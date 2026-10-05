@@ -198,6 +198,9 @@ function fromBulk(res: BulkCancelResponse, bookings: readonly GridBooking[], req
       ? { ...okRow(b, 0, 0), detail: refusalReason("already_cancelled") }
       : okRow(b, refund, penalty, splitFor(b, raw, req)));
   }
+  // R16 J16-12 — in the order the sheet listed them, not the answer's.
+  const at = new Map(bookings.map((b, index) => [b.bookingId, index]));
+  rows.sort((a, b) => (at.get(a.key) ?? bookings.length) - (at.get(b.key) ?? bookings.length));
   return { rows, cancelledIds, single: null };
 }
 

@@ -16,6 +16,7 @@ import { ScheduleNotices } from "../components/ScheduleNotices";
 import { StaleNotice } from "../components/shell/StaleNotice";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { OfflineNothingKeptRetry } from "../components/bookings/OfflineNothingKeptRetry";
+import { inTimeOrder } from "../components/bookings/slotOrder";
 import { isConnectionFailure } from "../lib/offline/useCachedRead";
 import { phoneIsOffline } from "../lib/api";
 import type { BoardContext } from "../components/ScheduleCells";
@@ -423,8 +424,10 @@ function SelectionBar(props: {
   const { selection, day, onBook, onCancel } = props;
   const span = useGridSpan(selection.api.active);
   if (!selection.api.active) return null;
-  const slots = toSelectedSlots(selection.keys, day);
-  const bookings = toGridBookings(selection.keys, day);
+  // R16 J16-12 — the sheets list the pick in the bar's order: by time, then court.
+  const courtOrder = day?.courts.map((c) => c.id) ?? [];
+  const slots = inTimeOrder(toSelectedSlots(selection.keys, day), courtOrder);
+  const bookings = inTimeOrder(toGridBookings(selection.keys, day), courtOrder);
   const free = freeCount(selection.keys);
   const total = slots.reduce((sum, s) => sum + s.priceMinutes, 0);
   const headline = selection.keys.length ? selectionHeadline(free, total, bookings.length) : BOOKINGS_COPY.chooseSlots;

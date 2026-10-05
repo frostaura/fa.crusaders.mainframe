@@ -263,6 +263,12 @@ function singleRun(slot: SelectedSlot, face: Face, balanceAfter: number | null, 
   };
 }
 
+/** R16 J16-12 — the results in the order the sheet sent (and showed) them, not the answer's. */
+function inSentOrder(rows: ResultRow[], sent: readonly SelectedSlot[]): ResultRow[] {
+  const at = new Map(sent.map((slot, i) => [slotKey(slot), i]));
+  return [...rows].sort((a, b) => (at.get(a.key) ?? sent.length) - (at.get(b.key) ?? sent.length));
+}
+
 export function fromMemberBulk(res: MemberBulkBookResponse, sent: readonly SelectedSlot[], face: Face): BookRun {
   const rows: ResultRow[] = [];
   const booked: SelectedSlot[] = [];
@@ -274,7 +280,7 @@ export function fromMemberBulk(res: MemberBulkBookResponse, sent: readonly Selec
     const word = ok ? (r.replayed ? RESULT_WORD.replayed : RESULT_WORD.booked) : RESULT_WORD.refused;
     rows.push(row(slot, face, ok, word, ok ? null : refusalReason(r.reason)));
   }
-  return { rows, booked, balanceAfter: res.balance_after_minutes ?? null, halted: res.halted_reason ?? null, hold: false };
+  return { rows: inSentOrder(rows, sent), booked, balanceAfter: res.balance_after_minutes ?? null, halted: res.halted_reason ?? null, hold: false };
 }
 
 const ADMIN_OK: Record<string, string> = {
@@ -296,7 +302,7 @@ export function fromAdminBulk(res: BulkBookResponse, sent: readonly SelectedSlot
   });
   const after = res.payer?.balance_after_minutes;
   return {
-    rows, booked, balanceAfter: typeof after === "number" ? after : null,
+    rows: inSentOrder(rows, sent), booked, balanceAfter: typeof after === "number" ? after : null,
     halted: typeof res.halted_reason === "string" ? res.halted_reason : null, hold,
   };
 }
