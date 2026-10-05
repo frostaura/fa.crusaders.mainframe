@@ -22,11 +22,16 @@ Tests: `liveBalanceR15`, `unreachableR15`, `setupChecklistR15`, `detailCancelR15
   notice), "Can't reach the club — your code still works" (pass badge), and a nothing-kept line's
   "once you're back online" tail becomes "Try again in a moment" (`unreachableNothingKept`; every
   nothing-kept line must match `backOnlineTail`, pinned by test). `writeCause` is neutral. This
-  REVERSES R8's "offline whatever onLine says" wording, not its notice (still never red).
+  REVERSES R8's "offline whatever onLine says" wording, not its notice (still never red). Swept as a
+  class: the chip's no-figure label, My Code's first visit ("needs the club" vs "needs signal"; an
+  offline enrol's OfflineError is "needs signal", not "failed") and the grid's book refusal follow it;
+  NOT_SENT / OfflineError / hold-lift / chunk / ConnectionLost were already gated on `onLine`.
 - **The setup checklist keeps each member's last read states on the phone**
   (`crusaders.setup-checklist.kept`, X15-4); "Couldn't check" only for what was never read here.
 - **D15-5 (decision): no member Cancel once `attendance.checked_in_at` is set**, whatever an older
-  `can_cancel` says; 409 `already_checked_in` is worded (sheet and bulk row). Admin cancel unaffected.
+  `can_cancel` says. The grid's CancelSheet refuses up front off the quote's `checkedIn` for every
+  booking on the MEMBER route (a member's, or an admin's own — the server's member route is
+  `actorIsAdmin: false`), in `ALREADY_CHECKED_IN_TEXT`, with no Cancel to press. Club route unaffected.
 - **Lost-reply cancel toast claims nothing about the screen** (X15-7): "its figures aren't in this
   message — your wallet shows what came back". *Why:* the booking page re-reads and shows the refund.
 - **One initials helper, `lib/initials.ts`, mirroring `MemberDisplay.SurnameInitial`** (J15-6):
