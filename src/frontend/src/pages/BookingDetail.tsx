@@ -174,7 +174,8 @@ type BodyProps = {
 };
 
 function DetailBody({ read, say, earlyResult, bookingId, seatId }: BodyProps) {
-  if (read.notFound) return <NotOnGame bookingId={bookingId} seatId={seatId} />;
+  // R14 J14-10 — no seat in the link: the 404's own seat (the viewer's, closed) says the same.
+  if (read.notFound) return <NotOnGame bookingId={bookingId} seatId={seatId ?? read.ownSeatId} />;
   // R7 X7-3, R8 — offline with nothing kept on this phone: said as offline, never "couldn't be reached". Offline is the read's own (the club unreachable, a NetworkError), never navigator.onLine, which Wi-Fi without internet leaves true.
   if (read.data === null && read.error != null && read.offline) return <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.booking} onRetry={read.reload} />;
   if (!read.data) {

@@ -29,6 +29,12 @@ export type DetailRead = {
   loading: boolean;
   /** The API answered 404 — not on it, not there, or not yours to see. */
   notFound: boolean;
+  /**
+   * R14 J14-10 (BE14b §6) — with a 404: the viewer's own CLOSED seat on the booking (removed,
+   * withdrawn, declined, lapsed), so a link without `?seat=` still says what became of it. Null for
+   * anybody else, or from an older API.
+   */
+  ownSeatId: string | null;
   /** When `data` was read, ms since epoch. */
   readAt: number | null;
   /** `data` is what the phone last had, shown because the club could not be reached. */
@@ -50,9 +56,16 @@ export function useBookingDetail(bookingId: string): DetailRead {
     error: cached.error,
     loading: cached.loading,
     notFound,
+    ownSeatId: notFound ? ownSeatOf(cached.error) : null,
     readAt: notFound ? null : cached.readAt,
     stale: cached.stale,
     offline: cached.offline,
     reload: cached.reload,
   };
+}
+
+/** The 404's `own_seat_id`, when it is a string. */
+function ownSeatOf(error: unknown): string | null {
+  const id = error instanceof ApiError ? error.detail("own_seat_id") : null;
+  return typeof id === "string" && id !== "" ? id : null;
 }
