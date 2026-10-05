@@ -69,10 +69,10 @@ export function Carousel({ slides, label = "Charts", className }: { slides: Caro
 
       {slides.length > 1 && (
         <>
-          <ArrowButton label="Previous" side="left" disabled={active === 0} onPress={() => goTo(Math.max(0, active - 1))}>
+          <ArrowButton label="Previous" side="left" atEnd={active === 0} onPress={() => goTo(Math.max(0, active - 1))}>
             <CaretLeft weight="bold" />
           </ArrowButton>
-          <ArrowButton label="Next" side="right" disabled={active === slides.length - 1} onPress={() => goTo(Math.min(slides.length - 1, active + 1))}>
+          <ArrowButton label="Next" side="right" atEnd={active === slides.length - 1} onPress={() => goTo(Math.min(slides.length - 1, active + 1))}>
             <CaretRight weight="bold" />
           </ArrowButton>
 
@@ -110,15 +110,19 @@ export function Carousel({ slides, label = "Charts", className }: { slides: Caro
   );
 }
 
-type ArrowProps = { label: string; side: "left" | "right"; disabled: boolean; onPress: () => void; children: ReactNode };
+type ArrowProps = { label: string; side: "left" | "right"; atEnd: boolean; onPress: () => void; children: ReactNode };
 
 /**
  * A desktop arrow: 36px to the eye and 44px to the finger (the `icon-sm` hit area), inside the
  * scroller's own 40px gutter, named by its label and its tooltip — the icon-button anatomy.
+ *
+ * At its end it is `aria-disabled` and ignores the press — never `disabled` (R15 X15-5): a
+ * disabled button blurs, so the press that brought in the last slide dropped focus to `<body>`
+ * and the next Tab started again at the skip link. The week strip's arrows do the same.
  */
 function ArrowButton(props: ArrowProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { label, side, disabled, onPress, children } = props;
+  const { label, side, atEnd, onPress, children } = props;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -126,12 +130,12 @@ function ArrowButton(props: ArrowProps) {
           aria-label={label}
           size="icon-sm"
           variant="outline"
-          onClick={onPress}
-          disabled={disabled}
+          onClick={() => { if (!atEnd) onPress(); }}
+          aria-disabled={atEnd || undefined}
           icon={children}
           // Centred with `inset-y-0 my-auto`, never a translate: the lift rule and the disabled
           // state both set `transform`, and either would knock a translated arrow off centre.
-          className={cn("absolute inset-y-0 my-auto hidden rounded-full md:inline-flex", side === "left" ? "left-0" : "right-0")}
+          className={cn("absolute inset-y-0 my-auto hidden rounded-full md:inline-flex aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-bg-surface", side === "left" ? "left-0" : "right-0")}
         />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

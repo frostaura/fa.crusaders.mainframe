@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Carousel } from "./Carousel";
 
 /**
@@ -62,5 +62,49 @@ describe("carousel controls", () => {
     const scroller = container.querySelector(".snap-x");
     expect(scroller).not.toBeNull();
     expect(scroller!.className).toContain("md:mx-10");
+  });
+});
+
+/**
+ * R15 X15-5 — an arrow at its end keeps focus. A `disabled` arrow blurred the moment the last
+ * slide came in: focus fell to `<body>` and the next Tab started at the skip link. It now says
+ * `aria-disabled` and ignores the press, so it stays focused and announced as unavailable.
+ */
+describe("the arrows at the ends (R15 X15-5)", () => {
+  /** jsdom has no layout: a 300px scroller whose `scrollTo` moves and announces like a browser's. */
+  function scrollable(container: HTMLElement) {
+    const scroller = container.querySelector<HTMLDivElement>(".snap-x")!;
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 300 });
+    scroller.scrollTo = ((options: ScrollToOptions) => {
+      scroller.scrollLeft = options.left ?? 0;
+      fireEvent.scroll(scroller);
+    }) as typeof scroller.scrollTo;
+    return scroller;
+  }
+
+  it.each([
+    ["Next", "the last", 3],
+    ["Previous", "the first", 2],
+  ])("%s keeps focus when it reaches %s slide, and says it is unavailable", (name, _end, slides) => {
+    const { container } = render(<Carousel slides={SLIDES.slice(0, slides)} />);
+    const scroller = scrollable(container);
+    if (name === "Previous") act(() => { scroller.scrollTo({ left: 300 }); });
+    const arrow = screen.getByRole("button", { name });
+    arrow.focus();
+    for (let i = 0; i < slides; i++) act(() => { fireEvent.click(arrow); });
+
+    expect(document.activeElement).toBe(arrow);
+    expect(arrow).not.toBeDisabled();
+    expect(arrow).toHaveAttribute("aria-disabled", "true");
+    const where = scroller.scrollLeft;
+    act(() => { fireEvent.click(arrow); });
+    expect(scroller.scrollLeft, "a press at the end goes nowhere").toBe(where);
+  });
+
+  it("the arrow away from the end is not marked unavailable", () => {
+    const { container } = render(<Carousel slides={SLIDES} />);
+    scrollable(container);
+    expect(screen.getByRole("button", { name: "Next" })).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByRole("button", { name: "Previous" })).toHaveAttribute("aria-disabled", "true");
   });
 });

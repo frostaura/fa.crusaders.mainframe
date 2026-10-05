@@ -245,3 +245,78 @@ describe("paging controls hand focus on (R14 X14-1)", () => {
     expect(scan(mutated).offenders.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * R15 X15-5 — the scan above looked for "Show more"-shaped labels, and bare stepper arrows got past
+ * it: the Reports carousel's Next / Previous were `disabled` at their ends, so the press that brought
+ * in the last slide dropped focus to `<body>`. An arrow is named by an ATTRIBUTE (it is an icon), so
+ * this reads every interactive tag whose `aria-label` / `label` names a bare direction — "Next",
+ * "Previous", "Prev", "Next week" — and requires that neither the tag nor, for a component defined
+ * in the same file, that component's body sets `disabled`: at its end it says `aria-disabled` and
+ * ignores the press (or hands focus on with `usePagedFocus`). A wizard's text "Next" (children, not
+ * an attribute) moves to another step and is not an arrow.
+ */
+const ARROW = /^(?:Next|Previous|Prev)(?:\s+[a-z]+)?$/;
+const DISABLED = /(?<![-\w])disabled(?:=|\s|\/?>)/;
+
+/** The string literals an attribute's value can be: `"Next"`, or each literal in `{a ? "Previous week" : "Next week"}`. */
+function attrLiterals(tag: string, name: string): string[] {
+  const plain = tag.match(new RegExp(`(?<![-\\w])${name}="([^"]*)"`));
+  if (plain) return [plain[1]];
+  const expr = attr(tag, name);
+  return expr === null ? [] : [...expr.matchAll(/["`]([^"`]*)["`]/g)].map((m) => m[1]);
+}
+
+/** The body of `function name(…) {…}` in `code`, when the file defines it. */
+function localComponent(code: string, name: string): string | null {
+  const at = code.search(new RegExp(`\\bfunction\\s+${name}\\s*\\(`));
+  if (at < 0) return null;
+  const open = code.indexOf("{", code.indexOf(")", at));
+  return braced(code, open);
+}
+
+function arrowScan(sources: ReadonlyMap<string, string>) {
+  const arrows: { file: string; name: string; tag: string }[] = [];
+  const offenders: string[] = [];
+  for (const [file, code] of sources) {
+    if (!file.endsWith(".tsx")) continue;
+    for (const open of code.matchAll(/<([A-Za-z][\w.]*)\b/g)) {
+      const tag = code.slice(open.index!, tagEnd(code, open.index!));
+      const name = [...attrLiterals(tag, "aria-label"), ...attrLiterals(tag, "label")].find((l) => ARROW.test(l));
+      if (name === undefined) continue;
+      arrows.push({ file, name, tag: open[1] });
+      if (resolves(attr(tag, "onClick"), file, enclosing(code, open.index!), sources)) continue;
+      const body = /^[A-Z]/.test(open[1]) ? localComponent(code, open[1]) : null;
+      if (DISABLED.test(tag.replace(/\bon\w+=\{[^}]*\}/g, "")) || (body !== null && DISABLED.test(body))) {
+        offenders.push(`${file}: <${open[1]}> "${name}" can be disabled at its end`);
+      }
+    }
+  }
+  return { arrows, offenders };
+}
+
+describe("stepper arrows keep focus at their ends (R15 X15-5)", () => {
+  const sources = sourcesNow();
+  const { arrows, offenders } = arrowScan(sources);
+
+  it("finds the arrows it guards (a scan that matches nothing proves nothing)", () => {
+    const found = arrows.map((a) => `${a.file} ${a.name}`);
+    expect(found).toEqual(expect.arrayContaining([
+      "components/Carousel.tsx Previous", "components/Carousel.tsx Next", "components/ui/week-strip.tsx Previous week",
+    ]));
+  });
+
+  it("no arrow is disabled at its end: it says aria-disabled and keeps focus", () => {
+    expect(offenders).toEqual([]);
+  });
+
+  it.each([
+    ["the carousel's arrow disabled again inside its component", "components/Carousel.tsx", "aria-disabled={atEnd || undefined}", "disabled={atEnd}"],
+    ["the carousel's arrow handed `disabled` at the call site", "components/Carousel.tsx", "atEnd={active === 0}", "disabled={active === 0}"],
+    ["the week strip's arrow disabled", "components/ui/week-strip.tsx", "aria-disabled={blocked || undefined}", "disabled={blocked}"],
+  ])("goes red on a mutation: %s", (_name, file, from, to) => {
+    const code = sources.get(file)!;
+    expect(code, `${file} no longer contains the mutation's anchor`).toContain(from);
+    expect(arrowScan(new Map(sources).set(file, code.replace(from, to))).offenders.length).toBeGreaterThan(0);
+  });
+});
