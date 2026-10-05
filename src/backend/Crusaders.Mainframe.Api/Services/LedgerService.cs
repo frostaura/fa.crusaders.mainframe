@@ -141,7 +141,7 @@ public sealed class LedgerService
         // penalty animate the badge once, by their net.
         foreach (var group in postings.GroupBy(p => p.UserId))
         {
-            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group), [.. group]);
+            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group), [.. group], postings);
         }
 
         foreach (var entry in entries) await MirrorAsync(entry, ct);
@@ -175,12 +175,16 @@ public sealed class LedgerService
     public const string SetAsideReason = "share_set_aside";
 
     private Task PublishBalanceAsync(
-        Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<LedgerPosting>? rows = null)
+        Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<LedgerPosting>? rows = null,
+        IReadOnlyList<LedgerPosting>? unitOfWork = null)
     {
-        // E10-1: each row's {reason, minutes}; R11 E11-1: why a share among them moved.
+        // E10-1: each row's {reason, minutes}; R11 E11-1: why a share among them moved; R13 X13-2:
+        // on a share row, the member on its other leg (read off the same unit of work).
         var frame = new WalletFrame(
-            deltaMinutes, reason, rows is null ? [] : PartsOf(rows), rows?.Select(p => p.Share).FirstOrDefault(w => w is not null), moneyIn)
+            deltaMinutes, reason, rows is null ? [] : PartsOf(rows, unitOfWork ?? rows), rows?.Select(p => p.Share).FirstOrDefault(w => w is not null), moneyIn)
         {
+            // R13 J13-4: the booking the movement is about, so the frame can name its court.
+            BookingId = BookingOf(rows),
             // R12 C1 / C2: who cancelled, and whose scan reversed a settlement — unstored, per posting.
             CancelledBy = rows?.Select(p => p.CancelledBy).FirstOrDefault(c => c is not null),
             CheckedInBy = rows?.Select(p => p.CheckedInBy ?? p.Share?.CheckedInBy).FirstOrDefault(c => c is not null),
@@ -220,6 +224,13 @@ public sealed class LedgerService
 
         var balance = await GetBalanceAsync(userId, token);
         var held = await GetHeldAsync(userId, token);
+        // R13 X13-2 / J13-4 (C13-7): the partners a share row moved to or from, and the booking's court and start.
+        var counterparts = await NamesAsync([.. frame.Parts.Select(p => p.CounterpartyUserId)], token);
+        var game = frame.BookingId is { } bookingId
+            ? await _db.Bookings.AsNoTracking().Where(b => b.Id == bookingId)
+                .Select(b => new { b.StartsAt, Court = _db.Courts.Where(c => c.Id == b.CourtId).Select(c => c.Name).FirstOrDefault() })
+                .FirstOrDefaultAsync(token)
+            : null;
         // R12 E12-2 (C2): the scanner is named only when it was somebody else.
         var checkedInBy = frame.CheckedInBy is { } scanner && scanner != userId
             ? await _db.Memberships.AsNoTracking().Where(m => m.UserId == scanner).Select(m => m.FullName).FirstOrDefaultAsync(token)
@@ -243,7 +254,16 @@ public sealed class LedgerService
             // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
             held_parts = held.WireParts(),
             // E10-1: the rows behind delta_minutes, each {reason (by type), delta_minutes}; [] when only what is set aside moved.
-            parts = frame.Parts.Select(p => new { reason = p.Reason, delta_minutes = p.DeltaMinutes }).ToList(),
+            // R13 X13-2: counterparty_name on a share_transfer part — the other member on that row; null on every other part.
+            parts = frame.Parts.Select(p => new
+            {
+                reason = p.Reason,
+                delta_minutes = p.DeltaMinutes,
+                counterparty_name = p.CounterpartyUserId is { } other ? counterparts.GetValueOrDefault(other) : null,
+            }).ToList(),
+            // R13 J13-4: the court and start of the one booking every row names; null when none or several.
+            court_name = game?.Court,
+            booking_starts_at = game?.StartsAt,
             // R11 E11-1: WHY a share moved (WalletShareCauses), null unless a share row moved; and on a
             // no-show return the partner's part of the penalty that stayed behind.
             share_cause = frame.Share?.Cause,
@@ -284,8 +304,36 @@ public sealed class LedgerService
     /// E10-1: each row of the movement for the frame's <c>parts</c> — its type reason and its
     /// signed minutes — so a refund-and-penalty pair can be said as both, not as their net.
     /// </summary>
-    internal static IReadOnlyList<BalancePart> PartsOf(IEnumerable<LedgerPosting> postings) =>
-        [.. postings.Select(p => new BalancePart(ReasonFor(p.Type), p.AmountMinutes))];
+    internal static IReadOnlyList<BalancePart> PartsOf(IEnumerable<LedgerPosting> postings, IReadOnlyList<LedgerPosting>? unitOfWork = null) =>
+        [.. postings.Select(p => new BalancePart(ReasonFor(p.Type), p.AmountMinutes) { CounterpartyUserId = CounterpartyOf(p, unitOfWork) })];
+
+    /// <summary>
+    /// R13 X13-2: on a share leg, the member on the pair's other leg — the leg posted beside it under
+    /// the same <c>share:{seat}:{seq}:</c> reference (<c>:out</c> / <c>:in</c>). Null on anything else.
+    /// </summary>
+    internal static Guid? CounterpartyOf(LedgerPosting posting, IReadOnlyList<LedgerPosting>? unitOfWork)
+    {
+        if (posting.Type != LedgerEntryType.ShareTransfer || unitOfWork is null || PairKey(posting.ExternalReference) is not { } key) return null;
+        return unitOfWork.FirstOrDefault(o => !ReferenceEquals(o, posting) && o.Type == LedgerEntryType.ShareTransfer
+                                              && o.UserId != posting.UserId && PairKey(o.ExternalReference) == key)?.UserId;
+    }
+
+    /// <summary>A share leg's reference without its leg suffix, or null.</summary>
+    private static string? PairKey(string? reference)
+    {
+        if (reference is null) return null;
+        var cut = reference.LastIndexOf(':');
+        return cut > 0 ? reference[..cut] : null;
+    }
+
+    /// <summary>Members' names by id, for the frame. One read; empty when nobody is asked about.</summary>
+    private async Task<Dictionary<Guid, string>> NamesAsync(IReadOnlyCollection<Guid?> ids, CancellationToken ct)
+    {
+        var wanted = ids.Where(i => i is not null).Select(i => i!.Value).Distinct().ToList();
+        if (wanted.Count == 0) return [];
+        return await _db.Memberships.AsNoTracking().Where(m => wanted.Contains(m.UserId))
+            .ToDictionaryAsync(m => m.UserId, m => m.FullName.Trim(), ct);
+    }
 
     // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
     // object initialiser as the END of the function and dumps the rest of the file into a
@@ -585,4 +633,8 @@ public static class WalletStreamReasons
 }
 
 /// <summary>One ledger row of a live wallet movement: its type reason and its signed minutes (E10-1).</summary>
-public sealed record BalancePart(string Reason, int DeltaMinutes);
+public sealed record BalancePart(string Reason, int DeltaMinutes)
+{
+    /// <summary>R13 X13-2: on a share row, the member on its other leg. Null elsewhere.</summary>
+    public Guid? CounterpartyUserId { get; init; }
+}
