@@ -427,7 +427,7 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    `code_step` to `codes:m1` devices. Phones still show legacy codes. Dean can pilot v1 on his own
    phone: v1 tokens are accepted online everywhere, even from un-flashed boards, because a board
    passes scanned bytes through unchanged.
-2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.6 —
+2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.7 —
    2.2.0 shows pay-for amounts in minutes, §9.3, 2.2.1 shows the member who rescans the code
    that just lit their own court its ON screen rather than `CODE USED`, 2.2.2 does the same
    on a court the box lit online for them, §6.5, and 2.2.3 arms nothing for a used code and
@@ -438,8 +438,11 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    unreadable request that jams its event queue — R15 D15-1, and 2.2.6 paces its event drain like the door
    (a post that moves nothing waits 15 s, doubling to 5 min, cleared the moment the queue moves) so a
    disabled or refused box can no longer spend the club's device rate budget, and keeps an event the
-   server answers 404 until its next heartbeat registers it again — R16 D16-2, D16-3) and each
-   ESP32 door (1.1.0) — the physical USB
+   server answers 404 until its next heartbeat registers it again — R16 D16-2, D16-3, and 2.2.7 keeps that
+   backoff honest through a long outage (an ended window is forgotten even while offline, so a 25-day
+   outage can never wrap into a weeks-long stall) and answers a 429 or 5xx on a walk-up or a pay-for
+   confirm with `BUSY` / `PRESS AGAIN`, the scan and nonce kept, never `SEE THE DESK` — R17 D17-2,
+   D17-4) and each ESP32 door (1.1.1: the same long-outage fix for every gate timer — R17 D17-2) — the physical USB
    step, below. Each board then reports `codes:m1`.
 3. **Cut-over, automatic**: the first time **every enabled device** of the tenant reports
    `codes:m1` on its latest heartbeat (and at least one does), the phase becomes `v1` and
@@ -464,8 +467,8 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
   **1 ON 2 ON 3 ON 4 ON 5–8 OFF**. (`make flash-bridge` is the PlatformIO equivalent.)
 - **Each door (ESP32)**: Arduino IDE, sketch `src/iot/door-gate/arduino/door_gate/`, board
   `esp32:esp32:esp32` (core 2.0.17), its own `secrets.h`; USB, upload.
-- **Proof it landed**: the Devices page shows firmware **2.2.6** for the box (a box still on
-  2.1.0, 2.2.0, 2.2.1, 2.2.2, 2.2.3, 2.2.4 or 2.2.5 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
+- **Proof it landed**: the Devices page shows firmware **2.2.7** for the box (a box still on
+  2.1.0, 2.2.0, 2.2.1, 2.2.2, 2.2.3, 2.2.4, 2.2.5 or 2.2.6 also reports `codes:m1`) and **1.1.1** for each door (1.1.0 also reports it), and — once the backend lane ships —
   `codes:m1`. The Mega stays **2.0.0**: the bridge is the only half of the box that is flashed.
 
 ---
@@ -593,7 +596,9 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
 (the `CodeUsed` screen — the same two lines §4.4 gives the activation and the walk-up, one situation
 and one screen, bridge 2.2.4, review round 9 D9-2), and for both the box forgets the scan and
 closes the window, so the next press cannot try a walk-up on it,
-`ended` → `THAT SLOT ENDED`, anything else → `SEE THE DESK`; no connection on a confirm →
+`ended` → `THAT SLOT ENDED`, a 429 or any 5xx (incl. `503 conflict_retry`) → `BUSY` / `PRESS AGAIN`
+(screen `Busy`, bridge 2.2.7, R17 D17-4 — the scan, nonce and quote are kept, so the next press retries
+the same purchase), anything else → `SEE THE DESK`; no connection on a confirm →
 `NO CONNECTION`. When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
 `!LCD` lines ahead of the `!ON`. **Everything reaches the Mega through `!ROW`/`!SHOW`/`!LCD`/`!ON`
 /`!AUTH` — frames the Mega already speaks.** Nothing about the serial dialect changes.

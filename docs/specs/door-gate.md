@@ -1082,7 +1082,7 @@ moment it loses the server it opens for nobody. That is a narrower failure than 
 replaces — a board anybody could self-register being handed the club's whole live code set —
 and it lasts exactly until an admin names the door.
 
-**With the single rotating member code (firmware 1.1.0, [`member-code.md`](member-code.md))**
+**With the single rotating member code (firmware 1.1.0 and later — 1.1.1 since R17, [`member-code.md`](member-code.md))**
 the offline rule is the same rule by members instead of by codes: a door that cannot reach the
 server **verifies** a v1 code's OFF half against the per-day key its heartbeat delivered, then
 admits the member only if a rostered booking names them — organiser or accepted partner — inside
