@@ -733,6 +733,10 @@ export type LedgerRow = {
   actorUserId: string;
   actorName: string;
   relatedBookingId: string | null;
+  /** C5 / R15 E15-9 — on a share transfer with an owned twin: the other member of the pair. Null / absent otherwise. */
+  counterparty_name?: string | null;
+  /** C5 — that member's user id. Null / absent on every other row. */
+  counterparty_user_id?: string | null;
 };
 
 export type WalletResponse = {
