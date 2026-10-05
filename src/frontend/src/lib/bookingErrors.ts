@@ -52,6 +52,9 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
   court_not_found: "That court isn't on the schedule any more. The schedule behind this is up to date now.",
   duplicate_request: "That booking already went through — it's on the schedule behind this.",
   already_started: "That booking has already started, so it can't be cancelled.",
+  // R15 D15-5 — a member may not cancel a booking they have checked in to: the lights have been
+  // on, nothing would come back, and the slot would be sold twice. The club can still cancel it.
+  already_checked_in: "You've checked in to this booking, so it can't be cancelled — the court is yours until it ends. If something's wrong, speak to the club.",
   booking_not_found: "That booking is no longer there. The schedule behind this is up to date now.",
   block_not_found: "That block has already been lifted.",
   // A suspended membership is not a stale screen. Without this key the refusal fell through to
@@ -402,9 +405,10 @@ export function cancellationOutcome(
   refunded: number | null, penalty: number | null, member?: string | null, split?: SplitCancel | null,
 ): string {
   const whose = member ? `${member}'s balance` : "your balance";
-  // F1.1 — the schedule shows it gone but the reply with the figures was lost.
+  // F1.1 — the schedule shows it gone but the reply with the figures was lost. R15 X15-7 — it
+  // claims nothing about the screen under it: a booking's own page re-reads and shows the refund.
   if (refunded === null || penalty === null) {
-    return `Booking cancelled. The club's reply didn't arrive, so the refund isn't shown here — it's on ${member ? `${member}'s` : "your"} wallet.`;
+    return `Booking cancelled. The club's reply didn't arrive, so its figures aren't in this message — ${member ? `${member}'s` : "your"} wallet shows what came back.`;
   }
   if (refunded <= 0 && penalty <= 0) {
     return member

@@ -406,6 +406,8 @@ export const REFUSAL_REASON: Record<string, string> = {
   member_not_active: "The membership isn't active.",
   booking_not_found: "That booking is no longer there.",
   already_started: "It has already started.",
+  /** R15 D15-5 — a member's own checked-in booking: only the club may cancel it now. */
+  already_checked_in: "You've checked in to it — only the club can cancel it now.",
   already_cancelled: "Was already cancelled.",
 };
 

@@ -51,7 +51,9 @@ function cancelNote(detail: BookingDetail): string {
 export function CancelPanel({ detail, reload }: Props) {
   const [open, setOpen] = useState(false);
   const { refresh } = useBalance();
-  if (!detail.permissions.can_cancel) return null;
+  // R15 D15-5 — a member may not cancel a booking once it is checked in to (the server answers 409
+  // `already_checked_in`): no Cancel is offered, whatever an older server's `can_cancel` says.
+  if (!detail.permissions.can_cancel || detail.attendance.checked_in_at) return null;
   const done = (outcome: CancelledOutcome) => {
     if (outcome.cancelledIds.length === 0) return;
     // R11 X11-2: the sheet's toast (with the figures) is the one announcement — a page notice as
