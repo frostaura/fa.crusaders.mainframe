@@ -848,7 +848,7 @@ public static class DeviceEventEndpoints
     {
         if (time.ClampedFrom is { } claimed)
         {
-            Note(services, device, DeviceErrorCodes.ClockClamped, $"claimed {claimed:O}", time.OccurredAt);
+            Note(services, device, DeviceErrorCodes.ClockClamped, DeviceTime.ClaimedDetail(claimed), time.OccurredAt);
         }
 
         var code = outcome?.Code;

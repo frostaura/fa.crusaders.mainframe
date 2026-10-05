@@ -45,8 +45,32 @@ public static class DeviceRateKey
     public static string Of(HttpContext ctx, string clientAddress)
     {
         var tenantId = ctx.Items[TenantItemKey] as Guid? ?? ctx.User.DeviceTenantId();
-        if (tenantId is not { } id) return $"ip:{clientAddress}";
-        return ctx.Items[ItemKey] is string mac ? $"device:{id:N}:{mac}" : $"tenant:{id:N}";
+        return tenantId is { } id ? KeyOf(ctx, id) : $"ip:{clientAddress}";
+    }
+
+    /// <summary>
+    /// The board's partition key when <see cref="UseDeviceRateKey"/> recognised the club key on this
+    /// request, else null — review round 17, D17-1.
+    ///
+    /// <para>
+    /// <b>Why the global limiter asks.</b> R16 made the DEVICE policy per board, but the global backstop
+    /// partitions by member token or, failing one, by client ADDRESS — and a device request carries no
+    /// member token. A club's boards and its members' phones share one router, so one board spinning
+    /// (bridge 2.2.5 on a 403, ~50,000 posts a minute on the live stack) spent the address bucket, and
+    /// every other board's heartbeat and every anonymous sign-in from the club were 429 for the rest of
+    /// the minute. A recognised device request is charged to its board's own global bucket instead, and
+    /// what its board lets through to a device-only per-address ceiling (Program.cs) — never to the
+    /// bucket anonymous callers use.
+    /// </para>
+    /// </summary>
+    public static string? BoardOf(HttpContext ctx)
+    {
+        return ctx.Items[TenantItemKey] is Guid id ? KeyOf(ctx, id) : null;
+    }
+
+    private static string KeyOf(HttpContext ctx, Guid tenantId)
+    {
+        return ctx.Items[ItemKey] is string mac ? $"device:{tenantId:N}:{mac}" : $"tenant:{tenantId:N}";
     }
 
     /// <summary>

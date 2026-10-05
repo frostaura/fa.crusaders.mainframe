@@ -30,4 +30,27 @@ public static class DeviceTime
 
     /// <summary>How long before the batch an event happened, in milliseconds — exact, never overflowing <c>long</c>.</summary>
     public static decimal Ago(long batchUptimeMs, long eventUptimeMs) => (decimal)batchUptimeMs - eventUptimeMs;
+
+    /// <summary>R17 D17-3: the <c>clock_clamped</c> detail for a claim saturated at <see cref="DateTimeOffset.MaxValue"/>.</summary>
+    public const string BeyondStorableDetail = "claimed a time beyond what can be stored";
+
+    /// <summary>R17 D17-3: the <c>clock_clamped</c> detail for a claim saturated at <see cref="DateTimeOffset.MinValue"/>.</summary>
+    public const string BeforeStorableDetail = "claimed a time too long ago to be stored";
+
+    /// <summary>
+    /// The <c>clock_clamped</c> detail for a claimed instant — review round 17, D17-3.
+    ///
+    /// <para>
+    /// A saturated claim is not a time the board gave: it is <see cref="Add"/>'s edge, and written as
+    /// <c>claimed 9999-12-31T23:59:59.9999999+00:00</c> it rendered on the faults page as "claimed Sat 1
+    /// Jan, 01:59" (the club's zone pushed it into year 10000). It is said in words; any other claim
+    /// keeps its round-trip instant, which the page shows in the club's time.
+    /// </para>
+    /// </summary>
+    public static string ClaimedDetail(DateTimeOffset claimed)
+    {
+        if (claimed == DateTimeOffset.MaxValue) return BeyondStorableDetail;
+        if (claimed == DateTimeOffset.MinValue) return BeforeStorableDetail;
+        return $"claimed {claimed:O}";
+    }
 }

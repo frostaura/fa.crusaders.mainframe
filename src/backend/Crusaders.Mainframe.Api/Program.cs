@@ -341,19 +341,41 @@ builder.Services.AddRateLimiter(options =>
     // higher ceiling (RateLimits:GlobalPerIpPerMinute, 6000). It was 600 per ADDRESS for
     // everything, and a club's members all share one router — an evening's app traffic tripped
     // it for the whole club at once.
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+    //
+    // Review round 17, D17-1: a request the device scheme recognised (DeviceRateKey.BoardOf) is
+    // charged to its BOARD's own bucket at the per-member ceiling, never to the address bucket.
+    // A device request carries no member token, so it had shared the anonymous bucket of the
+    // club's address: one board spinning on a 403 spent it and every other board's heartbeat and
+    // every anonymous sign-in from the club were 429 for the rest of the minute. What a board's
+    // bucket lets through is then charged to a device-only per-address ceiling (the same
+    // GlobalPerIpPerMinute), so the club key spread over invented MACs is still bounded per
+    // address — by its own bucket, which anonymous callers never spend. A refusal at the first
+    // stage does not reach the second, so a single spinning board never spends it.
+    static RateLimitPartition<string> Window(string key, int limit)
     {
-        var member = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.Id() : null;
-        var (key, limit) = member is { } id
-            ? ($"user:{id:N}", builder.Configuration.GetValue("RateLimits:GlobalPerMinute", 600))
-            : ($"ip:{ClientKey(ctx)}", builder.Configuration.GetValue("RateLimits:GlobalPerIpPerMinute", 6000));
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = limit,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
         });
+    }
+
+    var perCaller = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+    {
+        var member = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.Id() : null;
+        var perMember = builder.Configuration.GetValue("RateLimits:GlobalPerMinute", 600);
+        if (member is { } id) return Window($"user:{id:N}", perMember);
+        if (DeviceRateKey.BoardOf(ctx) is { } board) return Window(board, perMember);
+        return Window($"ip:{ClientKey(ctx)}", builder.Configuration.GetValue("RateLimits:GlobalPerIpPerMinute", 6000));
     });
+
+    var deviceAddress = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        DeviceRateKey.BoardOf(ctx) is null
+            ? RateLimitPartition.GetNoLimiter("not-a-device")
+            : Window($"device-ip:{ClientKey(ctx)}", builder.Configuration.GetValue("RateLimits:GlobalPerIpPerMinute", 6000)));
+
+    options.GlobalLimiter = PartitionedRateLimiter.CreateChained(perCaller, deviceAddress);
 
     // The stable code a client words ("too many requests — wait a moment"), apart from a
     // network failure, with the wait in the body as well as the header.
