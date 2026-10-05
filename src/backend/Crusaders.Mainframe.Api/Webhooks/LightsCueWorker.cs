@@ -98,15 +98,12 @@ public sealed class LightsCueWorker : BackgroundService
         // only while that end is recent (CancelledLitLookback): an older one is left un-cued and is
         // never read again, so the first deploy does not say an off hours late for every lit
         // booking ever cancelled.
-        var cancelledSince = now - CancelledLitLookback;
-        var dueOff = await db.Bookings.IgnoreQueryFilters()
-            .Where(b => (b.Status == BookingStatus.Booked
-                         || b.Status == BookingStatus.Completed
-                         || b.Status == BookingStatus.NoShow
-                         || (b.Status == BookingStatus.Cancelled && b.CheckedInAt != null && b.EndsAt > cancelledSince))
-                && b.LightsOffCuedAt == null
-                && b.EndsAt <= now)
-            .ToListAsync(ct);
+        //
+        // R16 D16-4: and a cancelled booking whose no-show REVERSAL re-lit the court after its old cue
+        // (reversed after it was cued off). Its off was the attended-and-over pass's to say, which
+        // reads only Booked rows — so the desk cancelling it before the next tick left its lights_on
+        // with no off on any consumer's mirror. It is a lit cancelled booking like any other.
+        var dueOff = await DueOffAsync(db, now, ct);
 
         // `booking.completed` (spec §9) fires once per booking from the two places that
         // promote one — this sweep and the reversed-no-show catch-up below — and in both it
@@ -166,6 +163,22 @@ public sealed class LightsCueWorker : BackgroundService
         // Completed, never anonymised by retention. Attended and over is Completed,
         // whether or not the lights-off was already cued.
         await CompleteAttendedAsync(db, tenant, now, ct);
+    }
+
+    /// <summary>The rows the off sweep owes an off (see the comment at its call). Lifted out of <see cref="TickAsync"/> for the complexity gate.</summary>
+    private static Task<List<Booking>> DueOffAsync(MainframeDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var cancelledSince = now - CancelledLitLookback;
+        return db.Bookings.IgnoreQueryFilters()
+            .Where(b => b.EndsAt <= now
+                && ((b.LightsOffCuedAt == null
+                     && (b.Status == BookingStatus.Booked
+                         || b.Status == BookingStatus.Completed
+                         || b.Status == BookingStatus.NoShow
+                         || (b.Status == BookingStatus.Cancelled && b.CheckedInAt != null && b.EndsAt > cancelledSince)))
+                    || (b.Status == BookingStatus.Cancelled && b.CheckedInAt != null && b.EndsAt > cancelledSince
+                        && b.NoShowReversedAt > b.LightsOffCuedAt)))
+            .ToListAsync(ct);
     }
 
     /// <summary>
@@ -274,12 +287,13 @@ public sealed class LightsCueWorker : BackgroundService
 
     /// <summary>
     /// Whether a lit booking's own off is still to be said: never cued, or (E14-4) a reversal that is
-    /// still Booked and re-lit the court after its old cue — the attended-and-over pass owes its off.
+    /// still Booked and re-lit the court after its old cue — the attended-and-over pass owes its off —
+    /// or (R16 D16-4) one the desk cancelled since, whose off the sweep now owes.
     /// </summary>
     private static bool OffStillToCome(Booking lit)
     {
         return lit.LightsOffCuedAt is not { } cued
-            || (lit.Status == BookingStatus.Booked && lit.NoShowReversedAt is { } reversed && reversed > cued);
+            || (lit.Status is BookingStatus.Booked or BookingStatus.Cancelled && lit.NoShowReversedAt is { } reversed && reversed > cued);
     }
 
     /// <summary>

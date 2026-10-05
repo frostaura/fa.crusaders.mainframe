@@ -549,6 +549,18 @@ public class CourtActivationService
     /// own off closes the court (court-level pairing, webhooks.md) — this booking is still cue-stamped
     /// so the attended-and-over pass says no second off.
     /// </remarks>
+    /// <remarks>
+    /// R16 E16-2: <b>stamped at its emission when an off for the court was already said after the
+    /// scan and the session is still running.</b> The documented consumer rule is plain — order by
+    /// <c>occurred_at</c>; a court is lit from an on until the next off. A no-show sweep's off (at the
+    /// truncated end) reached consumers first, and the reversal's on, stamped back at the scan, sorted
+    /// BEFORE it: replayed, the court read dark for the rest of a session the member was still playing.
+    /// So in that case the on is stamped at this instant — the moment the club learned of the scan —
+    /// and carries the scan as <c>scanned_at</c> for a consumer that wants it (every <c>lights_on</c>
+    /// carries <c>scanned_at</c>). Its off is still the restored end (or the holder's), which is later.
+    /// A session already over by the upload keeps the scan stamp: its off at the restored end is then
+    /// in the past too, and an on stamped now would sort after it and hold the court lit for ever.
+    /// </remarks>
     public async ValueTask EmitReversedLightsOnAsync(
         Court court, Booking booking, (Guid Identified, DateTimeOffset ScannedAt) scan, string method, CancellationToken ct)
     {
@@ -561,10 +573,35 @@ public class CourtActivationService
         // the survivor's, which closes the court (so this booking's own off is still never owed).
         if (walk.Holder is null || LightsCueWorker.LitFrom(walk.Holder) > scan.ScannedAt)
         {
-            await _bus.EmitAsync(LightsOnEvent(court, booking, (payer, scan.Identified), method, scan.ScannedAt), ct);
+            var at = await ReversalOnAtAsync(booking, scan.ScannedAt, ct);
+            await _bus.EmitAsync(LightsOnEvent(court, booking, (payer, scan.Identified), method, at, scan.ScannedAt), ct);
         }
         if (walk.FreeAt is null) await CoveredBySurvivorAsync(booking, ct);
         await cue.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// R16 E16-2: when the reversal's <c>lights_on</c> is said — now, when an off for this court was
+    /// already said after the scan and the restored session is still running; else the scan.
+    /// </summary>
+    private async Task<DateTimeOffset> ReversalOnAtAsync(Booking booking, DateTimeOffset scannedAt, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow();
+        return booking.EndsAt > now && await OffSaidAfterAsync(booking, scannedAt, now, ct) ? now : scannedAt;
+    }
+
+    /// <summary>
+    /// Whether a <c>booking.lights_off</c> for this court has already been said at an instant after
+    /// <paramref name="scannedAt"/>: this booking's own (the no-show sweep cued it off, and the reversal
+    /// keeps that marker), or another booking's on the court whose off is cued and whose end — the
+    /// earliest its off can be stamped — is after the scan and already past.
+    /// </summary>
+    private async Task<bool> OffSaidAfterAsync(Booking booking, DateTimeOffset scannedAt, DateTimeOffset now, CancellationToken ct)
+    {
+        if (booking.LightsOffCuedAt is { } cued && cued > scannedAt) return true;
+        return await _db.Bookings.IgnoreQueryFilters().AsNoTracking()
+            .AnyAsync(o => o.TenantId == booking.TenantId && o.CourtId == booking.CourtId && o.Id != booking.Id
+                && o.LightsOffCuedAt != null && o.EndsAt > scannedAt && o.EndsAt <= now, ct);
     }
 
     /// <summary>
@@ -601,13 +638,32 @@ public class CourtActivationService
         await cue.CommitAsync(ct);
     }
 
-    private DomainEvent LightsOnEvent(Court court, Booking booking, (Guid Payer, Guid Identified) who, string method, DateTimeOffset now)
+    /// <param name="scannedAt">R16 E16-2: the scan behind the on (<c>data.scanned_at</c>), when it is not <paramref name="now"/>.</param>
+    private DomainEvent LightsOnEvent(
+        Court court, Booking booking, (Guid Payer, Guid Identified) who, string method, DateTimeOffset now, DateTimeOffset? scannedAt = null)
     {
         // Block body, not an expression body. lizard's C# parser mis-scopes any
         // expression-bodied member containing braces and emits a *global* pseudo-function
         // whose reported length is the whole file, tripping -L 200 with a warning that
         // names no real function. Recorded in memory/gotchas.md; the fix is this, not a
         // whitelizard entry.
+        var data = new Dictionary<string, object?>
+        {
+            ["booking_id"] = booking.Id,
+            ["court_id"] = court.Id,
+            ["court_number"] = court.CourtNumber,
+            ["court_name"] = court.Name,
+            ["user_id"] = booking.UserId,
+            ["paid_by_user_id"] = who.Payer,
+            ["identified_user_id"] = who.Identified,
+            ["starts_at"] = booking.StartsAt,
+            ["ends_at"] = booking.EndsAt,
+            ["identification_method"] = method,
+            ["duration_seconds"] = Math.Max(0, (int)(booking.EndsAt - now).TotalSeconds),
+        };
+        // R16 E16-2: on EVERY lights_on — the scan behind it, which only a reversal stamped at its
+        // emission tells apart from occurred_at — so a webhook template naming it never misses it.
+        data["scanned_at"] = scannedAt ?? now;
         return new DomainEvent(
             Id: $"evt_{Guid.NewGuid():N}",
             Type: "booking.lights_on",
@@ -617,20 +673,7 @@ public class CourtActivationService
             ActorUserId: who.Identified,
             ActorIsAdmin: false,
             SubjectUserId: booking.UserId,
-            Data: new()
-            {
-                ["booking_id"] = booking.Id,
-                ["court_id"] = court.Id,
-                ["court_number"] = court.CourtNumber,
-                ["court_name"] = court.Name,
-                ["user_id"] = booking.UserId,
-                ["paid_by_user_id"] = who.Payer,
-                ["identified_user_id"] = who.Identified,
-                ["starts_at"] = booking.StartsAt,
-                ["ends_at"] = booking.EndsAt,
-                ["identification_method"] = method,
-                ["duration_seconds"] = Math.Max(0, (int)(booking.EndsAt - now).TotalSeconds),
-            });
+            Data: data);
     }
 }
 
