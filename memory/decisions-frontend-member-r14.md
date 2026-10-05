@@ -20,6 +20,10 @@ Tests: `walletMovementR14.test.tsx`, `paged-focus-scan.test.ts`, `routeLazy.test
 - **A cancel the frame places names it** (E14-7): "The club cancelled your booking on Court 3 · Mon
   5 Oct: …"; a displacement names court AND time. A late split cancel arrives as `mixed`; with a
   refund and share rows it goes through the cancel sentence (J14-4) — shares are never the penalty.
+- **A share movement's words are NOT in the entry chunk**: `lib/shareMovementCopy.ts` (ledger line +
+  chip share toast), loaded by the chip's dynamic `import("./shareMovement")` on a share frame.
+  *Why:* the R14 wording took the entry to 498.8/500 kB; moved, 491.3. Never import it from `walletCopy`
+  or any static import of `main.tsx`.
 - **`cancelled_no_refund` is the one zero movement the chip announces** (BE14b §5, E14-5).
 - **A free cancel of a split booking names the partners** (J14-6/J14-7): `CANCEL_SHEET.free(whose,
   partners)`, `SPLIT_CANCEL.note(whose, partners)`; one partner is singular.
