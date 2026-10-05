@@ -99,7 +99,7 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
       </Avatar>
       <span className="flex min-w-0 flex-[1_1_12rem] flex-col gap-1">
         {note ? <span className="text-xs font-semibold uppercase tracking-overline text-text-muted">{note}</span> : null}
-        <span className="break-words text-base font-semibold text-text-primary">{invitedLine(name, invite.open_link)}</span>
+        <span className="break-words text-base font-semibold text-text-primary">{invitedLine(name, invite.open_link, invite.added_by_club === true)}</span>
         <span className="break-words text-sm text-text-secondary">
           {`${invite.court_name ?? INVITES_COPY.court} · ${inviteWhen(invite)} · ${playersCount(invite.players)}`}
         </span>

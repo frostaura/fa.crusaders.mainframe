@@ -4,6 +4,7 @@ import { memberReads } from "@/lib/offline/memberReads";
 import { dropQuery } from "@/lib/offline/queryCache";
 import { useCachedRead, useDataOwner } from "@/lib/offline/useCachedRead";
 import type { BookingDetail } from "@/lib/playersApi";
+import { removedByOf, type SeatRemovedBy } from "@/lib/playersApi";
 
 /**
  * The booking detail, read and re-read.
@@ -35,6 +36,8 @@ export type DetailRead = {
    * anybody else, or from an older API.
    */
   ownSeatId: string | null;
+  /** R15 J15-1 (BE15b) — with a 404: who took the viewer off ("club" / "organiser"); null when unsaid. */
+  removedBy: SeatRemovedBy | null;
   /** When `data` was read, ms since epoch. */
   readAt: number | null;
   /** `data` is what the phone last had, shown because the club could not be reached. */
@@ -57,6 +60,7 @@ export function useBookingDetail(bookingId: string): DetailRead {
     loading: cached.loading,
     notFound,
     ownSeatId: notFound ? ownSeatOf(cached.error) : null,
+    removedBy: notFound && cached.error instanceof ApiError ? removedByOf(cached.error.detail("removed_by")) : null,
     readAt: notFound ? null : cached.readAt,
     stale: cached.stale,
     offline: cached.offline,

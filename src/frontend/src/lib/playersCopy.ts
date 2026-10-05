@@ -710,8 +710,9 @@ function sharesPaid(who: string | null, partners: readonly string[]): string {
  */
 export const DETAIL_GONE = {
   removedTitle: "You were taken off this game",
-  removedBody: (organiser: string, game: string) =>
-    `${organiser} took you off ${game}. Anything you'd paid for it is refunded — your wallet shows it.`,
+  /** R15 J15-1 — `by: "club"`: an admin's removal is the club's act, never the organiser's. */
+  removedBody: (organiser: string, game: string, by: "club" | "organiser" | null = null) =>
+    `${by === "club" ? "The club" : organiser} took you off ${game}. Anything you'd paid for it is refunded — your wallet shows it.`,
   leftTitle: "You're no longer on this game",
   declinedBody: (game: string) => `You declined ${game}.`,
   withdrawnBody: (game: string) => `You pulled out of ${game}. Anything you'd paid for it is refunded — your wallet shows it.`,
@@ -1043,8 +1044,12 @@ export function askedAgainLine(organiser: string, share: number): string {
   return `${organiser} changed the split: your share is now ${minutesSpoken(share)}. Check it and say yes again.`;
 }
 
-/** "Sam invited you to take a seat" (open link) · "Sam invited you to play". */
-export function invitedLine(organiser: string, openLink: boolean): string {
+/**
+ * "Sam invited you to take a seat" (open link) · "Sam invited you to play". R15 J15-1 — a seat the
+ * club put the member on (`added_by_club`) is the club's act: "The club added you to Sam's game".
+ */
+export function invitedLine(organiser: string, openLink: boolean, byClub = false): string {
+  if (byClub) return `The club added you to ${organiser}'s game`;
   return openLink ? `${organiser} invited you to take a seat` : `${organiser} invited you to play`;
 }
 

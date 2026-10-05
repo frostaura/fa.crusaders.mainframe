@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { CalendarBlank } from "@/components/ui/icons";
 import { StateBlock } from "@/components/ui/state-block";
-import { playersEndpoints, type MySeat } from "@/lib/playersApi";
+import { playersEndpoints, removedByOf, type MySeat, type SeatRemovedBy } from "@/lib/playersApi";
 import { DETAIL_COPY, DETAIL_GONE, PLAYERS_REFUSAL, playersWhen } from "@/lib/playersCopy";
 import { DetailSkeleton } from "./DetailSkeleton";
 
@@ -39,10 +39,12 @@ function useGoneSeat(seatId: string | null, bookingId: string): GoneSeat {
   return held?.key === key ? held.found : { kind: "reading" };
 }
 
-function words(seat: MySeat): { title: string; body: string } {
+function words(seat: MySeat, removedBy: SeatRemovedBy | null): { title: string; body: string } {
   const game = DETAIL_GONE.game(seat.court_name ?? DETAIL_COPY.someCourt, playersWhen(seat.starts_at));
   if (seat.status === "removed") {
-    return { title: DETAIL_GONE.removedTitle, body: DETAIL_GONE.removedBody(seat.organiser_name ?? DETAIL_GONE.someone, game) };
+    // R15 J15-1 — the club's removal is the club's act: the seat's own `removed_by`, else the 404's.
+    const by = removedByOf(seat.removed_by) ?? removedBy;
+    return { title: DETAIL_GONE.removedTitle, body: DETAIL_GONE.removedBody(seat.organiser_name ?? DETAIL_GONE.someone, game, by) };
   }
   if (seat.status === "declined") return { title: DETAIL_GONE.leftTitle, body: DETAIL_GONE.declinedBody(game) };
   if (seat.status === "withdrawn") return { title: DETAIL_GONE.leftTitle, body: DETAIL_GONE.withdrawnBody(game) };
@@ -57,11 +59,11 @@ const BACK = (
 );
 
 /** The page's 404, said with what became of the member's own seat when the link named it. */
-export function NotOnGame({ bookingId, seatId }: { bookingId: string; seatId: string | null }): ReactNode {
+export function NotOnGame({ bookingId, seatId, removedBy = null }: { bookingId: string; seatId: string | null; removedBy?: SeatRemovedBy | null }): ReactNode {
   const found = useGoneSeat(seatId, bookingId);
   if (found.kind === "reading") return <StateBlock loading action={DETAIL_COPY.readAction} skeleton={<DetailSkeleton />} />;
   if (found.kind === "gone") {
-    const said = words(found.seat);
+    const said = words(found.seat, removedBy);
     return (
       <div data-gone-from-game={found.seat.status}>
         <StateBlock empty emptyIcon={CalendarBlank} emptyTitle={said.title} emptyHint={said.body} emptyAction={BACK} />

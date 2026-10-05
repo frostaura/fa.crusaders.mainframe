@@ -39,7 +39,7 @@ export function inviteHeading(invite: Invite, invitedTitle: string): { title: st
   if (invite.status === "accepted" && invite.needs_consent) {
     return { title: INVITES_COPY.askedAgainTitle, line: askedAgainLine(organiser, invite.share_minutes) };
   }
-  return { title: invitedTitle, line: invitedLine(organiser, invite.open_link) };
+  return { title: invitedTitle, line: invitedLine(organiser, invite.open_link, invite.added_by_club === true) };
 }
 
 /**
