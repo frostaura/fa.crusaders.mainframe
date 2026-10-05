@@ -131,6 +131,12 @@ function placeOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "place"> {
 /** R14 (BE14b §5) — the frame's reason for a club cancel that refunded nothing (the lights had been on). */
 export const CANCELLED_NO_REFUND = "cancelled_no_refund";
 
+/**
+ * R16 J16-7 (BE16b) — the PARTNER's frame for the same cancel: nothing moved, their share stands.
+ * Like the booker's, a balance-neutral frame that is still said.
+ */
+export const CANCELLED_SHARE_STANDS = "cancelled_share_stands";
+
 /** One frame off the wire. Every field but the balance is optional — an older API sends none. */
 export type BalanceFrame = {
   balance_minutes: number;
@@ -466,7 +472,7 @@ export function useLiveBalance({
     // told, not money arriving. Neither is a re-read that confirms what we already had.
     // R14 (BE14b §5) — a club cancel of a session that had started moves nothing, yet the member
     // is told: that one balance-neutral frame is still a movement (amount 0) for the toast.
-    const neutralNews = before !== null && frame?.reason === CANCELLED_NO_REFUND;
+    const neutralNews = before !== null && (frame?.reason === CANCELLED_NO_REFUND || frame?.reason === CANCELLED_SHARE_STANDS);
     if (before === null || (Math.abs(amount) < 0.01 && !neutralNews)) { expectSelf.current = false; return; }
     const own = expectSelf.current || selfInFlight.current > 0 || Date.now() < selfUntil.current;
     setDelta({

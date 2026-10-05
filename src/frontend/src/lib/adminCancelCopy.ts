@@ -10,6 +10,12 @@ export const ADMIN_CANCEL = {
   started: (who: string) =>
     `The session has started. Cancelling frees the court; ${who} is told, and if anybody checked in nothing is refunded.`,
   upcoming: (who: string) => `${who} is told why, with what comes back to their balance.`,
+  /**
+   * R16 J16-7 — a started session somebody checked in to: the partners' shares do not come back,
+   * they stay with the organiser. Said by name and figure ("Owen's 15 minutes").
+   */
+  sharesStand: (shares: readonly string[], organiser: string) =>
+    `Partners' shares stand: ${shares.length === 1 ? shares[0] : `${shares.slice(0, -1).join(", ")} and ${shares[shares.length - 1]}`} stay with ${organiser}.`,
   open: "Cancel booking",
   /** The organiser when the record names nobody. */
   nobody: "the organiser",

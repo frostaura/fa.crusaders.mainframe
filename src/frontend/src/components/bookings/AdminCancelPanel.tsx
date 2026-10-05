@@ -5,13 +5,27 @@ import { Button } from "@/components/ui/button";
 import { Section } from "@/components/ui/page-shell";
 import { ADMIN_CANCEL } from "@/lib/adminCancelCopy";
 import { focusAfterAction } from "@/lib/focusAfterAction";
+import { minutesSpoken } from "@/lib/minutes";
 import type { BookingDetail } from "@/lib/playersApi";
+import { firstName } from "@/lib/playersNames";
 
 type Props = { detail: BookingDetail; reload: () => void; now?: () => number };
 
 /** The organiser's first name for the sheet's sentences ("Naledi has already checked in…"). */
 function firstNameOf(detail: BookingDetail): string | null {
   return detail.organiser.name?.trim().split(/\s+/)[0] || null;
+}
+
+/**
+ * R16 J16-7 — "Owen's 15 minutes" for each partner whose paid share would stand: a started session
+ * somebody checked in to refunds nothing, and the partners' shares stay with the organiser. A seat
+ * paid by hand, or that paid nothing, has nothing in the app to stand.
+ */
+function standingShares(detail: BookingDetail): string[] {
+  if (!detail.attendance.checked_in_at) return [];
+  return detail.players
+    .filter((p) => p.kind === "member" && p.user_id !== detail.organiser.user_id && p.status === "accepted" && !p.settled_outside && p.paid_minutes > 0)
+    .map((p) => `${firstName(p.name ?? "")}'s ${minutesSpoken(p.paid_minutes)}`);
 }
 
 /** Whether the organiser's own Cancel is on the page already — the desk's would be a second one. */
@@ -39,6 +53,8 @@ export function AdminCancelPanel({ detail, reload, now = Date.now }: Props) {
   const who = detail.organiser.name?.trim() || ADMIN_CANCEL.nobody;
   const started = new Date(detail.starts_at).getTime() <= now();
   const booking = { ...gridBookingOf(detail), mine: false, memberFirstName: firstNameOf(detail) };
+  const shares = started ? standingShares(detail) : [];
+  const description = started ? ADMIN_CANCEL.started(who) : ADMIN_CANCEL.upcoming(who);
   const done = (outcome: CancelledOutcome) => {
     if (outcome.cancelledIds.length === 0) return;
     // The sheet's toast carries the figures; the page re-reads and its cancelled banner takes focus.
@@ -46,7 +62,11 @@ export function AdminCancelPanel({ detail, reload, now = Date.now }: Props) {
     focusAfterAction(() => document.querySelector<HTMLElement>("[data-cancelled]"));
   };
   return (
-    <Section title={ADMIN_CANCEL.title} description={started ? ADMIN_CANCEL.started(who) : ADMIN_CANCEL.upcoming(who)} data-admin-cancel="">
+    <Section
+      title={ADMIN_CANCEL.title}
+      description={shares.length > 0 ? `${description} ${ADMIN_CANCEL.sharesStand(shares, firstNameOf(detail) ?? ADMIN_CANCEL.nobody)}` : description}
+      data-admin-cancel=""
+    >
       <div>
         <Button variant="danger-soft" onClick={() => setOpen(true)}>{ADMIN_CANCEL.open}</Button>
       </div>

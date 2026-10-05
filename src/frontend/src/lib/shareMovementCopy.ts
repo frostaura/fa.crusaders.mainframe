@@ -98,8 +98,9 @@ function partnerActed(a: Acted, minutes: string, where: string): string | null {
     share_returned: () => `You withdrew from ${where} — ${minutes} came back`,
     club_removed: () => `The club took you off ${where} — ${minutes} came back`,
     booking_cancelled: () => (a.cancelledBy === "member" && a.actor ? `${a.actor} cancelled ${where} — ${minutes} of your share came back` : null),
-    // R14 §9 — the club recorded the share as paid outside the app; a return no record explains names nobody.
-    club_settled: () => `${minutes} of your share of ${a.where ?? "a split booking"} came back — the club recorded your share as paid outside the app`,
+    // R14 §9 / R16 J16-6 — the club recorded that the partner paid the organiser BY HAND; a return
+    // no record explains names nobody.
+    club_settled: () => `${minutes} of your share of ${a.where ?? "a split booking"} came back — the club recorded that you paid ${a.other ?? "the organiser"} by hand`,
     share_back: () => `${minutes} of your share of ${a.where ?? "a split booking"} came back`,
     // R16 J16-2 — an equal split went down because a player was added: by the organiser (named),
     // else the club (no actor on the frame, or "The club").
@@ -118,7 +119,7 @@ function organiserActed(a: Acted, minutes: string, where: string): string | null
   const share = many ? "their shares" : "their share";
   const of = a.where ?? "a split booking";
   const said: Record<string, () => string> = {
-    club_settled: () => `${minutes} went back to ${to} — the club recorded ${share} of ${of} as paid outside the app`,
+    club_settled: () => `${minutes} went back to ${to} — the club recorded that ${many ? "they" : to} paid you by hand for ${of}`,
     share_back: () => `${minutes} went back to ${to} from ${share} of ${of}`,
     share_returned: () => `${a.actor ?? partner ?? "A partner"} withdrew from ${where} — ${minutes} went back to them`,
     organiser_removed: () => `You took ${partner ?? "a partner"} off ${where} — ${minutes} went back to them`,

@@ -249,6 +249,8 @@ const PRECISE_MOVEMENT: Record<string, (s: Said) => string> = {
     : s.up ? `Your wallet went up by ${s.minutes}.` : `${s.minutes} left your wallet.`,
   // R14 (BE14b §5) — the club cancelled a session that had started: nothing moved, said with where and when.
   cancelled_no_refund: (s) => `The club cancelled your session${s.whereAt ? ` on ${s.whereAt}` : ""} — it had started, so nothing was refunded.`,
+  // R16 J16-7 — the partner's side of it: nothing moved, and their share stands.
+  cancelled_share_stands: (s) => `The club cancelled ${s.whereAt ?? "your game"} — it had started, so your share stands.`,
   // R16 J16-4 — which booking, where the frame says.
   displaced_reinstated: (s) => s.up
     ? `${s.whereAt ? `Your booking on ${s.whereAt}` : "A booking"} was reinstated: ${s.minutes} back in your wallet.`

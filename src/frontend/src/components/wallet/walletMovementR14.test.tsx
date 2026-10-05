@@ -222,25 +222,26 @@ describe("R14 §9 — club_settled and share_back: the record's cause, nobody na
   const out = { from: "Omar Organiser", to: "Sam Partner", actorUserId: SAM, actorName: "Sam Partner" };
   const part = (name: string, n: number) => ({ reason: "share_transfer", delta_minutes: n, counterparty_name: name });
 
-  it("partner, club_settled (plain): '… of your share of Court 3 · Mon 7 Oct came back — the club recorded your share as paid outside the app.'", async () => {
+  // R16 J16-6 — a by-hand payment to the organiser, said as who paid whom.
+  it("partner, club_settled (plain): '… of your share of Court 3 · Mon 7 Oct came back — the club recorded that you paid Omar by hand.'", async () => {
     expect(await share([GONE], 7, { share_cause: "club_settled", actor_name: null, parts: [part("Omar Organiser", 7)] }))
-      .toEqual(["7 minutes of your share of Court 3 · Mon 7 Oct came back — the club recorded your share as paid outside the app."]);
+      .toEqual(["7 minutes of your share of Court 3 · Mon 7 Oct came back — the club recorded that you paid Omar by hand."]);
   }, 15_000);
 
   it("partner, club_settled (booking readable, named path): the same words", async () => {
     const readable = { path: `/api/v1/bookings/${BOOKING}`, body: { ...detail([]), organiser: { user_id: OMAR, name: "Omar Organiser", photo_url: null } } };
     expect(await share([readable], 7, { share_cause: "club_settled", actor_name: null }))
-      .toEqual(["7 minutes of your share of Court 3 · Mon 7 Oct came back — the club recorded your share as paid outside the app"]);
+      .toEqual(["7 minutes of your share of Court 3 · Mon 7 Oct came back — the club recorded that you paid Omar by hand"]);
   }, 15_000);
 
-  it("organiser, club_settled, one partner: '7 minutes went back to Sam — the club recorded their share of … as paid outside the app.'", async () => {
+  it("organiser, club_settled, one partner: '7 minutes went back to Sam — the club recorded that Sam paid you by hand for ….'", async () => {
     expect(await share([GONE], -7, { share_cause: "club_settled", actor_name: null, parts: [part("Sam Partner", -7)] }, out))
-      .toEqual(["7 minutes went back to Sam — the club recorded their share of Court 3 · Mon 7 Oct as paid outside the app."]);
+      .toEqual(["7 minutes went back to Sam — the club recorded that Sam paid you by hand for Court 3 · Mon 7 Oct."]);
   }, 15_000);
 
   it("organiser, club_settled, two partners in one frame: both named, plural", async () => {
     expect(await share([GONE], -14, { share_cause: "club_settled", actor_name: null, parts: [part("Sam Partner", -7), part("Nomsa Dube", -7)] }, out))
-      .toEqual(["14 minutes went back to Sam and Nomsa — the club recorded their shares of Court 3 · Mon 7 Oct as paid outside the app."]);
+      .toEqual(["14 minutes went back to Sam and Nomsa — the club recorded that they paid you by hand for Court 3 · Mon 7 Oct."]);
   }, 15_000);
 
   it("partner, share_back: plain, nobody named", async () => {
