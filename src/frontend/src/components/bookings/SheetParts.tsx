@@ -86,7 +86,9 @@ function SlotItem({ line, refusedWord }: { line: SlotLine; refusedWord: string }
       >
         <Racquet size={20} />
       </span>
-      <span className="grid min-w-0 flex-1 gap-0.5">
+      {/* R16 L16-4 — a shrinkable track: an implicit `auto` one is as wide as the longest word, and
+          `break-words` does not shorten that, so "Court 2 · Wolfeschlegelsteinhausenberger" ran 14px out at 320 / 200 %. */}
+      <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-0.5">
         {/* R7 L7-4 — the court's name wraps whole (it was cut "Cou…" at 390/200 %), and the figure
             drops under it, right-aligned, where the two do not fit on one line. */}
         <span className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -134,7 +136,7 @@ export function SlotSummary({ lines, label, more }: { lines: readonly SlotLine[]
   const shown = lines.slice(0, SUMMARY_ROWS);
   const rest = lines.length - shown.length;
   return (
-    <ul aria-label={label} data-slot-summary="" className="grid gap-1 rounded-xl border border-border bg-bg-surface px-3 py-2 text-sm">
+    <ul aria-label={label} data-slot-summary="" className="grid grid-cols-[minmax(0,1fr)] gap-1 rounded-xl border border-border bg-bg-surface px-3 py-2 text-sm">
       {shown.map((line) => (
         <li key={line.key} className="flex items-baseline justify-between gap-3">
           <span className="min-w-0 break-words">
@@ -175,7 +177,7 @@ function MoneyValue({ row }: { row: MoneyRow }) {
 /** The figures, right-aligned and tabular so they line up down the column. */
 export function MoneyRows({ rows, label }: { rows: readonly MoneyRow[]; label: string }) {
   return (
-    <dl aria-label={label} className="grid gap-2 rounded-xl bg-bg-muted p-4 text-sm">
+    <dl aria-label={label} className="grid grid-cols-[minmax(0,1fr)] gap-2 rounded-xl bg-bg-muted p-4 text-sm">
       {rows.map((row, index) => {
         const negative = row.value !== null && row.value < 0 && !row.debit;
         return (

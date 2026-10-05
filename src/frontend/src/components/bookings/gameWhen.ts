@@ -34,4 +34,9 @@ export const GAMES_LIST = [
   "@[56rem]/aside:grid-cols-3",
   "@[72rem]/aside:flex @[72rem]/aside:flex-col",
 ].join(" ");
-export const GAMES_ITEM = "w-64 max-w-full shrink-0 snap-start @[40rem]/aside:w-auto @[40rem]/aside:max-w-none";
+/**
+ * R16 L16-5 — a 16rem card, capped at the rail's own width (`100cqw`: the WithAside root is the
+ * container). `max-w-full` capped nothing: the strip is as wide as its content, so its 100 % was the
+ * card's own 16rem — 512px on a 320 phone at 200 %.
+ */
+export const GAMES_ITEM = "w-[min(16rem,100cqw)] shrink-0 snap-start @[40rem]/aside:w-auto";

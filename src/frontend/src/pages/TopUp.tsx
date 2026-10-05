@@ -105,6 +105,8 @@ export default function BuyMinutesPage() {
 
 const LG_UP = "(min-width: 1024px)";
 
+const PRICE_ID = "buy-docked-price";
+
 /** The phone's docked bar: the price of the chosen package beside the one verb. */
 function summaryDocked(pkg: ShelfPackage | null, buy: Purchase, notice: ReactNode) {
   return (
@@ -112,9 +114,18 @@ function summaryDocked(pkg: ShelfPackage | null, buy: Purchase, notice: ReactNod
       {pkg && isFreeHere(pkg) ? <Alert tone="warning">{BUY_SAID.priceZero}</Alert> : notice}
       {/* R15 L15-8 — nothing picked: a short label at the default size. "Pick a package to see what
           you pay." in a large button was four lines (~300px) of a 320 / 200 % screen's bottom bar. */}
-      <Button block size={pkg ? "lg" : "md"} pending={buy.pending} disabled={!pkg || isFreeHere(pkg)} onClick={() => { if (pkg && !isFreeHere(pkg)) void buy.run(pkg); }}>
-        {pkg ? `${BUY_COPY.cta} · ${formatMoney(pkg.price_zar)}` : BUY_COPY.pickShort}
-      </Button>
+      {/* R16 L16-2 — picked, the price stands beside the verb where they fit on one line and above it
+          where they do not: "Continue to PayFast · R120.00" inside one large button was three lines
+          (308px, half of a 320 / 200 % screen) of bar. The price is the button's description. */}
+      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+        {pkg ? <span id={PRICE_ID} className="text-base font-semibold tabular-nums text-text-primary">{formatMoney(pkg.price_zar)}</span> : null}
+        <Button
+          size="md" className="min-w-0 flex-[1_1_12rem]" pending={buy.pending} disabled={!pkg || isFreeHere(pkg)}
+          aria-describedby={pkg ? PRICE_ID : undefined} onClick={() => { if (pkg && !isFreeHere(pkg)) void buy.run(pkg); }}
+        >
+          {pkg ? BUY_COPY.cta : BUY_COPY.pickShort}
+        </Button>
+      </div>
     </>
   );
 }

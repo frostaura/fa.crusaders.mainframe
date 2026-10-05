@@ -121,9 +121,11 @@ function ProfileSkeleton() {
     <div className="flex flex-col gap-6">
       <Card className="px-4 sm:px-6">
         <Skeleton className="h-6 w-32" />
-        <div className="flex items-center gap-5">
+        {/* R16 L16-3 — wraps, and its column shrinks: a 6rem photo beside a fixed-rem bar pushed a
+            320 / 200 % phone sideways while the profile was read. */}
+        <div className="flex flex-wrap items-center gap-5">
           <Skeleton className="size-24 shrink-0 rounded-full" />
-          <div className="flex flex-1 flex-col gap-2">
+          <div className="flex min-w-0 flex-[1_1_8rem] flex-col gap-2">
             <Skeleton className="h-4 w-48 max-w-full" />
             <Skeleton className="h-3 w-24 max-w-full" />
           </div>

@@ -85,7 +85,8 @@ export function BookingBoard(props: BoardProps) {
         <div
           ref={scroller}
           data-grid-scroller=""
-          className="snap-x snap-proximity overflow-auto overscroll-contain md:snap-none"
+          // R16 L16-1 — a scroller clips: a ring at its edge is drawn inside its control.
+          className="snap-x snap-proximity overflow-auto overscroll-contain md:snap-none [&_:focus-visible]:-outline-offset-2"
           style={scrollerStyle(ctx.selection.active)}
         >
           <div
@@ -399,7 +400,8 @@ function CourtChips({ courts, active, onPick }: { courts: ScheduleCourt[]; activ
   return (
     // R4 form factor (SPEC 2.6): the row says it scrolls — the last chip was cut at the screen's
     // edge ("C") with no fade. Not a tab stop of its own: every chip is one, and brings itself in.
-    <ScrollArea label={BOOKINGS_COPY.courtChips} tabbable={false} fade="app" className="-mx-4 sm:mx-0">
+    // R16 L16-1 — the chips sit on the scroller's top edge: their rings are drawn inside them.
+    <ScrollArea label={BOOKINGS_COPY.courtChips} tabbable={false} fade="app" className="-mx-4 sm:mx-0 [&_:focus-visible]:-outline-offset-2">
       <div role="group" aria-label={BOOKINGS_COPY.courtChips} className="flex w-max scroll-px-4 gap-2 px-4 pb-1 sm:scroll-px-0 sm:px-0">
         {courts.map((c, i) => (
           // R2 F1-12: 44px targets (`md`), not 36. R2 F1-11: under forced colours the current chip

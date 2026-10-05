@@ -103,7 +103,8 @@ function CourtListSkeleton() {
       {[0, 1, 2, 3].map((row) => (
         <div key={row} className="flex items-center gap-3 rounded-xl border border-border bg-bg-surface p-4">
           <Skeleton className="size-11 shrink-0" />
-          <div className="flex flex-1 flex-col gap-2">
+          {/* R16 L16-3 — a shrinkable column, or its widest bar pushes a 320 / 200 % phone sideways. */}
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
             <Skeleton className="h-4 w-32" />
             <Skeleton className="h-3 w-24" />
           </div>

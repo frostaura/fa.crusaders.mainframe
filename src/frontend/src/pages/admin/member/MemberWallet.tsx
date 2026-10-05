@@ -55,7 +55,8 @@ export function MemberWallet() {
         emptyAction={detail.status !== "Active" ? undefined : <Button onClick={openSell} icon={<Plus weight="bold" aria-hidden="true" />}>{MEMBER_COPY.sell}</Button>}
         skeleton={<TableSkeleton rows={5} />}
       >
-        <div className="overflow-clip rounded-xl border border-border bg-bg-surface">
+        {/* R16 L16-1 — the clip would cut the sort buttons' rings at its top edge: they are drawn inside. */}
+        <div className="overflow-clip rounded-xl border border-border bg-bg-surface [&_:focus-visible]:-outline-offset-2">
           <LedgerTable rows={rows} columns={COLUMNS} onOpen={setOpened} label={COPY.label(name)} />
         </div>
         {rows.length >= LEDGER_LIMIT ? <p className="text-sm text-text-muted">{COPY.showingLatest(rows.length)}</p> : null}

@@ -286,12 +286,15 @@ export default function BookingsPage() {
  * it lie flat, `GAMES_LIST`), a column from a 40rem rail. Empty, it takes no room.
  */
 const RAIL_STRIP = [
-  "-mx-4 flex snap-x snap-proximity scroll-px-4 items-end gap-4 overflow-x-auto px-4 pb-1 empty:hidden [&>*]:shrink-0",
+  // R16 L16-1: it scrolls sideways, so it clips top and bottom too — "1 invite waiting" lost the
+  // top of its ring. Rings inside it are drawn inside their controls.
+  "-mx-4 flex snap-x snap-proximity scroll-px-4 items-end gap-4 overflow-x-auto px-4 pb-1 empty:hidden [&>*]:shrink-0 [&_:focus-visible]:-outline-offset-2",
   "@[40rem]/aside:mx-0 @[40rem]/aside:flex-col @[40rem]/aside:items-stretch @[40rem]/aside:overflow-visible @[40rem]/aside:px-0 @[40rem]/aside:pb-0 @[40rem]/aside:[&>*]:shrink",
 ].join(" ");
 
 /** R5 X5-12 / X5-11 — the invites link: a 44px target that wraps rather than running off a 320 phone at 200 %. */
-const INVITES_LINK = "min-h-touch max-w-full whitespace-normal text-left";
+// R16 L16-5: capped at the rail (`100cqw`), not `max-w-full` — the strip is as wide as its content.
+const INVITES_LINK = "min-h-touch max-w-[100cqw] whitespace-normal text-left";
 
 /** R5 F5-6 — WithAside's inner grid, from 3xl: the main column as wide as its content (the capped grid), no wider. */
 const HUG_GRID = "3xl:[&>div]:grid-cols-[minmax(0,max-content)_var(--aside-w)] 3xl:[&>div]:justify-start";

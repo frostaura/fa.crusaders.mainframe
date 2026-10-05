@@ -122,7 +122,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
           ref={scroller}
           data-slot="table-container"
           {...(props.label ? { role: "region", "aria-label": props.label, tabIndex: 0 } : {})}
-          className="relative w-full overflow-auto rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong"
+          // R16 L16-1 — the frame scrolls, so it clips: the head's sort buttons sat on its top edge
+          // and lost the top of their rings. Every ring inside it is drawn inside its control.
+          className="relative w-full overflow-auto rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong [&_:focus-visible]:-outline-offset-2"
           style={maxHeight !== undefined ? { maxHeight: typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight } : undefined}
         >
           <table data-slot="table" aria-label={props.label} className="w-full border-collapse text-sm">

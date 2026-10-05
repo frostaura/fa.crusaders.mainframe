@@ -216,7 +216,8 @@ describe("Buy minutes — the checkout", () => {
     expect(stub.calls.filter((c) => c.path === SHELF).length).toBeGreaterThanOrEqual(2);
     // Still nothing sent to PayFast, and the 5 hours stays chosen at its new price.
     expect(submitted).toHaveLength(0);
-    expect(continueButton()).toHaveTextContent(formatMoney(550));
+    // R16 L16-2 — the price stands beside the verb in the docked bar, and describes it.
+    expect(continueButton()).toHaveAccessibleDescription(formatMoney(550));
   });
 
   it("J8-2 — a moved price whose re-read finds the package gone says it has gone", async () => {

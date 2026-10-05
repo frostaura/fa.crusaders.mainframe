@@ -166,7 +166,9 @@ function LedgerSection(props: LedgerProps) {
       ) : (
         // `overflow-clip`, not `-hidden`: a hidden overflow is a scroll container, and the ledger's
         // column heads would stick to the card (which never scrolls) instead of the page (R5 V5-6).
-        <Card className="gap-0 overflow-clip py-0 sm:gap-0 sm:py-0">
+        // R16 L16-1: a clip cuts a ring all the same — the sort buttons sit 2px under its edge — so
+        // every ring inside it is drawn inside its control.
+        <Card className="gap-0 overflow-clip py-0 sm:gap-0 sm:py-0 [&_:focus-visible]:-outline-offset-2">
           <LedgerTable rows={memberLedgerRows(rows)} label="Wallet ledger" groupShares shareBookings={shareBookings} />
           {/* Said once under the list rather than on every row: every face on a member surface
               is the CLUB's day, which is right and otherwise invisible. */}
