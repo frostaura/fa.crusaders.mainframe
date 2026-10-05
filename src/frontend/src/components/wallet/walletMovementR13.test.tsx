@@ -166,3 +166,43 @@ describe("R13 E13-5 (contract C13-2) — one toast for a sweep or a reversal on 
     expect(said[0]).toBe("Pat Partner checked in, so the outage refund was taken back: the 15 minutes refund was taken back, 7 minutes came back from your partner for their share, so 8 minutes left your wallet.");
   }, 15_000);
 });
+
+/**
+ * R13 C13-7 — the real wire (BE13b's R13FrameNamesHttpTests): every part carries `counterparty_name`
+ * (null on the refund row), and a share frame carries `court_name` + `booking_starts_at`.
+ */
+describe("R13 C13-7 — the wire's names and court", () => {
+  it("J13-4: taken off (booking 404s) — the toast names the court and the day from the frame", async () => {
+    const { club, push } = mount([{ path: `/api/v1/bookings/${BOOKING}`, status: 404, body: { error: "booking_not_found" } }]);
+    await push({ balance_minutes: 290 });
+    await wait(120);
+    club.balance_minutes = 300; club.entries = [shareBack(10)]; club.total_entries = 1;
+    await push({
+      balance_minutes: 300, delta_minutes: 10, reason: "share_transfer",
+      parts: [{ reason: "share_transfer", delta_minutes: 10, counterparty_name: "Olive Organiser" }],
+      share_cause: "club_removed", share_kept_minutes: null, cancelled_by: null, checked_in_by_name: null,
+      court_name: "Court 1", booking_starts_at: "2030-10-08T16:00:00+00:00",
+    });
+    await wait(600);
+    expect(toasts()).toEqual(["10 minutes of your share of Court 1 · Tue 8 Oct came back — the club took you off the game."]);
+  }, 15_000);
+
+  it("X13-2: the cancel frame as sent — null name on the refund row, names on the share rows", async () => {
+    const { push } = mount();
+    await push({ balance_minutes: 200 });
+    await wait(120);
+    await push({
+      balance_minutes: 218, delta_minutes: 18, reason: "cancellation_refund", cancelled_by: "club",
+      parts: [
+        { reason: "cancellation_refund", delta_minutes: 32, counterparty_name: null },
+        { reason: "share_transfer", delta_minutes: -7, counterparty_name: "Sam Partner" },
+        { reason: "share_transfer", delta_minutes: -7, counterparty_name: "Alex Partner" },
+      ],
+      share_cause: "booking_cancelled", court_name: "Court 1", booking_starts_at: "2030-10-08T16:00:00+00:00",
+    });
+    await wait(400);
+    expect(toasts()).toEqual([
+      "The club cancelled your booking: 32 minutes came back, 7 minutes went back to Sam and 7 minutes to Alex for their shares, so 18 minutes came back to your wallet.",
+    ]);
+  }, 15_000);
+});

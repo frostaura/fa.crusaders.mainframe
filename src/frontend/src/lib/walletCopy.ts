@@ -581,7 +581,11 @@ export function shareMovementPlain(
   const collected = cause === "share_paid" || cause === "club_collected" || cause === "attended";
   const side = (collected ? amount < 0 : amount > 0) ? "partner" : "organiser";
   const row = { side, signed: amount, place: more.place ?? null, other: null, cause, kept, by, cancelledBy: more.cancelledBy } as const;
-  if (cause && side === "partner" && amount > 0) return `${shareRowSentence(row)}.`;
+  if (cause && side === "partner" && amount > 0) {
+    // R13 J13-4 (C13-7) — the court and the day from the frame: "of your share of Court 1 · Tue 8 Oct".
+    const where = sharePlace(row.place) ?? "a split booking";
+    return `${minutesSpoken(amount)} of your share of ${where} came back${shareCauseClause(row, null)}.`;
+  }
   const plain = movementSentence(amount, "share_transfer");
   const clause = shareCauseClause(row, null);
   return clause ? `${plain.replace(/\.$/, "")}${clause}.` : plain;

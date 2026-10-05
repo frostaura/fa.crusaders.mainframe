@@ -79,6 +79,8 @@ export type BalanceDelta = {
   cancelledBy?: "club" | "member";
   /** R12 E12-2 (contract C2) — on a reversal: the member whose scan reversed it; absent when it was this member. */
   checkedInBy?: string;
+  /** R13 C13-7 — the booking the frame's rows name (court + start), for a member who can no longer read it. */
+  place?: { courtName: string | null; startsAt: string };
 };
 
 /**
@@ -109,6 +111,14 @@ function whoOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "cancelledBy
   return { ...(by === "club" || by === "member" ? { cancelledBy: by } : {}), ...(name ? { checkedInBy: name } : {}) };
 }
 
+/** R13 C13-7 — the frame's own booking (`court_name`, `booking_starts_at`), kept only when the start is a string. */
+function placeOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "place"> {
+  const starts = frame?.booking_starts_at;
+  if (typeof starts !== "string" || !starts) return {};
+  const court = typeof frame?.court_name === "string" && frame.court_name.trim() ? frame.court_name.trim() : null;
+  return { place: { courtName: court, startsAt: starts } };
+}
+
 /** One frame off the wire. Every field but the balance is optional — an older API sends none. */
 export type BalanceFrame = {
   balance_minutes: number;
@@ -124,6 +134,10 @@ export type BalanceFrame = {
   cancelled_by?: "club" | "member" | null;
   /** R12 C2 — on a no-show / outage reversal (and its share frames): who scanned; null when it was this member. */
   checked_in_by_name?: string | null;
+  /** R13 C13-7 — the court of the booking the frame's rows name; null when they name none. */
+  court_name?: string | null;
+  /** R13 C13-7 — that booking's start (ISO); null when the rows name none. */
+  booking_starts_at?: string | null;
   /**
    * D11 (§3a): shares an organiser received, HELD for their partners' possible returns until
    * `held_until` (the earliest share deadline among them). Part of the balance, not spendable.
@@ -436,6 +450,7 @@ export function useLiveBalance({
       parts: balanceParts(frame?.parts),
       ...shareCauseOf(frame),
       ...whoOf(frame),
+      ...placeOf(frame),
     });
     expectSelf.current = false;
   }, []);
