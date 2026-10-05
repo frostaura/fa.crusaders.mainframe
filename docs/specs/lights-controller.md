@@ -81,7 +81,7 @@ Recommendation is **A + C** — timer-based auto-off is the safety net for "the 
 ## End-of-booking cleanup
 - The Arduino's local timer is the primary off-switch (works without mainframe).
 - The mainframe ALSO fires a `booking.lights_off` webhook at booking end, as a belt-and-braces.
-- If the mainframe knows a booking has ended early (cancellation), it fires an immediate `off` call with the cancelled booking's id.
+- [Superseded, and never built — R16] ~~If the mainframe knows a booking has ended early (cancellation), it fires an immediate `off` call with the cancelled booking's id.~~ No cancellation fires an immediate off. A cancelled booking that was lit gets its `booking.lights_off` at its `EndsAt`, from the lights-cue sweep (recent ones only, R14 D14-2); a cancelled booking that was never lit gets none. A no-show reversal that re-lit the court and was then cancelled at the desk is swept the same way (R16 D16-4). The box's own timer is what actually turns the relays off. Current rules: `webhooks.md` (`booking.lights_off` and *Ordering the lights events*); `Webhooks/LightsCueWorker.cs`.
 
 ## Observability
 - Mainframe records every request to the Arduino: timestamp, channel, action, response status, latency. Visible in the admin "Peripheral health" view.

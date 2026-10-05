@@ -452,7 +452,9 @@ Since review round 13:
   every webhook.
 - **The club cancelling a session that had started (refund 0)** still tells the booker: an inbox
   notice and a balance-neutral `cancelled_no_refund` frame; the mail says nothing was refunded and
-  promises no wallet line. Refund policy is unchanged (R14 E14-5).
+  promises no wallet line. Refund policy is unchanged (R14 E14-5). The mail, the inbox line and the
+  frame (`checked_in_by_name`) name who had checked in — "Pat Smith had checked in already", or
+  "You had…" to the member who did; never "Somebody" (R16 E16-3; `feature-spec.md` §11).
 - **Links without `?seat=` still land (R14 J14-10).** A 404 from `GET /bookings/{id}` carries
   `own_seat_id` — the viewer's own closed seat, newest, and nothing else — so old invites and mails
   reach "You were taken off this game". Invites carry `consented_minutes` so a seat the club added

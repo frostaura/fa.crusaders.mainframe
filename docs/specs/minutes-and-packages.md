@@ -574,7 +574,8 @@ frame followed by a `share_transfer` frame: `reason` is the settlement's (`cance
 net of every row, and `parts` every row in order with the share rows last (one per partner, in seat
 order). The frame also carries `cancelled_by` (`member | club`, on a cancellation — the partner's
 share frame too; null otherwise) and `checked_in_by_name` (on a reversal, the scanner when it was
-not this member; null for their own scan). Each `share_transfer` part names the other member on it,
+not this member; null for their own scan — and since R16 E16-3 on the booker's `cancelled_no_refund`
+frame, whoever checked the started session in, null when it was the booker). Each `share_transfer` part names the other member on it,
 `counterparty_name`, and a share frame carries `court_name` and `booking_starts_at` so a member no
 longer on the game is still told which one (R13 C13-7). Backend: `NoShowWorker` holds a booking's
 frames until its share follow-up has run (`Realtime/WalletFrameHolds`).
