@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { memberLedgerComment, movementSentence, shareMovementPlain } from "./walletCopy";
+import { memberLedgerComment, movementSentence } from "./walletCopy";
+import { shareMovementPlain } from "./shareMovementCopy";
 
 /**
  * R13 — the money toasts' words (lane FC13).

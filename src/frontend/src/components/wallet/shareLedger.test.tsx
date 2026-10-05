@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import type { LedgerRow, ShareBookingSummary } from "@/lib/api";
-import { SHARE_LEDGER_COPY, shareGroupSentence, shareRowSentence } from "@/lib/walletCopy";
+import { SHARE_LEDGER_COPY, shareGroupSentence } from "@/lib/walletCopy";
+import { shareRowSentence } from "@/lib/shareMovementCopy";
 import { renderPage, stubFetch } from "@/test/harness";
 import { LedgerTable } from "../LedgerTable";
 import { shareBookingsFrom } from "./useShareBookings";

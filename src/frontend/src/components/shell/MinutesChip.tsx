@@ -10,11 +10,10 @@ import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn } from "@/lib/utils";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
-import { movementSentence, shareMovementPlain } from "@/lib/walletCopy";
+import { movementSentence } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/useAuth";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { useChipBalance, type ChipFigures, type NoFigure } from "./chipBalance";
-import { namedShareMovement } from "./shareMovement";
 import { useToast } from "../toastContext";
 
 /**
@@ -112,14 +111,9 @@ function useClubMovementToast() {
     }
     const say = sayAs(delta.amount, delta.parts);
     if (delta.reason === "share_transfer") {
-      // R11 E11-1 — said with the frame's cause, named or plain.
-      // R13 X13-3 / J13-4 — who cancelled, and the frame's own court for a booking no longer readable.
-      // R14 X14-2 — who acted (`actor_name`) and the other member on the share row.
-      const other = delta.parts?.find((p) => p.reason === "share_transfer")?.counterparty_name ?? null;
-      const plainShare = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy, {
-        cancelledBy: delta.cancelledBy, place: delta.place, actor: delta.actorName, other,
-      });
-      namedShareMovement(delta.amount, me, delta).then((named) => say(named ?? plainShare), () => say(plainShare));
+      // R11 E11-1 / R13 / R14 X14-2 — said with the frame's cause and who acted, named or plain.
+      // The words load with the first share frame (`shareMovement`), out of the entry chunk.
+      void import("./shareMovement").then((m) => m.shareToast(delta, me)).then(say, () => say(movementSentence(delta.amount, "share_transfer")));
     } else if (awaitsShares(delta)) {
       const timer = window.setTimeout(() => {
         pending.current = null;

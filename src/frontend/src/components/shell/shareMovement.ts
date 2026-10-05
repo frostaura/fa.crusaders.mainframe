@@ -1,6 +1,7 @@
 import { endpoints } from "@/lib/api";
 import { playersEndpoints } from "@/lib/playersApi";
-import { shareRowSentence } from "@/lib/walletCopy";
+import { shareMovementPlain, shareRowSentence } from "@/lib/shareMovementCopy";
+import type { BalanceDelta } from "@/lib/liveBalance";
 import { summariseBooking } from "@/components/wallet/useShareBookings";
 
 /**
@@ -38,3 +39,22 @@ export async function namedShareMovement(
     cancelledBy: cause?.cancelledBy, actor: cause?.actorName,
   });
 }
+
+/**
+ * The chip's share toast, named where the ledger and the booking can be read, else the frame's own
+ * plain sentence (R11 E11-1, R13 J13-4, R14 X14-2). Loaded by the chip on the first share frame, so
+ * these words stay out of the entry chunk (R14 entry budget).
+ */
+export async function shareToast(delta: BalanceDelta, me: string | null): Promise<string> {
+  // R14 X14-2 — who acted (`actor_name`) and the other member on the share row.
+  const other = delta.parts?.find((p) => p.reason === "share_transfer")?.counterparty_name ?? null;
+  const plain = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy, {
+    cancelledBy: delta.cancelledBy, place: delta.place, actor: delta.actorName, other,
+  });
+  try {
+    return (await namedShareMovement(delta.amount, me, delta)) ?? plain;
+  } catch {
+    return plain;
+  }
+}
+

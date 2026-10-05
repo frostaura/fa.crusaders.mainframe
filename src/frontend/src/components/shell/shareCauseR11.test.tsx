@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "@/lib/auth";
 import { BalanceProvider } from "@/lib/balance";
 import type { BalanceFrame, BalanceTransport } from "@/lib/liveBalance";
-import { shareMovementPlain, shareRowSentence } from "@/lib/walletCopy";
+import { shareMovementPlain, shareRowSentence } from "@/lib/shareMovementCopy";
 import { ToastProvider } from "../Toast";
 import { MinutesChip } from "./MinutesChip";
 import { signIn, signOut, stubFetch } from "../../test/harness";
