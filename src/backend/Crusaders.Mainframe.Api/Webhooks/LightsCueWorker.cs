@@ -76,6 +76,9 @@ public sealed class LightsCueWorker : BackgroundService
         // fires only after the save that makes the promotion real, never before.
         foreach (var b in dueOff)
         {
+            // R13 (E13-1's rule, for every slot): said at the instant the court is next free — never
+            // after the lights_on of the next session already lit on it, which closes the court itself.
+            var offAt = await NextFreeAsync(db, b, now, ct);
             b.LightsOffCuedAt = now;
 
             // Only promote a booking that was actually attended. Flipping an
@@ -104,7 +107,7 @@ public sealed class LightsCueWorker : BackgroundService
             // consumer has no way to tell from a real one.
             if (await SaveOneAsync(db, b, ct))
             {
-                await FireLightsAsync(db, tenant, b, on: false, ct);
+                if (offAt is { } at) await FireLightsAsync(db, tenant, b, on: false, ct, occurredAt: at);
                 if (promoted) await FireCompletedAsync(db, tenant, b, ct);
             }
         }
@@ -158,18 +161,20 @@ public sealed class LightsCueWorker : BackgroundService
     }
 
     /// <summary>
-    /// R13 E13-1 (I12 refined): when a relit reversal's extra <c>booking.lights_off</c> is said, or
-    /// null for "not at all".
+    /// R13: when a booking's <c>booking.lights_off</c> is said, or null for "not at all" — the end-of-slot
+    /// cue and a relit reversal's extra one (E13-1, I12 refined) alike.
     ///
     /// <para>
-    /// A collided reversal's restored end is the start of the booking that survived on the court,
-    /// so an off stamped at the tick that sent it arrived after that member's <c>lights_on</c> and
-    /// read their paid session dark. Walking forward from the restored end: a live booking
-    /// (<c>Booked</c>, <c>Completed</c> or <c>NoShow</c> — the statuses the off sweep closes) that
-    /// holds the court at that instant and has not been cued off yet means its own off is still to
-    /// come and closes the court later by arrival and by <c>occurred_at</c>, so this one is not sent.
-    /// One already cued off moves the instant to its end; the first instant nobody holds is the
-    /// stamp. A cancelled booking and a club block light nothing and hold nothing. Only bookings
+    /// A collided reversal's restored end is the start of the booking that survived on the court, and
+    /// back-to-back slots meet the same way: an off stamped at the tick that sent it arrived after the
+    /// next member's <c>lights_on</c> (they scanned in early, or the sweep ran late) and read their paid
+    /// session dark. Walking forward from the booking's end: a live booking (<c>Booked</c>,
+    /// <c>Completed</c> or <c>NoShow</c> — the statuses the off sweep closes) that holds the court at
+    /// that instant AND is checked in — its <c>lights_on</c> has gone out — and has not been cued off
+    /// yet means its own off is still to come and closes the court later by arrival and by
+    /// <c>occurred_at</c>, so this one is not sent. One already cued off moves the instant to its end;
+    /// the first instant no lit booking holds is the stamp. A booking nobody checked in on lit nothing
+    /// (the court IS dark), and a cancelled booking and a club block hold nothing. Only bookings
     /// already started by <paramref name="now"/> are read: the walk only ever moves through holdings
     /// that are over and cued off, so a later one cannot be in the chain.
     /// </para>
@@ -186,6 +191,7 @@ public sealed class LightsCueWorker : BackgroundService
         foreach (var holder in holders)
         {
             if (holder.StartsAt > at) break;
+            if (holder.CheckedInAt is null) continue;
             if (holder.LightsOffCuedAt is null) return null;
             if (holder.EndsAt > at) at = holder.EndsAt;
         }

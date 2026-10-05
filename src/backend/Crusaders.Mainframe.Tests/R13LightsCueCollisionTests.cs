@@ -155,4 +155,86 @@ public class R13LightsCueCollisionTests
         var off = Assert.Single(OffsOf(emitted, a));
         Assert.True((off.OccurredAt - end).Duration() < TimeSpan.FromMilliseconds(1));
     }
+
+    // ------------------------------------------------------------------ the ordinary end-of-slot off
+
+    /// <summary>
+    /// A per-court mirror's two orderings, checked for <paramref name="holder"/>'s session: by ARRIVAL,
+    /// the holder is checked in — its <c>lights_on</c> went out at its scan, before this tick — so no
+    /// off for the court may be emitted by the tick at all; by <c>occurred_at</c>, no off may fall
+    /// inside the holder's lit session (from its scan, or its start if earlier, to its end).
+    /// </summary>
+    private static void AssertMirrorStaysLit(List<DomainEvent> emitted, Booking holder)
+    {
+        var offs = emitted.Where(e => e.Type == "booking.lights_off" && Equals(e.Data["court_id"], holder.CourtId)
+                                      && !Equals(e.Data["booking_id"], holder.Id)).ToList();
+        Assert.True(offs.Count == 0, $"by arrival: {offs.Count} off(s) for the court after {holder.Id}'s lights_on");
+        var litFrom = holder.CheckedInAt is { } scan && scan < holder.StartsAt ? scan : holder.StartsAt;
+        Assert.DoesNotContain(emitted, e => e.Type == "booking.lights_off" && Equals(e.Data["court_id"], holder.CourtId)
+                                            && !Equals(e.Data["booking_id"], holder.Id)
+                                            && e.OccurredAt >= litFrom && e.OccurredAt < holder.EndsAt);
+    }
+
+    /// <summary>
+    /// Back to back: A's slot ends where B's starts and B is already checked in — early (before A's
+    /// end), on time, or after A's end with the sweep running late. A's end-of-slot off would land
+    /// after B's lights_on and read B's paid session dark: it is not sent; B's own off closes the court.
+    /// A still completes, once, and is not cued twice.
+    /// </summary>
+    [Theory]
+    [InlineData(-2)]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task The_end_of_slot_off_never_darkens_the_next_session_already_lit(int bScanOffset)
+    {
+        await using var host = await TestHost.CreateAsync();
+        var end = DateTimeOffset.UtcNow.AddMinutes(-3);
+        var a = NewBooking(host, end.AddMinutes(-30), 30, checkedInAt: end.AddMinutes(-29));
+        var b = NewBooking(host, end, 60, checkedInAt: end.AddMinutes(bScanOffset), user: host.LeaguePlayerUser.Id);
+        await SeedAsync(host, a, b);
+
+        var emitted = await TickAsync(host);
+
+        AssertMirrorStaysLit(emitted, b);
+        Assert.Single(emitted, e => e.Type == "booking.completed" && Equals(e.Data["booking_id"], a.Id));
+    }
+
+    /// <summary>
+    /// The next booking is not lit — nobody has checked in — so the court IS dark after A, and says
+    /// so: one off, at A's end (never the tick's later instant, which could fall inside the next
+    /// session once its member arrives). Varied: the next one a swept no-show, and a cancelled one.
+    /// </summary>
+    [Theory]
+    [InlineData(BookingStatus.Booked)]
+    [InlineData(BookingStatus.NoShow)]
+    [InlineData(BookingStatus.Cancelled)]
+    public async Task An_unlit_next_booking_does_not_hold_the_court(BookingStatus next)
+    {
+        await using var host = await TestHost.CreateAsync();
+        var end = DateTimeOffset.UtcNow.AddMinutes(-3);
+        var a = NewBooking(host, end.AddMinutes(-30), 30, checkedInAt: end.AddMinutes(-29));
+        var b = NewBooking(host, end, 60, next, user: host.LeaguePlayerUser.Id);
+        await SeedAsync(host, a, b);
+
+        var emitted = await TickAsync(host);
+
+        var off = Assert.Single(OffsOf(emitted, a));
+        Assert.True((off.OccurredAt - end).Duration() < TimeSpan.FromMilliseconds(1), $"occurred_at {off.OccurredAt:o}, end {end:o}");
+    }
+
+    /// <summary>E13-1's late reversal follows the same rule: an adjacent booking nobody checked in on lights nothing.</summary>
+    [Fact]
+    public async Task A_relit_reversal_beside_an_unlit_booking_is_cued_off_at_its_restored_end()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var end = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var a = Relit(host, end);
+        var b = NewBooking(host, end, 60, user: host.LeaguePlayerUser.Id);
+        await SeedAsync(host, a, b);
+
+        var emitted = await TickAsync(host);
+
+        var off = Assert.Single(OffsOf(emitted, a));
+        Assert.True((off.OccurredAt - end).Duration() < TimeSpan.FromMilliseconds(1));
+    }
 }
