@@ -62,6 +62,23 @@ public sealed record ShareMovement(
 
     /// <summary>Review round 13, E13-4: the share went back because the partner withdrew from the game.</summary>
     public bool Withdrew { get; init; }
+
+    /// <summary>
+    /// R14 X14-2 / J14-8: why it went back, when the mail words it — <see cref="ShareActs.OrganiserRemoved"/>,
+    /// <see cref="ShareActs.SplitChanged"/> or <see cref="ShareActs.BookingCancelled"/>. Null otherwise.
+    /// </summary>
+    public string? Cause { get; init; }
+
+    /// <summary>R14 J14-8: with a cancellation, "club" or "member"; null when unrecorded.</summary>
+    public string? CancelledBy { get; init; }
+}
+
+/// <summary>The organiser's acts (and a cancellation) a share mail words for itself — the wire's <c>share_cause</c> values (R14).</summary>
+public static class ShareActs
+{
+    public const string OrganiserRemoved = "organiser_removed";
+    public const string SplitChanged = "split_changed";
+    public const string BookingCancelled = "booking_cancelled";
 }
 
 /// <summary>Why the club refunded a split session, so a returned share can say so (E10-7).</summary>
@@ -376,6 +393,7 @@ public static partial class EmailTemplates
         if (m.ByClub && m.Direction == ShareDirection.Paid) return $"The club collected your share — {m.CourtName}";
         if (m.ClubRemoved && m.Direction == ShareDirection.Refunded) return $"The club took you off the game — {m.CourtName}";
         if (m.ClubRemoved) return $"The club took {m.OtherName} off your game — {m.CourtName}";
+        if (ActSubject(m) is { } act) return act;
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"Share paid — {m.CourtName}";
@@ -383,6 +401,20 @@ public static partial class EmailTemplates
             case ShareDirection.Refunded: return $"Share refunded — {m.CourtName}";
             default: return $"Share returned to {m.OtherName} — {m.CourtName}";
         }
+    }
+
+    /// <summary>R14 X14-2 / J14-8: the partner's subject for an organiser's act or a cancellation; null otherwise.</summary>
+    private static string? ActSubject(ShareMovement m)
+    {
+        if (m.Direction != ShareDirection.Refunded) return null;
+        return m.Cause switch
+        {
+            ShareActs.OrganiserRemoved => $"{m.OtherName} took you off the game — {m.CourtName}",
+            ShareActs.SplitChanged => $"Your share was lowered — {m.CourtName}",
+            ShareActs.BookingCancelled when m.CancelledBy == "club" => $"The club cancelled the game — {m.CourtName}",
+            ShareActs.BookingCancelled when m.CancelledBy == "member" => $"{m.OtherName} cancelled the game — {m.CourtName}",
+            _ => null,
+        };
     }
 
     /// <summary>A club refund's subject (E10-7), or a no-show's that kept part of the share (E11-2); null otherwise.</summary>
@@ -423,6 +455,7 @@ public static partial class EmailTemplates
         if (m.KeptForNoShow) return NoShowSentence(m);
         if (ShareRefundCauses.Because(m.ClubRefund) is { } because) return ClubRefundSentence(m, because);
         if (m.Withdrew) return WithdrewSentence(m);
+        if (ActSentence(m) is { } act) return act;
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"You paid {Min(m.AmountMinutes)} to {m.OtherName} for your share of the court.";
@@ -441,6 +474,37 @@ public static partial class EmailTemplates
         return m.Direction == ShareDirection.Refunded
             ? $"The club took you off the game {m.OtherName} booked, and {Min(m.AmountMinutes)} of your share came back to your balance."
             : $"The club took {m.OtherName} off your game, and {Min(m.AmountMinutes)} of their share went back to them from your balance.";
+    }
+
+    /// <summary>
+    /// R14 X14-2 / J14-8: the organiser took the partner off, lowered their share, or the game was
+    /// cancelled — and the share followed. "Share refunded" with no cause left them guessing.
+    /// </summary>
+    private static string? ActSentence(ShareMovement m)
+    {
+        var mine = m.Direction == ShareDirection.Refunded;
+        var back = mine
+            ? $"{Min(m.AmountMinutes)} of your share came back to your balance"
+            : $"{Min(m.AmountMinutes)} of {m.OtherName}'s share went back to them from your balance";
+        var why = m.Cause switch
+        {
+            ShareActs.OrganiserRemoved => mine ? $"{m.OtherName} took you off the game" : $"You took {m.OtherName} off the game",
+            ShareActs.SplitChanged => mine ? $"{m.OtherName} lowered your share of the court" : $"You lowered {m.OtherName}'s share of the court",
+            ShareActs.BookingCancelled => CancelledWhy(m, mine),
+            _ => null,
+        };
+        return why is null ? null : $"{why}, so {back}.";
+    }
+
+    /// <summary>R14 J14-8: who cancelled, at the start of the share mail's sentence; null when unrecorded.</summary>
+    private static string? CancelledWhy(ShareMovement m, bool mine)
+    {
+        return m.CancelledBy switch
+        {
+            "club" => mine ? $"The club cancelled the game {m.OtherName} booked" : "The club cancelled your booking",
+            "member" => mine ? $"{m.OtherName} cancelled the game" : "You cancelled the booking",
+            _ => null,
+        };
     }
 
     /// <summary>R13 E13-4: the partner pulled out, and their share went back — the organiser was given no cause.</summary>

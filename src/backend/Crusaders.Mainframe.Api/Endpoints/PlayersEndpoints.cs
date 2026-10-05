@@ -71,10 +71,20 @@ public static class PlayersEndpoints
 
     // ------------------------------------------------------------------ reads
 
-    private static async Task<IResult> DetailAsync(Guid bookingId, HttpContext ctx, PlayersQuery query, CancellationToken ct)
+    private static async Task<IResult> DetailAsync(
+        Guid bookingId, HttpContext ctx, PlayersQuery query, Persistence.MainframeDbContext db, CancellationToken ct)
     {
         var view = await query.DetailAsync(bookingId, Me(ctx), ctx.User.IsInRole("admin"), ct);
-        return view is null ? Results.NotFound(new { error = "booking_not_found" }) : Results.Ok(view);
+        if (view is not null) return Results.Ok(view);
+        // R14 J14-10: a member no longer on the game — taken off, withdrew, declined, lapsed — is told
+        // their own seat, so a link without ?seat= (an invite, a receipt, an older inbox line) still
+        // reaches "You were taken off this game". Their own seat only: a stranger learns nothing more.
+        var me = Me(ctx);
+        var ownSeat = await db.BookingParticipants.AsNoTracking()
+            .Where(p => p.BookingId == bookingId && p.UserId == me && p.Seat > 1
+                        && p.Status != Domain.ParticipantStatus.Invited && p.Status != Domain.ParticipantStatus.Accepted)
+            .OrderByDescending(p => p.UpdatedAt).Select(p => (Guid?)p.Id).FirstOrDefaultAsync(ct);
+        return Results.NotFound(new { error = "booking_not_found", own_seat_id = ownSeat });
     }
 
     private static async Task<IResult> InvitesAsync(HttpContext ctx, PlayersQuery query, TenantSettingsAccessor settings, CancellationToken ct)

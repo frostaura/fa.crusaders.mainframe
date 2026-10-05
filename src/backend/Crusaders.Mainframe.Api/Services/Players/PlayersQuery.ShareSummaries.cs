@@ -58,6 +58,26 @@ public sealed partial class PlayersQuery
         return result;
     }
 
+    /// <summary>
+    /// R14 E14-7 (FE14m's ask): the court and start of every booking a wallet page's share rows
+    /// name — readable or not. <see cref="ShareSummariesAsync"/> answers null for a booking the
+    /// viewer is no longer on (no link to it), so a member taken off read "a split booking" with no
+    /// court or day; the place is what their own frame and mail already told them. Only bookings
+    /// the viewer has a share row on; tenant-scoped by the context's filters.
+    /// </summary>
+    public async Task<Dictionary<Guid, object>> SharePlacesAsync(IReadOnlyCollection<Guid> bookingIds, Guid viewer, CancellationToken ct)
+    {
+        var ids = bookingIds.Distinct().Take(ShareSummaryLimit).ToList();
+        if (ids.Count == 0) return [];
+        var mine = await _db.LedgerEntries.AsNoTracking()
+            .Where(l => l.UserId == viewer && l.Type == LedgerEntryType.ShareTransfer && l.RelatedBookingId != null && ids.Contains(l.RelatedBookingId.Value))
+            .Select(l => l.RelatedBookingId!.Value).Distinct().ToListAsync(ct);
+        var places = await _db.Bookings.AsNoTracking().Where(b => mine.Contains(b.Id))
+            .Select(b => new { b.Id, b.StartsAt, Court = _db.Courts.Where(c => c.Id == b.CourtId).Select(c => c.Name).FirstOrDefault() })
+            .ToListAsync(ct);
+        return places.ToDictionary(p => p.Id, p => (object)new { court_name = p.Court, starts_at = p.StartsAt });
+    }
+
     private static List<object> Partners(
         Booking booking, List<BookingParticipant> seats, (string Role, Guid? MySeatId) viewer,
         Dictionary<Guid, PublicMember> people, Dictionary<Guid, int> paid)

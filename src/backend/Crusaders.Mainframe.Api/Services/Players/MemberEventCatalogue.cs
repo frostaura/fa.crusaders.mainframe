@@ -24,7 +24,17 @@ public sealed record SharePayload(
     Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes,
     string? HeldUntilLocal = null, bool ByClub = false, int? BalanceAfterMinutes = null,
     bool ClubRemoved = false, string? ClubReason = null, bool AfterAttendance = false, string? ClubRefund = null,
-    int? KeptMinutes = null, bool Withdrew = false, Guid? OffGameSeatId = null);
+    int? KeptMinutes = null, bool Withdrew = false, Guid? OffGameSeatId = null)
+{
+    /// <summary>
+    /// R14 X14-2 / J14-8: why it went back when the mail words it itself — <c>organiser_removed</c>,
+    /// <c>split_changed</c> or <c>booking_cancelled</c> (<see cref="WalletShareCauses"/>). Null on older rows.
+    /// </summary>
+    public string? Cause { get; init; }
+
+    /// <summary>R14 J14-8: with <c>booking_cancelled</c>, who cancelled — "club" or "member"; null when unrecorded.</summary>
+    public string? CancelledBy { get; init; }
+}
 
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
 public sealed record ClubSeatPayload(
@@ -192,6 +202,8 @@ public static class MemberEventCatalogue
             AfterAttendance = p.AfterAttendance,
             ClubRefund = p.ClubRefund,
             KeptMinutes = p.KeptMinutes,
+            Cause = p.Cause,
+            CancelledBy = p.CancelledBy,
         });
     }
 

@@ -218,7 +218,9 @@ public static partial class AdminMemberTraceAssembly
     /// <summary>The organiser a partner's withdrawal names (C13-4's <c>organiser_user_id</c>), or null on any other row.</summary>
     private static Guid? OrganiserOf(AuditLog row)
     {
-        if (row.Action != TraceKinds.PartnerWithdrewAction) return null;
+        // R14 E14-2: a removal, a split change and a cancelled game name the organiser the same way.
+        if (row.Action is not (TraceKinds.PartnerWithdrewAction or TraceKinds.PlayerRemovedAction
+            or TraceKinds.SplitChangedAction or TraceKinds.GameCancelledAction)) return null;
         return GuidOf(DoorActivityView.Details(row.DetailsJson), "organiser_user_id");
     }
 

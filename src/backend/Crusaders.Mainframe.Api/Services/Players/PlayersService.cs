@@ -446,8 +446,9 @@ public sealed partial class PlayersService
         var now = DateTimeOffset.UtcNow;
         var game = await LoadAsync(bookingId, ct);
         if (OrganiserGate(game, organiserId, now) is { } refused) return refused;
-        // I4-5: the organiser's own removal — their "went back" receipt is born read.
-        return await RemoveSeatAsync(game!, seatId, now, ct, new ReconcileOptions(Guid.Empty) { OwnActionBy = organiserId });
+        // I4-5: the organiser's own removal — their "went back" receipt is born read. R14 E14-2: and
+        // the share going back is theirs on the ledger too, not the club's system.
+        return await RemoveSeatAsync(game!, seatId, now, ct, new ReconcileOptions(organiserId) { OwnActionBy = organiserId });
     }
 
     /// <param name="options">The admin's authority for the return, when an admin removes (review H1); null for the organiser.</param>
@@ -469,6 +470,7 @@ public sealed partial class PlayersService
             }
             MemberNotices.Stage(_db, _tenant.TenantId,
                 await PlayerNotices.CollapsedAsync(_db, removal, PlayerNotices.RemovedKeyPrefix, game.Settings, ct), game.Settings);
+            _db.AuditLogs.Add(SeatAudit(SeatFacts.RemovedAction, game.Booking, seat, RemoverOf(game, options), new { by_club = options?.ClubRemoval is not null }));
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;
@@ -562,13 +564,16 @@ public sealed partial class PlayersService
         foreach (var seat in changed)
         {
             seat.UpdatedAt = now.Storable();
+            // R14 E14-2: the partner's Night says the organiser changed it, and to what.
+            _db.AuditLogs.Add(SeatAudit(SplitChangedAction, game.Booking, seat, organiserId,
+                new { share_minutes = seat.ShareMinutes, previous_share_minutes = before[seat.Id] }));
             MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ChangedAsync(
                 _db, game.Booking, seat, game.Settings, $"split:{seat.Id:N}:{now.UtcTicks}", ct), game.Settings);
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;
-        // I4-5: the organiser's own split change — their receipts are born read.
-        await AfterAsync(game.Booking.Id, changed.Select(s => s.UserId!.Value), ct, new ReconcileOptions(Guid.Empty) { OwnActionBy = organiserId });
+        // I4-5: the organiser's own split change — their receipts are born read. R14 E14-2: their act on the ledger too.
+        await AfterAsync(game.Booking.Id, changed.Select(s => s.UserId!.Value), ct, new ReconcileOptions(organiserId) { OwnActionBy = organiserId });
         return PlayerOutcome.Ok(new
         {
             booking_id = game.Booking.Id,
@@ -585,6 +590,43 @@ public sealed partial class PlayersService
     }
 
     // ------------------------------------------------------------------ plumbing
+
+    /// <summary>The audit action a split change writes, once per partner whose share moved (R14 E14-2).</summary>
+    public const string SplitChangedAction = "players.split_changed";
+
+    /// <summary>Who took a seat off: the admin acting for the club, else the organiser (R14 E14-2).</summary>
+    private static Guid RemoverOf(Game game, ReconcileOptions? options)
+    {
+        return options is { ActorUserId: var actor } && actor != Guid.Empty ? actor : game.Booking.UserId ?? Guid.Empty;
+    }
+
+    /// <summary>
+    /// R14 E14-2: a seat change on the club's record, in the change's own save — the partner is the
+    /// subject, the person who made it the actor, and the organiser named in the details so the
+    /// Night can say whose game it was. <paramref name="more"/> is merged into the details.
+    /// </summary>
+    private AuditLog SeatAudit(string action, Booking booking, BookingParticipant seat, Guid actor, object more)
+    {
+        var details = System.Text.Json.JsonSerializer.SerializeToNode(new
+        {
+            booking_id = booking.Id,
+            participant_id = seat.Id,
+            organiser_user_id = booking.UserId,
+            starts_at = booking.StartsAt,
+        })!.AsObject();
+        foreach (var (key, value) in System.Text.Json.JsonSerializer.SerializeToNode(more)!.AsObject().ToList())
+        {
+            details[key] = value?.DeepClone();
+        }
+        return new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = actor,
+            SubjectUserId = seat.UserId,
+            Action = action,
+            DetailsJson = details.ToJsonString(),
+        };
+    }
 
     /// <summary>
     /// Saves, turning a lost race into a 409 the client retries: a concurrent change to the same

@@ -452,6 +452,9 @@ public sealed partial class PlayersQuery
             share_minutes = seat.ShareMinutes,
             to_pay_minutes = unpaid,
             needs_consent = seat.Status == ParticipantStatus.Accepted && seat.ShareMinutes > seat.ConsentedMinutes,
+            // R14 J14-9: what the seat last said yes to. 0 with needs_consent = the club accepted the seat
+            // without asking — the page says "the club has asked you for …", never "your share went up".
+            consented_minutes = seat.ConsentedMinutes,
             balance_minutes = balance,
             spendable_minutes = spendable,
             held_minutes = held.Held,

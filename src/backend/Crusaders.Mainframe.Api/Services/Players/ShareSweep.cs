@@ -166,9 +166,39 @@ public sealed class ShareSweep
             {
                 Email = seat.Status == ParticipantStatus.Accepted,
             };
+            // R14 E14-2: the partner's Night says the game was cancelled, and by whom — in the notice's own save.
+            var record = _db.AuditLogs.Add(CancelledAudit(booking, seat, by));
             if (await MemberNotices.RaiseAsync(_db, _tenant.TenantId, notice, settings, ct)) told.Add(seat.UserId.Value);
+            else record.State = EntityState.Detached;
         }
         return told;
+    }
+
+    /// <summary>The audit action a cancelled game writes on each partner still in it (R14 E14-2).</summary>
+    public const string GameCancelledAction = "players.game_cancelled";
+
+    /// <summary>
+    /// R14 E14-2: a partner's own record of a cancelled game — subject the partner, actor whoever
+    /// cancelled (the organiser, the admin; the system for a displacement), the organiser named.
+    /// </summary>
+    private AuditLog CancelledAudit(Booking booking, BookingParticipant seat, BookingCancellation? by)
+    {
+        return new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = by?.ActorUserId ?? Guid.Empty,
+            SubjectUserId = seat.UserId,
+            Action = GameCancelledAction,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = booking.Id,
+                participant_id = seat.Id,
+                organiser_user_id = booking.UserId,
+                starts_at = booking.StartsAt,
+                by_club = by?.ByClub,
+                cause = by?.Cause,
+            }),
+        };
     }
 
     /// <summary>R13 E13-6: the inbox line says who cancelled — the club, or the organiser — when it is on the record.</summary>

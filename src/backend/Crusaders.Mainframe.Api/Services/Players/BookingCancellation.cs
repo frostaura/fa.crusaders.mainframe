@@ -34,6 +34,12 @@ public sealed record BookingCancellation(string By, string? Cause, string? Reaso
         return c is null ? (null, null, null) : (c.By, c.Cause, c.Reason);
     }
 
+    /// <summary>
+    /// R14 E14-2: who cancelled it, off the record — the organiser, or the admin at the desk; null for
+    /// the club's system (a displacement, or a row written by the system). The share returns name them.
+    /// </summary>
+    public Guid? ActorUserId { get; init; }
+
     /// <summary>True when the club (a person at the desk, or its system) cancelled it.</summary>
     public bool ByClub => By == Club;
 
@@ -52,7 +58,10 @@ public sealed record BookingCancellation(string By, string? Cause, string? Reaso
         var row = await CancelledRowAsync(db, booking, ct);
         if (row is null) return null;
         var byClub = row.ActorUserId == Guid.Empty || row.ActorUserId != booking.UserId;
-        return new BookingCancellation(byClub ? Club : Member, null, byClub ? ReasonOf(row.DetailsJson) : null);
+        return new BookingCancellation(byClub ? Club : Member, null, byClub ? ReasonOf(row.DetailsJson) : null)
+        {
+            ActorUserId = row.ActorUserId == Guid.Empty ? null : row.ActorUserId,
+        };
     }
 
     /// <summary>The newest <c>booking.cancelled</c> row naming this booking, on its member's record.</summary>

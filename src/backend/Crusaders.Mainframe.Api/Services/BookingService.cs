@@ -1410,6 +1410,12 @@ public sealed class BookingService
             { CancelledBy = cancelledBy });
         }
 
+        // R14 E14-5: the club cancelled a session that had started — nothing comes back, so no ledger row
+        // moves and nothing told the member. Their inbox says so, in this same save.
+        var startedNoRefund = refundAmount == 0 && penaltyAmount == 0 && booking.CheckedInAt is not null
+                              && cancelledBy == WalletCancelledBy.Club;
+        if (startedNoRefund) await StageStartedCancelNoticeAsync(booking, settings, waiveReasonRecorded, ct);
+
         try
         {
             await _ledger.PostManyAsync(postings, ct);
@@ -1462,9 +1468,11 @@ public sealed class BookingService
             ? new Email.ClubCancellation(waiveReasonRecorded, waived)
             : null;
         var cancellationMsg = EmailTemplates.BookingCancellation(
-            await _club.GetAsync(ct), user.Email, new Email.CancelledSlot(court.Name, await StartsAtLocalAsync(booking.StartsAt, ct)),
+            await _club.GetAsync(ct), user.Email,
+            new Email.CancelledSlot(court.Name, await StartsAtLocalAsync(booking.StartsAt, ct)) { SessionStarted = booking.CheckedInAt is not null },
             refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
         SendEmailInBackground(cancellationMsg, $"cancellation for {booking.Id}");
+        if (startedNoRefund) await TellStartedCancelAsync(booking, cancelledBy, ct);
 
         await _bus.EmitAsync(new DomainEvent(
             Id: $"evt_{Guid.NewGuid():N}",
@@ -1485,6 +1493,37 @@ public sealed class BookingService
             }), ct);
 
         return new CancellationResult.Ok(refundAmount, penaltyAmount);
+    }
+
+    /// <summary>
+    /// R14 E14-5: the booker's inbox line for a session the club cancelled after it had started —
+    /// staged, so the cancellation's own save commits it. Not mailed: the cancellation mail is sent.
+    /// </summary>
+    private async Task StageStartedCancelNoticeAsync(Booking booking, TenantSettingsView settings, string? reason, CancellationToken ct)
+    {
+        var game = await GameText.ForAsync(_db, booking, settings, ct);
+        var me = booking.UserId!.Value;
+        var name = PersonNames.Of(me, await PersonNames.ForAsync(_db, [me], ct)) ?? "You";
+        MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
+            me, MemberEventCatalogue.GameCancelled, $"game-cancelled:{booking.Id:N}:{me:N}",
+            new GameCancelledPayload(booking.Id, name, game.CourtName, game.StartsLocal, ByClub: true, ClubReason: reason),
+            $"The club cancelled your session on {game.CourtName}, {game.StartsLocal} — it had started, so nothing was refunded",
+            $"/bookings/{booking.Id}", booking.Id)
+        {
+            Email = false,
+        }, settings);
+    }
+
+    /// <summary>R14 E14-5: after the commit, the booker's wallet and bell are told — no money moved, so no frame did.</summary>
+    private async Task TellStartedCancelAsync(Booking booking, string cancelledBy, CancellationToken ct)
+    {
+        var me = booking.UserId!.Value;
+        await _ledger.PublishCancelledNoRefundAsync(me, booking.Id, cancelledBy, ct);
+        using var scope = _scopes.CreateScope();
+        if (scope.ServiceProvider.GetService<Realtime.IRealtimeBus>() is { } bus)
+        {
+            await MemberNotices.PublishUnreadAsync(_db, bus, _tenant.TenantId, [me], ct);
+        }
     }
 
     /// <summary>The ledger reference under which one booking's no-show reversal is posted — one per leg, once per booking.</summary>
@@ -1583,7 +1622,11 @@ public sealed class BookingService
         // R13 E13-5 (C13-2): the reversal and the shares that follow it reach each wallet as ONE frame.
         await using var frames = WalletFrameScope.Open(_outbox.Holds, _ledger, _tenant.TenantId, booking.Id);
 
-        var legs = await SettledLegsAsync(booking, payerUserId, actorUserId, ct, await ScannerNameAsync(scan, payerUserId, ct));
+        // R14 E14-3: the reversal is the identified scanner's act — the audit row, the two legs (so the
+        // Night, the CSV and minutes.refund_reversed), as the webhook already said. The system only when
+        // nobody was identified. A displacement it causes stays the club's (below).
+        var scannerActor = ScannerOr(scan, actorUserId);
+        var legs = await SettledLegsAsync(booking, payerUserId, scannerActor, ct, await ScannerNameAsync(scan, payerUserId, ct));
         var tail = await DisplacementAsync(booking, actorUserId, now, provisionalLitEnd, ct);
         // R12 C2: the reversal's own legs name whose scan reversed it (the frame's checked_in_by_name).
         var postings = legs.Postings.Select(p => p with { CheckedInBy = scan?.UserId }).Concat(tail.Postings).ToList();
@@ -1605,7 +1648,7 @@ public sealed class BookingService
             booking.NoShowReversedAt = now;
             RestoreEnd(booking, tail);
 
-            _db.AuditLogs.Add(ReversalAudit(booking, attendedAt, payerUserId, actorUserId, legs, tail));
+            _db.AuditLogs.Add(ReversalAudit(booking, attendedAt, payerUserId, scannerActor, legs, tail));
             foreach (var other in tail.Displaced) _db.AuditLogs.Add(DisplacedAudit(booking, other, tail.Amounts[other.Id], actorUserId));
             if (scan is not null) stamped = await RecordReversalScanAsync(booking, scan, attendedAt, payerUserId, ct);
 
@@ -1638,6 +1681,12 @@ public sealed class BookingService
             DisplacedBookingIds = tail.Displaced.Select(b => b.Id).ToList(),
             ManuallyCompensated = legs.Compensation.Count > 0,
         };
+    }
+
+    /// <summary>R14 E14-3: the identified scanner, else the caller's actor (the system).</summary>
+    private static Guid ScannerOr(ReversalScan? scan, Guid actorUserId)
+    {
+        return scan?.UserId ?? actorUserId;
     }
 
     /// <summary>
@@ -1723,10 +1772,12 @@ public sealed class BookingService
         // What the sweep actually posted. The sweep is the only producer that posts these
         // two types as the system actor, and a reversal already on the ledger nets to zero
         // here — so this is "what is still outstanding", read off the record.
+        // R14 E14-3: a reversal's own legs carry the scanner as actor, so they are matched by reference.
+        var reversalPrefix = NoShowReversalReference(booking.Id, "");
         var settled = await _db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId == booking.Id
                         && l.UserId == payerUserId
-                        && l.ActorUserId == Guid.Empty
+                        && (l.ActorUserId == Guid.Empty || (l.ExternalReference != null && l.ExternalReference.StartsWith(reversalPrefix)))
                         && (l.Type == LedgerEntryType.CancellationRefund || l.Type == LedgerEntryType.NoShowPenalty))
             .ToListAsync(ct);
         var refunded = settled.Where(l => l.Type == LedgerEntryType.CancellationRefund).Sum(l => l.AmountMinutes);

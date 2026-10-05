@@ -149,7 +149,8 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
         await DeliverAsync(f, club);
 
         var sam = To(mail, club, "sam.partner");
-        Assert.Single(sam, m => m.Subject.StartsWith("Share refunded", StringComparison.Ordinal));
+        // R14 X14-2: the organiser's removal is said as theirs, by name (was the cause-less "Share refunded").
+        Assert.Single(sam, m => m.Subject.StartsWith("Olive Organiser took you off the game", StringComparison.Ordinal));
         Assert.DoesNotContain(sam, m => m.Subject.Contains("The club", StringComparison.Ordinal));
     }
 }

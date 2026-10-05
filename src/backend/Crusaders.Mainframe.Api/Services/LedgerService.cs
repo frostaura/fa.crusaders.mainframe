@@ -268,11 +268,39 @@ public sealed class LedgerService
             cancelled_by = frame.CancelledBy,
             // R12 C2: on a reversal by a late check-in (and its share), the scanner when not this member.
             checked_in_by_name = string.IsNullOrWhiteSpace(checkedInBy) ? null : checkedInBy.Trim(),
+            // R14 E14-2: on a share frame, the player whose act moved it when it was not this member; null otherwise.
+            actor_name = await ShareActorNameAsync(frame.Share, userId, token),
         })));
 
         // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
         if (retry is not null) await retry.AfterMinutesArriveAsync(tenantId, slug, [userId], token);
     }
+
+    /// <summary>
+    /// R14 E14-2: the name of the player (organiser or partner) whose act moved a share, for a member
+    /// other than them; null for the member's own act, the system's, and an admin's ("the club").
+    /// </summary>
+    private async Task<string?> ShareActorNameAsync(ShareWhy? share, Guid userId, CancellationToken ct)
+    {
+        if (share is not { ActorIsPlayer: true, ActorUserId: { } actor } || actor == userId || actor == Guid.Empty) return null;
+        var name = await _db.Memberships.AsNoTracking().Where(m => m.UserId == actor).Select(m => m.FullName).FirstOrDefaultAsync(ct);
+        return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+    }
+
+    /// <summary>
+    /// R14 E14-5: a booking the club cancelled after its session had started — nothing was refunded,
+    /// so no ledger row moved and no frame went out. The member's wallet is told all the same: a
+    /// balance-neutral frame (<see cref="CancelledNoRefundReason"/>, delta 0, no parts) naming the
+    /// booking and who cancelled, so the phone can say what happened.
+    /// </summary>
+    public Task PublishCancelledNoRefundAsync(Guid userId, Guid bookingId, string cancelledBy, CancellationToken ct)
+    {
+        var frame = new WalletFrame(0, CancelledNoRefundReason, [], null, false) { BookingId = bookingId, CancelledBy = cancelledBy };
+        return PublishFrameAsync(userId, frame, ct);
+    }
+
+    /// <summary>The frame reason of <see cref="PublishCancelledNoRefundAsync"/>.</summary>
+    public const string CancelledNoRefundReason = "cancelled_no_refund";
 
     /// <summary>R13 J13-4 (C13-7): the court and start of the booking a frame is about; null when it names none.</summary>
     private async Task<(string? Court, DateTimeOffset StartsAt)?> GameOfAsync(Guid? bookingId, CancellationToken ct)
@@ -576,7 +604,21 @@ public sealed record LedgerPosting(
 /// Why a share moved (one of <see cref="WalletShareCauses"/>), and on a no-show return the minutes kept as the partner's part of the penalty.
 /// R12 C2: on a share taken again after a late check-in, the member whose scan it was.
 /// </summary>
-public sealed record ShareWhy(string Cause, int? KeptMinutes = null, Guid? CheckedInBy = null);
+public sealed record ShareWhy(string Cause, int? KeptMinutes = null, Guid? CheckedInBy = null)
+{
+    /// <summary>
+    /// R14 E14-2: the person whose act moved the share — the organiser who took a partner off or
+    /// changed the split, who cancelled, the partner who withdrew, the admin, the scanner. Null when
+    /// the club's system did it. The pair's ledger rows carry it as their actor.
+    /// </summary>
+    public Guid? ActorUserId { get; init; }
+
+    /// <summary>
+    /// R14 E14-2: <see cref="ActorUserId"/> is a player on the game (its organiser or a partner),
+    /// so a member may be told their name — the frame's <c>actor_name</c>. An admin is "the club".
+    /// </summary>
+    public bool ActorIsPlayer { get; init; }
+}
 
 /// <summary>
 /// The closed set the live wallet frame's <c>share_cause</c> carries (review round 11, E11-1). The
@@ -593,11 +635,17 @@ public static class WalletShareCauses
     /// <summary>Taken again: a late check-in reversed the club's refund — the session was attended.</summary>
     public const string Attended = "attended";
 
-    /// <summary>The organiser's own act sent it back (a removal, a split change, a partner who left).</summary>
+    /// <summary>The partner withdrew from the game, so their share went back (narrowed in R14: nothing else).</summary>
     public const string ShareReturned = "share_returned";
 
+    /// <summary>R14 X14-2: the organiser took the partner off the game, so their paid share went back.</summary>
+    public const string OrganiserRemoved = Email.ShareActs.OrganiserRemoved;
+
+    /// <summary>R14 X14-2: the organiser lowered the partner's share while they are still on the game; the difference went back.</summary>
+    public const string SplitChanged = Email.ShareActs.SplitChanged;
+
     /// <summary>The booking was cancelled, so the share went back.</summary>
-    public const string BookingCancelled = "booking_cancelled";
+    public const string BookingCancelled = Email.ShareActs.BookingCancelled;
 
     /// <summary>The club took the partner off the game.</summary>
     public const string ClubRemoved = "club_removed";

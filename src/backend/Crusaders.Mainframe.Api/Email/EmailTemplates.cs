@@ -54,6 +54,9 @@ public sealed record CancelledSlot(string CourtName, string? WhenLocal = null)
 
     /// <summary>The court, then the time when there is one: <c>Court 1 · Thu 1 Oct, 10:15</c>.</summary>
     public string Label => WhenLocal is { Length: > 0 } when ? $"{CourtName} · {when}" : CourtName;
+
+    /// <summary>R14 E14-5: somebody had checked in, so the session had started and a cancellation refunds nothing.</summary>
+    public bool SessionStarted { get; init; }
 }
 
 /// <summary>
@@ -575,9 +578,12 @@ public static partial class EmailTemplates
         ClubIdentity club, string to, CancelledSlot slot, int refundedMinutes, int? penaltyMinutes,
         ClubCancellation? byClub = null)
     {
+        // R14 E14-5: a session that had started refunds nothing, and no wallet line moves — say that,
+        // never "each of these is its own line in your wallet" over a zero.
+        var nothingBack = slot.SessionStarted && refundedMinutes == 0 && penaltyMinutes is not > 0;
         var rows = new List<FactRow> { new("Court", slot.CourtName) };
         if (slot.WhenLocal is { Length: > 0 } when) rows.Add(new FactRow("When", when));
-        rows.Add(new FactRow("Refunded to your balance", Min(refundedMinutes)));
+        rows.Add(new FactRow("Refunded to your balance", nothingBack ? "Nothing — the session had started" : Min(refundedMinutes)));
         if (penaltyMinutes is > 0) rows.Add(new FactRow("Late-cancellation penalty", Min(penaltyMinutes.Value)));
 
         var blocks = new List<EmailBlock>
@@ -589,18 +595,27 @@ public static partial class EmailTemplates
         if (byClub?.Reason?.Trim() is { Length: > 0 } reason) blocks.Add(new Callout(CalloutTone.Info, $"Reason given by the club: {reason}"));
         blocks.Add(new Facts(rows));
         if (byClub is { PenaltyWaived: true }) blocks.Add(new Callout(CalloutTone.Success, "The late-cancellation penalty was waived, so nothing was deducted for it."));
-        blocks.Add(new Footnote("Each of these is its own line in your wallet. The refund and any penalty are separate movements, not one figure."));
+        blocks.Add(new Footnote(nothingBack
+            ? "Somebody had already checked in, so the session counts as started and nothing was refunded. Your wallet has no new line for this cancellation."
+            : "Each of these is its own line in your wallet. The refund and any penalty are separate movements, not one figure."));
 
         return EmailChrome.Compose(club, to, new EmailContent(
             Subject: byClub is null ? $"Booking cancelled — {slot.Label}" : $"The club cancelled your booking — {slot.Label}",
             // Both legs when there is a penalty (review round 6, J6-6): the preview alone said
             // "15 minutes back" to a member 11 better off. Still the two ledger figures, never a net.
-            Preheader: penaltyMinutes is > 0
-                ? $"Refunded {Min(refundedMinutes)}, less a late-cancellation penalty of {Min(penaltyMinutes.Value)}."
-                : $"{Min(refundedMinutes)} back on your balance.",
+            Preheader: CancellationPreheader(refundedMinutes, penaltyMinutes, nothingBack),
             Heading: byClub is null ? "Cancelled" : "Cancelled by the club",
             Blocks: blocks,
             WhyThis: WhyBooking));
+    }
+
+    /// <summary>The cancellation mail's preview line: both ledger figures, never a net — or, on a started session, that nothing came back.</summary>
+    private static string CancellationPreheader(int refundedMinutes, int? penaltyMinutes, bool nothingBack)
+    {
+        if (nothingBack) return "The session had started, so nothing was refunded.";
+        return penaltyMinutes is > 0
+            ? $"Refunded {Min(refundedMinutes)}, less a late-cancellation penalty of {Min(penaltyMinutes.Value)}."
+            : $"{Min(refundedMinutes)} back on your balance.";
     }
 
     /// <summary>
@@ -733,7 +748,7 @@ public static partial class EmailTemplates
             Heading: ReversedHeading(checkedInBy, "You were checked in after all"),
             Blocks:
             [
-                new Paragraph($"Your booking on {courtName} was refunded in full because the court's box was offline and could not tell the club anybody had arrived. Its check-in has since come through{ScannerClause(checkedInBy)}, so the booking stands as played and the refund has been taken back."),
+                new Paragraph($"Your booking on {courtName} was refunded in full because the court's box was offline and could not tell the club anybody had arrived. Its check-in has since come through{OutageScanner(checkedInBy)}, so the booking stands as played and the refund has been taken back."),
                 new Facts(
                 [
                     new FactRow("Refund taken back", Min(refunded)),
@@ -746,6 +761,12 @@ public static partial class EmailTemplates
     private static string ReversedHeading(string? checkedInBy, string own)
     {
         return string.IsNullOrWhiteSpace(checkedInBy) ? own : $"{checkedInBy.Trim()} checked in after all";
+    }
+
+    /// <summary>R14 E14-7: " (Dan Splitter checked in)" — one "so" in the sentence, not two; empty when it was the recipient.</summary>
+    private static string OutageScanner(string? checkedInBy)
+    {
+        return string.IsNullOrWhiteSpace(checkedInBy) ? "" : $" ({checkedInBy.Trim()} checked in)";
     }
 
     /// <summary>R12 E12-2: ": Dan Splitter checked in, so the session counts as attended" — empty when it was the recipient.</summary>

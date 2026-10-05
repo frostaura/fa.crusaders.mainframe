@@ -347,7 +347,8 @@ public sealed class ShareLedger
         var seq = await NextSeqAsync(seatId, partner, ct);
         var move = new ShareMove(seatId, partner, PayerOf(now.Booking), now.Delta, seq);
         var why = await StageReceiptsAsync(now.Booking, move, options, ct, RemovalReceipt(options, move));
-        await _ledger.PostManyAsync(Pair(now.Booking, move, options.ActorUserId, why), ct);
+        // R14 E14-2: the person whose act moved it is the rows' actor, as on the refund beside them.
+        await _ledger.PostManyAsync(Pair(now.Booking, move, why.ActorUserId ?? options.ActorUserId, why), ct);
         await payerLock.CommitAsync(ct);
         return move;
     }
@@ -561,42 +562,115 @@ public sealed class ShareLedger
         var heldUntil = organiserSide == ShareDirection.Received
             ? GameText.Local(PlayerSettings.ShareDeadline(booking, settings), settings)
             : null;
+        var f = await ReceiptFactsAsync(booking, move, club, ct);
+        (club, var seat, var refund, var kept, var cause, var cancel) = (f.Club, f.Seat, f.Refund, f.Kept, f.Cause, f.Cancel);
         var byClub = club?.Collected == true;
         var removed = club is { Collected: false };
-        var reason = club?.Reason?.Trim() is { Length: > 0 } r ? r : null;
-        // R9 E9-2: a share collected after the booking's refund was reversed on a late check-in is
-        // taken AGAIN because the session was attended — both receipts say so.
-        var attended = club is null && move.Delta > 0 && booking.NoShowReversedAt is not null;
-        var refund = RefundCauseOf(booking, move, club);
-        // R11 E11-2: a no-show return is the share LESS the partner's part of the penalty — say that part.
-        var kept = refund == ShareRefundCauses.NoShow ? await KeptOfNoShowAsync(move, amount, ct) : null;
-        var (withdrew, offGame) = await SeatFactsAsync(move, club, refund, ct);
-        var why = new HeadlineWhy(byClub, attended, refund, kept) { Withdrew = withdrew };
+        var reason = ClubReasonOf(club);
+        var attended = f.Attended;
+        var actor = ActorOf(new ActorFacts(who, booking, move, cause, f.Scanner, cancel, seat.Removal));
+        var why = new HeadlineWhy(byClub, attended, refund, kept)
+        {
+            Withdrew = seat.Withdrew,
+            Cause = cause,
+            Game = game,
+            CancelledByClub = cancel?.ByClub,
+        };
+        var told = new ShareTold(PayloadCause(cause), cancel?.By);
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
                 ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason,
-                AfterAttendance: attended, ClubRefund: refund, KeptMinutes: kept, Withdrew: withdrew, OffGameSeatId: offGame),
+                AfterAttendance: attended, ClubRefund: refund, KeptMinutes: kept, Withdrew: seat.Withdrew, OffGameSeatId: seat.OffGame)
+        {
+            Cause = told.Cause,
+            CancelledBy = told.CancelledBy,
+        },
             move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, why), settings,
             Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended,
-                ClubRefund: refund, KeptMinutes: kept, Withdrew: withdrew),
+                ClubRefund: refund, KeptMinutes: kept, Withdrew: seat.Withdrew)
+        {
+            Cause = told.Cause,
+            CancelledBy = told.CancelledBy,
+        },
             move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, why), settings,
             Own(move.OrganiserUserId));
-        return new ShareWhy(CauseOf(booking, move, club, attended, refund), kept, attended ? await ScannerOfAsync(booking, ct) : null);
+        return new ShareWhy(cause, kept, f.Scanner)
+        {
+            ActorUserId = actor,
+            ActorIsPlayer = IsPlayer(actor, booking, move),
+        };
     }
 
-    /// <summary>
-    /// R13 E13-4 / J13-3: whether this return goes to a partner who withdrew (neither the club's hand,
-    /// <paramref name="club"/>, nor a club refund, <paramref name="refund"/>), and the partner's seat when
-    /// they are no longer on the game — their links name it, because the booking page 404s for them.
-    /// </summary>
-    private async Task<(bool Withdrew, Guid? OffGameSeat)> SeatFactsAsync(ShareMove move, ClubReceipt? club, string? refund, CancellationToken ct)
+    /// <summary>R14 E14-2: <paramref name="actor"/> is on the game — its organiser or this pair's partner — so members may be told their name.</summary>
+    private static bool IsPlayer(Guid? actor, Booking booking, ShareMove move)
     {
-        var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == move.ParticipantId, ct);
-        if (seat is null || seat.IsLive) return (false, null);
-        var plainReturn = club is null && refund is null && move.Delta < 0;
-        return (plainReturn && seat.Status == ParticipantStatus.Withdrawn, seat.Id);
+        return actor is { } a && (a == move.PartnerUserId || a == move.OrganiserUserId || a == booking.UserId);
+    }
+
+    /// <summary>The admin's recorded reason for a club collect or removal, trimmed; null when there is none (B-8).</summary>
+    private static string? ClubReasonOf(ClubReceipt? club)
+    {
+        return club?.Reason?.Trim() is { Length: > 0 } r ? r : null;
+    }
+
+    /// <summary>Everything a receipt is worded from, read once (see <see cref="ReceiptFactsAsync"/>).</summary>
+    private sealed record ReceiptFacts(
+        ClubReceipt? Club, SeatFacts Seat, string? Refund, int? Kept, bool Attended, string Cause, BookingCancellation? Cancel, Guid? Scanner);
+
+    /// <summary>
+    /// Why this share moved, read off the booking, the seat and the record: a club refund's cause
+    /// (E10-7), the seat's fate, the club's hand (a removal's record counts — R14 X14-2: a removal's
+    /// return that waited for cover is still the club's), a re-collection after a late check-in (R9
+    /// E9-2) and its scanner, a no-show's kept part (R11 E11-2), and who cancelled (R14 J14-8).
+    /// </summary>
+    private async Task<ReceiptFacts> ReceiptFactsAsync(Booking booking, ShareMove move, ClubReceipt? club, CancellationToken ct)
+    {
+        var refund = RefundCauseOf(booking, move, club);
+        var seat = await SeatFacts.ReadAsync(_db, move, club, refund, ct);
+        if (club is null && seat.Removal is { ByClub: true }) club = new ClubReceipt(false, null, null);
+        var attended = club is null && move.Delta > 0 && booking.NoShowReversedAt is not null;
+        var kept = refund == ShareRefundCauses.NoShow ? await KeptOfNoShowAsync(move, Math.Abs(move.Delta), ct) : null;
+        var cause = CauseOf(booking, move, club, attended, refund, seat);
+        var cancel = cause == WalletShareCauses.BookingCancelled ? await BookingCancellation.ForAsync(_db, booking, ct) : null;
+        var scanner = attended ? await ScannerOfAsync(booking, ct) : null;
+        return new ReceiptFacts(club, seat, refund, kept, attended, cause, cancel, scanner);
+    }
+
+    /// <summary>R14 J14-8 / X14-2: what both receipts' mails say of why — the cause they word themselves, and who cancelled.</summary>
+    private sealed record ShareTold(string? Cause, string? CancelledBy);
+
+    /// <summary>The causes a receipt's mail words for itself (R14 J14-8 / X14-2); null for the rest, which carry their own flags.</summary>
+    private static string? PayloadCause(string cause)
+    {
+        return cause is WalletShareCauses.OrganiserRemoved or WalletShareCauses.SplitChanged or WalletShareCauses.BookingCancelled ? cause : null;
+    }
+
+    /// <summary>What <see cref="ActorOf"/> decides from.</summary>
+    private sealed record ActorFacts(
+        ReconcileOptions Who, Booking Booking, ShareMove Move, string Cause, Guid? Scanner, BookingCancellation? Cancel, SeatRemoval? Removal);
+
+    /// <summary>
+    /// R14 E14-2 / E14-3: the person whose act moved this share — the caller's named actor, else read
+    /// off the facts: the scanner whose late check-in made it attended, whoever cancelled (the
+    /// record's actor), the partner who withdrew, the organiser who took them off or changed the
+    /// split. Null when the club's system did it. A return that waited for cover and posts on a
+    /// sweep is still the act that caused it, so the Night and the CSV say who.
+    /// </summary>
+    private static Guid? ActorOf(ActorFacts f)
+    {
+        if (f.Who.ActorUserId != Guid.Empty) return f.Who.ActorUserId;
+        return f.Cause switch
+        {
+            WalletShareCauses.Attended => f.Scanner,
+            WalletShareCauses.BookingCancelled => f.Cancel?.ActorUserId,
+            WalletShareCauses.ShareReturned => f.Move.PartnerUserId,
+            WalletShareCauses.OrganiserRemoved => f.Removal?.ActorUserId ?? f.Booking.UserId,
+            WalletShareCauses.ClubRemoved => f.Removal?.ActorUserId,
+            WalletShareCauses.SplitChanged => f.Booking.UserId,
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -631,7 +705,7 @@ public sealed class ShareLedger
     /// R11 E11-1: the frame's <c>share_cause</c> — one of <see cref="WalletShareCauses"/>, decided from
     /// the same facts the receipts are worded from, so the toast and the inbox say the same thing.
     /// </summary>
-    internal static string CauseOf(Booking booking, ShareMove move, ClubReceipt? club, bool attended, string? refund)
+    internal static string CauseOf(Booking booking, ShareMove move, ClubReceipt? club, bool attended, string? refund, SeatFacts? seat = null)
     {
         if (move.Delta > 0)
         {
@@ -644,7 +718,21 @@ public sealed class ShareLedger
             ShareRefundCauses.Outage => WalletShareCauses.OutageRefund,
             ShareRefundCauses.NoShow => WalletShareCauses.NoShow,
             ShareRefundCauses.Displaced => WalletShareCauses.Displaced,
-            _ => booking.Status == BookingStatus.Cancelled ? WalletShareCauses.BookingCancelled : WalletShareCauses.ShareReturned,
+            _ => booking.Status == BookingStatus.Cancelled ? WalletShareCauses.BookingCancelled : PlainReturnCause(seat),
+        };
+    }
+
+    /// <summary>
+    /// R14 X14-2: a plain return on a game still on, by what became of the seat — the partner withdrew,
+    /// the organiser took them off, or they are still on it and their share was lowered.
+    /// </summary>
+    private static string PlainReturnCause(SeatFacts? seat)
+    {
+        return seat?.Status switch
+        {
+            ParticipantStatus.Removed => WalletShareCauses.OrganiserRemoved,
+            ParticipantStatus.Invited or ParticipantStatus.Accepted => WalletShareCauses.SplitChanged,
+            _ => WalletShareCauses.ShareReturned,
         };
     }
 
@@ -682,7 +770,41 @@ public sealed class ShareLedger
     /// <summary>The receipt's headline: a club refund's words when there is one (E10-7), else <see cref="ShareHeadline"/>.</summary>
     private static string HeadlineFor(ShareDirection d, string other, int amount, HeadlineWhy why) =>
         NoShowHeadline(d, other, amount, why) ?? RefundHeadline(d, other, amount, why.Refund) ?? WithdrewHeadline(d, other, amount, why)
-        ?? ShareHeadline(d, other, amount, why.ByClub, why.Attended);
+        ?? OrganiserActHeadline(d, other, amount, why) ?? ShareHeadline(d, other, amount, why.ByClub, why.Attended);
+
+    /// <summary>
+    /// R14 X14-2 / J14-8: a return the organiser's act or a cancellation caused, said as that, with the
+    /// court and the day: "16 minutes of your share came back — Olive took you off Court 1, Tue 08 Oct
+    /// 18:00". On the partner's side <paramref name="other"/> is the organiser; on theirs, the partner.
+    /// </summary>
+    private static string? OrganiserActHeadline(ShareDirection d, string other, int amount, HeadlineWhy why)
+    {
+        if (why.Game is not { } game || d is not (ShareDirection.Refunded or ShareDirection.Returned)) return null;
+        var mine = d == ShareDirection.Refunded;
+        if (ActClause(why, mine, other, $"{game.CourtName}, {game.StartsLocal}") is not { } clause) return null;
+        var minutes = MoneyFormat.Minutes(amount);
+        return mine ? $"{minutes} of your share came back — {clause}" : $"{minutes} went back to {other} — {clause}";
+    }
+
+    /// <summary>The clause after the dash in <see cref="OrganiserActHeadline"/>, or null for any other cause.</summary>
+    private static string? ActClause(HeadlineWhy why, bool mine, string other, string where)
+    {
+        return why.Cause switch
+        {
+            WalletShareCauses.OrganiserRemoved => mine ? $"{other} took you off {where}" : $"you took them off {where}",
+            WalletShareCauses.SplitChanged => mine ? $"{other} lowered your share of {where}" : $"you lowered their share of {where}",
+            WalletShareCauses.BookingCancelled => CancelClause(why.CancelledByClub, mine, other, where),
+            _ => null,
+        };
+    }
+
+    /// <summary>R14 J14-8: who cancelled, as the receipt says it.</summary>
+    private static string CancelClause(bool? byClub, bool mine, string other, string where)
+    {
+        if (byClub is null) return $"the booking on {where} was cancelled";
+        if (byClub.Value) return $"the club cancelled {where}";
+        return mine ? $"{other} cancelled {where}" : $"you cancelled {where}";
+    }
 
     /// <summary>R13 E13-4: "7 minutes went back to Paula — they withdrew from the game", or the partner's own.</summary>
     private static string? WithdrewHeadline(ShareDirection d, string other, int amount, HeadlineWhy why)
@@ -699,6 +821,15 @@ public sealed class ShareLedger
     {
         /// <summary>R13 E13-4: the partner withdrew, so their share went back.</summary>
         public bool Withdrew { get; init; }
+
+        /// <summary>R14: the frame's cause (<see cref="WalletShareCauses"/>).</summary>
+        public string? Cause { get; init; }
+
+        /// <summary>R14: the game's court and start, which the organiser-act headlines name.</summary>
+        public GameText? Game { get; init; }
+
+        /// <summary>R14 J14-8: on a cancellation's return, whether the club cancelled; null when the record does not say.</summary>
+        public bool? CancelledByClub { get; init; }
     }
 
     /// <summary>

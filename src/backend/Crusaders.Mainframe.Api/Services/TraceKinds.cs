@@ -262,6 +262,24 @@ public static class TraceKinds
     /// <summary>The audit action a partner's withdrawal writes (C13-4, <c>PlayersService.WithdrewAction</c>).</summary>
     public const string PartnerWithdrewAction = "players.withdrew";
 
+    /// <summary>
+    /// Somebody took them off a game — the organiser, or the club (R14 E14-2). <b>Added beyond D2
+    /// §6.2</b>: the removal wrote nothing, and its share return read as the club's automatic check.
+    /// </summary>
+    public const string BookingTakenOff = "booking.taken_off";
+
+    /// <summary>They took a player off a game (R14 E14-2) — the remover's side of the same row.</summary>
+    public const string BookingTookPlayerOff = "booking.took_player_off";
+
+    /// <summary>The organiser changed how their game is split, and their share moved (R14 E14-2).</summary>
+    public const string BookingSplitChanged = "booking.split_changed";
+
+    /// <summary>They changed how their game is split (R14 E14-2) — the organiser's side.</summary>
+    public const string BookingChangedSplit = "booking.changed_split";
+
+    /// <summary>A game they were a partner in was cancelled — by the organiser or the club (R14 E14-2).</summary>
+    public const string BookingGameCancelled = "booking.game_cancelled";
+
     /// <summary>They bought light time at the court rather than reserving it.</summary>
     public const string WalkUpBought = "walkup.bought";
 
@@ -359,6 +377,7 @@ public static class TraceKinds
         BookingMade, BookingMadeForThem, BookingCancelled, BookingCancelledByClub, BookingNoShow,
         BookingNoShowReversed, BookingBlockedOver, BookingDisplaced, BookingDisplacementReversed,
         BookingPaidForSomebody, BookingPaidForThem, BookingWithdrew, BookingPartnerWithdrew,
+        BookingTakenOff, BookingTookPlayerOff, BookingSplitChanged, BookingChangedSplit, BookingGameCancelled,
         WalkUpBought, WalkUpRefunded,
         CourtCheckedIn, CourtRefused,
         LightsOn, LightsOff,
@@ -455,10 +474,23 @@ public static class TraceKinds
             "booking.blocked" => BookingBlockedOver,
             Endpoints.DevicePayForEndpoint.PaidAction => actorIsSubject ? BookingPaidForSomebody : BookingPaidForThem,
             PartnerWithdrewAction => actorIsSubject ? BookingWithdrew : BookingPartnerWithdrew,
+            PlayerRemovedAction => actorIsSubject ? BookingTookPlayerOff : BookingTakenOff,
+            SplitChangedAction => actorIsSubject ? BookingChangedSplit : BookingSplitChanged,
+            // The canceller's own night has their booking.cancelled row already; one per partner would repeat it.
+            GameCancelledAction => actorIsSubject ? null : BookingGameCancelled,
 
             _ => OfAccountAction(action),
         };
     }
+
+    /// <summary>The audit action a seat's removal writes (R14, <c>SeatFacts.RemovedAction</c>).</summary>
+    public const string PlayerRemovedAction = "players.removed";
+
+    /// <summary>The audit action a split change writes per partner (R14, <c>PlayersService.SplitChangedAction</c>).</summary>
+    public const string SplitChangedAction = "players.split_changed";
+
+    /// <summary>The audit action a cancelled game writes per partner (R14, <c>ShareSweep.GameCancelledAction</c>).</summary>
+    public const string GameCancelledAction = "players.game_cancelled";
 
     /// <summary>
     /// The account's own story — applying, the club's decisions, admin rights, the code, passkeys
@@ -620,9 +652,7 @@ public static class TraceKinds
             BookingNoShow => facts.CourtWasDark
                 ? $"The club refunded {court} in full — its box was offline"
                 : "The club's automatic check marked this as a no-show",
-            BookingNoShowReversed => facts.CourtWasDark
-                ? "The club took back an outage refund — the check-in arrived late"
-                : "The club took a no-show back",
+            BookingNoShowReversed => NoShowReversed(facts),
             BookingBlockedOver => $"The club blocked out {court}",
             BookingDisplaced => Displaced(court, facts),
             BookingDisplacementReversed => $"The club put this booking on {court} back",
@@ -632,6 +662,11 @@ public static class TraceKinds
                 ? $"Withdrew from a game on {court}"
                 : $"Withdrew from {facts.OrganiserName.Trim()}'s game on {court}",
             BookingPartnerWithdrew => $"{ActorOr(facts, "A partner")} withdrew from their game on {court}",
+            BookingTakenOff => $"{ActorOr(facts, "Somebody")} took them off {Whose(facts)}{court}",
+            BookingTookPlayerOff => $"Took {Subject(facts)} off {Whose(facts)}{court}",
+            BookingSplitChanged => $"{ActorOr(facts, "The organiser")} changed how {court} is split{ShareNow(facts, "their")}",
+            BookingChangedSplit => $"Changed how {court} is split{ShareNow(facts, $"{Subject(facts)}'s")}",
+            BookingGameCancelled => GameCancelled(court, facts),
 
             WalkUpBought => $"Bought light time at {court}",
             WalkUpRefunded => $"Light time at {court} was given back",
@@ -862,10 +897,53 @@ public static class TraceKinds
     private static string BookedForThem(string court, TraceFacts facts)
         => $"{Who(facts)} booked {court} for them";
 
+    /// <summary>R14 E14-7: "Erin Chainadmin cancelled their booking on Court 3" — not "cancelled Court 3 for them".</summary>
     private static string CancelledByClub(string court, TraceFacts facts)
         => BySystem(facts)
-            ? $"The club's automatic check cancelled {court}"
-            : $"{Who(facts)} cancelled {court} for them";
+            ? $"The club's automatic check cancelled their booking on {court}"
+            : $"{Who(facts)} cancelled their booking on {court}";
+
+    /// <summary>
+    /// R14 E14-3: whose late check-in reversed it — "Sam Partner's check-in reached the club late —
+    /// no-show reversed". A row with no person on it (before R14, the system) keeps the club's words.
+    /// </summary>
+    private static string NoShowReversed(TraceFacts facts)
+    {
+        if (BySystem(facts) || string.IsNullOrWhiteSpace(facts.ActorName))
+        {
+            return facts.CourtWasDark
+                ? "The club took back an outage refund — the check-in arrived late"
+                : "The club took a no-show back";
+        }
+        var what = facts.CourtWasDark ? "outage refund reversed" : "no-show reversed";
+        return $"{facts.ActorName.Trim()}'s check-in reached the club late — {what}";
+    }
+
+    /// <summary>"Olive Organiser's " before the court when the game was somebody else's and the record names them; empty otherwise.</summary>
+    private static string Whose(TraceFacts facts)
+    {
+        var organiser = facts.OrganiserName?.Trim();
+        if (string.IsNullOrEmpty(organiser) || organiser == facts.ActorName?.Trim()) return "";
+        return $"{organiser}'s game on ";
+    }
+
+    /// <summary>" — their share is now 8 minutes", when the record carries the new share; empty otherwise.</summary>
+    private static string ShareNow(TraceFacts facts, string whose)
+    {
+        return facts.AmountMinutes is null ? "" : $" — {whose} share is now {Amount(facts)}";
+    }
+
+    /// <summary>
+    /// R14 E14-2: a partner's game cancelled — by its organiser ("Olive Organiser cancelled their game
+    /// on Court 1"), by somebody at the desk, or by the club's system.
+    /// </summary>
+    private static string GameCancelled(string court, TraceFacts facts)
+    {
+        var organiser = string.IsNullOrWhiteSpace(facts.OrganiserName) ? "the organiser" : facts.OrganiserName.Trim();
+        if (BySystem(facts) || string.IsNullOrWhiteSpace(facts.ActorName)) return $"The club cancelled {organiser}'s game on {court}";
+        if (facts.ActorName.Trim() == organiser) return $"{organiser} cancelled their game on {court}";
+        return $"{facts.ActorName.Trim()} cancelled {organiser}'s game on {court} for the club";
+    }
 
     /// <summary>
     /// Money back — or, on a NEGATIVE refund row, a refund taken back: the late-evidence reversal

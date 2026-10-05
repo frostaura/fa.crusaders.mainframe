@@ -457,6 +457,8 @@ public static partial class AdminMemberTraceAssembly
                     RefusedOffline = Text(details, "outcome") == DoorTrail.RefusedOffline,
                     OrganiserName = PersonNames.Of(OrganiserOf(row), s.Names),
                     CausedByName = CauseOf(row.Action, details, s),
+                    // R14 E14-2: a split change says what the partner's share became.
+                    AmountMinutes = row.Action == TraceKinds.SplitChangedAction ? IntOf(details, "share_minutes") : null,
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -684,6 +686,14 @@ public static partial class AdminMemberTraceAssembly
             JsonValueKind.Number => value.ToString(),
             _ => null,
         };
+    }
+
+    /// <summary>R14 E14-2: one whole-number field out of a details document; null when absent or not a number.</summary>
+    private static int? IntOf(JsonElement? details, string key)
+    {
+        return int.TryParse(Text(details, key), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n)
+            ? n
+            : null;
     }
 
     // ------------------------------------------------------------------ the summary
