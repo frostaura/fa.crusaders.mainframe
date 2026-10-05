@@ -98,7 +98,10 @@ public static class PlayerNotices
             seat.UserId!.Value, MemberEventCatalogue.Reminder, dedupeKey,
             new ReminderPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareMinutes, deadline,
                 fromOrganiser, InvitePath(seat.Id), seat.Id),
-            fromOrganiser ? $"{organiser} is waiting for your answer" : $"Your invite is still open — {game.CourtName}",
+            // R15 J15-5: every line names the court and the day.
+            fromOrganiser
+                ? $"{organiser} is waiting for your answer — {game.CourtName}, {game.StartsLocal}"
+                : $"Your invite is still open — {game.CourtName}, {game.StartsLocal}",
             InvitePath(seat.Id), booking.Id);
     }
 
@@ -110,16 +113,25 @@ public static class PlayerNotices
         var game = await GameText.ForAsync(db, booking, settings, ct);
         var organiser = await NameAsync(db, booking.UserId, "The organiser", ct);
         var removed = seat.Status == ParticipantStatus.Removed;
-        var needsConsent = !removed && seat.Status == ParticipantStatus.Accepted && seat.ShareMinutes > seat.ConsentedMinutes;
+        var needsConsent = !removed && NeedsConsent(seat);
+        var where = $"{game.CourtName}, {game.StartsLocal}";
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.GameChanged, dedupeKey,
             new GameChangedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, removed,
-                removed ? null : seat.ShareMinutes, needsConsent, seat.Id),
-            removed ? $"You were taken off {game.CourtName}, {game.StartsLocal}" : $"Your share changed — {game.CourtName}",
+                removed ? null : seat.ShareMinutes, needsConsent, seat.Id, SettledOutside: seat.SettledOutsideAt is not null),
+            // R15 J15-5: the court AND the day, and the new figure — "Your share changed — Court 4" named neither.
+            removed ? $"You were taken off {where}" : $"{organiser} changed your share of {where} — now {MoneyFormat.Minutes(seat.ShareMinutes)}",
             // R5 (M5-8): a removed member reads 404 from the booking; naming the seat lets the page
             // read their invite and say they were taken off. A share change keeps the plain path.
             removed ? $"/bookings/{booking.Id}?seat={seat.Id}" : $"/bookings/{booking.Id}", booking.Id);
     }
+
+    /// <summary>
+    /// The partner has a new figure to say yes to: they accepted, their share went above what they
+    /// agreed, and the club has not settled it by hand (R15 J15-9 — a settled share asks nothing).
+    /// </summary>
+    public static bool NeedsConsent(BookingParticipant seat) =>
+        seat.Status == ParticipantStatus.Accepted && seat.SettledOutsideAt is null && seat.ShareMinutes > seat.ConsentedMinutes;
 
     /// <summary>
     /// The club added the seat's member to the game, or accepted it for them (B8) — mailed, with

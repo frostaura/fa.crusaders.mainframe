@@ -184,7 +184,8 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
             new ShareMovement(ShareDirection.Paid, "Olive Organiser", "Court 2", "Sat 3 Oct, 10:00", 16, "https://x.test/b") { AfterAttendance = true });
         Assert.Equal("Share taken again — Court 2", sam.Subject);
         Assert.Contains("the session was attended", sam.PlainBody, StringComparison.Ordinal);
-        Assert.Contains("16 minutes was taken from your balance again", sam.PlainBody, StringComparison.Ordinal);
+        // R15 J15-11: the verb agrees with the figure ("16 minutes were").
+        Assert.Contains("16 minutes were taken from your balance again", sam.PlainBody, StringComparison.Ordinal);
     }
     /// <summary>
     /// Review round 10, E10-1: the live wallet frame for an outage refund and its reversal said

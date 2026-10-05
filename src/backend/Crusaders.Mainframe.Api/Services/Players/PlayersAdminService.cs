@@ -167,7 +167,12 @@ public sealed class PlayersAdminService
         seat.UpdatedAt = StorableTime.UtcNow;
         await RecordAsync(AdminChangeActions.BookingShareSettledOutside, act, seat,
             new { share_minutes = seat.ShareMinutes, paid_in_app_minutes = paid, overdraft_authorised = act.AllowNegativeBalance }, ct);
-        return await WithReturnStateAsync(await SaveAndSettleAsync(game!, seat, ct, OptionsFor(act, seat)), seat.Id, ct);
+        // R15 E15-3: on the club's record too, in the same save, so both players' Nights say it.
+        _db.AuditLogs.Add(PlayersService.SeatAuditFor(_tenant.TenantId, PlayersService.SettledOutsideAction, game!.Booking, seat, act.ActorId,
+            new { share_minutes = seat.ShareMinutes, paid_in_app_minutes = paid }));
+        // R15 E15-8: the return's receipts carry the desk's reason.
+        var options = OptionsFor(act, seat) with { ClubReason = act.Reason };
+        return await WithReturnStateAsync(await SaveAndSettleAsync(game!, seat, ct, options), seat.Id, ct);
     }
 
     /// <summary>
@@ -195,10 +200,15 @@ public sealed class PlayersAdminService
         ShareLedger.Collected? collected;
         try
         {
-            collected = await _shares.CollectAsync(game!.Booking.Id, seat.Id, act.ActorId, (tracked, delta, before) =>
-                RecordAsync(AdminChangeActions.BookingShareCollected, act, tracked,
-                    new { collected_minutes = delta, balance_before_minutes = before, balance_after_minutes = before - delta }, ct), ct,
-                act.Reason);
+            var booking = game!.Booking;
+            collected = await _shares.CollectAsync(booking.Id, seat.Id, act.ActorId, (tracked, delta, before) =>
+            {
+                // R15 E15-3: the collect on the club's record, in the money's own save, with the figure posted.
+                _db.AuditLogs.Add(PlayersService.SeatAuditFor(_tenant.TenantId, PlayersService.ShareCollectedAction, booking, tracked, act.ActorId,
+                    new { collected_minutes = delta }));
+                return RecordAsync(AdminChangeActions.BookingShareCollected, act, tracked,
+                    new { collected_minutes = delta, balance_before_minutes = before, balance_after_minutes = before - delta }, ct);
+            }, ct, act.Reason);
         }
         catch (DbUpdateException)
         {

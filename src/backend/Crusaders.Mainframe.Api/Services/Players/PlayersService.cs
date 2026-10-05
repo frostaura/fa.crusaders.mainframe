@@ -225,6 +225,12 @@ public sealed partial class PlayersService
     /// </summary>
     private async Task StageAddedNoticeAsync(Game game, BookingParticipant seat, ClubAdd? club, CancellationToken ct)
     {
+        // R15 E15-3: the club's add is on the record, in the add's own save — the member's and the
+        // organiser's Nights said nothing of it.
+        if (club is not null)
+        {
+            _db.AuditLogs.Add(SeatAudit(AddedByClubAction, game.Booking, seat, club.ActorId, new { accepted = club.Accept }));
+        }
         if (club is null)
         {
             var invite = await PlayerNotices.InviteAsync(_db, game.Booking, seat, game.Settings, ct);
@@ -605,7 +611,14 @@ public sealed partial class PlayersService
     /// subject, the person who made it the actor, and the organiser named in the details so the
     /// Night can say whose game it was. <paramref name="more"/> is merged into the details.
     /// </summary>
-    private AuditLog SeatAudit(string action, Booking booking, BookingParticipant seat, Guid actor, object more)
+    private AuditLog SeatAudit(string action, Booking booking, BookingParticipant seat, Guid actor, object more) =>
+        SeatAuditFor(_tenant.TenantId, action, booking, seat, actor, more);
+
+    /// <summary>
+    /// <see cref="SeatAudit"/> for a caller outside this service — the desk's settle-outside and
+    /// collect (R15 E15-3) write the same shape, so the Night reads every seat act one way.
+    /// </summary>
+    internal static AuditLog SeatAuditFor(Guid tenantId, string action, Booking booking, BookingParticipant seat, Guid actor, object more)
     {
         var details = System.Text.Json.JsonSerializer.SerializeToNode(new
         {
@@ -620,13 +633,22 @@ public sealed partial class PlayersService
         }
         return new AuditLog
         {
-            TenantId = _tenant.TenantId,
+            TenantId = tenantId,
             ActorUserId = actor,
             SubjectUserId = seat.UserId,
             Action = action,
             DetailsJson = details.ToJsonString(),
         };
     }
+
+    /// <summary>R15 E15-3: the desk added a member to a game (placed as playing, or invited) — the Night's record of it.</summary>
+    public const string AddedByClubAction = "players.added_by_club";
+
+    /// <summary>R15 E15-3: the desk recorded a partner's share as paid outside the app.</summary>
+    public const string SettledOutsideAction = "players.settled_outside";
+
+    /// <summary>R15 E15-3: the desk collected a partner's share by hand.</summary>
+    public const string ShareCollectedAction = "players.share_collected";
 
     /// <summary>
     /// Saves, turning a lost race into a 409 the client retries: a concurrent change to the same

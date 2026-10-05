@@ -1033,7 +1033,9 @@ public class WalkUpBookingTests
         foreach (var half in new[] { told.HtmlBody, MailText.Unwrap(told.PlainBody) })
         {
             Assert.Contains("Nothing was bought", half);
-            Assert.Contains("has gone straight back onto your balance", half);
+            // R15 J15-11: the verb agrees with the figure ("32 minutes have gone").
+            Assert.Contains(" gone straight back onto your balance", half);
+            Assert.DoesNotContain("minutes has gone", half);
             Assert.DoesNotContain("penalty", half);
         }
 

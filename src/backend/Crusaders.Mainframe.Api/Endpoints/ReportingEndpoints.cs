@@ -41,7 +41,7 @@ public static class ReportingEndpoints
             // a day the file does not contain.
             var name = $"crusaders-mainframe_wallet_{firstDay:yyyy-MM-dd}-{lastDay:yyyy-MM-dd}.csv";
             ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
-            return Results.Text(LedgerCsv(entries), "text/csv", Encoding.UTF8);
+            return Results.Text(await MemberWalletCsv.BuildAsync(db, userId, entries, ct), "text/csv", Encoding.UTF8);
         });
 
         var admin = app.MapGroup("/api/v1/admin/reports").RequireAuthorization(p => p.RequireRole("admin"));
@@ -576,26 +576,87 @@ public static class ReportingEndpoints
         return booked + rows.Count(e => e.RelatedBookingId is null && e.AmountMinutes < 0);
     }
 
-    private static string LedgerCsv(IEnumerable<LedgerEntry> entries)
+}
+
+/// <summary>
+/// The member's own wallet CSV (<c>/reports/me/wallet.csv</c>) — R15 E15-10 / J15-10: it carried
+/// the type, the figure and the club's internal references (<c>adjust:&lt;tenant&gt;:…</c>,
+/// <c>share:&lt;seat&gt;:2:in</c>) and nothing a member could reconcile with: who was on the other
+/// side, why a share moved, who did it, what rand changed hands, what was given.
+///
+/// <para>
+/// Columns: <c>created_at,type,amount_minutes,reason,counterparty,cause,done_by,given,zar_paid,
+/// court,booking_starts_at,related_booking_id</c>. <c>counterparty</c> is the wallet's other side as
+/// the member's Wallet names it (the other player on a share, else the club treasury or PayFast);
+/// <c>cause</c> a share row's <see cref="WalletShareCauses"/> value read off the record
+/// (<see cref="ShareRowCauses"/>), empty on every other row; <c>done_by</c> whoever moved it when
+/// that was not the member — an administrator is "The club", as on the Wallet (R14 review L3);
+/// <c>given</c> "yes" on a desk top-up taken for no rand (<see cref="GivenMinutes"/>); <c>zar_paid</c>
+/// the rand, 2 dp, where any changed hands. No reference column: the member has no use for one,
+/// and it published the club's tenant id.
+/// </para>
+/// </summary>
+public static class MemberWalletCsv
+{
+    public const string Header =
+        "created_at,type,amount_minutes,reason,counterparty,cause,done_by,given,zar_paid,court,booking_starts_at,related_booking_id";
+
+    public static async Task<string> BuildAsync(MainframeDbContext db, Guid userId, List<LedgerEntry> entries, CancellationToken ct)
     {
+        var ids = entries.Select(e => e.ActorUserId).Append(userId).Where(i => i != Guid.Empty).Distinct().ToList();
+        var names = await PersonNames.ForAsync(db, ids.Select(i => (Guid?)i), ct);
+        var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
+        var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
+        var whys = await ShareRowCauses.ForAsync(db, entries, ct);
+        var bookingIds = entries.Where(e => e.RelatedBookingId is not null).Select(e => e.RelatedBookingId!.Value).Distinct().ToList();
+        var places = await db.Bookings.AsNoTracking().Where(b => bookingIds.Contains(b.Id))
+            .Join(db.Courts.AsNoTracking(), b => b.CourtId, c => c.Id, (b, c) => new { b.Id, Court = c.Name, b.StartsAt })
+            .ToDictionaryAsync(x => x.Id, ct);
+        string NameFor(Guid id) => names.TryGetValue(id, out var n) ? n : "(unknown)";
+
         var sb = new StringBuilder();
-        sb.AppendLine("created_at,type,amount_minutes,reason,external_reference,related_booking_id");
+        sb.Append(Header).Append("\r\n");
         foreach (var e in entries)
         {
-            sb.Append(e.CreatedAt.ToString("o", CultureInfo.InvariantCulture)).Append(',');
-            sb.Append(e.Type).Append(',');
-            sb.Append(e.AmountMinutes.ToString(CultureInfo.InvariantCulture)).Append(',');
-            sb.Append(Csv(e.Reason)).Append(',');
-            sb.Append(Csv(e.ExternalReference)).Append(',');
-            sb.AppendLine(e.RelatedBookingId?.ToString() ?? "");
+            var row = LedgerRowMapper.Build(e, NameFor, admins.Contains, counterparties, memberView: true);
+            var place = e.RelatedBookingId is { } b && places.TryGetValue(b, out var p) ? (p.Court, p.StartsAt) : ((string, DateTimeOffset)?)null;
+            var line = new CsvRow(
+                Counterparty: e.AmountMinutes >= 0 ? row.From : row.To,
+                Cause: whys.TryGetValue(e.Id, out var why) ? why.Cause : null,
+                DoneBy: DoneBy(e, userId, admins, names),
+                Place: place);
+            sb.Append(Line(e, line));
         }
         return sb.ToString();
     }
 
-    private static string Csv(string? v)
+    /// <summary>What one CSV line says beyond the ledger row itself.</summary>
+    private sealed record CsvRow(string Counterparty, string? Cause, string? DoneBy, (string Court, DateTimeOffset StartsAt)? Place);
+
+    private static string Line(LedgerEntry e, CsvRow r)
     {
-        if (string.IsNullOrEmpty(v)) return "";
-        var needs = v.Contains(',') || v.Contains('"') || v.Contains('\n');
-        return needs ? "\"" + v.Replace("\"", "\"\"") + "\"" : v;
+        var cells = new[]
+        {
+            e.CreatedAt.ToString("o", CultureInfo.InvariantCulture),
+            e.Type.ToString(),
+            e.AmountMinutes.ToString(CultureInfo.InvariantCulture),
+            CsvCell.Of(e.Reason ?? ""),
+            CsvCell.Of(r.Counterparty),
+            r.Cause ?? "",
+            CsvCell.Of(r.DoneBy ?? ""),
+            GivenMinutes.IsGiven(e.Type, e.ZarPaid) ? "yes" : "",
+            e.ZarPaid?.ToString("0.00", CultureInfo.InvariantCulture) ?? "",
+            CsvCell.Of(r.Place?.Court ?? ""),
+            r.Place?.StartsAt.ToString("o", CultureInfo.InvariantCulture) ?? "",
+            e.RelatedBookingId?.ToString() ?? "",
+        };
+        return string.Join(",", cells) + "\r\n";
+    }
+
+    /// <summary>Who moved it when that was not the member: "The club" for an administrator, else the person; null for their own and the system's.</summary>
+    private static string? DoneBy(LedgerEntry e, Guid member, HashSet<Guid> admins, Dictionary<Guid, string> names)
+    {
+        if (e.ActorUserId == Guid.Empty || e.ActorUserId == member) return null;
+        return admins.Contains(e.ActorUserId) ? LedgerRowMapper.TheClub : PersonNames.Of(e.ActorUserId, names);
     }
 }

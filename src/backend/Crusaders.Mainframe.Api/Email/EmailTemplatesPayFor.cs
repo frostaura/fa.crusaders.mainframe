@@ -18,7 +18,7 @@ public static partial class EmailTemplates
             Heading: "You paid for a court at the box",
             Blocks:
             [
-                new Paragraph($"You paid for {p.OtherName}'s booking on {p.CourtName} at {p.StartsAtLocal}, at the court box with your member code."),
+                new Paragraph($"You paid for {p.OtherName}'s booking on {CourtOn(p.CourtName, p.StartsAtLocal)}, at the court box with your member code."),
                 new Facts(
                 [
                     new FactRow("Court", p.CourtName),
@@ -33,11 +33,11 @@ public static partial class EmailTemplates
     public static EmailMessage YourCourtWasPaidFor(ClubIdentity club, string to, PaidForCourt p) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"{p.OtherName} paid for your court",
-            Preheader: $"{Min(p.AmountMinutes)} is back in your wallet.",
+            Preheader: $"{Min(p.AmountMinutes)} {Is(p.AmountMinutes)} back in your wallet.",
             Heading: "Somebody paid for your court",
             Blocks:
             [
-                new Paragraph($"{p.OtherName} paid for your booking on {p.CourtName} at {p.StartsAtLocal}, at the court box."),
+                new Paragraph($"{p.OtherName} paid for your booking on {CourtOn(p.CourtName, p.StartsAtLocal)}, at the court box."),
                 new Facts(
                 [
                     new FactRow("Court", p.CourtName),

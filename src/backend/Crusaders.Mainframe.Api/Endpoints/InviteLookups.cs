@@ -84,6 +84,9 @@ public static class InviteLookups
             ends_at = BookingService.OriginalEndsAt(booking),
             organiser_name = organiser,
             share_minutes = seat.ShareMinutes,
+            // R15 J15-1: who put them on it and who took them off — the page credited the organiser with both.
+            added_by_club = SeatFacts.AddedByClub(booking, seat),
+            removed_by = await SeatFacts.RemovedByAsync(db, seat, ct),
             timezone = DoorClock.ZoneOf(settings).Name,
         });
     }

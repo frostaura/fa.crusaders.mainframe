@@ -125,9 +125,13 @@ public sealed class ShareSweep
             return;
         }
 
+        // R15 E15-4: the cause before its effects — the partners' "the game is off" record (and their
+        // notice) is saved BEFORE the share rows it explains, so the Night and the CSV never read a
+        // return ahead of the cancellation that sent it. TellCancelledAsync reads the seats as they
+        // were (the reconcile changes no seat), so the order changes nothing else.
+        var told = await TellCancelledAsync(bookingId, seats, ct);
         var moves = await _shares.ReconcileAsync(
             bookingId, ct, ownActionBy is null ? null : new ReconcileOptions(Guid.Empty) { OwnActionBy = ownActionBy });
-        var told = await TellCancelledAsync(bookingId, seats, ct);
 
         await ClearMarkerAsync(bookingId, started, ct);
 
@@ -157,12 +161,14 @@ public sealed class ShareSweep
         // R13 E13-6: who cancelled it, and why — the partner was never told the club had.
         var by = await BookingCancellation.ForAsync(_db, booking, ct);
         var told = new List<Guid>();
+        // R15 E15-1: somebody had checked in, so nothing was refunded — every share paid stands.
+        var started = booking.CheckedInAt is not null;
         foreach (var seat in seats.Where(p => p.Seat > 1 && p.UserId is not null && p.IsLive))
         {
             var notice = new MemberNotice(
                 seat.UserId!.Value, MemberEventCatalogue.GameCancelled, $"game-cancelled:{bookingId:N}:{seat.UserId:N}",
-                new GameCancelledPayload(bookingId, organiser, game.CourtName, game.StartsLocal, by?.ByClub, by?.Reason, CauseOf(by)),
-                CancelledHeadline(by, organiser, game), $"/bookings/{bookingId}", bookingId)
+                new GameCancelledPayload(bookingId, organiser, game.CourtName, game.StartsLocal, by?.ByClub, by?.Reason, CauseOf(by), started),
+                CancelledHeadline(by, organiser, game) + (started ? StartedClause : ""), $"/bookings/{bookingId}", bookingId)
             {
                 Email = seat.Status == ParticipantStatus.Accepted,
             };
@@ -200,6 +206,9 @@ public sealed class ShareSweep
             }),
         };
     }
+
+    /// <summary>R15 E15-1: the inbox line's ending for a game that had started — nothing came back, the share stands.</summary>
+    private const string StartedClause = " — it had started, so your share stands";
 
     /// <summary>R13 E13-6: the inbox line says who cancelled — the club, or the organiser — when it is on the record.</summary>
     private static string CancelledHeadline(BookingCancellation? by, string organiser, GameText game)

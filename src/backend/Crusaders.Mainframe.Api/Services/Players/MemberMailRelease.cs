@@ -216,8 +216,9 @@ public static class MemberMailRelease
             CourtName = game.CourtName,
             StartsAtLocal = game.StartsLocal,
             NewShareMinutes = seat.ShareMinutes,
-            NeedsConsent = seat.Status == ParticipantStatus.Accepted && seat.ShareMinutes > seat.ConsentedMinutes,
+            NeedsConsent = PlayerNotices.NeedsConsent(seat),
             SeatId = seat.Id,
+            SettledOutside = seat.SettledOutsideAt is not null,
         });
     }
 

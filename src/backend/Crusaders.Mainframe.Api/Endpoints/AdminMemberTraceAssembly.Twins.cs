@@ -220,7 +220,8 @@ public static partial class AdminMemberTraceAssembly
     {
         // R14 E14-2: a removal, a split change and a cancelled game name the organiser the same way.
         if (row.Action is not (TraceKinds.PartnerWithdrewAction or TraceKinds.PlayerRemovedAction
-            or TraceKinds.SplitChangedAction or TraceKinds.GameCancelledAction)) return null;
+            or TraceKinds.SplitChangedAction or TraceKinds.GameCancelledAction or TraceKinds.SettledOutsideAction
+            or TraceKinds.ShareCollectedAction or TraceKinds.AddedByClubAction)) return null;
         return GuidOf(DoorActivityView.Details(row.DetailsJson), "organiser_user_id");
     }
 

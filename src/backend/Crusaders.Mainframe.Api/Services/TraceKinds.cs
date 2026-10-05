@@ -132,6 +132,44 @@ public readonly record struct TraceFacts
     /// (review round 13, E13-8). Null when the record cannot say, and the sentence stays neutral.
     /// </summary>
     public string? CausedByName { get; init; }
+
+    /// <summary>
+    /// R15 E15-3: on a club add, the club placed them as playing rather than inviting them —
+    /// "put them in" rather than "added them to".
+    /// </summary>
+    public bool Placed { get; init; }
+
+    /// <summary>
+    /// R15 E15-3 / J15-4: why a share row moved — one of <see cref="WalletShareCauses"/>, read off
+    /// the record (<c>ShareRowCauses</c>). Null on a row nobody derived one for, which keeps the
+    /// pre-R15 words.
+    /// </summary>
+    public string? ShareCause { get; init; }
+
+    /// <summary>R15: the share row's partner, named — null when it is the person whose night this is ("they").</summary>
+    public string? PartnerName { get; init; }
+
+    /// <summary>R15: the share row's organiser, named — null when it is the person whose night this is ("they").</summary>
+    public string? OrganiserSideName { get; init; }
+
+    /// <summary>R15: the share row is a COLLECTION (partner to organiser) rather than a return.</summary>
+    public bool Collection { get; init; }
+}
+
+/// <summary>
+/// R15 E15-3 / J15-4: from where the person whose night it is sees an audit row. A seat act or a
+/// booking-level act reaches a night three ways, and the same row needs a different sentence on each.
+/// </summary>
+public enum TraceView
+{
+    /// <summary>They are the row's actor or its subject — the sentence every row always had.</summary>
+    Own,
+
+    /// <summary>They organised the game the row's seat is on, and neither did it nor had it done to them (an admin's act on their partner).</summary>
+    Organiser,
+
+    /// <summary>They held a partner's seat on the booking the row is about (its no-show, its reversal).</summary>
+    Partner,
 }
 
 /// <summary>
@@ -280,6 +318,42 @@ public static class TraceKinds
     /// <summary>A game they were a partner in was cancelled — by the organiser or the club (R14 E14-2).</summary>
     public const string BookingGameCancelled = "booking.game_cancelled";
 
+    /// <summary>R15 E15-3: the club took a partner off THEIR game — the organiser's side of an admin's removal.</summary>
+    public const string BookingClubTookPlayerOff = "booking.club_took_player_off";
+
+    /// <summary>R15 E15-3: the club recorded their share as paid outside the app (the partner's side).</summary>
+    public const string BookingShareSettledOutside = "booking.share_settled_outside";
+
+    /// <summary>R15 E15-3: the club recorded a partner's share of THEIR game as paid outside the app (the organiser's side).</summary>
+    public const string BookingPartnerShareSettledOutside = "booking.partner_share_settled_outside";
+
+    /// <summary>R15 E15-3: they (an admin) recorded a partner's share as paid outside the app.</summary>
+    public const string BookingSettledShareOutside = "booking.settled_share_outside";
+
+    /// <summary>R15 E15-3: the club collected their share by hand (the partner's side).</summary>
+    public const string BookingShareCollected = "booking.share_collected";
+
+    /// <summary>R15 E15-3: the club collected a partner's share of THEIR game (the organiser's side).</summary>
+    public const string BookingPartnerShareCollected = "booking.partner_share_collected";
+
+    /// <summary>R15 E15-3: they (an admin) collected a partner's share.</summary>
+    public const string BookingCollectedShare = "booking.collected_share";
+
+    /// <summary>R15 E15-3: the club added them to somebody's game, or put them in it (the member's side).</summary>
+    public const string BookingAddedToGame = "booking.added_to_game";
+
+    /// <summary>R15 E15-3: the club added a member to THEIR game (the organiser's side).</summary>
+    public const string BookingClubAddedPlayer = "booking.club_added_player";
+
+    /// <summary>R15 E15-3: they (an admin) added a member to somebody's game.</summary>
+    public const string BookingAddedPlayer = "booking.added_player";
+
+    /// <summary>R15 J15-4: a game they were a partner in was settled as a no-show, or refunded for an outage.</summary>
+    public const string BookingGameNoShow = "booking.game_no_show";
+
+    /// <summary>R15 J15-4: that no-show or outage refund was reversed by a late check-in.</summary>
+    public const string BookingGameNoShowReversed = "booking.game_no_show_reversed";
+
     /// <summary>They bought light time at the court rather than reserving it.</summary>
     public const string WalkUpBought = "walkup.bought";
 
@@ -378,6 +452,9 @@ public static class TraceKinds
         BookingNoShowReversed, BookingBlockedOver, BookingDisplaced, BookingDisplacementReversed,
         BookingPaidForSomebody, BookingPaidForThem, BookingWithdrew, BookingPartnerWithdrew,
         BookingTakenOff, BookingTookPlayerOff, BookingSplitChanged, BookingChangedSplit, BookingGameCancelled,
+        BookingClubTookPlayerOff, BookingShareSettledOutside, BookingPartnerShareSettledOutside, BookingSettledShareOutside,
+        BookingShareCollected, BookingPartnerShareCollected, BookingCollectedShare,
+        BookingAddedToGame, BookingClubAddedPlayer, BookingAddedPlayer, BookingGameNoShow, BookingGameNoShowReversed,
         WalkUpBought, WalkUpRefunded,
         CourtCheckedIn, CourtRefused,
         LightsOn, LightsOff,
@@ -446,7 +523,57 @@ public static class TraceKinds
     /// "cancelled" from "cancelled by the club", and it is NOT
     /// <c>ActorUserId != SubjectUserId</c></b> — see <see cref="TraceActors"/> and D2-B41.
     /// </param>
-    public static string? OfAudit(string action, bool actorIsSubject)
+    public static string? OfAudit(string action, bool actorIsSubject) => OfAudit(action, actorIsSubject, TraceView.Own);
+
+    /// <summary>
+    /// R15 E15-3 / J15-4: <see cref="OfAudit(string, bool)"/> from where the person whose night it is
+    /// stands. <see cref="TraceView.Own"/> is the plain answer; the organiser of the game an admin
+    /// acted on, and a partner on a booking the club settled, each get their own word — or none,
+    /// for a row that is not theirs to see that way.
+    /// </summary>
+    public static string? OfAudit(string action, bool actorIsSubject, TraceView view)
+    {
+        return view switch
+        {
+            TraceView.Organiser => OfOrganisersView(action),
+            TraceView.Partner => OfPartnersView(action),
+            _ => OfOwnAudit(action, actorIsSubject),
+        };
+    }
+
+    /// <summary>R15 E15-3: a seat act an admin did on a partner of THEIR game.</summary>
+    private static string? OfOrganisersView(string action)
+    {
+        return action switch
+        {
+            PartnerWithdrewAction => BookingPartnerWithdrew,
+            PlayerRemovedAction => BookingClubTookPlayerOff,
+            SettledOutsideAction => BookingPartnerShareSettledOutside,
+            ShareCollectedAction => BookingPartnerShareCollected,
+            AddedByClubAction => BookingClubAddedPlayer,
+            _ => null,
+        };
+    }
+
+    /// <summary>R15 J15-4: what the club did to the booking a partner paid into.</summary>
+    private static string? OfPartnersView(string action)
+    {
+        return action switch
+        {
+            "booking.no_show" => BookingGameNoShow,
+            "booking.no_show_reversed" => BookingGameNoShowReversed,
+            _ => null,
+        };
+    }
+
+    /// <summary>The audit actions a partner's Night reads off the booking they paid into (R15 J15-4).</summary>
+    public static readonly string[] PartnersViewActions = ["booking.no_show", "booking.no_show_reversed"];
+
+    /// <summary>The seat acts an organiser's Night reads off the game's partners (R13 E13-4, R15 E15-3).</summary>
+    public static readonly string[] OrganisersViewActions =
+        [PartnerWithdrewAction, PlayerRemovedAction, SettledOutsideAction, ShareCollectedAction, AddedByClubAction];
+
+    private static string? OfOwnAudit(string action, bool actorIsSubject)
     {
         if (Array.IndexOf(NotAPersonsNight, action) >= 0) return null;
         if (action.StartsWith(DoorTrail.DeniedPrefix, StringComparison.Ordinal)) return DoorRefused;
@@ -478,6 +605,9 @@ public static class TraceKinds
             SplitChangedAction => actorIsSubject ? BookingChangedSplit : BookingSplitChanged,
             // The canceller's own night has their booking.cancelled row already; one per partner would repeat it.
             GameCancelledAction => actorIsSubject ? null : BookingGameCancelled,
+            SettledOutsideAction => actorIsSubject ? BookingSettledShareOutside : BookingShareSettledOutside,
+            ShareCollectedAction => actorIsSubject ? BookingCollectedShare : BookingShareCollected,
+            AddedByClubAction => actorIsSubject ? BookingAddedPlayer : BookingAddedToGame,
 
             _ => OfAccountAction(action),
         };
@@ -491,6 +621,15 @@ public static class TraceKinds
 
     /// <summary>The audit action a cancelled game writes per partner (R14, <c>ShareSweep.GameCancelledAction</c>).</summary>
     public const string GameCancelledAction = "players.game_cancelled";
+
+    /// <summary>R15 E15-3: the desk recorded a share paid outside the app (<c>PlayersService.SettledOutsideAction</c>).</summary>
+    public const string SettledOutsideAction = "players.settled_outside";
+
+    /// <summary>R15 E15-3: the desk collected a share (<c>PlayersService.ShareCollectedAction</c>).</summary>
+    public const string ShareCollectedAction = "players.share_collected";
+
+    /// <summary>R15 E15-3: the desk added a member to a game (<c>PlayersService.AddedByClubAction</c>).</summary>
+    public const string AddedByClubAction = "players.added_by_club";
 
     /// <summary>
     /// The account's own story — applying, the club's decisions, admin rights, the code, passkeys
@@ -686,8 +825,52 @@ public static class TraceKinds
             WalletReversed => $"A payment for {Amount(facts)} was reversed",
             WalletShareMoved => ShareMoved(facts),
 
-            _ => AccountHeadline(kind, facts),
+            _ => ClubSeatHeadline(kind, court, facts) ?? AccountHeadline(kind, facts),
         };
+    }
+
+    /// <summary>
+    /// R15 E15-3 / J15-4: the club's seat acts from each side, and the club's settlement of a game
+    /// as its partner reads it; null for any other word.
+    /// </summary>
+    private static string? ClubSeatHeadline(string kind, string court, TraceFacts facts)
+    {
+        var actor = ActorOr(facts, "Somebody at the club");
+        var partner = Subject(facts);
+        var theirs = OrganisersGame(facts, court);
+        return kind switch
+        {
+            BookingClubTookPlayerOff => $"{actor} took {partner} off their game on {court}",
+            BookingShareSettledOutside => $"{actor} recorded their share of {theirs} as paid outside the app",
+            BookingPartnerShareSettledOutside => $"{actor} recorded {partner}'s share of their game on {court} as paid outside the app",
+            BookingSettledShareOutside => $"Recorded {partner}'s share of {theirs} as paid outside the app",
+            BookingShareCollected => $"{actor} collected {Amount(facts)} from them for their share of {theirs}",
+            BookingPartnerShareCollected => $"{actor} collected {partner}'s share of their game on {court}: {Amount(facts)}",
+            BookingCollectedShare => $"Collected {Amount(facts)} from {partner} for their share of {theirs}",
+            BookingAddedToGame => facts.Placed ? $"{actor} put them in {theirs}" : $"{actor} added them to {theirs}",
+            BookingClubAddedPlayer => facts.Placed ? $"{actor} put {partner} in their game on {court}" : $"{actor} added {partner} to their game on {court}",
+            BookingAddedPlayer => facts.Placed ? $"Put {partner} in {theirs}" : $"Added {partner} to {theirs}",
+            BookingGameNoShow => facts.CourtWasDark
+                ? $"The club refunded {theirs} in full — its box was offline"
+                : $"The club's automatic check marked {theirs} as a no-show",
+            BookingGameNoShowReversed => GameNoShowReversed(theirs, facts),
+            _ => null,
+        };
+    }
+
+    /// <summary>"Olive Organiser's game on Court 1" — or "a game on Court 1" when the record names no organiser.</summary>
+    private static string OrganisersGame(TraceFacts facts, string court)
+    {
+        var organiser = facts.OrganiserName?.Trim();
+        return string.IsNullOrEmpty(organiser) ? $"a game on {court}" : $"{organiser}'s game on {court}";
+    }
+
+    /// <summary>R15 J15-4: a partner's view of a late check-in reversing the club's settlement of the game they paid into.</summary>
+    private static string GameNoShowReversed(string theirs, TraceFacts facts)
+    {
+        var what = facts.CourtWasDark ? "outage refund" : "no-show";
+        var who = string.IsNullOrWhiteSpace(facts.ActorName) || BySystem(facts) ? "A check-in" : $"{facts.ActorName.Trim()}'s check-in";
+        return $"{who} reached the club late — the {what} on {theirs} was reversed";
     }
 
     /// <summary>R11 D11-2: an offline refusal of a genuine code, said neutrally; empty otherwise.</summary>
@@ -738,10 +921,92 @@ public static class TraceKinds
     /// </summary>
     private static string ShareMoved(TraceFacts facts)
     {
+        if (string.IsNullOrWhiteSpace(facts.WithdrewName) && facts.ShareCause is not null) return OwnShareMoved(facts);
         if (string.IsNullOrWhiteSpace(facts.WithdrewName)) return $"A share of a split booking moved: {Amount(facts)}";
         return facts.AmountMinutes > 0
             ? $"{Amount(facts)} of their share came back — they withdrew from the game"
             : $"{Amount(facts)} went back to {facts.WithdrewName.Trim()} — they withdrew from the game";
+    }
+
+    /// <summary>
+    /// R15 E15-3 / J15-4: the person whose night this is moved their own money for a share — which
+    /// way, with whom, and why ("A share of a split booking moved: 7 minutes" said none of it). They
+    /// are "they"/"them" in the sentence; the other side is named.
+    /// </summary>
+    private static string OwnShareMoved(TraceFacts facts)
+    {
+        var court = ShareCourt(facts);
+        var tracedIsPartner = facts.Collection == (facts.AmountMinutes < 0);
+        var partner = tracedIsPartner ? ShareSide.Them : ShareSide.Named(facts.PartnerName);
+        var organiser = tracedIsPartner ? ShareSide.Named(facts.OrganiserSideName) : ShareSide.Them;
+        var why = ShareClause(facts.ShareCause, partner, organiser);
+        var amount = Amount(facts);
+        if (facts.Collection)
+        {
+            return tracedIsPartner
+                ? $"Paid {organiser.Name} {amount} for their share of {court}{why}"
+                : $"{partner.Name} paid them {amount} for their share of {court}{why}";
+        }
+        return tracedIsPartner
+            ? $"{amount} of their share of {court} came back from {organiser.Name}{why}"
+            : $"{amount} went back to {partner.Name} for their share of {court}{why}";
+    }
+
+    /// <summary>R15: the other half of a share on this night — somebody else's money, both sides named.</summary>
+    private static string TwinShareMoved(string whose, TraceFacts facts)
+    {
+        var court = ShareCourt(facts);
+        var why = ShareClause(facts.ShareCause, ShareSide.Named(facts.PartnerName), ShareSide.Named(facts.OrganiserSideName));
+        var amount = Amount(facts);
+        var partnersRow = facts.Collection == (facts.AmountMinutes < 0);
+        if (facts.Collection)
+        {
+            return partnersRow
+                ? $"{whose} paid {amount} for their share of {court}{why}"
+                : $"{whose} received {amount} for the share of {court}{why}";
+        }
+        return partnersRow
+            ? $"{whose} got {amount} of their share of {court} back{why}"
+            : $"{amount} went back from {whose} for the share of {court}{why}";
+    }
+
+    private static string ShareCourt(TraceFacts facts) =>
+        string.IsNullOrWhiteSpace(facts.CourtName) ? "the game" : facts.CourtName.Trim();
+
+    /// <summary>One side of a share in a sentence: a name, or the person whose night it is.</summary>
+    private sealed record ShareSide(string Name, string Object, string Possessive)
+    {
+        public static readonly ShareSide Them = new("they", "them", "their");
+
+        public static ShareSide Named(string? name)
+        {
+            var n = string.IsNullOrWhiteSpace(name) ? "another member" : name.Trim();
+            return new ShareSide(n, n, $"{n}'s");
+        }
+    }
+
+    /// <summary>
+    /// R15: why a share moved, after a dash — off the record's cause (<see cref="WalletShareCauses"/>),
+    /// empty for a plain payment or a return no record explains.
+    /// </summary>
+    private static string ShareClause(string? cause, ShareSide partner, ShareSide organiser)
+    {
+        var clause = cause switch
+        {
+            WalletShareCauses.OrganiserRemoved => $"{organiser.Name} took {partner.Object} off the game",
+            WalletShareCauses.ClubRemoved => $"the club took {partner.Object} off the game",
+            WalletShareCauses.ShareReturned => $"{partner.Name} withdrew from the game",
+            WalletShareCauses.SplitChanged => $"{organiser.Name} lowered {partner.Possessive} share",
+            WalletShareCauses.ClubSettled => $"the club recorded {partner.Possessive} share as paid outside the app",
+            WalletShareCauses.BookingCancelled => "the game was cancelled",
+            WalletShareCauses.NoShow => "nobody checked in, so the club settled it as a no-show",
+            WalletShareCauses.OutageRefund => "the court's box was offline, so the club refunded the session",
+            WalletShareCauses.Displaced => "the court was in use by an earlier booking, so the club refunded the session",
+            WalletShareCauses.ClubCollected => "the club collected it",
+            WalletShareCauses.Attended => "the session was attended after all",
+            _ => null,
+        };
+        return clause is null ? "" : $" — {clause}";
     }
 
     /// <summary>The actor's name, or <paramref name="nobody"/> when the row cannot name them.</summary>
@@ -819,6 +1084,7 @@ public static class TraceKinds
     /// </summary>
     private static string OthersShareMoved(string whose, TraceFacts facts)
     {
+        if (string.IsNullOrWhiteSpace(facts.WithdrewName) && facts.ShareCause is not null) return TwinShareMoved(whose, facts);
         if (string.IsNullOrWhiteSpace(facts.WithdrewName)) return $"A share of a split booking moved for {whose}: {Amount(facts)}";
         return facts.AmountMinutes > 0
             ? $"{whose} got {Amount(facts)} of their share back — they withdrew from the game"

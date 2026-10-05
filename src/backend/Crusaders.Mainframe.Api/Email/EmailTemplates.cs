@@ -169,6 +169,37 @@ public static partial class EmailTemplates
     internal static string Min(int value) => Services.MoneyFormat.Minutes(value);
 
     /// <summary>
+    /// R15 J15-11: the verb a minutes figure takes — "1 minute is", "1 hour is", "15 minutes are",
+    /// "1 hour 30 minutes are". A figure is singular only when it reads as one of one unit.
+    /// </summary>
+    internal static string Is(int minutes) => Singular(minutes) ? "is" : "are";
+
+    /// <summary>R15 J15-11: "1 minute was", "15 minutes were".</summary>
+    internal static string Was(int minutes) => Singular(minutes) ? "was" : "were";
+
+    /// <summary>R15 J15-11: "1 minute has", "15 minutes have".</summary>
+    internal static string Has(int minutes) => Singular(minutes) ? "has" : "have";
+
+    private static bool Singular(int minutes)
+    {
+        var words = Min(minutes).Split(' ');
+        return words.Length == 2 && words[0] == "1";
+    }
+
+    /// <summary>
+    /// R15 J15-11: a court and its start as a sentence says them — "Court 4 on Tue 13 Oct at 06:00",
+    /// from the club's own "Tue 13 Oct, 06:00" (<see cref="Services.ClubDate.Format"/>). "Court 4 at Tue
+    /// 13 Oct, 06:00" read as a place. A start in any other shape keeps the plain "at".
+    /// </summary>
+    internal static string CourtOn(string courtName, string startsAtLocal)
+    {
+        var comma = startsAtLocal.LastIndexOf(", ", StringComparison.Ordinal);
+        return comma > 0
+            ? $"{courtName} on {startsAtLocal[..comma]} at {startsAtLocal[(comma + 2)..]}"
+            : $"{courtName} at {startsAtLocal}";
+    }
+
+    /// <summary>
     /// Real money, in the club's own symbol. Only for amounts that really are money — what the
     /// member paid the gateway.
     ///
@@ -552,7 +583,7 @@ public static partial class EmailTemplates
             new Paragraph($"The box couldn't start {courtName} for you, so the court time you pressed for wasn't sold."),
         };
         blocks.Add(refundedMinutes > 0
-            ? new Callout(CalloutTone.Success, $"{Min(refundedMinutes)} has gone straight back onto your balance. You are exactly where you were before you pressed.")
+            ? new Callout(CalloutTone.Success, $"{Min(refundedMinutes)} {Has(refundedMinutes)} gone straight back onto your balance. You are exactly where you were before you pressed.")
             : new Callout(CalloutTone.Success, "Nothing was taken off your balance."));
         blocks.Add(new Paragraph("Try again at the box, or ask at the desk."));
 
@@ -669,7 +700,7 @@ public static partial class EmailTemplates
             Heading: "Your booking has been refunded",
             Blocks:
             [
-                new Paragraph($"Your booking on {courtName} at {startsAtLocal} was sold while the court was still being used by an earlier booking. That booking's check-in reached the club late, so the slot looked free when it was not."),
+                new Paragraph($"Your booking on {CourtOn(courtName, startsAtLocal)} was sold while the court was still being used by an earlier booking. That booking's check-in reached the club late, so the slot looked free when it was not."),
                 new Callout(CalloutTone.Success, "It has been cancelled and refunded in full, with no penalty."),
                 new Paragraph("This is the club's fault rather than yours. We are sorry for the wasted trip — speak to the desk if you came down for it."),
             ],
@@ -706,7 +737,7 @@ public static partial class EmailTemplates
             Heading: "Your booking is back on",
             Blocks:
             [
-                new Paragraph($"The club refunded your booking on {courtName} at {startsAtLocal}, because an earlier booking looked as though it was still using the court."),
+                new Paragraph($"The club refunded your booking on {CourtOn(courtName, startsAtLocal)}, because an earlier booking looked as though it was still using the court."),
                 new Paragraph("The court's own lights say otherwise — it went dark before your slot — so the booking has been put back and charged again at the original price. Nothing extra has been taken."),
                 new Callout(CalloutTone.Success, "Your access code is in the app, as it was. Turn up as planned."),
             ],

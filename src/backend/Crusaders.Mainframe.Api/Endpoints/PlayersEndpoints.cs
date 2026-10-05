@@ -83,8 +83,10 @@ public static class PlayersEndpoints
         var ownSeat = await db.BookingParticipants.AsNoTracking()
             .Where(p => p.BookingId == bookingId && p.UserId == me && p.Seat > 1
                         && p.Status != Domain.ParticipantStatus.Invited && p.Status != Domain.ParticipantStatus.Accepted)
-            .OrderByDescending(p => p.UpdatedAt).Select(p => (Guid?)p.Id).FirstOrDefaultAsync(ct);
-        return Results.NotFound(new { error = "booking_not_found", own_seat_id = ownSeat });
+            .OrderByDescending(p => p.UpdatedAt).FirstOrDefaultAsync(ct);
+        // R15 J15-1: who took them off — "club" or "organiser" — so "Mia took you off" is never said of the club's act.
+        var removedBy = ownSeat is null ? null : await SeatFacts.RemovedByAsync(db, ownSeat, ct);
+        return Results.NotFound(new { error = "booking_not_found", own_seat_id = ownSeat?.Id, removed_by = removedBy });
     }
 
     private static async Task<IResult> InvitesAsync(HttpContext ctx, PlayersQuery query, TenantSettingsAccessor settings, CancellationToken ct)

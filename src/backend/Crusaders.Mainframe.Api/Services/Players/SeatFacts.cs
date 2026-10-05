@@ -63,6 +63,25 @@ public sealed record SeatFacts(bool Withdrew, Guid? OffGame, ParticipantStatus? 
         return lastMove is { } moved && moved > split.At ? null : split.Act;
     }
 
+    /// <summary>
+    /// R15 J15-1: who took this seat off the game, for its member — <c>"club"</c> or
+    /// <c>"organiser"</c> off the removal's record; null for a seat that was not removed, and for a
+    /// removal from before the record existed (the reader then says neither).
+    /// </summary>
+    public static async Task<string?> RemovedByAsync(MainframeDbContext db, BookingParticipant seat, CancellationToken ct)
+    {
+        if (seat.Status != ParticipantStatus.Removed || seat.UserId is null) return null;
+        var record = await RecordOfAsync(db, RemovedAction, seat, ct);
+        return record is not { } r ? null : r.Act.ByClub ? "club" : "organiser";
+    }
+
+    /// <summary>
+    /// R15 J15-1: the CLUB put this seat on the game — an admin's add records the admin as the
+    /// inviter, where the organiser's own add records the organiser. A guest seat is never asked.
+    /// </summary>
+    public static bool AddedByClub(Booking booking, BookingParticipant seat) =>
+        seat.Seat > 1 && seat.GuestName is null && seat.InvitedByUserId is { } by && by != Guid.Empty && by != booking.UserId;
+
     /// <summary>The newest <paramref name="action"/> row naming this seat and when it was written, or null when there is none.</summary>
     private static async Task<(SeatAct Act, DateTimeOffset At)?> RecordOfAsync(MainframeDbContext db, string action, BookingParticipant seat, CancellationToken ct)
     {

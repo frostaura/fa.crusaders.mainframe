@@ -71,6 +71,16 @@ public sealed record ShareMovement(
 
     /// <summary>R14 J14-8: with a cancellation, "club" or "member"; null when unrecorded.</summary>
     public string? CancelledBy { get; init; }
+
+    /// <summary>
+    /// R15 J15-5: on a share taken again after a late check-in (<see cref="AfterAttendance"/>), whose
+    /// check-in it was — "Olive Organiser's check-in has since come through". Null when it was the
+    /// reader's own ("Your check-in…") or the record names nobody ("The court's check-in…").
+    /// </summary>
+    public string? ScannerName { get; init; }
+
+    /// <summary>R15 J15-5: the reader's own check-in made the session attended.</summary>
+    public bool ScannedByReader { get; init; }
 }
 
 /// <summary>The organiser's acts (and a cancellation) a share mail words for itself — the wire's <c>share_cause</c> values (R14).</summary>
@@ -135,6 +145,9 @@ public sealed record ShareReturnWaitingNotice(
 /// </summary>
 public sealed record GameCancelledBy(bool ByClub, string? Reason, string? Cause);
 
+/// <summary>A game that is off, as the cancellation mail names it. R15 E15-1: <paramref name="SessionStarted"/> — nothing was refunded.</summary>
+public sealed record CancelledGame(string OrganiserName, string CourtName, string StartsAtLocal, bool SessionStarted = false);
+
 /// <summary>A change to a game the reader is in — they were taken off it, or their share moved.</summary>
 public sealed record PlayersChange(
     string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, int? NewShareMinutes, bool NeedsConsent,
@@ -142,6 +155,12 @@ public sealed record PlayersChange(
 {
     /// <summary>The club, not the organiser, took the reader off (review round 2, B-8).</summary>
     public bool ByClub { get; init; }
+
+    /// <summary>
+    /// R15 J15-9: the club recorded the reader's share as paid outside the app, so a new figure moves
+    /// nothing in the app — "Your share now: 20 minutes" alone read as minutes about to be taken.
+    /// </summary>
+    public bool SettledOutside { get; init; }
 }
 
 /// <summary>
@@ -242,8 +261,8 @@ public static partial class EmailTemplates
         var blocks = new List<EmailBlock>
         {
             new Paragraph(n.Accepted
-                ? $"The club has put you in the game {n.OrganiserName} booked for {n.CourtName} at {n.StartsAtLocal}."
-                : $"The club has added you to the game {n.OrganiserName} booked for {n.CourtName} at {n.StartsAtLocal}, and it is waiting for your answer."),
+                ? $"The club has put you in the game {n.OrganiserName} booked for {CourtOn(n.CourtName, n.StartsAtLocal)}."
+                : $"The club has added you to the game {n.OrganiserName} booked for {CourtOn(n.CourtName, n.StartsAtLocal)}, and it is waiting for your answer."),
             new Facts(
             [
                 new FactRow("Court", n.CourtName),
@@ -271,8 +290,8 @@ public static partial class EmailTemplates
             Blocks:
             [
                 new Paragraph(n.FromOrganiser
-                    ? $"{n.OrganiserName} would like to know if you are playing on {n.CourtName} at {n.StartsAtLocal}."
-                    : $"You have an open invite from {n.OrganiserName} for {n.CourtName} at {n.StartsAtLocal}."),
+                    ? $"{n.OrganiserName} would like to know if you are playing on {CourtOn(n.CourtName, n.StartsAtLocal)}."
+                    : $"You have an open invite from {n.OrganiserName} for {CourtOn(n.CourtName, n.StartsAtLocal)}."),
                 new Facts(
                 [
                     new FactRow("Your share", Min(n.ShareMinutes)),
@@ -292,8 +311,8 @@ public static partial class EmailTemplates
             Blocks:
             [
                 new Paragraph(n.ToOrganiser
-                    ? $"{n.OtherName} did not pay {Min(n.UnpaidMinutes)} of their share for {n.CourtName} at {n.StartsAtLocal} before it closed. Your booking already covered the court, so nothing else moves."
-                    : $"Your share for {n.CourtName} at {n.StartsAtLocal} closed before it was paid. {n.OtherName}'s booking covers it and nothing is owed."),
+                    ? $"{n.OtherName} did not pay {Min(n.UnpaidMinutes)} of their share for {CourtOn(n.CourtName, n.StartsAtLocal)} before it closed. Your booking already covered the court, so nothing else moves."
+                    : $"Your share for {CourtOn(n.CourtName, n.StartsAtLocal)} closed before it was paid. {n.OtherName}'s booking covers it and nothing is owed."),
                 new CallToAction("Open the booking", n.BookingUrl),
             ],
             WhyThis: WhyGame));
@@ -305,14 +324,16 @@ public static partial class EmailTemplates
     /// </summary>
     public static EmailMessage ShareReturnWaiting(ClubIdentity club, string to, ShareReturnWaitingNotice n) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: n.ToOrganiser ? $"{Min(n.AmountMinutes)} for {n.OtherName} is waiting — {n.CourtName}" : $"{Min(n.AmountMinutes)} is on its way back — {n.CourtName}",
+            Subject: n.ToOrganiser
+                ? $"{Min(n.AmountMinutes)} for {n.OtherName} {Is(n.AmountMinutes)} waiting — {n.CourtName}"
+                : $"{Min(n.AmountMinutes)} {Is(n.AmountMinutes)} on {(Is(n.AmountMinutes) == "is" ? "its" : "their")} way back — {n.CourtName}",
             Preheader: n.ToOrganiser ? "It goes back as soon as your balance covers it." : "It reaches you as soon as it can be sent.",
             Heading: "A share is on its way back",
             Blocks:
             [
                 new Paragraph(n.ToOrganiser
-                    ? $"{Min(n.AmountMinutes)} of {n.OtherName}'s share for {n.CourtName} at {n.StartsAtLocal} is due back to them. Your balance doesn't cover it right now, so it will go back automatically the next time it does."
-                    : $"{Min(n.AmountMinutes)} of your share for {n.CourtName} at {n.StartsAtLocal} is due back to you from {n.OtherName}. It will reach your balance automatically as soon as it can be sent."),
+                    ? $"{Min(n.AmountMinutes)} of {n.OtherName}'s share for {CourtOn(n.CourtName, n.StartsAtLocal)} {Is(n.AmountMinutes)} due back to them. Your balance doesn't cover it right now, so it will go back automatically the next time it does."
+                    : $"{Min(n.AmountMinutes)} of your share for {CourtOn(n.CourtName, n.StartsAtLocal)} {Is(n.AmountMinutes)} due back to you from {n.OtherName}. It will reach your balance automatically as soon as it can be sent."),
                 new CallToAction("Open the booking", n.BookingUrl),
             ],
             WhyThis: WhyGame));
@@ -324,16 +345,30 @@ public static partial class EmailTemplates
     /// </summary>
     public static EmailMessage PlayersBookingCancelled(
         ClubIdentity club, string to, string organiserName, string courtName, string startsAtLocal, GameCancelledBy? by = null) =>
+        PlayersBookingCancelled(club, to, new CancelledGame(organiserName, courtName, startsAtLocal), by);
+
+    /// <summary>
+    /// <see cref="PlayersBookingCancelled(ClubIdentity, string, string, string, string, GameCancelledBy?)"/>,
+    /// and R15 E15-1: when <see cref="CancelledGame.SessionStarted"/> — somebody had checked in, so the
+    /// club refunded nothing and every share paid STANDS — it says so; "comes back … separate receipt"
+    /// promised a refund that never came.
+    /// </summary>
+    public static EmailMessage PlayersBookingCancelled(ClubIdentity club, string to, CancelledGame game, GameCancelledBy? by = null) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"Game cancelled — {courtName}",
-            Preheader: $"{startsAtLocal}. Any share you paid comes back to you.",
+            Subject: $"Game cancelled — {game.CourtName}",
+            Preheader: game.SessionStarted
+                ? $"{game.StartsAtLocal}. {ShareStands}"
+                : $"{game.StartsAtLocal}. Any share you paid comes back to you.",
             Heading: by?.ByClub == true ? "The club cancelled this game" : "This game has been cancelled",
-            Blocks: CancelledBlocks(organiserName, courtName, startsAtLocal, by),
+            Blocks: CancelledBlocks(game.OrganiserName, CourtOn(game.CourtName, game.StartsAtLocal), by, game.SessionStarted),
             WhyThis: WhyGame));
 
-    private static List<EmailBlock> CancelledBlocks(string organiserName, string courtName, string startsAtLocal, GameCancelledBy? by)
+    /// <summary>R15 E15-1: what a partner of a started session that was cancelled is told of their share.</summary>
+    private const string ShareStands = "The session had started, so any share you paid stands.";
+
+    private static List<EmailBlock> CancelledBlocks(string organiserName, string where, GameCancelledBy? by, bool sessionStarted)
     {
-        var blocks = new List<EmailBlock> { new Paragraph(CancelledSentence(organiserName, courtName, startsAtLocal, by)) };
+        var blocks = new List<EmailBlock> { new Paragraph(CancelledSentence(organiserName, where, by)) };
         if (by?.ByClub == true && ShareRefundCauses.Because(by.Cause) is { } because)
         {
             blocks.Add(new Callout(CalloutTone.Info, $"Why: {because}."));
@@ -342,16 +377,19 @@ public static partial class EmailTemplates
         {
             blocks.Add(new Callout(CalloutTone.Info, $"Reason given by the club: {reason}"));
         }
-        blocks.Add(new Callout(CalloutTone.Info, "If you had paid a share, it comes back to your balance — you will get a separate receipt for it."));
+        blocks.Add(new Callout(CalloutTone.Info, sessionStarted
+            ? $"{ShareStands} The club refunded nothing for the court, so nothing moves back to your balance."
+            : "If you had paid a share, it comes back to your balance — you will get a separate receipt for it."));
         return blocks;
     }
 
-    private static string CancelledSentence(string organiserName, string courtName, string startsAtLocal, GameCancelledBy? by)
+    /// <param name="where">The court and its start, already said (<see cref="CourtOn"/>).</param>
+    private static string CancelledSentence(string organiserName, string where, GameCancelledBy? by)
     {
-        if (by is null) return $"The booking {organiserName} made for {courtName} at {startsAtLocal} has been cancelled.";
+        if (by is null) return $"The booking {organiserName} made for {where} has been cancelled.";
         return by.ByClub
-            ? $"The club has cancelled the booking {organiserName} made for {courtName} at {startsAtLocal}."
-            : $"{organiserName} has cancelled the booking for {courtName} at {startsAtLocal}.";
+            ? $"The club has cancelled the booking {organiserName} made for {where}."
+            : $"{organiserName} has cancelled the booking for {where}.";
     }
 
     /// <summary>The reader was taken off a game, or their share of it changed.</summary>
@@ -370,20 +408,30 @@ public static partial class EmailTemplates
             new Paragraph(ChangeSentence(c)),
         };
         if (!c.Removed && c.NewShareMinutes is { } share) blocks.Add(new Facts([new FactRow("Your share now", Min(share))]));
-        if (c.NeedsConsent) blocks.Add(new Callout(CalloutTone.Warning, "Your share went up. Nothing more is taken until you accept the new figure."));
+        if (!c.Removed && c.SettledOutside)
+        {
+            // R15 J15-9: the club settled this share by hand; a new figure moves nothing in the app.
+            blocks.Add(new Callout(CalloutTone.Info,
+                "The club has recorded your share as paid outside the app, so nothing is taken or returned in the app for this change."));
+        }
+        else if (c.NeedsConsent)
+        {
+            blocks.Add(new Callout(CalloutTone.Warning, "Your share went up. Nothing more is taken until you accept the new figure."));
+        }
         blocks.Add(new CallToAction("Open the booking", c.BookingUrl));
         return blocks;
     }
 
     private static string ChangeSentence(PlayersChange c)
     {
+        var where = CourtOn(c.CourtName, c.StartsAtLocal);
         if (c.Removed && c.ByClub)
         {
-            return $"The club has taken you off the booking {c.OrganiserName} made for {c.CourtName} at {c.StartsAtLocal}. Any share you paid comes back to you.";
+            return $"The club has taken you off the booking {c.OrganiserName} made for {where}. Any share you paid comes back to you.";
         }
         return c.Removed
-            ? $"{c.OrganiserName} has taken you off the booking for {c.CourtName} at {c.StartsAtLocal}. Any share you paid comes back to you."
-            : $"{c.OrganiserName} has changed how {c.CourtName} at {c.StartsAtLocal} is split.";
+            ? $"{c.OrganiserName} has taken you off the booking for {where}. Any share you paid comes back to you."
+            : $"{c.OrganiserName} has changed how {where} is split.";
     }
 
     private static string ShareSubject(ShareMovement m)
@@ -394,7 +442,7 @@ public static partial class EmailTemplates
         if (m.ByClub && m.Direction == ShareDirection.Paid) return $"The club collected your share — {m.CourtName}";
         if (m.ClubRemoved && m.Direction == ShareDirection.Refunded) return $"The club took you off the game — {m.CourtName}";
         if (m.ClubRemoved) return $"The club took {m.OtherName} off your game — {m.CourtName}";
-        if (ActSubject(m) is { } act) return act;
+        if (CauseSubject(m) is { } why) return why;
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"Share paid — {m.CourtName}";
@@ -417,6 +465,40 @@ public static partial class EmailTemplates
             ShareActs.BookingCancelled when m.CancelledBy == "member" => $"{m.OtherName} cancelled the game — {m.CourtName}",
             _ => null,
         };
+    }
+
+    /// <summary>A subject that says why the share moved — a withdrawal, an organiser's act, a cancellation (R14 / R15 E15-8); null otherwise.</summary>
+    private static string? CauseSubject(ShareMovement m) => WithdrewSubject(m) ?? ActSubject(m) ?? ReturnedSubject(m);
+
+    /// <summary>R15 E15-8: a withdrawal titled as one on both sides — the partner's read "Share refunded".</summary>
+    private static string? WithdrewSubject(ShareMovement m)
+    {
+        if (!m.Withdrew) return null;
+        return m.Direction switch
+        {
+            ShareDirection.Refunded => $"Your share came back: you withdrew — {m.CourtName}",
+            ShareDirection.Returned => $"Share returned to {m.OtherName}: they withdrew — {m.CourtName}",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// R15 E15-8: the organiser's side of an act that sent a share back, with its cause — "Share
+    /// returned to Sam" alone gave them none. Null for any other movement.
+    /// </summary>
+    private static string? ReturnedSubject(ShareMovement m)
+    {
+        if (m.Direction != ShareDirection.Returned) return null;
+        var why = m.Cause switch
+        {
+            ShareActs.OrganiserRemoved => "you took them off the game",
+            ShareActs.SplitChanged => "you lowered their share",
+            ShareActs.ClubSettled => "the club settled it outside the app",
+            ShareActs.BookingCancelled when m.CancelledBy == "club" => "the club cancelled the game",
+            ShareActs.BookingCancelled when m.CancelledBy == "member" => "you cancelled the game",
+            _ => null,
+        };
+        return why is null ? null : $"Share returned to {m.OtherName}: {why} — {m.CourtName}";
     }
 
     /// <summary>A club refund's subject (E10-7), or a no-show's that kept part of the share (E11-2); null otherwise.</summary>
@@ -544,12 +626,17 @@ public static partial class EmailTemplates
     }
 
     /// <summary>Review round 9, E9-2: the refund was reversed because the session was attended, so the share follows the court again.</summary>
+    /// <remarks>R15 J15-5: names whose check-in it was; J15-11: the figure's verb agrees with it.</remarks>
     private static string AttendedSentence(ShareMovement m)
     {
+        var checkIn = m.ScannedByReader ? "your check-in"
+            : string.IsNullOrWhiteSpace(m.ScannerName) ? "the court's check-in" : $"{m.ScannerName.Trim()}'s check-in";
         return m.Direction == ShareDirection.Paid
-            ? $"Your share came back to you when the club refunded the booking, but the court's check-in has since come through — the session was attended, so {Min(m.AmountMinutes)} was taken from your balance again and paid to {m.OtherName}."
-            : $"The court's check-in has since come through and the session was attended, so {m.OtherName}'s share of {Min(m.AmountMinutes)} was taken again and paid to you.";
+            ? $"Your share came back to you when the club refunded the booking, but {checkIn} has since come through — the session was attended, so {Min(m.AmountMinutes)} {Was(m.AmountMinutes)} taken from your balance again and paid to {m.OtherName}."
+            : $"{Capital(checkIn)} has since come through and the session was attended, so {m.OtherName}'s share of {Min(m.AmountMinutes)} was taken again and paid to you.";
     }
+
+    private static string Capital(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     /// <summary>B8: a share the CLUB collected — "You paid your share…" told the partner they had done something they had not.</summary>
     private static string ClubShareSentence(ShareMovement m)

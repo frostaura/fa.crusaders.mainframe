@@ -113,7 +113,8 @@ public sealed class R13PlayersWordsHttpTests(PostgresFixture pg) : IClassFixture
         await DeliverAsync(g);
         var oliveMail = Assert.Single(MailTo(g, "olive.organiser"), m => m.Subject.Contains("Share returned", StringComparison.Ordinal));
         Assert.Contains("Sam Partner withdrew from the game", Flat(oliveMail.PlainBody), StringComparison.Ordinal);
-        var samMail = Assert.Single(MailTo(g, "sam.partner"), m => m.Subject.Contains("Share refunded", StringComparison.Ordinal));
+        // R15 E15-8: titled as the withdrawal it was ("Share refunded" said nothing of why).
+        var samMail = Assert.Single(MailTo(g, "sam.partner"), m => m.Subject.Contains("Your share came back: you withdrew", StringComparison.Ordinal));
         Assert.Contains("You withdrew from the game", Flat(samMail.PlainBody), StringComparison.Ordinal);
         Assert.Contains($"/bookings/{g.BookingId}?seat={seat}", samMail.PlainBody, StringComparison.Ordinal);
     }

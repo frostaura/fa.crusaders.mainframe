@@ -152,6 +152,9 @@ public static partial class AdminMemberTraceAssembly
 
         /// <summary>The withdrawn seats the share rows name, by participant id — who withdrew, and when (R13 E13-4).</summary>
         public Dictionary<Guid, Withdrawal> Withdrawals { get; init; } = [];
+
+        /// <summary>R15 E15-3 / J15-4: every share row's partner, organiser, direction and cause, by ledger id.</summary>
+        public Dictionary<Guid, ShareRowWhy> ShareWhys { get; init; } = [];
     }
 
     public static async Task<TraceNight> BuildAsync(
@@ -215,11 +218,13 @@ public static partial class AdminMemberTraceAssembly
             .ToListAsync(ct);
         var bookingCourts = bookingRows.ToDictionary(b => b.Id, b => b.CourtId);
         var withdrawals = await WithdrawalsAsync(db, ledger, ct);
+        var shareWhys = await ShareRowCauses.ForAsync(db, ledger, ct);
 
         var people = audit.SelectMany(a => new Guid?[] { a.ActorUserId, a.SubjectUserId, CodeHolderOf(a), OrganiserOf(a) })
             .Concat(ledger.SelectMany(l => new Guid?[] { l.ActorUserId, l.UserId }))
             .Concat(bookingRows.Select(b => b.UserId))
-            .Concat(withdrawals.Values.Select(w => (Guid?)w.UserId));
+            .Concat(withdrawals.Values.Select(w => (Guid?)w.UserId))
+            .Concat(shareWhys.Values.SelectMany(w => new Guid?[] { w.PartnerUserId, w.OrganiserUserId }));
         var names = await PersonNames.ForAsync(db, people, ct);
         var admins = await AdminsAsync(
             db, audit.Select(a => a.ActorUserId).Concat(ledger.Select(l => l.ActorUserId)).Concat(withdrawals.Values.Select(w => w.UserId)), ct);
@@ -236,6 +241,7 @@ public static partial class AdminMemberTraceAssembly
             DeviceCourts = boards.Courts,
             BookingOwners = bookingRows.ToDictionary(b => b.Id, b => b.UserId),
             Withdrawals = withdrawals,
+            ShareWhys = shareWhys,
         };
     }
 
@@ -301,18 +307,60 @@ public static partial class AdminMemberTraceAssembly
     /// R13 E13-4: plus a partner's withdrawal from THIS member's game — that row is the partner's
     /// (actor and subject), and names the organiser only in its details.
     /// </para>
-    private static Task<List<AuditLog>> AuditRowsAsync(
+    /// <para>
+    /// R15 E15-3 / J15-4: plus the club's other acts on THIS member's partners (an admin's removal,
+    /// settle-outside, collect, add — <see cref="TraceKinds.OrganisersViewActions"/>), and the club's
+    /// settlement of a game this member paid INTO as a partner — its no-show and its reversal
+    /// (<see cref="PartnerRowsAsync"/>).
+    /// </para>
+    private static async Task<List<AuditLog>> AuditRowsAsync(
         MainframeDbContext db, AdminMemberTraceQuery q, CancellationToken ct)
     {
         var organiser = JsonSerializer.Serialize(new { organiser_user_id = q.UserId });
-        return db.AuditLogs.AsNoTracking()
+        var organisersView = TraceKinds.OrganisersViewActions;
+        var rows = await db.AuditLogs.AsNoTracking()
             .Where(a => a.SubjectUserId == q.UserId || a.ActorUserId == q.UserId
-                        || (a.Action == TraceKinds.PartnerWithdrewAction && a.DetailsJson != null
+                        || (organisersView.Contains(a.Action) && a.DetailsJson != null
                             && EF.Functions.JsonContains(a.DetailsJson, organiser)))
             .Where(a => a.CreatedAt >= q.From && a.CreatedAt < q.To)
             .OrderBy(a => a.CreatedAt)
             .Take(q.StrandRows)
             .ToListAsync(ct);
+        var partner = await PartnerRowsAsync(db, q, ct);
+        if (partner.Count == 0) return rows;
+        var have = rows.Select(r => r.Id).ToHashSet();
+        return [.. rows.Concat(partner.Where(r => have.Add(r.Id))).OrderBy(r => r.CreatedAt).ThenBy(r => r.Id)];
+    }
+
+    /// <summary>How far before the window a game may have started and still be settled inside it — a late check-in uploads hours after.</summary>
+    private static readonly TimeSpan SettledLate = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// R15 J15-4: the club's no-show sweep and its reversal on a booking this member holds a PARTNER
+    /// seat on — the rows are about the booker, so the partner's Night had their share moving with
+    /// nothing saying why. Read by the bookers and the actions, narrowed to those bookings in memory.
+    /// </summary>
+    private static async Task<List<AuditLog>> PartnerRowsAsync(MainframeDbContext db, AdminMemberTraceQuery q, CancellationToken ct)
+    {
+        var floor = q.From - SettledLate;
+        var games = await db.BookingParticipants.AsNoTracking()
+            .Where(p => p.UserId == q.UserId && p.Seat > 1)
+            .Join(db.Bookings.AsNoTracking(), p => p.BookingId, b => b.Id, (p, b) => b)
+            .Where(b => b.StartsAt < q.To && b.EndsAt >= floor && b.UserId != null)
+            .Select(b => new { b.Id, Booker = b.UserId!.Value })
+            .Distinct()
+            .ToListAsync(ct);
+        if (games.Count == 0) return [];
+
+        var bookers = games.Select(g => g.Booker).Distinct().ToList();
+        var ids = games.Select(g => g.Id).ToHashSet();
+        var actions = TraceKinds.PartnersViewActions;
+        var rows = await db.AuditLogs.AsNoTracking()
+            .Where(a => a.SubjectUserId != null && bookers.Contains(a.SubjectUserId!.Value) && actions.Contains(a.Action))
+            .Where(a => a.CreatedAt >= q.From && a.CreatedAt < q.To)
+            .Take(q.StrandRows)
+            .ToListAsync(ct);
+        return [.. rows.Where(r => GuidOf(DoorActivityView.Details(r.DetailsJson), "booking_id") is { } b && ids.Contains(b))];
     }
 
     private static async Task<List<LedgerEntry>> LedgerRowsAsync(
@@ -420,7 +468,8 @@ public static partial class AdminMemberTraceAssembly
             // in the club's door log in the same change.
             if (DoorTrail.IsScan(row.Action) && DoorTrail.AtANonDoorBoard(details, s.NotADoor)) continue;
 
-            var kind = TraceKinds.OfAudit(row.Action, actorIsSubject: row.ActorUserId == q.UserId);
+            var view = ViewOf(row, q.UserId);
+            var kind = TraceKinds.OfAudit(row.Action, actorIsSubject: row.ActorUserId == q.UserId, view);
             if (kind is null) continue;
 
             // E7-1: the server's own lights row for a scan a board uploaded. The receipt already
@@ -455,10 +504,12 @@ public static partial class AdminMemberTraceAssembly
                     CodeUsed = Text(details, "reason") == MemberCodeIdentity.CodeUsed,
                     Attempt = Text(details, "attempt"),
                     RefusedOffline = Text(details, "outcome") == DoorTrail.RefusedOffline,
-                    OrganiserName = PersonNames.Of(OrganiserOf(row), s.Names),
+                    // R15 J15-4: a partner's view of the booker's row names the booker as the game's organiser.
+                    OrganiserName = PersonNames.Of(view == TraceView.Partner ? row.SubjectUserId : OrganiserOf(row), s.Names),
                     CausedByName = CauseOf(row.Action, details, s),
-                    // R14 E14-2: a split change says what the partner's share became.
-                    AmountMinutes = row.Action == TraceKinds.SplitChangedAction ? IntOf(details, "share_minutes") : null,
+                    // R14 E14-2: a split change says what the partner's share became; R15 E15-3: a collect what it took.
+                    AmountMinutes = AuditAmountOf(row.Action, details),
+                    Placed = Flag(details, "accepted"),
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -478,6 +529,27 @@ public static partial class AdminMemberTraceAssembly
                 CodeHolderName = CodeHolderOf(row) is { } holder ? PersonNames.Of(holder, s.Names) : null,
             };
         }
+    }
+
+    /// <summary>
+    /// R15 E15-3 / J15-4: from where this member sees the row — their own (actor or subject), the
+    /// organiser of the game an admin acted on, or a partner on the booking the club settled.
+    /// </summary>
+    private static TraceView ViewOf(AuditLog row, Guid traced)
+    {
+        if (row.ActorUserId == traced || row.SubjectUserId == traced) return TraceView.Own;
+        return OrganiserOf(row) == traced ? TraceView.Organiser : TraceView.Partner;
+    }
+
+    /// <summary>The minutes an audit row's sentence names: a split change's new share (R14), a collect's figure (R15).</summary>
+    private static int? AuditAmountOf(string action, JsonElement? details)
+    {
+        return action switch
+        {
+            TraceKinds.SplitChangedAction => IntOf(details, "share_minutes"),
+            TraceKinds.ShareCollectedAction => IntOf(details, "collected_minutes"),
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -515,6 +587,7 @@ public static partial class AdminMemberTraceAssembly
             var actorKind = ActorKindOf(actorId, hasDevice: false, s.Admins);
             var actorName = PersonNames.Of(actorId, s.Names);
             var court = CourtOfBooking(row.RelatedBookingId, s);
+            var share = s.ShareWhys.GetValueOrDefault(row.Id);
 
             yield return new TraceEventRow(
                 At: row.CreatedAt,
@@ -534,6 +607,11 @@ public static partial class AdminMemberTraceAssembly
                     // E8-5: a desk top-up the club took no rand for was given, not sold.
                     NoCharge = GivenMinutes.IsGiven(row.Type, row.ZarPaid),
                     WithdrewName = withdrew is { } w ? PersonNames.Of(w, s.Names) ?? "their partner" : null,
+                    // R15 E15-3 / J15-4: which way the share went, with whom, and why — off the record.
+                    ShareCause = share?.Cause,
+                    PartnerName = share is null ? null : PersonNames.Of(share.PartnerUserId, s.Names),
+                    OrganiserSideName = share is null ? null : PersonNames.Of(share.OrganiserUserId, s.Names),
+                    Collection = share?.Collection ?? false,
                 }),
                 ActorUserId: actorId,
                 ActorKind: actorKind,

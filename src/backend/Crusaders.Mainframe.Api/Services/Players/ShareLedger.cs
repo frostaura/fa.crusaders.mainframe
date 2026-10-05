@@ -20,6 +20,12 @@ public sealed record ReconcileOptions(Guid ActorUserId, Guid? OverdraftSeatId = 
     /// are; it changes nothing else (the ledger rows keep <see cref="ActorUserId"/>).
     /// </summary>
     public Guid? OwnActionBy { get; init; }
+
+    /// <summary>
+    /// R15 E15-8: the reason the desk recorded for an act whose return this reconcile posts — the
+    /// settle-outside's — so both receipts carry it as a collect's and a removal's already do.
+    /// </summary>
+    public string? ClubReason { get; init; }
 }
 
 /// <summary>The club removed <paramref name="SeatId"/>'s member, for <paramref name="Reason"/>.</summary>
@@ -548,9 +554,11 @@ public sealed class ShareLedger
         bool Own(Guid reader) => who.ActorUserId == reader || who.OwnActionBy == reader;
         var settings = await _settings.GetAsync(ct);
         var game = await GameText.ForAsync(_db, booking, settings, ct);
-        var names = await PersonNames.ForAsync(_db, [move.PartnerUserId, move.OrganiserUserId], ct);
+        var f = await ReceiptFactsAsync(booking, move, club, ct);
+        var names = await PersonNames.ForAsync(_db, [move.PartnerUserId, move.OrganiserUserId, f.Scanner], ct);
         var partnerName = PersonNames.Of(move.PartnerUserId, names) ?? "Your partner";
         var organiserName = PersonNames.Of(move.OrganiserUserId, names) ?? "The organiser";
+        var scannerName = PersonNames.Of(f.Scanner, names);
         var amount = Math.Abs(move.Delta);
         var key = $"share:{move.ParticipantId:N}:{move.Seq}";
 
@@ -562,11 +570,11 @@ public sealed class ShareLedger
         var heldUntil = organiserSide == ShareDirection.Received
             ? GameText.Local(PlayerSettings.ShareDeadline(booking, settings), settings)
             : null;
-        var f = await ReceiptFactsAsync(booking, move, club, ct);
         (club, var seat, var refund, var kept, var cause, var cancel) = (f.Club, f.Seat, f.Refund, f.Kept, f.Cause, f.Cancel);
         var byClub = club?.Collected == true;
         var removed = club is { Collected: false };
-        var reason = ClubReasonOf(club);
+        // R15 E15-8: a settle-outside's return carries the desk's reason, as a collect's and a removal's do.
+        var reason = ClubReasonOf(club) ?? (cause == WalletShareCauses.ClubSettled ? ClubReasonOf(new ClubReceipt(false, null, who.ClubReason)) : null);
         var attended = f.Attended;
         var actor = ActorOf(new ActorFacts(who, move, cause, f.Scanner, cancel, seat));
         var why = new HeadlineWhy(byClub, attended, refund, kept)
@@ -578,14 +586,20 @@ public sealed class ShareLedger
         };
         var told = new ShareTold(PayloadCause(cause), cancel?.By);
 
+        // R15 J15-5: a share taken again names whose check-in it was, to each reader.
+        var partnerScan = new ScanWords(attended ? f.Scanner : null, scannerName, move.PartnerUserId);
+        var organiserScan = new ScanWords(attended ? f.Scanner : null, scannerName, move.OrganiserUserId);
+
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
                 ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason,
                 AfterAttendance: attended, ClubRefund: refund, KeptMinutes: kept, Withdrew: seat.Withdrew, OffGameSeatId: seat.OffGame)
         {
             Cause = told.Cause,
             CancelledBy = told.CancelledBy,
+            ScannerName = partnerScan.OtherName,
+            ScannedByReader = partnerScan.Mine,
         },
-            move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, why), settings,
+            move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, why with { Scan = partnerScan }), settings,
             Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended,
@@ -593,14 +607,34 @@ public sealed class ShareLedger
         {
             Cause = told.Cause,
             CancelledBy = told.CancelledBy,
+            ScannerName = organiserScan.OtherName,
+            ScannedByReader = organiserScan.Mine,
         },
-            move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, why), settings,
+            move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, why with { Scan = organiserScan }), settings,
             Own(move.OrganiserUserId));
         return new ShareWhy(cause, kept, f.Scanner)
         {
             ActorUserId = actor,
             ActorIsPlayer = IsPlayer(actor, booking, move),
         };
+    }
+
+    /// <summary>
+    /// R15 J15-5: whose late check-in made a session attended, as one reader is told it — their own
+    /// (<see cref="Mine"/>), somebody else by name (<see cref="OtherName"/>), or nobody on the record.
+    /// </summary>
+    private sealed record ScanWords(Guid? Scanner, string? Name, Guid Reader)
+    {
+        public bool Mine => Scanner == Reader;
+
+        public string? OtherName => Scanner is { } s && s != Reader ? Name : null;
+
+        /// <summary>"you checked in" / "Olive Organiser checked in" / null.</summary>
+        public string? Clause()
+        {
+            if (Mine) return "you checked in";
+            return OtherName is { Length: > 0 } name ? $"{name} checked in" : null;
+        }
     }
 
     /// <summary>R14 E14-2: <paramref name="actor"/> is on the game — its organiser or this pair's partner — so members may be told their name.</summary>
@@ -775,7 +809,7 @@ public sealed class ShareLedger
     /// <summary>The receipt's headline: a club refund's words when there is one (E10-7), else <see cref="ShareHeadline"/>.</summary>
     private static string HeadlineFor(ShareDirection d, string other, int amount, HeadlineWhy why) =>
         NoShowHeadline(d, other, amount, why) ?? RefundHeadline(d, other, amount, why.Refund) ?? WithdrewHeadline(d, other, amount, why)
-        ?? OrganiserActHeadline(d, other, amount, why) ?? ShareHeadline(d, other, amount, why.ByClub, why.Attended);
+        ?? OrganiserActHeadline(d, other, amount, why) ?? ShareHeadline(d, other, amount, why);
 
     /// <summary>
     /// R14 X14-2 / J14-8: a return the organiser's act or a cancellation caused, said as that, with the
@@ -838,6 +872,9 @@ public sealed class ShareLedger
 
         /// <summary>R14 J14-8: on a cancellation's return, whether the club cancelled; null when the record does not say.</summary>
         public bool? CancelledByClub { get; init; }
+
+        /// <summary>R15 J15-5: whose late check-in made it attended, as this reader is told it.</summary>
+        public ScanWords? Scan { get; init; }
     }
 
     /// <summary>
@@ -864,20 +901,33 @@ public sealed class ShareLedger
             : $"{minutes} went back to {other} — the club refunded the session: {because}";
     }
 
-    private static string ShareHeadline(ShareDirection d, string other, int amount, bool byClub = false, bool attended = false)
+    /// <summary>
+    /// The plain receipt line — R15 J15-5: every one names the court and the day ("You paid Owen 7
+    /// minutes" said neither), and a share taken again names whose check-in it was.
+    /// </summary>
+    private static string ShareHeadline(ShareDirection d, string other, int amount, HeadlineWhy why)
     {
         var minutes = MoneyFormat.Minutes(amount);
-        if (attended && d == ShareDirection.Paid) return $"{minutes} taken again for your share — the session was attended";
-        if (attended && d == ShareDirection.Received) return $"{other}'s share of {minutes} came back to you — the session was attended";
-        if (byClub && d == ShareDirection.Paid) return $"The club collected {minutes} for your share";
-        if (byClub && d == ShareDirection.Received) return $"The club collected {other}'s share: {minutes}";
+        var where = why.Game is { } game ? $"{game.CourtName}, {game.StartsLocal}" : "the game";
+        if (why.Attended) return AttendedHeadline(d, other, minutes, where, why.Scan?.Clause());
+        if (why.ByClub && d == ShareDirection.Paid) return $"The club collected {minutes} for your share of {where}";
+        if (why.ByClub && d == ShareDirection.Received) return $"The club collected {other}'s share of {where}: {minutes}";
         switch (d)
         {
-            case ShareDirection.Paid: return $"You paid {other} {minutes}";
-            case ShareDirection.Received: return $"{other} paid you {minutes}";
-            case ShareDirection.Refunded: return $"{minutes} of your share came back";
-            default: return $"{minutes} went back to {other}";
+            case ShareDirection.Paid: return $"You paid {other} {minutes} for {where}";
+            case ShareDirection.Received: return $"{other} paid you {minutes} for {where}";
+            case ShareDirection.Refunded: return $"{minutes} of your share of {where} came back";
+            default: return $"{minutes} went back to {other} for {where}";
         }
+    }
+
+    /// <summary>R9 E9-2 / R15 J15-5: a share taken again because a late check-in showed the session was attended.</summary>
+    private static string AttendedHeadline(ShareDirection d, string other, string minutes, string where, string? scanned)
+    {
+        var why = scanned is null ? "the session was attended" : $"{scanned}, so the session was attended";
+        return d == ShareDirection.Paid
+            ? $"{minutes} taken again for your share of {where} — {why}"
+            : $"{other}'s share of {minutes} came back to you for {where} — {why}";
     }
 
     private static bool IsUniqueViolation(DbUpdateException ex)

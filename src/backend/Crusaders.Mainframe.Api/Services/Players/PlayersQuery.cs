@@ -455,6 +455,8 @@ public sealed partial class PlayersQuery
             // R14 J14-9: what the seat last said yes to. 0 with needs_consent = the club accepted the seat
             // without asking — the page says "the club has asked you for …", never "your share went up".
             consented_minutes = seat.ConsentedMinutes,
+            // R15 J15-1: the club, not the organiser, put this member on the game — "Owen invited you" was false.
+            added_by_club = SeatFacts.AddedByClub(booking, seat),
             balance_minutes = balance,
             spendable_minutes = spendable,
             held_minutes = held.Held,
