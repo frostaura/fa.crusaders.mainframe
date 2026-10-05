@@ -6,8 +6,9 @@ import { BOOKING, ME, PEOPLE, SAM, detailFixture, memberShellRoutes } from "./pl
  * Review round 16, lane FE16m — measured in Chromium.
  *
  * <ul>
- *   <li><b>X16-5</b> — the wallet's share-group toggle was 240×40 at 390: under the 44px target
- *   floor. Every share toggle is at least 44px tall, at every width.</li>
+ *   <li><b>X16-5</b> — the wallet's share-group toggle measured 240×40 at 390 (20px tall at 1280) —
+ *   its text box. Its target is its row (stretched over it since R4 V4-10, deliberately with no
+ *   floor of its own so its words sit on the row's baseline): measured where a tap lands.</li>
  * </ul>
  */
 
@@ -48,8 +49,23 @@ for (const [width, root] of [[320, 16], [390, 16], [390, 32], [1280, 16]] as con
     await large(page, root);
     const toggle = page.locator("[data-share-toggle]").first();
     await expect(toggle).toBeVisible();
-    const box = (await toggle.boundingBox())!;
-    expect(box.height, "toggle height").toBeGreaterThanOrEqual(44);
-    expect(box.width, "toggle width").toBeGreaterThanOrEqual(44);
+    // The disclosure is stretched over its whole row (`after:absolute after:inset-0`, R4 V4-10), so
+    // its TARGET is where a tap lands on it, not the button's text box. Measured as a finger finds
+    // it: down a line through the row's middle, the longest run of points that hit the toggle.
+    await toggle.scrollIntoViewIfNeeded();
+    const m = await toggle.evaluate((button) => {
+      const row = button.closest("tr")!.getBoundingClientRect();
+      const x = row.left + row.width / 2;
+      let run = 0;
+      let best = 0;
+      for (let y = Math.max(0, row.top); y < Math.min(window.innerHeight, row.bottom); y += 1) {
+        const el = document.elementFromPoint(x, y);
+        run = el !== null && (el === button || button.contains(el)) ? run + 1 : 0;
+        best = Math.max(best, run);
+      }
+      return { row: row.height, text: button.getBoundingClientRect().height, best };
+    });
+    console.log(`X16-5 ${width}/${root}: row ${m.row.toFixed(0)}, text box ${m.text.toFixed(0)}, tap run ${m.best}`);
+    expect(m.best, "a 44px run of the row taps the toggle").toBeGreaterThanOrEqual(44);
   });
 }
