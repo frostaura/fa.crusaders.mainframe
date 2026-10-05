@@ -135,7 +135,7 @@ function Fingerprints({ enrolments, onRemoved }: { enrolments: FingerprintEnrolm
     );
   }
   return (
-    <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface">
+    <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface [&_:focus-visible]:-outline-offset-2">
       {enrolments.map((e) => (
         <li key={e.template_id} className="flex items-center gap-3 px-4 py-3">
           <Fingerprint size={20} aria-hidden="true" className="shrink-0 text-accent-strong" />

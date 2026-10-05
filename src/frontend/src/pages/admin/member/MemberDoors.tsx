@@ -122,11 +122,15 @@ function DoorPagesView({ pages }: { pages: Pages }) {
           {[clubRangeInWords(first.range, first.timezone), COPY.total(pages.items.length, first.total)].filter(Boolean).join(" ")}
         </p>
       ) : null}
-      <ol data-member-doors="" className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface">
-        {pages.items.map((row, i) => (
-          <DoorLine key={`${row.at}-${i}`} row={row} now={now} timezone={first?.timezone} />
-        ))}
-      </ol>
+      {/* R15 L15-3: the time beside the scan where the LIST's box has room (rem, so 200 % text
+          counts), its column as wide as the widest time on the page (auto, rows on a subgrid). */}
+      <div className="[container-type:inline-size]">
+        <ol data-member-doors="" className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface [&_:focus-visible]:-outline-offset-2 [@container(min-width:30rem)]:grid [@container(min-width:30rem)]:grid-cols-[auto_minmax(0,1fr)_auto]">
+          {pages.items.map((row, i) => (
+            <DoorLine key={`${row.at}-${i}`} row={row} now={now} timezone={first?.timezone} />
+          ))}
+        </ol>
+      </div>
       {pages.more.error ? <Alert tone="danger">{COPY.loadOlderFailed}</Alert> : null}
       {pages.cursor ? (
         <div className="flex justify-center">
@@ -160,16 +164,16 @@ function DoorLine({ row, now, timezone }: { row: MemberDoorRow; now: number; tim
   const method = doorMethod(row.method);
   return (
     // tabIndex −1: where "Load older" hands focus when its last page takes the button away (X12-2).
-    <li tabIndex={-1} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1 px-4 py-3 sm:grid-cols-[11rem_minmax(0,1fr)_auto]">
+    <li tabIndex={-1} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1 px-4 py-3 [@container(min-width:30rem)]:col-span-3 [@container(min-width:30rem)]:grid-cols-subgrid">
       <time
         dateTime={row.at}
         title={row.time_uncertain ? COPY.approximate : undefined}
-        className="text-sm font-medium tabular-nums text-text-secondary sm:pt-0.5"
+        className="text-sm font-medium tabular-nums text-text-secondary [@container(min-width:30rem)]:pt-0.5"
       >
         {`${row.time_uncertain ? "≈" : ""}${clubRowTime(row.at, now, timezone)}`}
         {row.time_uncertain ? <span className="sr-only">{` — ${COPY.approximate}`}</span> : null}
       </time>
-      <div className="col-span-2 row-start-2 flex min-w-0 flex-col gap-0.5 sm:col-span-1 sm:col-start-2 sm:row-start-1">
+      <div className="col-span-2 row-start-2 flex min-w-0 flex-col gap-0.5 [@container(min-width:30rem)]:col-span-1 [@container(min-width:30rem)]:col-start-2 [@container(min-width:30rem)]:row-start-1">
         <p className="break-words font-semibold text-text-primary">{doorName(row)}</p>
         <p className="break-words text-sm text-text-secondary">{row.reason_text}</p>
         {row.offline || method ? (
@@ -184,7 +188,7 @@ function DoorLine({ row, now, timezone }: { row: MemberDoorRow; now: number; tim
           </p>
         ) : null}
       </div>
-      <Badge tone={released ? "success" : "danger"} className={cn("col-start-2 row-start-1 justify-self-end sm:col-start-3")}>
+      <Badge tone={released ? "success" : "danger"} className={cn("col-start-2 row-start-1 justify-self-end [@container(min-width:30rem)]:col-start-3")}>
         {released ? COPY.released : COPY.refused}
       </Badge>
     </li>

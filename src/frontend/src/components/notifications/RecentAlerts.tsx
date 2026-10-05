@@ -89,7 +89,7 @@ export function RecentAlerts({ feed, shown }: {
       <ol
         aria-label={COPY.listLabel}
         data-recent-alerts=""
-        className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs"
+        className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs [&_:focus-visible]:-outline-offset-2"
       >
         {items.map((notice, index) => (
           <AlertRow key={notice.id} notice={notice} now={now} rowRef={index === shown ? firstRevealed : undefined} />

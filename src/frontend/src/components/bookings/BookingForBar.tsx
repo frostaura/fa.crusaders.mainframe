@@ -39,7 +39,8 @@ export function BookingForBar({ booking }: { booking: BookingFor }) {
       className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-accent-strong/40 bg-accent-soft p-3 sm:p-4"
     >
       <UserCircle size={24} aria-hidden="true" className="shrink-0 text-accent-strong" />
-      <div className="grid min-w-0 flex-[1_1_14rem] gap-0.5 text-sm">
+      {/* R15 L15-5: a shrinkable track — an implicit `auto` one took the w-64 skeleton's 512px at 200 %. */}
+      <div className="grid min-w-0 flex-[1_1_14rem] grid-cols-[minmax(0,1fr)] gap-0.5 text-sm">
         {member ? <MemberFacts member={member} /> : (
           <>
             <span className="sr-only" role="status">{BOOKING_FOR.reading}</span>

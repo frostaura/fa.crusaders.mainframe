@@ -37,12 +37,14 @@ const TONES: Record<AlertTone, string> = {
 
 /**
  * The mark hangs in the left gutter, level with the first line; under a 14rem container (large
- * text, a narrow box) it floats at the start of the first line instead and the lines under it take
- * the whole width (R8 L8-11: a 72px gutter down every line of a 256px callout at 320 / 200 %).
+ * text, a narrow box) it stands on a line of its own above the words, which take the whole width
+ * (R8 L8-11: a 72px gutter down every line of a 256px callout at 320 / 200 %). R15 L15-4: it used
+ * to FLOAT into the first line there, and a long first word beside it had no room left —
+ * "Bartholome/w" split across the float.
  */
 const ICON_PLACE = [
   "absolute left-3 top-3",
-  "[@container(max-width:14rem)]:static [@container(max-width:14rem)]:float-left [@container(max-width:14rem)]:mr-2 [@container(max-width:14rem)]:mt-0.5",
+  "[@container(max-width:14rem)]:static [@container(max-width:14rem)]:mb-1 [@container(max-width:14rem)]:block",
 ].join(" ");
 
 /** Tone → mark. The shape differs as well as the colour, so the tone survives forced colours. */
@@ -144,9 +146,8 @@ export function Alert({ tone = "danger", live, className, announceKey, children,
         // (a flex row would also make the text an anonymous item that cannot shrink).
         // R8 L8-11: the hanging gutter (icon + insets, in rem so it grows with the icon) steps
         // down to the plain inset when the text is large for the box around it — a rem query on
-        // the nearest container (every page is one) — and the icon then floats in the first line.
+        // the nearest container (every page is one) — and the icon then takes a line of its own.
         "relative break-words rounded-lg border-l-4 py-2.5 pl-9 pr-3 text-sm [@container(max-width:14rem)]:pl-3",
-        "[@container(max-width:14rem)]:flow-root",
         TONES[tone],
         className,
       )}

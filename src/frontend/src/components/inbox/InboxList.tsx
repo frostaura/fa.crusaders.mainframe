@@ -59,7 +59,7 @@ export function InboxList({ feed, listRef, pick }: { feed: InboxFeed; listRef?: 
           tabIndex={-1}
           aria-label={COPY.listLabel}
           data-inbox-list=""
-          className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none"
+          className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none [&_:focus-visible]:-outline-offset-2"
         >
           {feed.items.map((n) => <InboxRow key={n.id} notice={n} now={now} feed={feed} pick={pick} />)}
         </ol>

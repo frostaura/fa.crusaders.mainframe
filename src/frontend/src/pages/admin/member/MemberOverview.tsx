@@ -11,6 +11,7 @@ import type { MemberDetail } from "@/lib/memberDetailApi";
 import { MEMBER_COPY, OVERVIEW_COPY as COPY, accountStatusWord, countOf, withPlayersLine } from "@/lib/memberDetailCopy";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { EmailWithBreaks } from "@/components/members/EmailWithBreaks";
 import { BookingLine, StatTile } from "./parts";
 import { zoneNow } from "./memberTime";
 import { useMemberDetail } from "./useMemberDetail";
@@ -83,9 +84,15 @@ function PeopleOn({ state }: { state: OthersState | undefined }) {
   return <>{withPlayersLine(state)}</>;
 }
 
+/**
+ * R15 L15-3 — a term beside its value only where the RECORD's box has room (a container query in
+ * rem, so 200 % text counts), the term column as wide as the longest term (`auto`, every row on
+ * the list's own subgrid). It was `sm:` and a fixed 12rem: beside the members list at 200 % the
+ * 384px term column left the address a sliver, and a short term sat in a column built for none.
+ */
 function Fact({ term, children, tone }: { term: string; children: ReactNode; tone?: "warning" }) {
   return (
-    <div className="flex flex-col gap-0.5 border-b border-border py-3 last:border-0 sm:grid sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-4">
+    <div className="flex flex-col gap-0.5 border-b border-border py-3 last:border-0 [@container(min-width:30rem)]:col-span-2 [@container(min-width:30rem)]:grid [@container(min-width:30rem)]:grid-cols-subgrid">
       <dt className="text-sm text-text-secondary">{term}</dt>
       <dd className={cn("min-w-0 break-words text-sm font-medium text-text-primary", tone === "warning" && "text-warning-strong")}>
         {children}
@@ -98,30 +105,32 @@ function AccountFacts({ detail }: { detail: MemberDetail }) {
   const zone = zoneNow();
   const applicant = detail.status === "PendingApproval" || detail.status === "Rejected";
   return (
-    <dl className="rounded-xl border border-border bg-bg-surface px-4 sm:px-6">
-      <Fact term={COPY.email}>{detail.email}</Fact>
-      <Fact term={COPY.verified} tone={detail.email_verified ? undefined : "warning"}>
-        {detail.email_verified ? COPY.verifiedYes : COPY.unverified}
-      </Fact>
-      {detail.membership_number ? <Fact term={COPY.membershipNumber}>{detail.membership_number}</Fact> : null}
-      {/* An applicant was never a member (F3-12): "Member since" on a pending or turned-down
-          page claimed a membership the club has not granted. */}
-      <Fact term={applicant ? COPY.appliedOn : COPY.memberSince}>{clubDate(detail.created_at, zone)}</Fact>
-      <Fact term={COPY.lastSignIn}>{detail.last_login_at ? clubInstant(detail.last_login_at, zone) : COPY.neverSignedIn}</Fact>
-      {detail.status === "Rejected" ? (
-        <Fact term={COPY.application}>
-          {detail.rejection_reason ? COPY.turnedDownBecause(detail.rejection_reason) : COPY.turnedDown}
+    <div className="[container-type:inline-size]">
+      <dl className="rounded-xl border border-border bg-bg-surface px-4 [@container(min-width:30rem)]:px-6 [@container(min-width:30rem)]:grid [@container(min-width:30rem)]:grid-cols-[auto_minmax(0,1fr)] [@container(min-width:30rem)]:gap-x-4">
+        <Fact term={COPY.email}><EmailWithBreaks email={detail.email} /></Fact>
+        <Fact term={COPY.verified} tone={detail.email_verified ? undefined : "warning"}>
+          {detail.email_verified ? COPY.verifiedYes : COPY.unverified}
         </Fact>
-      ) : applicant ? null : (
-        // Not on a pending page (F3-12): "Account: active" beside "Awaiting approval" read as
-        // two answers to one question. The header's status is the one that counts.
-        <Fact term={COPY.accountStatus}>{accountStatusWord(detail.account_status)}</Fact>
-      )}
-      <Fact term={COPY.passkeys}>{countOf(detail.passkey_count, "passkey", "passkeys")}</Fact>
-      {/* P13 §9: no court-box fingerprints while enrolment is switched off. */}
-      {FEATURES.fingerprintEnrolment ? (
-        <Fact term={COPY.fingerprints}>{countOf(detail.fingerprints.count, "finger enrolled", "fingers enrolled")}</Fact>
-      ) : null}
-    </dl>
+        {detail.membership_number ? <Fact term={COPY.membershipNumber}>{detail.membership_number}</Fact> : null}
+        {/* An applicant was never a member (F3-12): "Member since" on a pending or turned-down
+            page claimed a membership the club has not granted. */}
+        <Fact term={applicant ? COPY.appliedOn : COPY.memberSince}>{clubDate(detail.created_at, zone)}</Fact>
+        <Fact term={COPY.lastSignIn}>{detail.last_login_at ? clubInstant(detail.last_login_at, zone) : COPY.neverSignedIn}</Fact>
+        {detail.status === "Rejected" ? (
+          <Fact term={COPY.application}>
+            {detail.rejection_reason ? COPY.turnedDownBecause(detail.rejection_reason) : COPY.turnedDown}
+          </Fact>
+        ) : applicant ? null : (
+          // Not on a pending page (F3-12): "Account: active" beside "Awaiting approval" read as
+          // two answers to one question. The header's status is the one that counts.
+          <Fact term={COPY.accountStatus}>{accountStatusWord(detail.account_status)}</Fact>
+        )}
+        <Fact term={COPY.passkeys}>{countOf(detail.passkey_count, "passkey", "passkeys")}</Fact>
+        {/* P13 §9: no court-box fingerprints while enrolment is switched off. */}
+        {FEATURES.fingerprintEnrolment ? (
+          <Fact term={COPY.fingerprints}>{countOf(detail.fingerprints.count, "finger enrolled", "fingers enrolled")}</Fact>
+        ) : null}
+      </dl>
+    </div>
   );
 }

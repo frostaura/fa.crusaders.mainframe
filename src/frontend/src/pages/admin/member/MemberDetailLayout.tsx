@@ -162,8 +162,10 @@ function MemberSkeleton() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-4 rounded-xl border border-border bg-bg-surface p-4 sm:p-6">
-        <Skeleton className="size-14 rounded-full" />
-        <div className="flex flex-1 flex-col gap-2">
+        <Skeleton className="size-14 shrink-0 rounded-full" />
+        {/* min-w-0 (R15 L15-5): a flex column's floor is its widest child, and a `w-40` bar is 320px
+            at 200 % text — the header pushed a 320 phone 97px sideways. Its bars are max-w-full. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-4 w-24" />
         </div>
