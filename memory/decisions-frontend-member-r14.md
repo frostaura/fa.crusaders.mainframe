@@ -17,6 +17,10 @@ Tests: `walletMovementR14.test.tsx`, `paged-focus-scan.test.ts`, `routeLazy.test
   "You changed the split on … — went back to Sam". *Why:* `share_returned` once covered removal and
   split change, and "you withdrew" was false for both. Names: `actor_name`, else the share row's
   `counterparty_name`. The named path (ledger words) carries no full stop — pre-existing, kept.
+- **§9 causes** (d301b687): `club_settled` ("… came back — the club recorded your share as paid
+  outside the app" / "… went back to Sam — the club recorded their share of …") and `share_back`
+  (names nobody as acting). `personName()`: blank/"null" is nobody; "The club" (admin on a member's
+  wallet) stays whole. Organiser toasts name every partner on the frame's share rows.
 - **A cancel the frame places names it** (E14-7): "The club cancelled your booking on Court 3 · Mon
   5 Oct: …"; a displacement names court AND time. A late split cancel arrives as `mixed`; with a
   refund and share rows it goes through the cancel sentence (J14-4) — shares are never the penalty.
