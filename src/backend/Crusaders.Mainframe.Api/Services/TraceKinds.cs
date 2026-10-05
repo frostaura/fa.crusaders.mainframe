@@ -154,6 +154,24 @@ public readonly record struct TraceFacts
 
     /// <summary>R15: the share row is a COLLECTION (partner to organiser) rather than a return.</summary>
     public bool Collection { get; init; }
+
+    /// <summary>
+    /// R16 J16-2: who joined the game, on a share row whose cause is <see cref="WalletShareCauses.PlayerAdded"/>
+    /// and on the split change that recorded it. Null everywhere else.
+    /// </summary>
+    public string? JoinedName { get; init; }
+
+    /// <summary>
+    /// R16 E16-6: the row's actor is somebody other than the person whose night this is, and the row
+    /// is about them — "Pat checked in at Court 1" on the booker's night, never "Checked in".
+    /// </summary>
+    public bool ByOther { get; init; }
+
+    /// <summary>
+    /// R16 E16-6: the person whose night this is did it to somebody else's booking — the scanning
+    /// partner's own reversal reads in their voice, naming whose game it was.
+    /// </summary>
+    public bool ForOther { get; init; }
 }
 
 /// <summary>
@@ -339,6 +357,18 @@ public static class TraceKinds
     /// <summary>R15 E15-3: they (an admin) collected a partner's share.</summary>
     public const string BookingCollectedShare = "booking.collected_share";
 
+    /// <summary>R16 E16-1: the club accepted their invite to somebody's game for them (the partner's side).</summary>
+    public const string BookingAcceptedForThem = "booking.accepted_for_them";
+
+    /// <summary>R16 E16-1: the club accepted a partner's invite to THEIR game (the organiser's side).</summary>
+    public const string BookingClubAcceptedPlayer = "booking.club_accepted_player";
+
+    /// <summary>R16 E16-1: they (an admin) accepted a partner's invite on the partner's behalf.</summary>
+    public const string BookingAcceptedForPlayer = "booking.accepted_for_player";
+
+    /// <summary>R16 E16-1: the desk accepted a partner's invite for them (<c>PlayersService.AcceptedByClubAction</c>).</summary>
+    public const string AcceptedByClubAction = "players.accepted_by_club";
+
     /// <summary>R15 E15-3: the club added them to somebody's game, or put them in it (the member's side).</summary>
     public const string BookingAddedToGame = "booking.added_to_game";
 
@@ -455,6 +485,7 @@ public static class TraceKinds
         BookingClubTookPlayerOff, BookingShareSettledOutside, BookingPartnerShareSettledOutside, BookingSettledShareOutside,
         BookingShareCollected, BookingPartnerShareCollected, BookingCollectedShare,
         BookingAddedToGame, BookingClubAddedPlayer, BookingAddedPlayer, BookingGameNoShow, BookingGameNoShowReversed,
+        BookingAcceptedForThem, BookingClubAcceptedPlayer, BookingAcceptedForPlayer,
         WalkUpBought, WalkUpRefunded,
         CourtCheckedIn, CourtRefused,
         LightsOn, LightsOff,
@@ -551,6 +582,7 @@ public static class TraceKinds
             SettledOutsideAction => BookingPartnerShareSettledOutside,
             ShareCollectedAction => BookingPartnerShareCollected,
             AddedByClubAction => BookingClubAddedPlayer,
+            AcceptedByClubAction => BookingClubAcceptedPlayer,
             _ => null,
         };
     }
@@ -571,7 +603,7 @@ public static class TraceKinds
 
     /// <summary>The seat acts an organiser's Night reads off the game's partners (R13 E13-4, R15 E15-3).</summary>
     public static readonly string[] OrganisersViewActions =
-        [PartnerWithdrewAction, PlayerRemovedAction, SettledOutsideAction, ShareCollectedAction, AddedByClubAction];
+        [PartnerWithdrewAction, PlayerRemovedAction, SettledOutsideAction, ShareCollectedAction, AddedByClubAction, AcceptedByClubAction];
 
     private static string? OfOwnAudit(string action, bool actorIsSubject)
     {
@@ -608,6 +640,7 @@ public static class TraceKinds
             SettledOutsideAction => actorIsSubject ? BookingSettledShareOutside : BookingShareSettledOutside,
             ShareCollectedAction => actorIsSubject ? BookingCollectedShare : BookingShareCollected,
             AddedByClubAction => actorIsSubject ? BookingAddedPlayer : BookingAddedToGame,
+            AcceptedByClubAction => actorIsSubject ? BookingAcceptedForPlayer : BookingAcceptedForThem,
 
             _ => OfAccountAction(action),
         };
@@ -803,14 +836,14 @@ public static class TraceKinds
             BookingPartnerWithdrew => $"{ActorOr(facts, "A partner")} withdrew from their game on {court}",
             BookingTakenOff => $"{ActorOr(facts, "Somebody")} took them off {Whose(facts)}{court}",
             BookingTookPlayerOff => $"Took {Subject(facts)} off {Whose(facts)}{court}",
-            BookingSplitChanged => $"{ActorOr(facts, "The organiser")} changed how {court} is split{ShareNow(facts, "their")}",
-            BookingChangedSplit => $"Changed how {court} is split{ShareNow(facts, $"{Subject(facts)}'s")}",
+            BookingSplitChanged => SplitChanged(court, facts),
+            BookingChangedSplit => ChangedSplit(court, facts),
             BookingGameCancelled => GameCancelled(court, facts),
 
             WalkUpBought => $"Bought light time at {court}",
             WalkUpRefunded => $"Light time at {court} was given back",
 
-            CourtCheckedIn => $"Checked in at {court}",
+            CourtCheckedIn => CheckedIn(court, facts),
             CourtRefused => CourtRefusedHeadline(facts, court),
 
             LightsOn => $"{court} lights came on",
@@ -850,6 +883,9 @@ public static class TraceKinds
             BookingAddedToGame => facts.Placed ? $"{actor} put them in {theirs}" : $"{actor} added them to {theirs}",
             BookingClubAddedPlayer => facts.Placed ? $"{actor} put {partner} in their game on {court}" : $"{actor} added {partner} to their game on {court}",
             BookingAddedPlayer => facts.Placed ? $"Put {partner} in {theirs}" : $"Added {partner} to {theirs}",
+            BookingAcceptedForThem => $"{actor} accepted their place in {theirs} for them",
+            BookingClubAcceptedPlayer => $"{actor} accepted {partner}'s place in their game on {court} for them",
+            BookingAcceptedForPlayer => $"Accepted {partner}'s place in {theirs} for them",
             BookingGameNoShow => facts.CourtWasDark
                 ? $"The club refunded {theirs} in full — its box was offline"
                 : $"The club's automatic check marked {theirs} as a no-show",
@@ -921,7 +957,9 @@ public static class TraceKinds
     /// </summary>
     private static string ShareMoved(TraceFacts facts)
     {
-        if (string.IsNullOrWhiteSpace(facts.WithdrewName) && facts.ShareCause is not null) return OwnShareMoved(facts);
+        // R16 E16-4: a row whose cause the record names says it through OwnShareMoved — the withdrawal
+        // too, with its court and in the right voice ("they withdrew" on the organiser's night was wrong).
+        if (facts.ShareCause is not null) return OwnShareMoved(facts);
         if (string.IsNullOrWhiteSpace(facts.WithdrewName)) return $"A share of a split booking moved: {Amount(facts)}";
         return facts.AmountMinutes > 0
             ? $"{Amount(facts)} of their share came back — they withdrew from the game"
@@ -939,7 +977,7 @@ public static class TraceKinds
         var tracedIsPartner = facts.Collection == (facts.AmountMinutes < 0);
         var partner = tracedIsPartner ? ShareSide.Them : ShareSide.Named(facts.PartnerName);
         var organiser = tracedIsPartner ? ShareSide.Named(facts.OrganiserSideName) : ShareSide.Them;
-        var why = ShareClause(facts.ShareCause, partner, organiser);
+        var why = ShareClause(facts, partner, organiser);
         var amount = Amount(facts);
         if (facts.Collection)
         {
@@ -956,7 +994,7 @@ public static class TraceKinds
     private static string TwinShareMoved(string whose, TraceFacts facts)
     {
         var court = ShareCourt(facts);
-        var why = ShareClause(facts.ShareCause, ShareSide.Named(facts.PartnerName), ShareSide.Named(facts.OrganiserSideName));
+        var why = ShareClause(facts, ShareSide.Named(facts.PartnerName), ShareSide.Named(facts.OrganiserSideName));
         var amount = Amount(facts);
         var partnersRow = facts.Collection == (facts.AmountMinutes < 0);
         if (facts.Collection)
@@ -989,10 +1027,12 @@ public static class TraceKinds
     /// R15: why a share moved, after a dash — off the record's cause (<see cref="WalletShareCauses"/>),
     /// empty for a plain payment or a return no record explains.
     /// </summary>
-    private static string ShareClause(string? cause, ShareSide partner, ShareSide organiser)
+    private static string ShareClause(TraceFacts facts, ShareSide partner, ShareSide organiser)
     {
-        var clause = cause switch
+        var joined = string.IsNullOrWhiteSpace(facts.JoinedName) ? "another player" : facts.JoinedName.Trim();
+        var clause = facts.ShareCause switch
         {
+            WalletShareCauses.PlayerAdded => $"{joined} joined, so {partner.Possessive} share went down",
             WalletShareCauses.OrganiserRemoved => $"{organiser.Name} took {partner.Object} off the game",
             WalletShareCauses.ClubRemoved => $"the club took {partner.Object} off the game",
             WalletShareCauses.ShareReturned => $"{partner.Name} withdrew from the game",
@@ -1084,7 +1124,7 @@ public static class TraceKinds
     /// </summary>
     private static string OthersShareMoved(string whose, TraceFacts facts)
     {
-        if (string.IsNullOrWhiteSpace(facts.WithdrewName) && facts.ShareCause is not null) return TwinShareMoved(whose, facts);
+        if (facts.ShareCause is not null) return TwinShareMoved(whose, facts);
         if (string.IsNullOrWhiteSpace(facts.WithdrewName)) return $"A share of a split booking moved for {whose}: {Amount(facts)}";
         return facts.AmountMinutes > 0
             ? $"{whose} got {Amount(facts)} of their share back — they withdrew from the game"
@@ -1175,6 +1215,13 @@ public static class TraceKinds
     /// </summary>
     private static string NoShowReversed(TraceFacts facts)
     {
+        // R16 E16-6: the scanning partner's own row — their check-in, on somebody else's booking.
+        if (facts.ForOther && !string.IsNullOrWhiteSpace(facts.SubjectName))
+        {
+            var settled = facts.CourtWasDark ? "outage refund" : "no-show";
+            var court = string.IsNullOrWhiteSpace(facts.CourtName) ? "a court" : facts.CourtName.Trim();
+            return $"Their check-in reached the club late — the {settled} on {facts.SubjectName.Trim()}'s game on {court} was reversed";
+        }
         if (BySystem(facts) || string.IsNullOrWhiteSpace(facts.ActorName))
         {
             return facts.CourtWasDark
@@ -1191,6 +1238,43 @@ public static class TraceKinds
         var organiser = facts.OrganiserName?.Trim();
         if (string.IsNullOrEmpty(organiser) || organiser == facts.ActorName?.Trim()) return "";
         return $"{organiser}'s game on ";
+    }
+
+    /// <summary>
+    /// The partner's side of a split change — R16 J16-2: one an add caused says who joined, whoever
+    /// added them ("Jo Partner joined Olive Organiser's game on Court 1, so their share is now 10 minutes").
+    /// </summary>
+    private static string SplitChanged(string court, TraceFacts facts)
+    {
+        if (string.IsNullOrWhiteSpace(facts.JoinedName)) return $"{ActorOr(facts, "The organiser")} changed how {court} is split{ShareNow(facts, "their")}";
+        var organiser = facts.OrganiserName?.Trim();
+        var game = string.IsNullOrEmpty(organiser) ? court : $"{organiser}'s game on {court}";
+        return $"{facts.JoinedName.Trim()} joined {game}{SoShareNow(facts, "their")}";
+    }
+
+    /// <summary>The organiser's (or the desk's) own side of a split change — R16 J16-2 likewise.</summary>
+    private static string ChangedSplit(string court, TraceFacts facts)
+    {
+        if (string.IsNullOrWhiteSpace(facts.JoinedName)) return $"Changed how {court} is split{ShareNow(facts, $"{Subject(facts)}'s")}";
+        return $"{facts.JoinedName.Trim()} joined {court}{SoShareNow(facts, $"{Subject(facts)}'s")}";
+    }
+
+    /// <summary>", so their share is now 10 minutes" when the record carries it; ", so the split went down" otherwise.</summary>
+    private static string SoShareNow(TraceFacts facts, string whose)
+    {
+        return facts.AmountMinutes is null ? ", so the split went down" : $", so {whose} share is now {Amount(facts)}";
+    }
+
+    /// <summary>
+    /// R16 E16-6: a check-in, in the voice of the night it is on — "Checked in at Court 1" for the
+    /// scanner's own; "Pat checked in at Court 1" on the booker's night when somebody else scanned;
+    /// the scanner's own row at somebody else's booking names whose it was.
+    /// </summary>
+    private static string CheckedIn(string court, TraceFacts facts)
+    {
+        if (facts.ByOther && !string.IsNullOrWhiteSpace(facts.ActorName)) return $"{facts.ActorName.Trim()} checked in at {court}";
+        if (facts.ForOther && !string.IsNullOrWhiteSpace(facts.SubjectName)) return $"Checked in at {court} for {facts.SubjectName.Trim()}'s booking";
+        return $"Checked in at {court}";
     }
 
     /// <summary>" — their share is now 8 minutes", when the record carries the new share; empty otherwise.</summary>

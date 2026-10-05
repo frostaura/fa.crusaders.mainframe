@@ -178,7 +178,12 @@ public static class PlayersEndpoints
         }
 
         var members = await query.DirectoryAsync(Me(ctx), term, ct);
-        return Results.Ok(new { items = members.Select(m => new { user_id = m.UserId, name = m.Name, photo_url = m.PhotoUrl }) });
+        // R16 J16-3: two members of one name told apart by what the caller already knows of them.
+        var played = await query.PlayedWithAsync(Me(ctx), [.. members.Select(m => m.UserId)], ct);
+        return Results.Ok(new
+        {
+            items = members.Select(m => PlayersQuery.PickerRow(m, played.GetValueOrDefault(m.UserId) ?? PlayedWith.Never)),
+        });
     }
 
     /// <summary>

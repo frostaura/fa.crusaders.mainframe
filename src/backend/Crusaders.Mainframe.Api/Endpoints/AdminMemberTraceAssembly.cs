@@ -510,6 +510,11 @@ public static partial class AdminMemberTraceAssembly
                     // R14 E14-2: a split change says what the partner's share became; R15 E15-3: a collect what it took.
                     AmountMinutes = AuditAmountOf(row.Action, details),
                     Placed = Flag(details, "accepted"),
+                    // R16 J16-2: a split an add lowered names who joined.
+                    JoinedName = row.Action == TraceKinds.SplitChangedAction ? Text(details, "joined") : null,
+                    // R16 E16-6: whose voice — somebody else did it to this member, or this member did it to somebody else's booking.
+                    ByOther = OtherActed(row, q.UserId),
+                    ForOther = row.ActorUserId == q.UserId && row.SubjectUserId is { } subject && subject != q.UserId,
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -539,6 +544,12 @@ public static partial class AdminMemberTraceAssembly
     {
         if (row.ActorUserId == traced || row.SubjectUserId == traced) return TraceView.Own;
         return OrganiserOf(row) == traced ? TraceView.Organiser : TraceView.Partner;
+    }
+
+    /// <summary>R16 E16-6: the row is about this member and a person other than them did it.</summary>
+    private static bool OtherActed(AuditLog row, Guid traced)
+    {
+        return row.SubjectUserId == traced && row.ActorUserId != Guid.Empty && row.ActorUserId != traced;
     }
 
     /// <summary>The minutes an audit row's sentence names: a split change's new share (R14), a collect's figure (R15).</summary>
@@ -594,7 +605,7 @@ public static partial class AdminMemberTraceAssembly
                 SourceId: row.Id,
                 Source: LedgerSource,
                 Kind: kind,
-                Headline: TraceKinds.Headline(kind, new TraceFacts
+                Headline: TraceKinds.Headline(kind, WithShare(new TraceFacts
                 {
                     AmountMinutes = row.AmountMinutes,
                     CourtName = court?.Name,
@@ -607,12 +618,7 @@ public static partial class AdminMemberTraceAssembly
                     // E8-5: a desk top-up the club took no rand for was given, not sold.
                     NoCharge = GivenMinutes.IsGiven(row.Type, row.ZarPaid),
                     WithdrewName = withdrew is { } w ? PersonNames.Of(w, s.Names) ?? "their partner" : null,
-                    // R15 E15-3 / J15-4: which way the share went, with whom, and why — off the record.
-                    ShareCause = share?.Cause,
-                    PartnerName = share is null ? null : PersonNames.Of(share.PartnerUserId, s.Names),
-                    OrganiserSideName = share is null ? null : PersonNames.Of(share.OrganiserUserId, s.Names),
-                    Collection = share?.Collection ?? false,
-                }),
+                }, share, s)),
                 ActorUserId: actorId,
                 ActorKind: actorKind,
                 ActorName: actorName,
@@ -629,6 +635,23 @@ public static partial class AdminMemberTraceAssembly
                     ("reason", row.Reason),
                     ("booking_id", row.RelatedBookingId)));
         }
+    }
+
+    /// <summary>
+    /// R15 E15-3 / J15-4: which way a share went, with whom, and why — off the record; R16 J16-2: who
+    /// joined, when an add lowered it. The facts unchanged on a row that is not a share.
+    /// </summary>
+    private static TraceFacts WithShare(TraceFacts facts, ShareRowWhy? share, Strands s)
+    {
+        if (share is null) return facts;
+        return facts with
+        {
+            ShareCause = share.Cause,
+            PartnerName = PersonNames.Of(share.PartnerUserId, s.Names),
+            OrganiserSideName = PersonNames.Of(share.OrganiserUserId, s.Names),
+            Collection = share.Collection,
+            JoinedName = share.Joined,
+        };
     }
 
     /// <summary>

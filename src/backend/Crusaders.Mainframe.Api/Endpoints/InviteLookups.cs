@@ -71,11 +71,16 @@ public static class InviteLookups
             .Select(m => m.FullName).FirstOrDefaultAsync(ct);
         var court = await db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var settings = await settingsAccessor.GetAsync(ct);
+        var changer = await ShareChanger.OfAsync(db, seat, ct);
         return Results.Ok(new
         {
             participant_id = seat.Id,
             booking_id = booking.Id,
             status = PlayerViews.StatusName(seat.Status),
+            // R16 J16-1: the one consent rule, and who last changed the share ("organiser" by name, or "club").
+            needs_consent = PlayerNotices.NeedsConsent(seat),
+            share_changed_by = changer.By,
+            share_changed_by_name = changer.Name,
             lapsed = seat.LapsedAt is not null || seat.Status == ParticipantStatus.Lapsed,
             settled_outside = seat.SettledOutsideAt is not null,
             booking_status = PlayerViews.BookingStatusName(booking.Status),

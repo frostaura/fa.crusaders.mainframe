@@ -245,7 +245,8 @@ public sealed class R15NightAndCsvHttpTests(PostgresFixture pg) : IClassFixture<
             "remove" => ("Olive Organiser took them off the game", "they took Sam Partner off the game"),
             "split" => ("Olive Organiser lowered their share", "they lowered Sam Partner's share"),
             "cancel" => ("the game was cancelled", "the game was cancelled"),
-            _ => ("they withdrew from the game", "they withdrew from the game"),
+            // R16 E16-4: the organiser's row names who withdrew — "they" on THEIR Night was Olive.
+            _ => ("they withdrew from the game", "Sam Partner withdrew from the game"),
         };
         Assert.EndsWith($" — {samWhy}", Headline(LastOwnShare(sam)), StringComparison.Ordinal);
         Assert.EndsWith($" — {oliveWhy}", Headline(oliveNight.Last(e => Kind(e) == TraceKinds.WalletShareMoved && Own(e)

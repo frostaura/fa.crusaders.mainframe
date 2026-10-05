@@ -6,7 +6,14 @@ using Microsoft.EntityFrameworkCore;
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>Who changed a seat, off its record — <c>players.removed</c> or <c>players.split_changed</c> (R14 E14-2).</summary>
-public sealed record SeatAct(Guid? ActorUserId, bool ByClub);
+public sealed record SeatAct(Guid? ActorUserId, bool ByClub)
+{
+    /// <summary>R16 J16-2: why a split changed, when the record says — <see cref="Email.ShareActs.PlayerAdded"/>; null for the organiser's own change.</summary>
+    public string? Because { get; init; }
+
+    /// <summary>R16 J16-2: with <see cref="Because"/>, who joined ("Jo Partner", "Jo Partner and Kim").</summary>
+    public string? Joined { get; init; }
+}
 
 /// <summary>
 /// What a share movement's receipts need to know of its seat: whether the partner withdrew (R13
@@ -63,6 +70,12 @@ public sealed record SeatFacts(bool Withdrew, Guid? OffGame, ParticipantStatus? 
         return lastMove is { } moved && moved > split.At ? null : split.Act;
     }
 
+    /// <summary>R16 J16-1: the seat's newest split-change record, whatever has moved since — or null.</summary>
+    public static async Task<SeatAct?> SplitRecordAsync(MainframeDbContext db, BookingParticipant seat, CancellationToken ct)
+    {
+        return (await RecordOfAsync(db, SplitChangedAction, seat, ct))?.Act;
+    }
+
     /// <summary>
     /// R15 J15-1: who took this seat off the game, for its member — <c>"club"</c> or
     /// <c>"organiser"</c> off the removal's record; null for a seat that was not removed, and for a
@@ -103,6 +116,33 @@ public sealed record SeatFacts(bool Withdrew, Guid? OffGame, ParticipantStatus? 
         if (row is null) return null;
         using var doc = JsonDocument.Parse(row.DetailsJson!);
         var byClub = doc.RootElement.TryGetProperty("by_club", out var b) && b.ValueKind == JsonValueKind.True;
-        return (new SeatAct(row.ActorUserId == Guid.Empty ? null : row.ActorUserId, byClub), row.CreatedAt);
+        return (new SeatAct(row.ActorUserId == Guid.Empty ? null : row.ActorUserId, byClub)
+        {
+            Because = TextOf(doc.RootElement, "because"),
+            Joined = TextOf(doc.RootElement, "joined"),
+        }, row.CreatedAt);
+    }
+
+    private static string? TextOf(JsonElement root, string key)
+    {
+        return root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    }
+}
+
+/// <summary>
+/// R16 J16-1: who last changed a seat's share, off its newest <c>players.split_changed</c> record —
+/// <c>"organiser"</c> (named) or <c>"club"</c> (a desk add that lowered it; never named to a member).
+/// Nobody when the share is still what the seat was asked for at its invite.
+/// </summary>
+public sealed record ShareChanger(string? By, string? Name)
+{
+    public static readonly ShareChanger Nobody = new(null, null);
+
+    public static async Task<ShareChanger> OfAsync(MainframeDbContext db, BookingParticipant seat, CancellationToken ct)
+    {
+        if (seat.UserId is null || await SeatFacts.SplitRecordAsync(db, seat, ct) is not { } act) return Nobody;
+        if (act.ByClub) return new ShareChanger("club", null);
+        var names = await PersonNames.ForAsync(db, [act.ActorUserId], ct);
+        return new ShareChanger("organiser", PersonNames.Of(act.ActorUserId, names));
     }
 }

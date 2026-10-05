@@ -120,10 +120,58 @@ public static class PlayerNotices
             new GameChangedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, removed,
                 removed ? null : seat.ShareMinutes, needsConsent, seat.Id, SettledOutside: seat.SettledOutsideAt is not null),
             // R15 J15-5: the court AND the day, and the new figure — "Your share changed — Court 4" named neither.
-            removed ? $"You were taken off {where}" : $"{organiser} changed your share of {where} — now {MoneyFormat.Minutes(seat.ShareMinutes)}",
+            removed ? $"You were taken off {where}" : ChangedHeadline(organiser, where, seat),
             // R5 (M5-8): a removed member reads 404 from the booking; naming the seat lets the page
             // read their invite and say they were taken off. A share change keeps the plain path.
             removed ? $"/bookings/{booking.Id}?seat={seat.Id}" : $"/bookings/{booking.Id}", booking.Id);
+    }
+
+    /// <summary>
+    /// R16 J16-6: the club recorded a partner's share as paid to the organiser by hand — told to both,
+    /// in the act's own save: the partner (mailed, as every club act on their seat is) and the
+    /// organiser (inbox only; any money that went back has its own receipt).
+    /// </summary>
+    public static async Task<IReadOnlyList<MemberNotice>> SettledOutsideAsync(
+        MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, CancellationToken ct)
+    {
+        var game = await GameText.ForAsync(db, booking, settings, ct);
+        var organiser = await NameAsync(db, booking.UserId, "The organiser", ct);
+        var partner = await NameAsync(db, seat.UserId, "Your partner", ct);
+        var where = $"{game.CourtName}, {game.StartsLocal}";
+        // Per act: the desk may record the same seat again (a second hand payment, a corrected reason).
+        var key = $"settled-outside:{seat.Id:N}:{DateTimeOffset.UtcNow.UtcTicks}";
+        return
+        [
+            new MemberNotice(
+                seat.UserId!.Value, MemberEventCatalogue.GameChanged, $"{key}:partner",
+                new GameChangedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, false, null, false, seat.Id, ByClub: true, SettledOutside: true)
+                {
+                    SettledByHand = true,
+                },
+                $"The club recorded that you paid {organiser} by hand for {where} — nothing moves in the app", $"/bookings/{booking.Id}", booking.Id),
+            new MemberNotice(
+                booking.UserId!.Value, MemberEventCatalogue.GameChanged, $"{key}:organiser",
+                new GameChangedPayload(booking.Id, partner, game.CourtName, game.StartsLocal, false, null, false, seat.Id, ByClub: true, SettledOutside: true)
+                {
+                    SettledByHand = true,
+                },
+                $"The club recorded that {partner} paid you by hand for {where}", $"/bookings/{booking.Id}", booking.Id)
+            {
+                Email = false,
+            },
+        ];
+    }
+
+    /// <summary>
+    /// R16 J16-1: a share change, in the partner's inbox — one the club settled by hand says nothing
+    /// moves ("share now 10" read as a figure they still owed).
+    /// </summary>
+    private static string ChangedHeadline(string organiser, string where, BookingParticipant seat)
+    {
+        var now = MoneyFormat.Minutes(seat.ShareMinutes);
+        return seat.SettledOutsideAt is null
+            ? $"{organiser} changed your share of {where} — now {now}"
+            : $"{organiser} changed the split of {where} — you paid {organiser} by hand, so nothing moves in the app";
     }
 
     /// <summary>
@@ -153,6 +201,24 @@ public static class PlayerNotices
                 ? $"The club put you in {organiser}'s game — {game.CourtName}, {game.StartsLocal}"
                 : $"The club added you to {organiser}'s game — {game.CourtName}, {game.StartsLocal}",
             path, booking.Id);
+    }
+
+    /// <summary>
+    /// R16 E16-1: the club accepted a partner's invite for them — told to the organiser on the inbox
+    /// only (it moves no money: an admin's accept records no consent), with the court and the day.
+    /// </summary>
+    public static async Task<MemberNotice> ClubAcceptedForOrganiserAsync(
+        MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, CancellationToken ct)
+    {
+        var game = await GameText.ForAsync(db, booking, settings, ct);
+        var partner = await NameAsync(db, seat.UserId, "A player", ct);
+        return new MemberNotice(
+            booking.UserId!.Value, MemberEventCatalogue.Response, $"response:{seat.Id:N}:club-accepted",
+            new { booking_id = booking.Id }, $"The club accepted {partner}'s place in your game — {game.CourtName}, {game.StartsLocal}",
+            $"/bookings/{booking.Id}", booking.Id)
+        {
+            Email = false,
+        };
     }
 
     /// <summary>A partner's answer, told to the organiser on the inbox only.</summary>

@@ -271,24 +271,25 @@ public static class LedgerRowMapper
             ActorName: actor,
             RelatedBookingId: e.RelatedBookingId)
         {
-            DoneBy = DoneByOf(e, actor, isAdmin),
+            DoneBy = DoneByOf(e, actor),
             CounterpartyName = other?.Name,
             CounterpartyUserId = other?.UserId,
         };
     }
 
     /// <summary>
-    /// Who moved this money when it was somebody OTHER than the wallet's owner (review round 1,
-    /// B9): the admin behind a desk adjustment or package sale, or who booked or cancelled on the
-    /// member's behalf. Null for the member's own movements and the system's (no actor), and for
-    /// a share moving between two members — the other member is already the row's From or To —
-    /// unless an administrator moved it.
+    /// The actor's name — "The club" for an administrator, on the member's own wallet (R14 review L3);
+    /// <see cref="Automatic"/> for the club's own machinery (R16 E16-7: "(unknown)" beside a null
+    /// <c>actor_name</c> was two answers to one question).
     /// </summary>
-    /// <summary>The actor's name — "The club" for an administrator, on the member's own wallet (R14 review L3).</summary>
     private static string ActorNameOf(LedgerEntry e, Func<Guid, string> nameFor, Func<Guid, bool>? isAdmin, bool memberView)
     {
+        if (e.ActorUserId == Guid.Empty) return Automatic;
         return memberView && IsClubHand(e, isAdmin) ? TheClub : nameFor(e.ActorUserId);
     }
+
+    /// <summary>R16 E16-7: who moved money the club's own machinery moved — a sweep, a settlement, a lapse.</summary>
+    public const string Automatic = "Automatic";
 
     /// <summary>An administrator moved somebody else's money — the club's hand, to the member whose money it was.</summary>
     private static bool IsClubHand(LedgerEntry e, Func<Guid, bool>? isAdmin)
@@ -296,10 +297,19 @@ public static class LedgerRowMapper
         return e.ActorUserId != Guid.Empty && e.ActorUserId != e.UserId && isAdmin?.Invoke(e.ActorUserId) == true;
     }
 
-    private static string? DoneByOf(LedgerEntry e, string actor, Func<Guid, bool>? isAdmin)
+    /// <summary>
+    /// Who moved this money when it was somebody OTHER than the wallet's owner (review round 1,
+    /// B9): the admin behind a desk adjustment or package sale, who booked or cancelled on the
+    /// member's behalf, or the other member whose act moved a share. Null for the member's own
+    /// movements and the system's (no actor).
+    /// </summary>
+    /// <remarks>
+    /// R16 E16-7: ONE answer with <c>actorName</c> — whenever this is set the two agree, and a share
+    /// another member moved names them too (it was null beside <c>actorName</c> naming them).
+    /// </remarks>
+    private static string? DoneByOf(LedgerEntry e, string actor)
     {
         if (e.ActorUserId == Guid.Empty || e.ActorUserId == e.UserId) return null;
-        if (e.Type == LedgerEntryType.ShareTransfer && isAdmin?.Invoke(e.ActorUserId) != true) return null;
         return actor;
     }
 }

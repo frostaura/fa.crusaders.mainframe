@@ -47,6 +47,19 @@ public static class PlayerViews
 public sealed record PublicMember(Guid UserId, string Name, string? PhotoUrl);
 
 /// <summary>
+/// R16 J16-3: what tells two members of one name apart in a picker, without anything the grid's
+/// rule forbids (no email, no phone, no membership number): how often the caller played with them,
+/// when last, and the month they joined the club.
+/// </summary>
+public sealed record PlayedWith(int Games, DateTimeOffset? LastAt, DateOnly? MemberSince)
+{
+    public static readonly PlayedWith Never = new(0, null, null);
+
+    /// <summary>The wire's <c>member_since</c>: <c>yyyy-MM-dd</c>, or null.</summary>
+    public string? MemberSinceText => MemberSince?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// <summary>
 /// Everything the players feature READS: the booking detail, a member's open invites, their
 /// recent partners and favourites, and the club directory (D11–D13).
 ///
@@ -237,7 +250,7 @@ public sealed partial class PlayersQuery
             var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
             var money = new SeatMoney(paid, ShareLedger.TargetFor(d.Booking, s, d.Owed, paid, closed), open,
                 s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct, CancelledSince(d.Booking)) : 0);
-            players.Add(SeatView(s, d.People, money));
+            players.Add(SeatView(s, d.People, money, await SeatToldAsync(d, s, ct)));
         }
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
         return new DetailTable(players, received, unpaid);
@@ -295,7 +308,32 @@ public sealed partial class PlayersQuery
     /// <summary>One seat's money: paid (net of returns), its target, what is still open, and what came back.</summary>
     private sealed record SeatMoney(int Paid, int Target, int Unpaid, int Returned);
 
-    private static object SeatView(BookingParticipant s, Dictionary<Guid, PublicMember> people, SeatMoney money)
+    /// <summary>
+    /// R16: what a seat row says beyond its money — who last changed the share (J16-1) and, to the
+    /// desk, whether collecting it now would take the partner below what they can spend (J16-10).
+    /// </summary>
+    private sealed record SeatTold(ShareChanger Changer, bool? CollectNeedsOverdraft);
+
+    private async Task<SeatTold> SeatToldAsync(DetailContext d, BookingParticipant s, CancellationToken ct)
+    {
+        var changer = s.IsPartner && s.UserId is not null ? await ShareChanger.OfAsync(_db, s, ct) : ShareChanger.Nobody;
+        return new SeatTold(changer, d.Role == "admin" ? await CollectNeedsOverdraftAsync(d.Booking, s, ct) : null);
+    }
+
+    /// <summary>
+    /// R16 J16-10: true when the desk's collect of this seat would need the overdraft named — the
+    /// partner's spendable minutes do not cover what it would take; null where collect does not apply.
+    /// </summary>
+    private async Task<bool?> CollectNeedsOverdraftAsync(Booking booking, BookingParticipant s, CancellationToken ct)
+    {
+        if (!s.IsPartner || s.UserId is not { } partner || s.Status != ParticipantStatus.Accepted || s.SettledOutsideAt is not null) return null;
+        if (booking.Status is not (BookingStatus.Booked or BookingStatus.Completed)) return null;
+        var due = await _shares.UnpaidAsync(booking, s, ct, evenIfClosed: true);
+        if (due <= 0) return null;
+        return await _ledger.GetSpendableAsync(partner, ct) < due;
+    }
+
+    private static object SeatView(BookingParticipant s, Dictionary<Guid, PublicMember> people, SeatMoney money, SeatTold told)
     {
         var (paid, target, unpaid) = (money.Paid, money.Target, money.Unpaid);
         var member = s.UserId is { } id && people.TryGetValue(id, out var m) ? m : null;
@@ -318,7 +356,11 @@ public sealed partial class PlayersQuery
             // F2-4: share minutes that came BACK to this seat — paid_minutes nets them out, so a
             // cancelled game read "paid 0" with no word of the refund.
             returned_minutes = money.Returned,
-            needs_consent = s.IsPartner && s.Status == ParticipantStatus.Accepted && s.ShareMinutes > s.ConsentedMinutes,
+            // R16 J16-1: the one rule (PlayerNotices.NeedsConsent) — a share settled by hand asks nothing.
+            needs_consent = s.IsPartner && PlayerNotices.NeedsConsent(s),
+            share_changed_by = told.Changer.By,
+            share_changed_by_name = told.Changer.Name,
+            collect_needs_overdraft = told.CollectNeedsOverdraft,
             settled_outside = s.SettledOutsideAt is not null,
             lapsed = s.LapsedAt is not null || s.Status == ParticipantStatus.Lapsed,
             checked_in_at = s.CheckedInAt,
@@ -435,6 +477,7 @@ public sealed partial class PlayersQuery
             : null;
         var players = await _db.BookingParticipants.AsNoTracking()
             .CountAsync(p => p.BookingId == booking.Id && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted), ct);
+        var changer = openLink ? ShareChanger.Nobody : await ShareChanger.OfAsync(_db, seat, ct);
 
         return new
         {
@@ -451,7 +494,12 @@ public sealed partial class PlayersQuery
             players = Math.Max(players, 1),
             share_minutes = seat.ShareMinutes,
             to_pay_minutes = unpaid,
-            needs_consent = seat.Status == ParticipantStatus.Accepted && seat.ShareMinutes > seat.ConsentedMinutes,
+            needs_consent = PlayerNotices.NeedsConsent(seat),
+            // R16 J16-1: who last changed the share — the page names them ("Owen changed your share…"),
+            // never "the club has asked you" for the organiser's change.
+            share_changed_by = changer.By,
+            share_changed_by_name = changer.Name,
+            settled_outside = seat.SettledOutsideAt is not null,
             // R14 J14-9: what the seat last said yes to. 0 with needs_consent = the club accepted the seat
             // without asking — the page says "the club has asked you for …", never "your share went up".
             consented_minutes = seat.ConsentedMinutes,
@@ -522,8 +570,20 @@ public sealed partial class PlayersQuery
             .Select(g => new { UserId = g.Key, Last = g.Max(r => r.StartsAt), Games = g.Count() })
             .OrderByDescending(g => g.Last).Take(20).ToList();
         var people = await ActiveMembersAsync(grouped.Select(g => g.UserId), ct);
+        var played = await PlayedWithAsync(me, [.. people.Keys], ct);
         return grouped.Where(g => people.ContainsKey(g.UserId))
-            .Select(g => (object)new { user_id = g.UserId, name = people[g.UserId].Name, photo_url = people[g.UserId].PhotoUrl, last_played_at = g.Last, games = g.Games })
+            .Select(g => (object)new
+            {
+                user_id = g.UserId,
+                name = people[g.UserId].Name,
+                photo_url = people[g.UserId].PhotoUrl,
+                last_played_at = g.Last,
+                games = g.Games,
+                // R16 J16-3: the same tiebreak fields the directory and the favourites carry.
+                played_with_you = played[g.UserId].Games,
+                last_played_with_you_at = played[g.UserId].LastAt,
+                member_since = played[g.UserId].MemberSinceText,
+            })
             .ToList();
     }
 
@@ -532,9 +592,54 @@ public sealed partial class PlayersQuery
         var ids = await _db.PartnerFavourites.AsNoTracking().Where(f => f.UserId == me)
             .OrderBy(f => f.CreatedAt).Select(f => f.PartnerUserId).ToListAsync(ct);
         var people = await ActiveMembersAsync(ids, ct);
+        var played = await PlayedWithAsync(me, [.. people.Keys], ct);
         return ids.Where(people.ContainsKey)
-            .Select(id => (object)new { user_id = id, name = people[id].Name, photo_url = people[id].PhotoUrl })
+            .Select(id => PickerRow(people[id], played[id]))
             .ToList();
+    }
+
+    /// <summary>
+    /// R16 J16-3: one member as a partner picker lists them — id, name, photo (the grid's rule) and
+    /// the tiebreak a namesake needs: games played with the caller, when last, and when they joined.
+    /// </summary>
+    public static object PickerRow(PublicMember m, PlayedWith played)
+    {
+        return new
+        {
+            user_id = m.UserId,
+            name = m.Name,
+            photo_url = m.PhotoUrl,
+            played_with_you = played.Games,
+            last_played_with_you_at = played.LastAt,
+            member_since = played.MemberSinceText,
+        };
+    }
+
+    /// <summary>
+    /// R16 J16-3: for each of <paramref name="ids"/>, the games the caller played with them — both of
+    /// them players (booker or accepted seat) of a booking the box checked in, started, not cancelled —
+    /// all time, and when last; and the date their membership began. One read each, at most a page.
+    /// </summary>
+    public async Task<Dictionary<Guid, PlayedWith>> PlayedWithAsync(Guid me, IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        if (ids.Count == 0) return [];
+        var now = DateTimeOffset.UtcNow;
+        var mine = _db.BookingParticipants.Where(p => p.UserId == me && p.Status == ParticipantStatus.Accepted).Select(p => p.BookingId);
+        var games = _db.Bookings.Where(b => b.CheckedInAt != null && b.StartsAt <= now && b.Status != BookingStatus.Cancelled
+                                            && b.Status != BookingStatus.AdminBlock && (b.UserId == me || mine.Contains(b.Id)));
+        var seated = await _db.BookingParticipants.AsNoTracking()
+            .Where(p => p.UserId != null && ids.Contains(p.UserId!.Value) && p.Status == ParticipantStatus.Accepted)
+            .Join(games, p => p.BookingId, b => b.Id, (p, b) => new { UserId = p.UserId!.Value, b.Id, b.StartsAt })
+            .ToListAsync(ct);
+        var booked = await games.AsNoTracking().Where(b => b.UserId != null && ids.Contains(b.UserId!.Value))
+            .Select(b => new { UserId = b.UserId!.Value, b.Id, b.StartsAt }).ToListAsync(ct);
+        var since = await _db.Memberships.AsNoTracking().Where(m => ids.Contains(m.UserId))
+            .Select(m => new { m.UserId, m.CreatedAt }).ToListAsync(ct);
+        var joined = since.GroupBy(m => m.UserId).ToDictionary(g => g.Key, g => g.Min(m => m.CreatedAt));
+        var together = seated.Concat(booked).DistinctBy(x => (x.UserId, x.Id)).ToLookup(x => x.UserId);
+        return ids.Distinct().ToDictionary(id => id, id => new PlayedWith(
+            together[id].Count(), together[id].Select(x => (DateTimeOffset?)x.StartsAt).Max(),
+            joined.TryGetValue(id, out var at) ? DateOnly.FromDateTime(at.UtcDateTime) : null));
     }
 
     /// <summary>Active members only: a suspended or departed member drops out of every picker without anyone deleting anything.</summary>

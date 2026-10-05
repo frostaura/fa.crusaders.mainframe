@@ -54,6 +54,13 @@ public sealed class R13PlayersWordsHttpTests(PostgresFixture pg) : IClassFixture
         return new Game(club, app, mail, bookingId, seatOf);
     }
 
+    /// <summary>The court and start as every inbox line says them: "Court 1, Thu 8 Oct, 08:00".</summary>
+    private static async Task<string> WhereAsync(Game g)
+    {
+        var start = await PlayersClub.ReadAsync(g.App, db => db.Bookings.IgnoreQueryFilters().Where(b => b.Id == g.BookingId).Select(b => b.StartsAt).FirstAsync());
+        return $"Court 1, {start.ToString("ddd d MMM, HH:mm", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
     private static async Task DeliverAsync(Game g)
     {
         for (var i = 0; i < 50 && await PeopleClub.DeliverAdminNoticesAsync(g.App) > 0; i++) { }
@@ -102,10 +109,12 @@ public sealed class R13PlayersWordsHttpTests(PostgresFixture pg) : IClassFixture
         // The receipts say why.
         var olive = Assert.Single(await InboxAsync(g, g.Club.Organiser, MemberEventCatalogue.ShareMoved),
             n => n.Headline.Contains("went back", StringComparison.Ordinal));
-        Assert.Equal($"{paid} minutes went back to Sam Partner — they withdrew from the game", olive.Headline);
+        // R16 E16-4: with the court and the day, as every share line.
+        var where = await WhereAsync(g);
+        Assert.Equal($"{paid} minutes went back to Sam Partner for {where} — they withdrew from the game", olive.Headline);
         var sam = Assert.Single(await InboxAsync(g, g.Club.Sam, MemberEventCatalogue.ShareMoved),
             n => n.Headline.Contains("came back", StringComparison.Ordinal));
-        Assert.Equal($"{paid} minutes of your share came back — you withdrew from the game", sam.Headline);
+        Assert.Equal($"{paid} minutes of your share of {where} came back — you withdrew from the game", sam.Headline);
         // J13-3: Sam is off the game, so his link names his seat.
         Assert.Equal($"/bookings/{g.BookingId}?seat={seat}", sam.Link);
         Assert.Equal($"/bookings/{g.BookingId}", olive.Link);

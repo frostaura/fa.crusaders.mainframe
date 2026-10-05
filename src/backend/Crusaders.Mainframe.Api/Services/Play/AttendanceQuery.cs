@@ -11,7 +11,24 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <param name="PlayedMinutes"><c>max(0, min(EndsAt, CancelledAt ?? EndsAt) − StartsAt)</c> in whole minutes.</param>
 /// <param name="OtherPlayers">The OTHER members who were players of the booking (§5.1 <c>partners</c>).</param>
 public sealed record AttendedSession(
-    Guid BookingId, DateTimeOffset StartsAt, DateTimeOffset EvidenceAt, int PlayedMinutes, IReadOnlyList<Guid> OtherPlayers);
+    Guid BookingId, DateTimeOffset StartsAt, DateTimeOffset EvidenceAt, int PlayedMinutes, IReadOnlyList<Guid> OtherPlayers)
+{
+    /// <summary>
+    /// R16 E16-9: when the court time ended — its end, or the cancellation that stopped it. Null on a
+    /// session built without it (the unit suites), which is read as over.
+    /// </summary>
+    public DateTimeOffset? EndedAt { get; init; }
+
+    /// <summary>R16 E16-9: the booking was cancelled after its check-in — only the club can, once a session has started.</summary>
+    public bool Cancelled { get; init; }
+
+    /// <summary>
+    /// R16 E16-9: a session that may earn a badge — over, and not cancelled by the club. Badges are
+    /// never taken back (play.md §3.3), so one is awarded when the session ENDS, not when it starts:
+    /// a session the club cancelled half way earned "First court" and "Night owl" it then kept.
+    /// </summary>
+    public bool EarnsBadgesAt(DateTimeOffset now) => !Cancelled && (EndedAt is not { } end || end <= now);
+}
 
 /// <summary>
 /// Who attended what, for play (<c>docs/specs/play.md</c> §1). Attendance is <c>CheckedInAt</c> —
@@ -103,7 +120,11 @@ public static class AttendanceQuery
         return rows
             .Select(r => new AttendedSession(
                 r.Id, r.StartsAt, AttendedAt(r.StartsAt, (r.Own ?? r.CheckedInAt)!.Value), PlayedMinutes(r.StartsAt, r.EndsAt, r.CancelledAt),
-                seated[r.Id].Prepend(r.UserId).Where(u => u != userId).Distinct().ToList()))
+                seated[r.Id].Prepend(r.UserId).Where(u => u != userId).Distinct().ToList())
+            {
+                EndedAt = r.CancelledAt is { } c && c < r.EndsAt ? c : r.EndsAt,
+                Cancelled = r.CancelledAt is not null,
+            })
             .OrderBy(s => s.EvidenceAt).ThenBy(s => s.BookingId)
             .ToList();
     }

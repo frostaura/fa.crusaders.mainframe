@@ -589,8 +589,10 @@ public static class ReportingEndpoints
 /// court,booking_starts_at,related_booking_id</c>. <c>counterparty</c> is the wallet's other side as
 /// the member's Wallet names it (the other player on a share, else the club treasury or PayFast);
 /// <c>cause</c> a share row's <see cref="WalletShareCauses"/> value read off the record
-/// (<see cref="ShareRowCauses"/>), empty on every other row; <c>done_by</c> whoever moved it when
-/// that was not the member — an administrator is "The club", as on the Wallet (R14 review L3);
+/// (<see cref="ShareRowCauses"/>), empty on every other row; <c>done_by</c> who moved it, never blank
+/// (R16 E16-7): "You", "The club" for an administrator (as on the Wallet, R14 review L3),
+/// "Automatic" for the club's own sweeps, else the other player — and a pay-for at the box names
+/// the other member as the counterparty on both legs, as its frames do;
 /// <c>given</c> "yes" on a desk top-up taken for no rand (<see cref="GivenMinutes"/>); <c>zar_paid</c>
 /// the rand, 2 dp, where any changed hands. No reference column: the member has no use for one,
 /// and it published the club's tenant id.
@@ -610,8 +612,10 @@ public static class MemberWalletCsv
         var whys = await ShareRowCauses.ForAsync(db, entries, ct);
         var bookingIds = entries.Where(e => e.RelatedBookingId is not null).Select(e => e.RelatedBookingId!.Value).Distinct().ToList();
         var places = await db.Bookings.AsNoTracking().Where(b => bookingIds.Contains(b.Id))
-            .Join(db.Courts.AsNoTracking(), b => b.CourtId, c => c.Id, (b, c) => new { b.Id, Court = c.Name, b.StartsAt })
+            .Join(db.Courts.AsNoTracking(), b => b.CourtId, c => c.Id, (b, c) => new { b.Id, Court = c.Name, b.StartsAt, b.UserId, b.PaidByUserId })
             .ToDictionaryAsync(x => x.Id, ct);
+        var payFor = places.Values.ToDictionary(p => p.Id, p => new PayForSides(p.UserId, p.PaidByUserId));
+        var sideNames = await PersonNames.ForAsync(db, payFor.Values.SelectMany(p => new[] { p.Booker, p.Payer }), ct);
         string NameFor(Guid id) => names.TryGetValue(id, out var n) ? n : "(unknown)";
 
         var sb = new StringBuilder();
@@ -621,7 +625,7 @@ public static class MemberWalletCsv
             var row = LedgerRowMapper.Build(e, NameFor, admins.Contains, counterparties, memberView: true);
             var place = e.RelatedBookingId is { } b && places.TryGetValue(b, out var p) ? (p.Court, p.StartsAt) : ((string, DateTimeOffset)?)null;
             var line = new CsvRow(
-                Counterparty: e.AmountMinutes >= 0 ? row.From : row.To,
+                Counterparty: PayForCounterparty(e, payFor, sideNames) ?? (e.AmountMinutes >= 0 ? row.From : row.To),
                 Cause: whys.TryGetValue(e.Id, out var why) ? why.Cause : null,
                 DoneBy: DoneBy(e, userId, admins, names),
                 Place: place);
@@ -630,8 +634,25 @@ public static class MemberWalletCsv
         return sb.ToString();
     }
 
+    /// <summary>A booking's booker and its payer now — for a pay-for at the box (D10), whose two legs name each other.</summary>
+    private sealed record PayForSides(Guid? Booker, Guid? Payer);
+
+    /// <summary>
+    /// R16 E16-7: a pay-for at the box moves money between two members through the club's books — the
+    /// payer's charge read "Club treasury" while their frame named the booker. The payer's charge
+    /// names the booker; the booker's "payer changed" refund names the payer. Null on every other row.
+    /// </summary>
+    private static string? PayForCounterparty(LedgerEntry e, Dictionary<Guid, PayForSides> bookings, Dictionary<Guid, string> names)
+    {
+        if (e.RelatedBookingId is not { } id || !bookings.TryGetValue(id, out var sides) || sides.Booker is not { } booker) return null;
+        if (e.Type == LedgerEntryType.BookingCharge && e.UserId != booker) return PersonNames.Of(booker, names);
+        var payerChanged = e.Type == LedgerEntryType.CancellationRefund && e.UserId == booker
+                           && e.Reason?.StartsWith("Payer changed at court", StringComparison.Ordinal) == true;
+        return payerChanged && sides.Payer is { } payer && payer != booker ? PersonNames.Of(payer, names) : null;
+    }
+
     /// <summary>What one CSV line says beyond the ledger row itself.</summary>
-    private sealed record CsvRow(string Counterparty, string? Cause, string? DoneBy, (string Court, DateTimeOffset StartsAt)? Place);
+    private sealed record CsvRow(string Counterparty, string? Cause, string DoneBy, (string Court, DateTimeOffset StartsAt)? Place);
 
     private static string Line(LedgerEntry e, CsvRow r)
     {
@@ -643,7 +664,7 @@ public static class MemberWalletCsv
             CsvCell.Of(e.Reason ?? ""),
             CsvCell.Of(r.Counterparty),
             r.Cause ?? "",
-            CsvCell.Of(r.DoneBy ?? ""),
+            CsvCell.Of(r.DoneBy),
             GivenMinutes.IsGiven(e.Type, e.ZarPaid) ? "yes" : "",
             e.ZarPaid?.ToString("0.00", CultureInfo.InvariantCulture) ?? "",
             CsvCell.Of(r.Place?.Court ?? ""),
@@ -653,10 +674,18 @@ public static class MemberWalletCsv
         return string.Join(",", cells) + "\r\n";
     }
 
-    /// <summary>Who moved it when that was not the member: "The club" for an administrator, else the person; null for their own and the system's.</summary>
-    private static string? DoneBy(LedgerEntry e, Guid member, HashSet<Guid> admins, Dictionary<Guid, string> names)
+    /// <summary>
+    /// Who moved it — R16 E16-7 / J16-9: never blank. "You" for the member's own act, "The club" for an
+    /// administrator, <see cref="LedgerRowMapper.Automatic"/> for the club's own machinery (a sweep, a
+    /// settlement, a lapse), else the other player by name.
+    /// </summary>
+    private static string DoneBy(LedgerEntry e, Guid member, HashSet<Guid> admins, Dictionary<Guid, string> names)
     {
-        if (e.ActorUserId == Guid.Empty || e.ActorUserId == member) return null;
-        return admins.Contains(e.ActorUserId) ? LedgerRowMapper.TheClub : PersonNames.Of(e.ActorUserId, names);
+        if (e.ActorUserId == Guid.Empty) return LedgerRowMapper.Automatic;
+        if (e.ActorUserId == member) return You;
+        return admins.Contains(e.ActorUserId) ? LedgerRowMapper.TheClub : PersonNames.Of(e.ActorUserId, names) ?? LedgerRowMapper.SomeMember;
     }
+
+    /// <summary>R16 E16-7: the member's own act, in the column that names who did it.</summary>
+    public const string You = "You";
 }

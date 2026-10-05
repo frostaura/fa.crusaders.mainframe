@@ -68,6 +68,12 @@ public static class PlayerErrors
     public const string PreviouslyRemoved = "player_previously_removed";
     public const string InviteLimit = "player_invite_limit";
     public const string NotAccepted = "player_not_accepted";
+
+    /// <summary>R16 E16-8: the share was recorded as paid by hand — there is nothing to collect in the app.</summary>
+    public const string SettledOutside = "share_settled_outside";
+
+    /// <summary>R16 J16-11: the member already holds their daily cap of court time on that club day.</summary>
+    public const string AtDailyLimit = "at_daily_limit";
 }
 
 /// <summary>

@@ -40,6 +40,9 @@ public sealed record SharePayload(
 
     /// <summary>R15 J15-5: that check-in was the reader's own.</summary>
     public bool ScannedByReader { get; init; }
+
+    /// <summary>R16 J16-2: on a <c>player_added</c> return, who joined. Null on older rows.</summary>
+    public string? Joined { get; init; }
 }
 
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
@@ -66,7 +69,11 @@ public sealed record ReturnWaitingPayload(
 /// <param name="SessionStarted">R15 E15-1: somebody had checked in, so nothing was refunded and every share paid stands. False on older rows.</param>
 public sealed record GameCancelledPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool? ByClub = null, string? ClubReason = null,
-    string? Cause = null, bool SessionStarted = false);
+    string? Cause = null, bool SessionStarted = false)
+{
+    /// <summary>R16 J16-6: the club had recorded the reader's share as paid to the organiser by hand. False on older rows.</summary>
+    public bool SettledOutside { get; init; }
+}
 
 /// <summary>D14: a result the reader is asked to confirm, frozen at the first recording (§8).</summary>
 public sealed record ResultToConfirmPayload(
@@ -75,7 +82,11 @@ public sealed record ResultToConfirmPayload(
 /// <param name="SettledOutside">R15 J15-9: the club recorded the reader's share as paid outside the app. False on older rows.</param>
 public sealed record GameChangedPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, int? NewShareMinutes, bool NeedsConsent,
-    Guid? SeatId = null, bool ByClub = false, bool SettledOutside = false);
+    Guid? SeatId = null, bool ByClub = false, bool SettledOutside = false)
+{
+    /// <summary>R16 J16-6: this notice IS the club recording the share as paid by hand — not a change to it. False on older rows.</summary>
+    public bool SettledByHand { get; init; }
+}
 
 /// <summary>Everything one member mail needs.</summary>
 public sealed record MemberMailContext(ClubIdentity Club, string To, AdminNotification Row, string BaseUrl, TenantSettingsView Settings)
@@ -214,6 +225,7 @@ public static class MemberEventCatalogue
             CancelledBy = p.CancelledBy,
             ScannerName = p.ScannerName,
             ScannedByReader = p.ScannedByReader,
+            Joined = p.Joined,
         });
     }
 
@@ -242,7 +254,10 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<GameCancelledPayload>();
         var by = p.ByClub is { } club ? new GameCancelledBy(club, p.ClubReason, p.Cause) : null;
-        return EmailTemplates.PlayersBookingCancelled(c.Club, c.To, new CancelledGame(p.OrganiserName, p.CourtName, p.StartsAtLocal, p.SessionStarted), by);
+        return EmailTemplates.PlayersBookingCancelled(c.Club, c.To, new CancelledGame(p.OrganiserName, p.CourtName, p.StartsAtLocal, p.SessionStarted)
+        {
+            SettledOutside = p.SettledOutside,
+        }, by);
     }
 
     private static EmailMessage ComposeReturnWaiting(MemberMailContext c)
@@ -269,6 +284,7 @@ public static class MemberEventCatalogue
         {
             ByClub = p.ByClub,
             SettledOutside = p.SettledOutside,
+            SettledByHand = p.SettledByHand,
         });
     }
 }

@@ -165,10 +165,16 @@ public sealed class ShareSweep
         var started = booking.CheckedInAt is not null;
         foreach (var seat in seats.Where(p => p.Seat > 1 && p.UserId is not null && p.IsLive))
         {
+            // R16 J16-6: a share the club recorded as paid by hand is between the partner and the
+            // organiser — "it comes back" (or "stands") promised the app would move it.
+            var settled = seat.SettledOutsideAt is not null;
             var notice = new MemberNotice(
                 seat.UserId!.Value, MemberEventCatalogue.GameCancelled, $"game-cancelled:{bookingId:N}:{seat.UserId:N}",
-                new GameCancelledPayload(bookingId, organiser, game.CourtName, game.StartsLocal, by?.ByClub, by?.Reason, CauseOf(by), started),
-                CancelledHeadline(by, organiser, game) + (started ? StartedClause : ""), $"/bookings/{bookingId}", bookingId)
+                new GameCancelledPayload(bookingId, organiser, game.CourtName, game.StartsLocal, by?.ByClub, by?.Reason, CauseOf(by), started)
+                {
+                    SettledOutside = settled,
+                },
+                CancelledHeadline(by, organiser, game) + EndingOf(started, settled, organiser), $"/bookings/{bookingId}", bookingId)
             {
                 Email = seat.Status == ParticipantStatus.Accepted,
             };
@@ -177,7 +183,38 @@ public sealed class ShareSweep
             if (await MemberNotices.RaiseAsync(_db, _tenant.TenantId, notice, settings, ct)) told.Add(seat.UserId.Value);
             else record.State = EntityState.Detached;
         }
+        await TellSharesStandAsync(booking, by, seats.Where(p => told.Contains(p.UserId ?? Guid.Empty)), ct);
         return told;
+    }
+
+    /// <summary>
+    /// R16 J16-7: the club cancelled a session that had started — nothing was refunded, so no ledger
+    /// row moved and no frame reached the partners' wallets: the organiser's phone toasted, theirs
+    /// said nothing. Each accepted partner (not settled by hand) is sent a balance-neutral frame,
+    /// <see cref="CancelledShareStandsReason"/>, naming the booking and that the club did it.
+    /// </summary>
+    private async Task TellSharesStandAsync(Booking booking, BookingCancellation? by, IEnumerable<BookingParticipant> told, CancellationToken ct)
+    {
+        if (booking.CheckedInAt is null || by?.ByClub != true) return;
+        foreach (var seat in told.Where(s => s.Status == ParticipantStatus.Accepted && s.SettledOutsideAt is null))
+        {
+            var frame = new WalletFrame(0, CancelledShareStandsReason, [], null, false)
+            {
+                BookingId = booking.Id,
+                CancelledBy = WalletCancelledBy.Club,
+            };
+            await _shares.PublishFrameAsync(seat.UserId!.Value, frame, ct);
+        }
+    }
+
+    /// <summary>R16 J16-7: the partner's frame for a started session the club cancelled — their share stands.</summary>
+    public const string CancelledShareStandsReason = "cancelled_share_stands";
+
+    /// <summary>The inbox line's ending: a started game's share stands (R15 E15-1); a share paid by hand is between the two of them (R16 J16-6).</summary>
+    private static string EndingOf(bool started, bool settled, string organiser)
+    {
+        if (settled) return $" — you paid {organiser} by hand, so that is between you and {organiser}";
+        return started ? StartedClause : "";
     }
 
     /// <summary>The audit action a cancelled game writes on each partner still in it (R14 E14-2).</summary>

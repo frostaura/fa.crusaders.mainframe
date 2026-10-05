@@ -596,12 +596,13 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         await club.CreditAsync(f, club.Organiser, 100);
         await club.CreditAsync(f, club.Sam, 100);
 
-        // Sam already holds his hour for tomorrow.
+        // Sam is invited, and only then takes his own hour for that day (R16 J16-11: an invite to a
+        // member already at the cap is refused at the add, so the accept is where a later booking bites).
+        var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var own = await club.Client(f, club.Sam).PostAsJsonAsync("/api/v1/bookings",
             new { courtId = club.CourtId, startsAt = PlayersClub.Tomorrow(10), sliceCount = 4 });
         Assert.Equal(HttpStatusCode.OK, own.StatusCode);
 
-        var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var response = await AcceptAsync(club, f, club.Sam, bookingId, PlayersClub.SeatOf(body, 2));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);

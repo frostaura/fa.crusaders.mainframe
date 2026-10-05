@@ -680,6 +680,9 @@ public static class WalletShareCauses
     /// <summary>R14 review M1: the club recorded the partner's share as paid outside the app, so what they paid in the app went back.</summary>
     public const string ClubSettled = Email.ShareActs.ClubSettled;
 
+    /// <summary>R16 J16-2: a player was added (by the organiser or the club) and the split went down; the difference went back.</summary>
+    public const string PlayerAdded = Email.ShareActs.PlayerAdded;
+
     /// <summary>
     /// R14 review M1/L1: a share went back and no record names an act — a desk adjustment to the
     /// booking, a removal from before R14. Said plainly, with nobody named.

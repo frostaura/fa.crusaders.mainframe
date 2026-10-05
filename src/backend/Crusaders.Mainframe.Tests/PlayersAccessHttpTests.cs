@@ -197,7 +197,9 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         var found = await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=partner"));
         var items = found.GetProperty("items").EnumerateArray().ToList();
         Assert.Equal(new[] { club.Alex, club.Sam }.Order(), items.Select(i => i.GetProperty("user_id").GetGuid()).Order());
-        Assert.All(items, i => Assert.Equal(["user_id", "name", "photo_url"], i.EnumerateObject().Select(p => p.Name)));
+        // R16 J16-3: plus the namesake tiebreak — games played with the caller and the joining date; nothing private.
+        Assert.All(items, i => Assert.Equal(
+            ["user_id", "name", "photo_url", "played_with_you", "last_played_with_you_at", "member_since"], i.EnumerateObject().Select(p => p.Name)));
 
         Assert.Empty((await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=Bea"))).GetProperty("items").EnumerateArray());
         Assert.Empty((await JsonAsync(await club.Client(f, club.Sam).GetAsync("/api/v1/members/directory?q=Sam"))).GetProperty("items").EnumerateArray());

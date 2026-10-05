@@ -9,7 +9,14 @@ namespace Crusaders.Mainframe.Api.Services;
 /// One share row, read back: which seat's pair it is, who the partner and the organiser were, which
 /// way it went, and why (one of <see cref="WalletShareCauses"/>).
 /// </summary>
-public sealed record ShareRowWhy(string Cause, Guid PartnerUserId, Guid OrganiserUserId, bool Collection);
+public sealed record ShareRowWhy(string Cause, Guid PartnerUserId, Guid OrganiserUserId, bool Collection)
+{
+    /// <summary>R16 J16-2: on a <see cref="WalletShareCauses.PlayerAdded"/> return, who joined. Null otherwise.</summary>
+    public string? Joined { get; init; }
+
+    /// <summary>R16 E16-7: who did the act the record names (null for the club's system, and for a plain payment).</summary>
+    public Guid? ActorUserId { get; init; }
+}
 
 /// <summary>
 /// R15 E15-3 / J15-4 / E15-10: why a share row moved, read back off the club's RECORD for the Night
@@ -41,7 +48,17 @@ public static class ShareRowCauses
     private static readonly string[] BookingActs = ["booking.cancelled", "booking.no_show", "booking.displaced", "booking.no_show_reversed"];
 
     /// <summary>One act on the record, reduced to what the decision needs.</summary>
-    private sealed record Act(string Action, DateTimeOffset At, Guid? Seat, Guid? Booking, bool ByClub, bool Dark);
+    private sealed record Act(string Action, DateTimeOffset At, Guid? Seat, Guid? Booking, bool ByClub, bool Dark)
+    {
+        /// <summary>R16 J16-2: a split change's <c>because</c>.</summary>
+        public string? Because { get; init; }
+
+        /// <summary>R16 J16-2: a split change's <c>joined</c>.</summary>
+        public string? Joined { get; init; }
+
+        /// <summary>R16 E16-7: the record's actor; null for the system.</summary>
+        public Guid? Actor { get; init; }
+    }
 
     /// <summary>The why of every share row among <paramref name="rows"/>, by ledger id. Rows that are not shares are absent.</summary>
     public static async Task<Dictionary<Guid, ShareRowWhy>> ForAsync(
@@ -72,8 +89,9 @@ public static class ShareRowCauses
             var collection = row.UserId == partner ? row.AmountMinutes < 0 : row.AmountMinutes > 0;
             // A seat act explains its own seat's rows only — Alex's removal never explains Sam's return.
             var mine = acts.Where(a => (a.Seat is { } s ? s == seat.Id : a.Booking == seat.BookingId) && a.At <= row.CreatedAt + SameSave).ToList();
-            var cause = collection ? CollectionCause(mine, row, booking.NoShowReversedAt) : ReturnCause(mine, row);
-            result[row.Id] = new ShareRowWhy(cause, partner, organiser, collection);
+            result[row.Id] = collection
+                ? new ShareRowWhy(CollectionCause(mine, row, booking.NoShowReversedAt), partner, organiser, true)
+                : ReturnWhy(ReturnAct(mine, row), partner, organiser);
         }
         return result;
     }
@@ -88,16 +106,32 @@ public static class ShareRowCauses
         return reversedAt is { } at && row.CreatedAt >= at ? WalletShareCauses.Attended : WalletShareCauses.SharePaid;
     }
 
-    /// <summary>A return: the newest act at the row that sends a share back; nothing on the record says share_back.</summary>
-    private static string ReturnCause(List<Act> acts, LedgerEntry row)
+    /// <summary>A return's why — its cause, and (R16) who joined on a <see cref="WalletShareCauses.PlayerAdded"/> and the act's actor.</summary>
+    private static ShareRowWhy ReturnWhy(Act? act, Guid partner, Guid organiser)
     {
-        var act = acts.Where(a => a.Action is not (TraceKinds.ShareCollectedAction or "booking.no_show_reversed") && a.At <= row.CreatedAt + SameSave)
+        var cause = ReturnCause(act);
+        return new ShareRowWhy(cause, partner, organiser, false)
+        {
+            Joined = cause == WalletShareCauses.PlayerAdded ? act!.Joined : null,
+            ActorUserId = act?.Actor,
+        };
+    }
+
+    /// <summary>The newest act at the row that sends a share back, or null.</summary>
+    private static Act? ReturnAct(List<Act> acts, LedgerEntry row)
+    {
+        return acts.Where(a => a.Action is not (TraceKinds.ShareCollectedAction or "booking.no_show_reversed") && a.At <= row.CreatedAt + SameSave)
             .MaxBy(a => a.At);
+    }
+
+    /// <summary>A return: the act's cause; nothing on the record says share_back.</summary>
+    private static string ReturnCause(Act? act)
+    {
         return act?.Action switch
         {
             TraceKinds.PlayerRemovedAction => act.ByClub ? WalletShareCauses.ClubRemoved : WalletShareCauses.OrganiserRemoved,
             TraceKinds.PartnerWithdrewAction => WalletShareCauses.ShareReturned,
-            TraceKinds.SplitChangedAction => WalletShareCauses.SplitChanged,
+            TraceKinds.SplitChangedAction => act.Because == WalletShareCauses.PlayerAdded ? WalletShareCauses.PlayerAdded : WalletShareCauses.SplitChanged,
             TraceKinds.SettledOutsideAction => WalletShareCauses.ClubSettled,
             "booking.cancelled" => WalletShareCauses.BookingCancelled,
             "booking.no_show" => act.Dark ? WalletShareCauses.OutageRefund : WalletShareCauses.NoShow,
@@ -116,12 +150,13 @@ public static class ShareRowCauses
         var actions = SeatActs.Concat(BookingActs).ToList();
         var rows = await db.AuditLogs.AsNoTracking()
             .Where(a => a.SubjectUserId != null && people.Contains(a.SubjectUserId!.Value) && actions.Contains(a.Action) && a.CreatedAt <= until)
-            .Select(a => new { a.Action, a.CreatedAt, a.DetailsJson })
+            .Select(a => new { a.Action, a.CreatedAt, a.DetailsJson, a.ActorUserId })
             .ToListAsync(ct);
         var acts = new List<Act>(rows.Count);
         foreach (var r in rows)
         {
-            if (Parse(r.Action, r.CreatedAt, r.DetailsJson) is not { } act) continue;
+            if (Parse(r.Action, r.CreatedAt, r.DetailsJson) is not { } parsed) continue;
+            var act = parsed with { Actor = r.ActorUserId == Guid.Empty ? null : r.ActorUserId };
             if ((act.Seat is { } s && seatIds.Contains(s)) || (act.Seat is null && act.Booking is { } b && bookingIds.Contains(b))) acts.Add(act);
         }
         return acts;
@@ -134,7 +169,16 @@ public static class ShareRowCauses
         var root = doc.RootElement;
         if (root.ValueKind != JsonValueKind.Object) return null;
         var seat = Array.IndexOf(SeatActs, action) >= 0 ? GuidOf(root, "participant_id") : null;
-        return new Act(action, at, seat, GuidOf(root, "booking_id"), True(root, "by_club"), True(root, "peripheral_outage"));
+        return new Act(action, at, seat, GuidOf(root, "booking_id"), True(root, "by_club"), True(root, "peripheral_outage"))
+        {
+            Because = TextOf(root, "because"),
+            Joined = TextOf(root, "joined"),
+        };
+    }
+
+    private static string? TextOf(JsonElement root, string key)
+    {
+        return root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
     }
 
     private static Guid? GuidOf(JsonElement root, string key)

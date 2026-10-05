@@ -8,7 +8,8 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// Review round 2, B-11 (MJ, B15 residual): "First court" and "Early bird" were awarded at the
 /// box scan — 06:24 for a 06:30 court, before a ball was hit. A session is attended from its court
 /// time or its check-in, whichever is later: nothing is awarded before the court starts, the
-/// check-in's recompute is due at the start, and the badge is dated then. A partner who walked in
+/// check-in's recompute is due at the start, and the badge is dated then. R16 E16-9: it is
+/// AWARDED when the court time ends (the start's recompute re-arms for the end). A partner who walked in
 /// behind the scanner still counts (founder default, unchanged).
 /// </summary>
 public sealed class R2BadgeAtCourtTimeHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
@@ -35,7 +36,13 @@ public sealed class R2BadgeAtCourtTimeHttpTests(PostgresFixture pg) : IClassFixt
         Assert.Empty(await BadgesAsync(f, club.Sam));
         Assert.Empty(await CelebrationsAsync(f, club.Sam));
 
+        // R16 E16-9: and nothing while the court is still in play — the club could yet cancel it, and a
+        // badge is never taken back. The start's recompute re-arms for the court time's end.
         await TickAsync(f, start.AddMinutes(1));
+        Assert.Empty(await BadgesAsync(f, club.Sam));
+        Assert.Equal(start.AddMinutes(32), await MarkerAsync(f, booking));
+
+        await TickAsync(f, start.AddMinutes(33));
         foreach (var member in new[] { club.Organiser, club.Sam })   // Sam walked in behind the scanner: still counts
         {
             var first = Assert.Single(await BadgesAsync(f, member), b => b.BadgeKey == BadgeCatalogue.FirstSession);

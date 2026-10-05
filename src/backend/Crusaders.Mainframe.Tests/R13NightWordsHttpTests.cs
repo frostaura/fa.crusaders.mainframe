@@ -148,7 +148,8 @@ public sealed class R13NightWordsHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.True(withdrew.GetProperty("actor").GetProperty("is_self").GetBoolean());
         var back = Assert.Single(sam, e => Kind(e) == TraceKinds.WalletShareMoved && e.GetProperty("amount_minutes").ValueKind == JsonValueKind.Number
                                              && e.GetProperty("amount_minutes").GetInt32() == 7);
-        Assert.Equal("7 minutes of their share came back — they withdrew from the game", Headline(back));
+        // R16 E16-4: through the share sentence — the court, and whose game.
+        Assert.Equal("7 minutes of their share of Court 1 came back from Olive Organiser — they withdrew from the game", Headline(back));
         Assert.Equal(TraceActors.Member, ActorKind(back));
         Assert.Equal("Sam Partner", ActorName(back));
         // The payment before the withdrawal is not the withdrawal's.
@@ -164,7 +165,7 @@ public sealed class R13NightWordsHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal("Sam Partner", ActorName(partner));
         var out7 = Assert.Single(olive, e => Kind(e) == TraceKinds.WalletShareMoved && e.GetProperty("amount_minutes").ValueKind == JsonValueKind.Number
                                                && e.GetProperty("amount_minutes").GetInt32() == -7);
-        Assert.Equal("7 minutes went back to Sam Partner — they withdrew from the game", Headline(out7));
+        Assert.Equal("7 minutes went back to Sam Partner for their share of Court 1 — Sam Partner withdrew from the game", Headline(out7));
         Assert.Equal(TraceActors.Member, ActorKind(out7));
         Assert.Equal("Sam Partner", ActorName(out7));
         Assert.DoesNotContain(olive, e => Headline(e).Contains("automatic", StringComparison.Ordinal));

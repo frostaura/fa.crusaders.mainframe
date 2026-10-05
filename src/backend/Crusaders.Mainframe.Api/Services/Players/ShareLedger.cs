@@ -234,6 +234,9 @@ public sealed class ShareLedger
 
     public static Guid PayerOf(Booking booking) => booking.PaidByUserId ?? booking.UserId ?? Guid.Empty;
 
+    /// <summary>R16 J16-7: a balance-neutral frame for a member — sent after the commit, as every wallet frame is.</summary>
+    public Task PublishFrameAsync(Guid userId, WalletFrame frame, CancellationToken ct) => _ledger.PublishFrameAsync(userId, frame, ct);
+
     /// <summary>
     /// A booking whose court is being paid for by more than one member: any partner seat still
     /// asked for a share, or any share already moved. The pay-for-at-the-box path (P7) refuses
@@ -458,6 +461,24 @@ public sealed class ShareLedger
     public sealed record Collected(ShareMove Move, int BalanceBefore, int BalanceAfter);
 
     /// <summary>
+    /// The desk's collect: the reason it recorded, and whether it named the overdraft — R16 J16-10:
+    /// needed only when the partner's spendable minutes do not cover what would be collected.
+    /// </summary>
+    public sealed record CollectAsk(string? Reason, bool MayOverdraw);
+
+    /// <summary>
+    /// R16 J16-10: the collect would take the partner below what they can spend and the desk did not
+    /// name the overdraft. Decided under the partner's lock; nothing was written.
+    /// </summary>
+    public sealed class CollectShortException(int collectMinutes, int spendableMinutes)
+        : InvalidOperationException($"collecting {collectMinutes} would overdraw a spendable {spendableMinutes}")
+    {
+        public int CollectMinutes { get; } = collectMinutes;
+
+        public int SpendableMinutes { get; } = spendableMinutes;
+    }
+
+    /// <summary>
     /// An admin's explicit collect (R19 posture, applied to shares): the seat's consent raised to
     /// its share, the rest of the share collected whatever the partner's balance — even past the
     /// deadline — and the change-log line staged by <paramref name="record"/> with the figure
@@ -466,9 +487,10 @@ public sealed class ShareLedger
     /// written); throws <see cref="DbUpdateException"/> when the pair could not post (nothing is
     /// written either).
     /// </summary>
+    /// <exception cref="CollectShortException">The partner cannot cover it and <see cref="CollectAsk.MayOverdraw"/> is false.</exception>
     public async Task<Collected?> CollectAsync(
         Guid bookingId, Guid seatId, Guid actorUserId, Func<BookingParticipant, int, int, Task> record, CancellationToken ct,
-        string? reason = null)
+        CollectAsk ask)
     {
         var partner = await _db.BookingParticipants.AsNoTracking().Where(p => p.Id == seatId).Select(p => p.UserId).FirstOrDefaultAsync(ct);
         if (partner is not { } partnerId) return null;
@@ -488,10 +510,16 @@ public sealed class ShareLedger
             return null;
         }
 
+        if (!ask.MayOverdraw && await _ledger.GetSpendableAsync(partnerId, ct) is var spendable && spendable < delta)
+        {
+            _db.ChangeTracker.Clear();
+            throw new CollectShortException(delta, spendable);
+        }
+
         var before = await _ledger.GetBalanceAsync(partnerId, ct);
         var move = new ShareMove(seatId, partnerId, PayerOf(booking), delta, await NextSeqAsync(seatId, partnerId, ct));
         await record(seat, delta, before);
-        var why = await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct, new ClubReceipt(true, before - delta, reason));
+        var why = await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct, new ClubReceipt(true, before - delta, ask.Reason));
         try
         {
             await _ledger.PostManyAsync(Pair(booking, move, actorUserId, why), ct);
@@ -583,6 +611,7 @@ public sealed class ShareLedger
             Cause = cause,
             Game = game,
             CancelledByClub = cancel?.ByClub,
+            Joined = seat.Split?.Joined,
         };
         var told = new ShareTold(PayloadCause(cause), cancel?.By);
 
@@ -598,6 +627,7 @@ public sealed class ShareLedger
             CancelledBy = told.CancelledBy,
             ScannerName = partnerScan.OtherName,
             ScannedByReader = partnerScan.Mine,
+            Joined = why.Joined,
         },
             move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, why with { Scan = partnerScan }), settings,
             Own(move.PartnerUserId));
@@ -609,6 +639,7 @@ public sealed class ShareLedger
             CancelledBy = told.CancelledBy,
             ScannerName = organiserScan.OtherName,
             ScannedByReader = organiserScan.Mine,
+            Joined = why.Joined,
         },
             move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, why with { Scan = organiserScan }), settings,
             Own(move.OrganiserUserId));
@@ -679,7 +710,7 @@ public sealed class ShareLedger
     private static string? PayloadCause(string cause)
     {
         return cause is WalletShareCauses.OrganiserRemoved or WalletShareCauses.SplitChanged or WalletShareCauses.BookingCancelled
-            or WalletShareCauses.ClubSettled ? cause : null;
+            or WalletShareCauses.ClubSettled or WalletShareCauses.PlayerAdded ? cause : null;
     }
 
     /// <summary>What <see cref="ActorOf"/> decides from.</summary>
@@ -705,7 +736,7 @@ public sealed class ShareLedger
             WalletShareCauses.BookingCancelled => f.Cancel?.ActorUserId,
             WalletShareCauses.ShareReturned => f.Move.PartnerUserId,
             WalletShareCauses.OrganiserRemoved or WalletShareCauses.ClubRemoved => f.Seat.Removal?.ActorUserId,
-            WalletShareCauses.SplitChanged => f.Seat.Split?.ActorUserId,
+            WalletShareCauses.SplitChanged or WalletShareCauses.PlayerAdded => f.Seat.Split?.ActorUserId,
             _ => null,
         };
     }
@@ -772,7 +803,8 @@ public sealed class ShareLedger
         if (seat.Status == ParticipantStatus.Withdrawn) return WalletShareCauses.ShareReturned;
         if (seat.Status == ParticipantStatus.Removed) return seat.Removal is null ? WalletShareCauses.ShareBack : WalletShareCauses.OrganiserRemoved;
         if (seat.SettledOutside) return WalletShareCauses.ClubSettled;
-        return seat.Split is null ? WalletShareCauses.ShareBack : WalletShareCauses.SplitChanged;
+        if (seat.Split is null) return WalletShareCauses.ShareBack;
+        return seat.Split.Because == WalletShareCauses.PlayerAdded ? WalletShareCauses.PlayerAdded : WalletShareCauses.SplitChanged;
     }
 
     /// <param name="ownAction">
@@ -808,7 +840,7 @@ public sealed class ShareLedger
 
     /// <summary>The receipt's headline: a club refund's words when there is one (E10-7), else <see cref="ShareHeadline"/>.</summary>
     private static string HeadlineFor(ShareDirection d, string other, int amount, HeadlineWhy why) =>
-        NoShowHeadline(d, other, amount, why) ?? RefundHeadline(d, other, amount, why.Refund) ?? WithdrewHeadline(d, other, amount, why)
+        NoShowHeadline(d, other, amount, why) ?? RefundHeadline(d, other, amount, why) ?? WithdrewHeadline(d, other, amount, why)
         ?? OrganiserActHeadline(d, other, amount, why) ?? ShareHeadline(d, other, amount, why);
 
     /// <summary>
@@ -832,6 +864,10 @@ public sealed class ShareLedger
         {
             WalletShareCauses.OrganiserRemoved => mine ? $"{other} took you off {where}" : $"you took them off {where}",
             WalletShareCauses.SplitChanged => mine ? $"{other} lowered your share of {where}" : $"you lowered their share of {where}",
+            // R16 J16-2: an add lowered the split — said as the join, whoever added them.
+            WalletShareCauses.PlayerAdded => $"{why.Joined ?? "another player"} joined {where}, so the split went down",
+            // R16 E16-4: the club's removal, with its cause, on both sides (the organiser's said only "went back").
+            WalletShareCauses.ClubRemoved => mine ? $"the club took you off {where}" : $"the club took them off {where}",
             WalletShareCauses.ClubSettled => mine
                 ? $"the club recorded your share of {where} as paid outside the app"
                 : $"the club recorded their share of {where} as paid outside the app",
@@ -853,9 +889,10 @@ public sealed class ShareLedger
     {
         if (!why.Withdrew) return null;
         var minutes = MoneyFormat.Minutes(amount);
+        // R16 E16-4: with the court and the day, as every other share line.
         return d == ShareDirection.Refunded
-            ? $"{minutes} of your share came back — you withdrew from the game"
-            : $"{minutes} went back to {other} — they withdrew from the game";
+            ? $"{minutes} of your share of {why.Where} came back — you withdrew from the game"
+            : $"{minutes} went back to {other} for {why.Where} — they withdrew from the game";
     }
 
     /// <summary>The facts a receipt's headline is worded from.</summary>
@@ -875,6 +912,12 @@ public sealed class ShareLedger
 
         /// <summary>R15 J15-5: whose late check-in made it attended, as this reader is told it.</summary>
         public ScanWords? Scan { get; init; }
+
+        /// <summary>R16 J16-2: on a <see cref="WalletShareCauses.PlayerAdded"/> return, who joined.</summary>
+        public string? Joined { get; init; }
+
+        /// <summary>R16 E16-4: "Court 4, Sun 18 Oct, 12:00", or "the game" when the court is not known.</summary>
+        public string Where => Game is { } game ? $"{game.CourtName}, {game.StartsLocal}" : "the game";
     }
 
     /// <summary>
@@ -887,18 +930,18 @@ public sealed class ShareLedger
         var minutes = MoneyFormat.Minutes(amount);
         var part = $"{MoneyFormat.Minutes(kept)} {(kept == 1 ? "is" : "are")}";
         return d == ShareDirection.Refunded
-            ? $"{minutes} of your share came back — nobody checked in, and {part} your part of the no-show penalty"
-            : $"{minutes} went back to {other} — nobody checked in, and {part} {other}'s part of the no-show penalty";
+            ? $"{minutes} of your share of {why.Where} came back — nobody checked in, and {part} your part of the no-show penalty"
+            : $"{minutes} went back to {other} for {why.Where} — nobody checked in, and {part} {other}'s part of the no-show penalty";
     }
 
     /// <summary>E10-7: the headline for a share the club's refund sent back, or null to use <see cref="ShareHeadline"/>.</summary>
-    private static string? RefundHeadline(ShareDirection d, string other, int amount, string? cause)
+    private static string? RefundHeadline(ShareDirection d, string other, int amount, HeadlineWhy why)
     {
-        if (ShareRefundCauses.Because(cause) is not { } because) return null;
+        if (ShareRefundCauses.Because(why.Refund) is not { } because) return null;
         var minutes = MoneyFormat.Minutes(amount);
         return d == ShareDirection.Refunded
-            ? $"{minutes} of your share came back — the club refunded the session: {because}"
-            : $"{minutes} went back to {other} — the club refunded the session: {because}";
+            ? $"{minutes} of your share of {why.Where} came back — the club refunded the session: {because}"
+            : $"{minutes} went back to {other} for {why.Where} — the club refunded the session: {because}";
     }
 
     /// <summary>

@@ -211,8 +211,28 @@ public sealed partial class PlayersService
         {
             return bad;
         }
+        if (await DailyLimitRefusalAsync(game, specs, now, ct) is { } atLimit) return atLimit;
 
         return await AddSeatsAsync(new AddWork(game, req with { SplitMode = mode }, club?.ActorId ?? organiserId, now, bookingLock) { Club = club }, ct);
+    }
+
+    /// <summary>
+    /// R16 J16-11: a member already holding their daily cap of court time on the game's club day is
+    /// not added — by the organiser or the desk. Their accept would be refused for the same cap (D12),
+    /// so the invite could never be taken, and an equal split would have gone down for nothing. The
+    /// same rule and figures the accept meets (<see cref="BookingRules.PartnerCapRefusalAsync"/>); a
+    /// game that has started is past asking, as the invite view's cap is.
+    /// </summary>
+    private async Task<PlayerOutcome?> DailyLimitRefusalAsync(Game game, IReadOnlyList<PlayerSpec> specs, DateTimeOffset now, CancellationToken ct)
+    {
+        if (game.Booking.StartsAt <= now) return null;
+        foreach (var id in specs.Where(s => s.UserId is not null).Select(s => s.UserId!.Value))
+        {
+            if (await _p.Rules.PartnerCapRefusalAsync(id, game.Booking, game.Settings, ct) is null) continue;
+            var name = PersonNames.Of(id, await PersonNames.ForAsync(_db, [id], ct));
+            return PlayerOutcome.Refuse(409, PlayerErrors.AtDailyLimit, new { user_id = id, name });
+        }
+        return null;
     }
 
     /// <summary>The desk adding a player: who, and whether to place them as accepted (B8).</summary>
@@ -297,16 +317,21 @@ public sealed partial class PlayersService
 
         var figures = added.ToDictionary(a => a.Seat.Id, a => (specs[added.IndexOf(a)].Weight ?? 1, specs[added.IndexOf(a)].Amount ?? 0m));
         if (organiserWeight is { } w) figures[game.Organiser!.Id] = (w, 0m);
+        var before = game.Live.Where(s => s.Seat > 1 && s.UserId is not null && !figures.ContainsKey(s.Id)).ToDictionary(s => s.Id, s => s.ShareMinutes);
         if (Resplit(game, mode, figures) is { } splitError) return PlayerOutcome.Refuse(400, splitError);
 
         foreach (var (seat, _) in added.Where(a => a.Seat.UserId is not null))
         {
             await StageAddedNoticeAsync(game, seat, work.Club, ct);
         }
+        await RecordRebalanceAsync(game, before, added.Select(a => a.Seat).ToList(), work, ct);
 
         if (await SaveAsync(ct) is { } conflict) return conflict;
         await work.Lock.CommitAsync(ct);
-        await AfterAsync(game.Booking.Id, added.Where(a => a.Seat.UserId is not null).Select(a => a.Seat.UserId!.Value), ct);
+        // R16 J16-2: a share the add lowered goes back as the ADDER's act — the organiser's (their
+        // receipt born read) or the desk's — never the club's system with no cause.
+        var options = new ReconcileOptions(actorId) { OwnActionBy = work.Club is null ? actorId : null };
+        await AfterAsync(game.Booking.Id, added.Where(a => a.Seat.UserId is not null).Select(a => a.Seat.UserId!.Value), ct, options);
         return PlayerOutcome.Ok(new
         {
             booking_id = game.Booking.Id,
@@ -322,6 +347,32 @@ public sealed partial class PlayersService
                 invite_path = a.Token is null ? null : InviteTokens.PathFor(a.Token),
             }).ToList(),
         });
+    }
+
+    /// <summary>
+    /// R16 J16-2: every partner whose share an add lowered, on the record in the add's own save — a
+    /// <c>players.split_changed</c> row whose <c>because</c> is <see cref="ShareActs.PlayerAdded"/> and
+    /// whose <c>joined</c> names who joined. The share that goes back reads its cause, actor and words
+    /// off it (<see cref="SeatFacts"/>, <see cref="ShareRowCauses"/>): "Jo joined, so the split went down".
+    /// </summary>
+    private async Task RecordRebalanceAsync(
+        Game game, Dictionary<Guid, int> before, List<BookingParticipant> added, AddWork work, CancellationToken ct)
+    {
+        var moved = game.Live.Where(s => before.TryGetValue(s.Id, out var was) && was != s.ShareMinutes).ToList();
+        if (moved.Count == 0) return;
+        var names = await PersonNames.ForAsync(_db, added.Select(a => a.UserId), ct);
+        var joined = string.Join(" and ", added.Select(a => a.GuestName ?? PersonNames.Of(a.UserId, names) ?? "A player"));
+        foreach (var seat in moved)
+        {
+            _db.AuditLogs.Add(SeatAudit(SplitChangedAction, game.Booking, seat, work.ActorId, new
+            {
+                share_minutes = seat.ShareMinutes,
+                previous_share_minutes = before[seat.Id],
+                because = Email.ShareActs.PlayerAdded,
+                joined,
+                by_club = work.Club is not null,
+            }));
+        }
     }
 
     /// <summary>
@@ -590,7 +641,8 @@ public sealed partial class PlayersService
                 seat = s.Seat,
                 share_minutes = s.ShareMinutes,
                 weight = s.ShareWeight,
-                needs_consent = s.Seat > 1 && s.Status == ParticipantStatus.Accepted && s.ShareMinutes > s.ConsentedMinutes,
+                // R16 J16-1: the one rule — a share the club settled by hand asks nothing.
+                needs_consent = s.Seat > 1 && PlayerNotices.NeedsConsent(s),
             }).ToList(),
         });
     }
@@ -643,6 +695,9 @@ public sealed partial class PlayersService
 
     /// <summary>R15 E15-3: the desk added a member to a game (placed as playing, or invited) — the Night's record of it.</summary>
     public const string AddedByClubAction = "players.added_by_club";
+
+    /// <summary>R16 E16-1: the desk accepted a partner's invite on their behalf.</summary>
+    public const string AcceptedByClubAction = "players.accepted_by_club";
 
     /// <summary>R15 E15-3: the desk recorded a partner's share as paid outside the app.</summary>
     public const string SettledOutsideAction = "players.settled_outside";

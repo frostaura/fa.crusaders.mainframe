@@ -15,8 +15,8 @@ namespace Crusaders.Mainframe.Api.Services;
 /// is playing; it does not record the member's consent, so the reconcile collects nothing from
 /// them (<see cref="BookingParticipant.ConsentedMinutes"/> stays where the member left it). Money
 /// moves from a partner only through the member's own accept or through <see cref="CollectAsync"/>,
-/// which must be sent with <c>allowNegativeBalance</c> and a reason — the R19 posture, applied to
-/// shares.
+/// which needs a reason and — when the partner's balance does not cover it (R16 J16-10) —
+/// <c>allowNegativeBalance</c>: the R19 posture, applied to shares.
 /// </para>
 /// </summary>
 public sealed class PlayersAdminService
@@ -141,10 +141,16 @@ public sealed class PlayersAdminService
         seat.RespondedAt = StorableTime.UtcNow;
         seat.UpdatedAt = StorableTime.UtcNow;
         await RecordAsync(AdminChangeActions.BookingPlayerAcceptedOnBehalf, act, seat, new { status = "accepted", consented_minutes = seat.ConsentedMinutes }, ct);
+        // R16 E16-1: on the club's record too, in the act's own save — the partner's and the organiser's Nights said nothing.
+        _db.AuditLogs.Add(PlayersService.SeatAuditFor(_tenant.TenantId, PlayersService.AcceptedByClubAction, game!.Booking, seat, act.ActorId,
+            new { consented_minutes = seat.ConsentedMinutes }));
         // B8: the member is told the club said yes for them, in the same save.
         MemberNotices.Stage(_db, _tenant.TenantId,
-            await PlayerNotices.ClubSeatAsync(_db, game!.Booking, seat, game.Settings, "club-accepted", ct), game.Settings);
-        return await SaveAndSettleAsync(game!, seat, ct);
+            await PlayerNotices.ClubSeatAsync(_db, game.Booking, seat, game.Settings, "club-accepted", ct), game.Settings);
+        // R16 E16-1: and the organiser — their game has a player they did not see say yes.
+        MemberNotices.Stage(_db, _tenant.TenantId,
+            await PlayerNotices.ClubAcceptedForOrganiserAsync(_db, game.Booking, seat, game.Settings, ct), game.Settings);
+        return await SaveAndSettleAsync(game, seat, ct);
     }
 
     /// <summary>
@@ -170,14 +176,20 @@ public sealed class PlayersAdminService
         // R15 E15-3: on the club's record too, in the same save, so both players' Nights say it.
         _db.AuditLogs.Add(PlayersService.SeatAuditFor(_tenant.TenantId, PlayersService.SettledOutsideAction, game!.Booking, seat, act.ActorId,
             new { share_minutes = seat.ShareMinutes, paid_in_app_minutes = paid }));
+        // R16 J16-6: both players are told, in the same save — the partner that they paid the organiser by hand.
+        foreach (var notice in await PlayerNotices.SettledOutsideAsync(_db, game.Booking, seat, game.Settings, ct))
+        {
+            MemberNotices.Stage(_db, _tenant.TenantId, notice, game.Settings);
+        }
         // R15 E15-8: the return's receipts carry the desk's reason.
         var options = OptionsFor(act, seat) with { ClubReason = act.Reason };
         return await WithReturnStateAsync(await SaveAndSettleAsync(game!, seat, ct, options), seat.Id, ct);
     }
 
     /// <summary>
-    /// Collects the rest of a partner's share whatever their balance — the one path that may take a
-    /// partner below zero, and only when <paramref name="allowNegativeBalance"/> says so by name. It
+    /// Collects the rest of a partner's share — the one path that may take a partner below zero, and
+    /// only when <paramref name="allowNegativeBalance"/> says so by name; a share their spendable
+    /// minutes cover needs no such word (R16 J16-10), and a short one without it is refused. It
     /// may collect after the share lapsed, which nothing else can.
     ///
     /// <para>
@@ -191,10 +203,11 @@ public sealed class PlayersAdminService
     public async Task<PlayerOutcome> CollectAsync(AdminAct act, bool allowNegativeBalance, CancellationToken ct)
     {
         if (Reason(act) is { } missing) return missing;
-        if (!allowNegativeBalance) return PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised);
         var (game, seat) = await SeatAsync(act, ct);
         if (seat is null || seat.UserId is null) return PlayerOutcome.PlayerNotFound;
-        if (seat.Status != ParticipantStatus.Accepted || seat.SettledOutsideAt is not null) return PlayerOutcome.Refuse(409, PlayerErrors.NotInvited);
+        // R16 E16-8: an invite nobody answered has no share to collect — said as that, not "not invited".
+        if (seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.NotAccepted);
+        if (seat.SettledOutsideAt is not null) return PlayerOutcome.Refuse(409, PlayerErrors.SettledOutside);
         _db.ChangeTracker.Clear();
 
         ShareLedger.Collected? collected;
@@ -208,7 +221,13 @@ public sealed class PlayersAdminService
                     new { collected_minutes = delta }));
                 return RecordAsync(AdminChangeActions.BookingShareCollected, act, tracked,
                     new { collected_minutes = delta, balance_before_minutes = before, balance_after_minutes = before - delta }, ct);
-            }, ct, act.Reason);
+            }, ct, new ShareLedger.CollectAsk(act.Reason, allowNegativeBalance));
+        }
+        catch (ShareLedger.CollectShortException shortBy)
+        {
+            // R16 J16-10: the overdraft is named only when it is one — a covered share collects without it.
+            return PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised,
+                new { collect_minutes = shortBy.CollectMinutes, balance_minutes = shortBy.SpendableMinutes });
         }
         catch (DbUpdateException)
         {

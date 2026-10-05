@@ -60,7 +60,11 @@ public sealed record PlayRecord(
     /// <summary>The figures of §5.1, derived.</summary>
     public PersonalStats Stats => PlayStats.Compute(Sessions, Results, Zone, Now);
 
-    /// <summary>The badge inputs, with the club's two time-of-day thresholds.</summary>
+    /// <summary>
+    /// The badge inputs, with the club's two time-of-day thresholds — R16 E16-9: only sessions that
+    /// have ended and that the club did not cancel (<see cref="AttendedSession.EarnsBadgesAt"/>).
+    /// </summary>
     public BadgeInputs BadgeInputs => new(
-        Sessions, Results, Walk, Zone, PlaySettings.EarlyBirdBeforeMinute(Settings), PlaySettings.NightOwlFromMinute(Settings));
+        [.. Sessions.Where(s => s.EarnsBadgesAt(Now))], Results, Walk, Zone,
+        PlaySettings.EarlyBirdBeforeMinute(Settings), PlaySettings.NightOwlFromMinute(Settings));
 }

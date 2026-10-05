@@ -75,8 +75,11 @@ public sealed class PlaySweep
                     _db.ChangeTracker.Clear();
                     await _evaluator.EvaluateAsync(userId, now, ct);
                 }
+                // R16 E16-9: a session still on court is evaluated again when it ends — that is when its
+                // badges are earned (never at the start: the club may yet cancel it, and badges stay).
                 await _db.Bookings.Where(b => b.Id == bookingId && b.PlayRecomputeDueAt <= passStart)
-                    .ExecuteUpdateAsync(u => u.SetProperty(b => b.PlayRecomputeDueAt, (DateTimeOffset?)null), ct);
+                    .ExecuteUpdateAsync(u => u.SetProperty(b => b.PlayRecomputeDueAt,
+                        b => b.CheckedInAt != null && b.CancelledAt == null && b.EndsAt > passStart ? b.EndsAt : (DateTimeOffset?)null), ct);
                 drained++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

@@ -25,6 +25,13 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
+    /// <summary>R16 E16-4: the court and start as every share line says them.</summary>
+    private static async Task<string> WhereAsync(Rig r)
+    {
+        var start = await PlayersClub.ReadAsync(r.App, db => db.Bookings.IgnoreQueryFilters().Where(b => b.Id == r.BookingId).Select(b => b.StartsAt).FirstAsync());
+        return $"Court 1, {start.ToString("ddd d MMM, HH:mm", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
     private sealed record Rig(PlayersClub Club, WebApplicationFactory<Program> App, CapturingMail Mail, Guid BookingId, DateTimeOffset Start)
     {
         /// <summary>The organiser's live wallet, subscribed before the sweep (R10 E10-1).</summary>
@@ -253,7 +260,8 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         var sam = await PlayersClub.ReadAsync(r.App, db => db.AdminNotifications.IgnoreQueryFilters()
             .Where(n => n.RecipientUserId == r.Club.Sam && n.Kind == MemberEventCatalogue.ShareMoved)
             .OrderByDescending(n => n.CreatedAt).FirstAsync());
-        Assert.Equal("16 minutes of your share came back — the club refunded the session: the court's box was offline", sam.Headline);
+        // R16 E16-4: with the court and the day.
+        Assert.Equal($"16 minutes of your share of {await WhereAsync(r)} came back — the club refunded the session: the court's box was offline", sam.Headline);
         Assert.Equal("outage", JsonDocument.Parse(sam.PayloadJson).RootElement.GetProperty("club_refund").GetString());
 
         var olive = await PlayersClub.ReadAsync(r.App, db => db.AdminNotifications.IgnoreQueryFilters()
@@ -393,7 +401,7 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
             .Where(n => n.RecipientUserId == r.Club.Sam && n.Kind == MemberEventCatalogue.ShareMoved)
             .OrderByDescending(n => n.CreatedAt).FirstAsync());
         Assert.Equal(
-            $"{returned} minutes of your share came back — nobody checked in, and {kept} minutes are your part of the no-show penalty",
+            $"{returned} minutes of your share of {await WhereAsync(r)} came back — nobody checked in, and {kept} minutes are your part of the no-show penalty",
             sam.Headline);
         Assert.DoesNotContain("refunded the session", sam.Headline, StringComparison.Ordinal);
         Assert.Equal(kept, JsonDocument.Parse(sam.PayloadJson).RootElement.GetProperty("kept_minutes").GetInt32());
