@@ -39,4 +39,4 @@ export const GAMES_LIST = [
  * container). `max-w-full` capped nothing: the strip is as wide as its content, so its 100 % was the
  * card's own 16rem — 512px on a 320 phone at 200 %.
  */
-export const GAMES_ITEM = "w-[min(16rem,100cqw)] shrink-0 snap-start @[40rem]/aside:w-auto";
+export const GAMES_ITEM = "w-rail-card shrink-0 snap-start @[40rem]/aside:w-auto";

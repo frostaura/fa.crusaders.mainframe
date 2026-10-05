@@ -84,6 +84,7 @@ const config: Config = {
       height: { touch: layout.touch },
       size: { touch: layout.touch },
       maxWidth: layout.width,
+      width: { "rail-card": layout.railCard },
       transitionDuration: motion.duration,
       transitionTimingFunction: motion.easing,
       /**

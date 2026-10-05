@@ -365,7 +365,11 @@ export const layout = {
   width: {
     narrow: "36rem", content: "64rem", wide: "80rem", page: "120rem",
     list: "24rem", aside: "20rem", asideWide: "24rem", form: "40rem",
+    /** R16 L16-5: the nearest size container's width — a rail item never outgrows its rail. */
+    container: "100cqw",
   },
+  /** R16 L16-5: a rail card — 16rem, capped at the rail (`100cqw`) at large text. */
+  railCard: "min(16rem, 100cqw)",
   tile: { stat: "9rem", card: "18rem", panel: "26rem", wide: "34rem" },
   stickyTop: "0px",
   /** Tailwind's breakpoints plus one: a 1920 screen is not a 1536 one with more margin. */
