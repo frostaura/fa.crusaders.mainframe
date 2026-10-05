@@ -12,14 +12,14 @@ Specs: `e2e/money-r13-fc13.spec.ts`; tests `*R13*` / `*-r13.test.tsx`.
 
 - **One partner is one share** (X13-2): `cancelSentence` names each partner from the share part's
   `counterparty_name` ("7 minutes went back to Sam for their share"; two: "… to Sam and 7 minutes
-  to Nomsa for their shares"), else "your partner" / "your N partners". Never "your partners …
+  to Nomsa for their shares"; C13-7 sends it, null on non-share rows), else "your partner" / "your N partners". Never "your partners …
   their shares" for one. *Why:* the organiser's own cancel sheet names each ("Back to Sam").
 - **The partner hears who cancelled** (X13-3): `share_cause: booking_cancelled` + `cancelled_by:
   club` → "— the club cancelled the booking" (named and plain toasts).
 - **A returned share is "your share"** (J13-4): a known return cause, minutes in, on the plain path
   (the booking 404s for a member taken off it) says "10 minutes of your share of a split booking
-  came back — the club took you off the game"; never "A share … moved". `shareMovementPlain`'s 5th
-  arg carries `cancelledBy` and an optional `place` (court from the frame, if a server sends one).
+  came back — the club took you off the game"; never "A share … moved". With C13-7's frame
+  `court_name` + `booking_starts_at` (→ `BalanceDelta.place`) it reads "of Court 1 · Tue 8 Oct".
 - **A settlement with shares is one sentence** (E13-5, C13-2): `settledWithShares` words the
   settlement from its OWN rows, then the partners' share rows, then the net — the sweep had counted
   the share as penalty ("10 minutes charged" for a 4-minute penalty + 6-minute share).
