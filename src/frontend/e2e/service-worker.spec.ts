@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { pinPhoneOffline } from "./offlinePhone";
 
 /**
  * E-F06 — the offline shell, driven through a REAL service worker registration.
@@ -194,8 +195,11 @@ test("what §12 still promises: the app opens with no signal", async ({ page, co
   await expect(page).toHaveTitle("Crusaders Mainframe");
 
   await context.setOffline(true);
+  // The test ends offline: this page is never online again, so its next document may be pinned.
+  await pinPhoneOffline(page);
   try {
     await page.goto(`${origin}/wallet`);
+    expect(await page.evaluate(() => navigator.onLine), "the next document must see a phone with no signal").toBe(false);
     // A route the member has never opened still gets the interface rather than the browser's
     // offline page: the worker falls back to the one cached shell for every navigation.
     await expect(page).toHaveTitle("Crusaders Mainframe");

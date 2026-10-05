@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { pinPhoneOffline } from "./offlinePhone";
 
 /**
  * R3-9 / D-H3 — the PWA promise, held against a REAL production build.
@@ -223,7 +224,9 @@ test("a member who has opened the app once can open it again with no signal at a
   try {
     // A COLD start: a new page, the home-screen shortcut's own route, no network.
     const cold = await context.newPage();
+    await pinPhoneOffline(cold);
     await cold.goto(`${origin}/my-code`);
+    expect(await cold.evaluate(() => navigator.onLine), "the cold document must see a phone with no signal").toBe(false);
 
     // The proof that the APP booted rather than just the HTML arriving: the document title is
     // set by `RouteAnnouncer` from JavaScript. The static `index.html` says "Crusaders
@@ -305,6 +308,7 @@ test("a lapsed session drops what could be a member's, keeps the shell, and My C
     await context.setOffline(true);
     try {
       const cold = await context.newPage();
+      await pinPhoneOffline(cold);
       await cold.goto(`${origin}/my-code`);
       await expect(cold).toHaveTitle(/— Crusaders Mainframe$/, { timeout: 15_000 });
       await cold.close();
