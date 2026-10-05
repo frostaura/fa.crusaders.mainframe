@@ -1451,7 +1451,9 @@ public sealed class BookingService
         // moves and nothing told the member. Their inbox says so, in this same save.
         var startedNoRefund = refundAmount == 0 && penaltyAmount == 0 && booking.CheckedInAt is not null
                               && cancelledBy == WalletCancelledBy.Club;
-        if (startedNoRefund) await StageStartedCancelNoticeAsync(booking, settings, waiveReasonRecorded, ct);
+        // R16 E16-3: who checked in, so the mail, the inbox line and the frame name them ("you" to themselves).
+        var checker = await CheckedInByAsync(booking, ct);
+        if (startedNoRefund) await StageStartedCancelNoticeAsync(booking, settings, (waiveReasonRecorded, checker), ct);
 
         try
         {
@@ -1506,10 +1508,14 @@ public sealed class BookingService
             : null;
         var cancellationMsg = EmailTemplates.BookingCancellation(
             await _club.GetAsync(ct), user.Email,
-            new Email.CancelledSlot(court.Name, await StartsAtLocalAsync(booking.StartsAt, ct)) { SessionStarted = booking.CheckedInAt is not null },
+            new Email.CancelledSlot(court.Name, await StartsAtLocalAsync(booking.StartsAt, ct))
+            {
+                SessionStarted = booking.CheckedInAt is not null,
+                CheckedInByName = checker?.OtherName,
+            },
             refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
         SendEmailInBackground(cancellationMsg, $"cancellation for {booking.Id}");
-        if (startedNoRefund) await TellStartedCancelAsync(booking, cancelledBy, ct);
+        if (startedNoRefund) await TellStartedCancelAsync(booking, cancelledBy, checker?.UserId, ct);
 
         await _bus.EmitAsync(new DomainEvent(
             Id: $"evt_{Guid.NewGuid():N}",
@@ -1536,26 +1542,77 @@ public sealed class BookingService
     /// R14 E14-5: the booker's inbox line for a session the club cancelled after it had started —
     /// staged, so the cancellation's own save commits it. Not mailed: the cancellation mail is sent.
     /// </summary>
-    private async Task StageStartedCancelNoticeAsync(Booking booking, TenantSettingsView settings, string? reason, CancellationToken ct)
+    /// <remarks>R16 E16-3: the line names who had checked in — "you had checked in" when it was the booker.</remarks>
+    private async Task StageStartedCancelNoticeAsync(
+        Booking booking, TenantSettingsView settings, (string? Reason, Checker? By) why, CancellationToken ct)
     {
         var game = await GameText.ForAsync(_db, booking, settings, ct);
         var me = booking.UserId!.Value;
         var name = PersonNames.Of(me, await PersonNames.ForAsync(_db, [me], ct)) ?? "You";
         MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
             me, MemberEventCatalogue.GameCancelled, $"game-cancelled:{booking.Id:N}:{me:N}",
-            new GameCancelledPayload(booking.Id, name, game.CourtName, game.StartsLocal, ByClub: true, ClubReason: reason),
-            $"The club cancelled your session on {game.CourtName}, {game.StartsLocal} — it had started, so nothing was refunded",
+            new GameCancelledPayload(booking.Id, name, game.CourtName, game.StartsLocal, ByClub: true, ClubReason: why.Reason),
+            $"The club cancelled your session on {game.CourtName}, {game.StartsLocal} — it had started ({Email.EmailTemplates.CheckedInClause(why.By?.OtherName)}), so nothing was refunded",
             $"/bookings/{booking.Id}", booking.Id)
         {
             Email = false,
         }, settings);
     }
 
-    /// <summary>R14 E14-5: after the commit, the booker's wallet and bell are told — no money moved, so no frame did.</summary>
-    private async Task TellStartedCancelAsync(Booking booking, string cancelledBy, CancellationToken ct)
+    /// <summary>R16 E16-3: who checked a booking in, and their name when that was not the booker.</summary>
+    private sealed record Checker(Guid UserId, string? OtherName);
+
+    /// <summary>
+    /// R16 E16-3: whose scan checked this booking in — the seat stamped at the booking's check-in
+    /// (activation and the reversal both stamp the scanner's own seat), else the scanner on the
+    /// booking's <c>court.activated</c> row (a pay-for payer holds no seat), else the booker. Null when
+    /// nobody checked in. The name is only filled for somebody other than the booker.
+    /// </summary>
+    private async Task<Checker?> CheckedInByAsync(Booking booking, CancellationToken ct)
+    {
+        if (booking.CheckedInAt is not { } at) return null;
+        var seat = await _db.BookingParticipants.AsNoTracking()
+            .Where(p => p.BookingId == booking.Id && p.CheckedInAt == at && p.UserId != null)
+            .OrderBy(p => p.Seat).Select(p => p.UserId).FirstOrDefaultAsync(ct);
+        var scanner = seat ?? await ActivatedByAsync(booking, ct);
+        if ((scanner ?? booking.UserId) is not { } who) return null;
+        var name = who == booking.UserId
+            ? null
+            : await _db.Memberships.AsNoTracking().Where(m => m.UserId == who).Select(m => m.FullName).FirstOrDefaultAsync(ct);
+        return new Checker(who, name);
+    }
+
+    /// <summary>The first scanner on this booking's <c>court.activated</c> rows (jsonb containment on Postgres).</summary>
+    private async Task<Guid?> ActivatedByAsync(Booking booking, CancellationToken ct)
+    {
+        var rows = _db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == "court.activated" && a.SubjectUserId == booking.UserId
+                && a.ActorUserId != Guid.Empty && a.DetailsJson != null);
+        if (_db.Database.IsNpgsql())
+        {
+            var containment = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id });
+            return await rows.Where(a => EF.Functions.JsonContains(a.DetailsJson!, containment))
+                .OrderBy(a => a.CreatedAt).Select(a => (Guid?)a.ActorUserId).FirstOrDefaultAsync(ct);
+        }
+        var id = booking.Id.ToString();
+        return (await rows.ToListAsync(ct))
+            .Where(a => a.DetailsJson!.Contains(id, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(a => a.CreatedAt).Select(a => (Guid?)a.ActorUserId).FirstOrDefault();
+    }
+
+    /// <summary>
+    /// R14 E14-5: after the commit, the booker's wallet and bell are told — no money moved, so no frame did.
+    /// R16 E16-3: the frame names who had checked in (<c>checked_in_by_name</c>, when not the booker).
+    /// </summary>
+    private async Task TellStartedCancelAsync(Booking booking, string cancelledBy, Guid? checkedInBy, CancellationToken ct)
     {
         var me = booking.UserId!.Value;
-        await _ledger.PublishCancelledNoRefundAsync(me, booking.Id, cancelledBy, ct);
+        await _ledger.PublishFrameAsync(me, new Realtime.WalletFrame(0, LedgerService.CancelledNoRefundReason, [], null, false)
+        {
+            BookingId = booking.Id,
+            CancelledBy = cancelledBy,
+            CheckedInBy = checkedInBy,
+        }, ct);
         using var scope = _scopes.CreateScope();
         if (scope.ServiceProvider.GetService<Realtime.IRealtimeBus>() is { } bus)
         {
@@ -2636,9 +2693,11 @@ public sealed class BookingService
                 var scanner = scan is { } s && s.UserId != booking.UserId
                     ? await _db.Memberships.AsNoTracking().Where(m => m.UserId == s.UserId).Select(m => m.FullName).FirstOrDefaultAsync(ct)
                     : null;
+                // R16 E16-4: court AND day and time.
+                var slot = new Email.CourtSlot(courtName, await StartsAtLocalAsync(booking.StartsAt, ct));
                 await _email.SendAsync(booking.OutageRefundedAt is not null
-                    ? EmailTemplates.OutageRefundReversed(club, user.Email, courtName, refunded, scanner)
-                    : EmailTemplates.NoShowReversed(club, user.Email, courtName, refunded, penalised, scanner), ct);
+                    ? EmailTemplates.OutageRefundReversed(club, user.Email, slot, refunded, scanner)
+                    : EmailTemplates.NoShowReversed(club, user.Email, slot, refunded, penalised, scanner), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show reversal email failed for {BookingId}", booking.Id); }
         }

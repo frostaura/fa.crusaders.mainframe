@@ -45,6 +45,11 @@ public sealed class NoShowWorker : BackgroundService
     // internal so the money-correctness regression test can drive one tick directly
     // rather than waiting on the 30s BackgroundService timer.
 
+    /// <summary>R16 E16-4: the booking's start in the club's zone, as every booking mail states it.</summary>
+    private static string StartsLocal(Booking b, TenantSettingsView settings) =>
+        TimeZoneInfo.ConvertTime(b.StartsAt, ClubClock.ZoneOf(settings))
+            .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>
     /// Everything one tick needs, so the per-booking work can be its own method.
     ///
@@ -140,9 +145,10 @@ public sealed class NoShowWorker : BackgroundService
     // file into a *global* pseudo-function the length of the file, failing `-L 200` with a warning
     // that names no real function. See memory/gotchas.md.
     private static EmailMessage Notice(
-        ClubIdentity club, string to, string courtName, int refundedMinutes, int penalty,
+        ClubIdentity club, string to, CourtSlot slot, int refundedMinutes, int penalty,
         CourtDarkness darkness)
     {
+        var courtName = slot.CourtName;
         if (darkness == CourtDarkness.Unreachable)
         {
             return EmailTemplates.BookingRefundedForOutage(club, to, courtName, refundedMinutes);
@@ -153,7 +159,7 @@ public sealed class NoShowWorker : BackgroundService
             return EmailTemplates.BookingRefundedForOutOfServiceBox(club, to, courtName, refundedMinutes);
         }
 
-        return EmailTemplates.BookingNoShow(club, to, courtName, refundedMinutes, penalty);
+        return EmailTemplates.BookingNoShow(club, to, slot, refundedMinutes, penalty);
     }
 
     /// <summary>
@@ -342,7 +348,7 @@ public sealed class NoShowWorker : BackgroundService
             try
             {
                 await email.SendAsync(
-                    Notice(sweep.Club, user.Email, courtName, refundedMinutes, penalty, darkness), ct);
+                    Notice(sweep.Club, user.Email, new CourtSlot(courtName, StartsLocal(b, sweep.Settings)), refundedMinutes, penalty, darkness), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show email failed for {BookingId}", b.Id); }
         }

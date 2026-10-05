@@ -274,7 +274,8 @@ public sealed class R14NightAndCancelHttpTests(PostgresFixture pg) : IClassFixtu
         var line = Assert.Single(await PlayersClub.ReadAsync(g.App, db => db.MemberNotifications.IgnoreQueryFilters()
             .Where(n => n.UserId == g.Club.Organiser && n.BookingId == g.BookingId && n.Kind == MemberEventCatalogue.GameCancelled).ToListAsync()));
         Assert.StartsWith("The club cancelled your session on Court 1, ", line.Headline, StringComparison.Ordinal);
-        Assert.EndsWith(" — it had started, so nothing was refunded", line.Headline, StringComparison.Ordinal);
+        // R16 E16-3: and who had checked in — here the organiser, so "you".
+        Assert.EndsWith(" — it had started (you had checked in), so nothing was refunded", line.Headline, StringComparison.Ordinal);
 
         await DeliverAsync(g.App);
         await Task.Delay(200);   // the cancellation mail is sent in the background

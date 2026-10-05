@@ -57,6 +57,25 @@ public sealed record CancelledSlot(string CourtName, string? WhenLocal = null)
 
     /// <summary>R14 E14-5: somebody had checked in, so the session had started and a cancellation refunds nothing.</summary>
     public bool SessionStarted { get; init; }
+
+    /// <summary>
+    /// R16 E16-3: who checked in, when it was somebody other than the recipient; null when it was the
+    /// recipient themselves (the mail then says "You had checked in").
+    /// </summary>
+    public string? CheckedInByName { get; init; }
+}
+
+/// <summary>
+/// R16 E16-4: the court a booking mail is about and, when known, its club-local start
+/// (<c>Thu 1 Oct, 10:15</c>), so a member with two bookings on one court can tell which one it was.
+/// A bare court name converts implicitly, so a caller without the time still compiles and reads as before.
+/// </summary>
+public sealed record CourtSlot(string CourtName, string? StartsAtLocal = null)
+{
+    public static implicit operator CourtSlot(string courtName) => new(courtName);
+
+    /// <summary>"Court 4 on Tue 13 Oct at 06:00", or the bare court when the time is not known.</summary>
+    public string On => StartsAtLocal is { Length: > 0 } when ? EmailTemplates.CourtOn(CourtName, when) : CourtName;
 }
 
 /// <summary>
@@ -627,7 +646,7 @@ public static partial class EmailTemplates
         blocks.Add(new Facts(rows));
         if (byClub is { PenaltyWaived: true }) blocks.Add(new Callout(CalloutTone.Success, "The late-cancellation penalty was waived, so nothing was deducted for it."));
         blocks.Add(new Footnote(nothingBack
-            ? "Somebody had already checked in, so the session counts as started and nothing was refunded. Your wallet has no new line for this cancellation."
+            ? $"{Capitalised(CheckedInClause(slot.CheckedInByName))} already, so the session counts as started and nothing was refunded. Your wallet has no new line for this cancellation."
             : "Each of these is its own line in your wallet. The refund and any penalty are separate movements, not one figure."));
 
         return EmailChrome.Compose(club, to, new EmailContent(
@@ -639,6 +658,17 @@ public static partial class EmailTemplates
             Blocks: blocks,
             WhyThis: WhyBooking));
     }
+
+    /// <summary>
+    /// R16 E16-3: who had checked in, mid-sentence — "you had checked in" to the member who did,
+    /// "Pat Smith had checked in" to anyone else. It used to be "Somebody", even to the checker.
+    /// </summary>
+    public static string CheckedInClause(string? otherName)
+    {
+        return string.IsNullOrWhiteSpace(otherName) ? "you had checked in" : $"{otherName.Trim()} had checked in";
+    }
+
+    private static string Capitalised(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     /// <summary>The cancellation mail's preview line: both ledger figures, never a net — or, on a started session, that nothing came back.</summary>
     private static string CancellationPreheader(int refundedMinutes, int? penaltyMinutes, bool nothingBack)
@@ -667,23 +697,23 @@ public static partial class EmailTemplates
     /// number is precisely what started this.
     /// </para>
     /// </remarks>
+    /// <remarks>R16 E16-4: the subject and the facts say which booking — court AND day and time.</remarks>
     public static EmailMessage BookingNoShow(
-        ClubIdentity club, string to, string courtName, int refundedMinutes, int penaltyMinutes) =>
+        ClubIdentity club, string to, CourtSlot slot, int refundedMinutes, int penaltyMinutes) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"Missed booking — {courtName}",
+            Subject: $"Missed booking — {slot.On}",
             Preheader: penaltyMinutes > 0
                 ? $"Refunded {Min(refundedMinutes)}, less a no-show penalty of {Min(penaltyMinutes)}."
                 : $"Refunded {Min(refundedMinutes)}, with no penalty.",
             Heading: "You missed this booking",
             Blocks:
             [
-                new Paragraph($"Nobody was identified at {courtName} for your booking before the grace window closed, so the court was released for somebody else and the booking is marked as a no-show."),
-                new Facts(
+                new Paragraph($"Nobody was identified at the court for your booking on {slot.On} before the grace window closed, so the court was released for somebody else and the booking is marked as a no-show."),
+                new Facts(SlotRows(slot,
                 [
-                    new FactRow("Court", courtName),
                     new FactRow("Booking refunded", Min(refundedMinutes)),
                     new FactRow("No-show penalty", penaltyMinutes > 0 ? Min(penaltyMinutes) : "None"),
-                ]),
+                ])),
                 new Footnote("Both of those are separate lines in your wallet — the refund and the penalty are two movements, not one."),
                 new Callout(CalloutTone.Info, "If you were at the court and couldn't get the lights on, tell the club. They can reverse this."),
             ],
@@ -748,20 +778,21 @@ public static partial class EmailTemplates
     /// a partner checking in — the mail names them; "You were there after all" is said only to
     /// the member whose own check-in it was.
     /// </summary>
+    /// <remarks>R16 E16-4: court AND day and time, in the subject and the facts.</remarks>
     public static EmailMessage NoShowReversed(
-        ClubIdentity club, string to, string courtName, int refunded, int penalised, string? checkedInBy = null) =>
+        ClubIdentity club, string to, CourtSlot slot, int refunded, int penalised, string? checkedInBy = null) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"No-show reversed — {courtName}",
+            Subject: $"No-show reversed — {slot.On}",
             Preheader: "The court's check-in reached the club late. The booking now stands as played.",
             Heading: ReversedHeading(checkedInBy, "You were there after all"),
             Blocks:
             [
-                new Paragraph($"Your booking on {courtName} was marked as a no-show, but the court's check-in reached the club afterwards{ScannerClause(checkedInBy)}. The booking now stands as attended."),
-                new Facts(
+                new Paragraph($"Your booking on {slot.On} was marked as a no-show, but the court's check-in reached the club afterwards{ScannerClause(checkedInBy)}. The booking now stands as attended."),
+                new Facts(SlotRows(slot,
                 [
                     new FactRow("No-show refund reversed", Min(refunded)),
                     new FactRow("No-show penalty returned", Min(penalised)),
-                ]),
+                ])),
                 new Footnote("Both of those appear as their own lines in your wallet, so you can see exactly what moved and when."),
             ],
             WhyThis: WhyMoney));
@@ -772,21 +803,29 @@ public static partial class EmailTemplates
     /// call it one, and there was no penalty to return. R12 E12-2: names the scanner when it was
     /// somebody else.
     /// </summary>
-    public static EmailMessage OutageRefundReversed(ClubIdentity club, string to, string courtName, int refunded, string? checkedInBy = null) =>
+    public static EmailMessage OutageRefundReversed(ClubIdentity club, string to, CourtSlot slot, int refunded, string? checkedInBy = null) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"Outage refund reversed — {courtName}",
+            Subject: $"Outage refund reversed — {slot.On}",
             Preheader: "The court's check-in reached the club late. The booking now stands as played.",
             Heading: ReversedHeading(checkedInBy, "You were checked in after all"),
             Blocks:
             [
-                new Paragraph($"Your booking on {courtName} was refunded in full because the court's box was offline and could not tell the club anybody had arrived. Its check-in has since come through{OutageScanner(checkedInBy)}, so the booking stands as played and the refund has been taken back."),
-                new Facts(
+                new Paragraph($"Your booking on {slot.On} was refunded in full because the court's box was offline and could not tell the club anybody had arrived. Its check-in has since come through{OutageScanner(checkedInBy)}, so the booking stands as played and the refund has been taken back."),
+                new Facts(SlotRows(slot,
                 [
                     new FactRow("Refund taken back", Min(refunded)),
-                ]),
+                ])),
                 new Footnote("It appears as its own line in your wallet, so you can see exactly what moved and when."),
             ],
             WhyThis: WhyMoney));
+
+    /// <summary>R16 E16-4: the Court row, the When row when the start is known, then the mail's own rows.</summary>
+    private static List<FactRow> SlotRows(CourtSlot slot, List<FactRow> rows)
+    {
+        var head = new List<FactRow> { new("Court", slot.CourtName) };
+        if (slot.StartsAtLocal is { Length: > 0 } when) head.Add(new FactRow("When", when));
+        return [.. head, .. rows];
+    }
 
     /// <summary>R12 E12-2: "Dan Splitter checked in after all" — or the recipient's own heading. Block body for the lizard reason.</summary>
     private static string ReversedHeading(string? checkedInBy, string own)
