@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-backend-r13a
-description: "Backend round 13 (lane BE13a): every lights_off is said when the court is next free, webhook is_admin is the read role, given minutes are not sold, the Night names withdrawals and displacements."
+description: "Backend round 13 (lane BE13a): every lights_off is said when the court is next free under a per-court lock, webhook is_admin is the read role, given minutes are not sold, the Night names withdrawals and displacements."
 type: decision
 last_verified: 2026-10-05
 ---
@@ -17,8 +17,17 @@ last_verified: 2026-10-05
   `LightsOffCuedAt` is still set either way, so nothing re-fires. *Why:* a collided reversal's
   restored end is the survivor's start, and back-to-back slots meet the same way — an off stamped at
   the tick arrived after the next member's early (or the late sweep's) `lights_on` and read their
-  paid session dark. Residual: a check-in committing between the sweep's read and its emit is a
-  millisecond race this does not close.
+  paid session dark.
+- **One court's cues are serialised by `CourtCueLock`** — `pg_advisory_xact_lock(0x43554520,
+  fnv(tenant, court))`, the TWO-int key space, disjoint from every bigint lock (`PayerLock`, seat,
+  device, admin-role). The sweep holds it across read → decide → save → SEND (then commits); every
+  `booking.lights_on` (`CourtActivationService.EmitUnderCueLockAsync`: activation, walk-up, pay-for,
+  the reversal's `EmitReversedLightsOnAsync`) is sent under it AFTER its check-in committed. So a
+  check-in committing mid-sweep is seen lit (no off) or announces its on after the off. Innermost
+  lock: holders take no other advisory lock, emitters hold no row locks, no HTTP under it.
+  Cost: the off is sent before the sweep's commit, so a commit failing after a good save re-sends it
+  next tick. `NextFreeAsync` reads untracked (a tracked row answers with pre-lock state). Proven by
+  `R13LightsCueRaceHttpTests` (hook `AfterOffDecidedForTests`, both arrival and `occurred_at`).
 - **`minutes.*` `actor.is_admin` is the actor's `User.IsAdmin`, read** (E13-2;
   `LedgerService.HoldsAdminAsync`, one tenant-filtered read, never for `Guid.Empty`). An admin is an
   admin on their own wallet too. *Why:* "actor ≠ wallet owner" called a member paying for a
