@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { AdminDialogs, AdminSection } from "@/components/players/admin/AdminPanel";
+import { AdminCancelPanel } from "@/components/bookings/AdminCancelPanel";
 import { useAdminHands } from "@/components/players/admin/useAdminHands";
 import { AdminSeatMenu } from "@/components/players/admin/AdminSeatMenu";
 import { Attendance, CancelPanel } from "@/components/players/detail/AttendanceAndCancel";
@@ -301,7 +302,12 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
         <div data-detail-cancel="" className={CANCEL}>
           <CancelPanel detail={detail} reload={reload} />
         </div>
-        {isAdmin ? <div className={ADMIN}><AdminSection hands={admin} /></div> : null}
+        {isAdmin ? (
+          <div className={cn(ADMIN, "flex flex-col gap-8")}>
+            <AdminSection hands={admin} />
+            <AdminCancelPanel detail={detail} reload={reload} />
+          </div>
+        ) : null}
       </div>
       {canInvite && !wide ? (
         <ContextBar position="bottom" until="lg" label={DETAIL_COPY.actionsLabel} primary={<InviteButton hands={organiser} />} />

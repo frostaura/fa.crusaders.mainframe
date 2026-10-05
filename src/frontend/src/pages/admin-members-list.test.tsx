@@ -164,7 +164,8 @@ describe("the status filter and the search", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: MEMBERS_PAGE.searchLabel }), { target: { value: "cr-0003" } });
     expect(screen.getByText("Alan Turing")).toBeInTheDocument();
     expect(screen.queryByText("Ada Lovelace")).not.toBeInTheDocument();
-    expect(where()).toBe("/admin/members?q=cr-0003");
+    // R15 L15-2: the URL follows once typing pauses (lib/useUrlText), not on every key.
+    await waitFor(() => expect(where()).toBe("/admin/members?q=cr-0003"));
   });
 
   it("says nothing matched — and offers the way back — rather than calling the club empty", async () => {

@@ -4,6 +4,7 @@ import { signOut, unreachable } from "@/test/harness";
 import {
   DETAIL_ADMIN, DETAIL_ATTENDANCE, DETAIL_CANCEL, DETAIL_COPY, DETAIL_MONEY, DETAIL_PLAYER, PLAYERS_REFUSAL, STATUS_WORD,
 } from "@/lib/playersCopy";
+import { ADMIN_CANCEL } from "@/lib/adminCancelCopy";
 import {
   ALEX_SEAT, DETAIL_PATH, OPEN_SEAT, PID, SAM_SEAT, adminView, detail, playerView, renderDetail, seat, serve,
 } from "@/components/players/__tests__/detailKit";
@@ -164,6 +165,15 @@ describe("booking detail — an admin's view", () => {
     expect(screen.getByRole("button", { name: DETAIL_ADMIN.menu("Alex") })).toBeInTheDocument();
     // The organiser's own seat has nothing for god mode to do.
     expect(screen.queryByRole("button", { name: DETAIL_ADMIN.menu("Sam") })).not.toBeInTheDocument();
+  });
+
+  it("R15 J15-2: offers the club's Cancel on the page, a session already under way included", async () => {
+    const started = new Date(Date.now() - 10 * 60_000).toISOString();
+    serve({ admin: true, detail: adminView({ starts_at: started, attendance: { checked_in_at: started, players_checked_in: 1 } }) });
+    renderDetail();
+    await screen.findByRole("region", { name: DETAIL_ADMIN.title });
+    expect(screen.getByRole("button", { name: ADMIN_CANCEL.open })).toBeInTheDocument();
+    expect(screen.getByText(ADMIN_CANCEL.started("Sam Petersen"))).toBeInTheDocument();
   });
 });
 
