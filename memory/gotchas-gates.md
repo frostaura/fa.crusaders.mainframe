@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-gates
 description: "Gates that report a red run as green or trip on a function nobody wrote: complexity exits 1 on stdout, lizard's C# and .tsx lexers mis-scope (one form of it no single member causes — split the file), ls-files misses untracked work."
 type: gotcha
-last_verified: 2026-10-02
+last_verified: 2026-10-06
 ---
 
 # Gotchas — the quality gates and their lint tooling
@@ -19,6 +19,9 @@ gate failures: [`gotchas-env.md`](gotchas-env.md).
   a function nobody wrote (tell: one "grows" to the file's end). Cure the text: `new RegExp` from
   strings (`String.fromCharCode(34)`), a Set for a class, name the type; for the closing-tag form
   **move the component to its own file**. Round 2's five "grown" functions were four desyncs.
+  R16: a one-line object `type X = { …; organiser: string | null }` declared BETWEEN functions (and the
+  same shape inline in `useState<{…}>`) grew `SingleCancel` to the file's end — neither the alias nor
+  its doc comment alone did it; an `interface` did too. Cure: derive it (`ReturnType<typeof f>`).
 - **lizard's C# parser mis-scopes any expression-bodied member whose body contains braces**
   (`=> new { … }`, `=> x switch { … }`, a property pattern), dumping the rest of the file into a
   `*global*` pseudo-function the length of the file — the gate trips naming no real function at line
