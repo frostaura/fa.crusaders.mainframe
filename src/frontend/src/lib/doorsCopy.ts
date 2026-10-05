@@ -150,14 +150,28 @@ export function doorPickerLabel(device: { name: string; gate_key: string | null 
 /**
  * What the picker's "Removed doors" group calls one of them (A2).
  *
- * The stored name, else the stored key, else the key the rows were written against — which
- * is at least a string an admin can match against a board they remember.
+ * <p>
+ * The stored name, else the stored key, else what {@link doorDisplayName} calls a board nobody
+ * named — "Unnamed scanner (gate-44c103)" when the row kept the board's code, as the export
+ * (R12 D12-3, `TraceKinds.DoorLabel`), the Night and the Doors page say.
+ * </p>
+ *
+ * <p>
+ * <b>R13 L13-1: never the device id.</b> The last arm used to be `door.key` — the deleted board's
+ * UUID, a string no admin has ever seen on a board or a screen. The server names a row with no
+ * stored name by its code (`DoorRowDoor.StoredName`), so a name that IS the code is the same
+ * unnamed board. `device_code` is read when the wire carries it.
+ * </p>
  */
-export function removedDoorName(door: { key: string; name?: string | null; gate_key?: string | null }): string {
+export function removedDoorName(door: {
+  key: string; name?: string | null; gate_key?: string | null; device_code?: string | null;
+}): string {
   const name = (door.name ?? "").trim();
-  if (name !== "" && name !== GATE_PLACEHOLDER_NAME) return name;
+  const code = (door.device_code ?? "").trim();
+  if (name !== "" && name !== GATE_PLACEHOLDER_NAME && name !== code) return name;
   const key = (door.gate_key ?? "").trim();
-  return key !== "" ? key : door.key;
+  if (key !== "") return key;
+  return doorDisplayName({ name: null, device_code: code });
 }
 
 /**

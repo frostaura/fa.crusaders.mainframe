@@ -81,7 +81,12 @@ export function SelectContent({
         data-slot="select-content"
         position={position}
         className={cn(
-          "relative z-popover max-h-[var(--radix-select-content-available-height)] min-w-32 overflow-y-auto overflow-x-hidden",
+          // R13 L13-1: never wider than the screen. A list sized by its longest option ran 674px off
+          // a 390 phone at 200 % text ("All doors" over a long door name). Capped at the room Radix
+          // measured beside the trigger and at the window less its gutters, the floor capped too
+          // (a min-width beats a max-width — gotchas-frontend-layout); long options wrap instead.
+          "relative z-popover max-h-[var(--radix-select-content-available-height)] min-w-[min(8rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-y-auto overflow-x-hidden",
+          popper && "max-w-[min(var(--radix-select-content-available-width),calc(100vw-1rem))]",
           "rounded-xl border border-border bg-bg-raised text-text-primary shadow-md",
           "origin-[var(--radix-select-content-transform-origin)]",
           "data-[state=open]:animate-pop-in data-[state=closed]:animate-pop-out motion-reduce:animate-none",
@@ -92,7 +97,7 @@ export function SelectContent({
       >
         <SelectScrollUpButton />
         <SelectPrimitive.Viewport
-          className={cn("p-1", popper && "w-full min-w-[var(--radix-select-trigger-width)]")}
+          className={cn("p-1", popper && "w-full min-w-[min(var(--radix-select-trigger-width),calc(100vw-1rem))]")}
         >
           {children}
         </SelectPrimitive.Viewport>
@@ -117,7 +122,10 @@ export function SelectItem({ className, children, ...props }: ComponentProps<typ
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
+        // L13-1: an option longer than the capped list wraps — by word, and mid-word only when one
+        // word is wider than the list (a gate key, a scanner code).
         "no-lift relative flex min-h-touch w-full cursor-pointer select-none items-center rounded-lg border border-transparent",
+        "whitespace-normal [overflow-wrap:anywhere]",
         "py-2 pl-3 pr-9 text-sm text-text-primary focus-visible:-outline-offset-2",
         "data-[highlighted]:bg-bg-muted data-[state=checked]:font-semibold",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
