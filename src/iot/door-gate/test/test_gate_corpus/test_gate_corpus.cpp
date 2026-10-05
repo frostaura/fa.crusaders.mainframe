@@ -177,7 +177,7 @@ void executeOutOfRangeCountersRequest(const char* expected, size_t expectedLen, 
   TEST_ASSERT_EQUAL_UINT32_MESSAGE(2147483648UL, noPush, "the vector is meant to be one past INT32_MAX");
 
   char rendered[gatelogic::kGateHeartbeatBodyCap] = {};
-  const gatelogic::GateDiagnostics diagnostics = {noPush, 4294967295UL};
+  const gatelogic::GateDiagnostics diagnostics = {noPush, 4294967295UL, false};
   TEST_ASSERT_TRUE(
       gatelogic::renderGateHeartbeatBody(rendered, sizeof(rendered), mac, version, uptime, diagnostics) > 0U);
   TEST_ASSERT_NOT_EQUAL_MESSAGE(0, strcmp(expected, rendered),

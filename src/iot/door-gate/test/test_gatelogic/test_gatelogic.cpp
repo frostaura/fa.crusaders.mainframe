@@ -5139,7 +5139,8 @@ void test_heartbeat_body_carries_its_counters_only_when_there_are_some() {
       body, "a healthy board's body is the corpus vector, byte for byte");
 
   TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
-                                                      86400000ULL, gatelogic::GateDiagnostics{4U, 0U}) > 0U);
+                                                      86400000ULL,
+                                                      gatelogic::GateDiagnostics{4U, 0U, false}) > 0U);
   TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,"
                            "\"kind\":\"gate\",\"no_push\":4}",
                            body);
@@ -5148,13 +5149,13 @@ void test_heartbeat_body_carries_its_counters_only_when_there_are_some() {
   // the shape, not an accident of the renderer.
   TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
                                                       86400000ULL,
-                                                      gatelogic::GateDiagnostics{0U, 720U}) > 0U);
+                                                      gatelogic::GateDiagnostics{0U, 720U, false}) > 0U);
   TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,"
                            "\"kind\":\"gate\",\"events_lost\":720}",
                            body);
   TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
                                                       86400000ULL,
-                                                      gatelogic::GateDiagnostics{4U, 720U}) > 0U);
+                                                      gatelogic::GateDiagnostics{4U, 720U, false}) > 0U);
   TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,"
                            "\"kind\":\"gate\",\"no_push\":4,\"events_lost\":720}",
                            body);
@@ -5167,14 +5168,14 @@ void test_heartbeat_body_carries_its_counters_only_when_there_are_some() {
                            gatelogic::saturatingIncrement(gatelogic::kMaxDiagnosticCount - 1U));
   TEST_ASSERT_TRUE(
       gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 4295187295ULL,
-                                         gatelogic::GateDiagnostics{4294967295UL, 4294967295UL}) > 0U);
+                                         gatelogic::GateDiagnostics{4294967295UL, 4294967295UL, false}) > 0U);
   TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"no_push\":2147483647,\"events_lost\":2147483647}"),
                                "a counter over INT32_MAX is what the API silently ignores");
 
   char tiny[96] = {};
   TEST_ASSERT_EQUAL_size_t(
       0U, gatelogic::renderGateHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "1.0.0", 4295187295ULL,
-                                             gatelogic::GateDiagnostics{4294967295UL, 4294967295UL}));
+                                             gatelogic::GateDiagnostics{4294967295UL, 4294967295UL, false}));
   TEST_ASSERT_EQUAL_STRING("", tiny);
 }
 
