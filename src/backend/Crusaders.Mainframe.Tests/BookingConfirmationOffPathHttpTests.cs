@@ -24,6 +24,12 @@ public sealed class BookingConfirmationOffPathHttpTests(PostgresFixture pg) : IC
     /// The receipt's membership read is held until the test lets it go. Composed in the request,
     /// the booking cannot answer while it is held; composed after it, the booking answers, and the
     /// mail — receipt and all, with the balance the response stated — follows once released.
+    ///
+    /// <para>
+    /// The gate has no timeout of its own, so an in-request composition never answers before the
+    /// release however long the test waits — which is what lets the wait be generous. It was 20 s
+    /// against a gate that gave up at 60 s, and a loaded sharded run timed out a correct build.
+    /// </para>
     /// </summary>
     [SkippableFact]
     public async Task A_booking_answers_before_its_confirmation_is_composed_and_the_mail_still_follows()
@@ -38,15 +44,22 @@ public sealed class BookingConfirmationOffPathHttpTests(PostgresFixture pg) : IC
         await club.CreditAsync(f, club.Organiser, 100);
         var olive = club.Client(f, club.Organiser);
 
-        var answered = await olive.PostAsJsonAsync("/api/v1/bookings", new
+        try
         {
-            courtId = club.CourtId, startsAt = PlayersClub.Tomorrow(9), sliceCount = 2,
-        }).WaitAsync(TimeSpan.FromSeconds(20));
+            var answered = await olive.PostAsJsonAsync("/api/v1/bookings", new
+            {
+                courtId = club.CourtId, startsAt = PlayersClub.Tomorrow(9), sliceCount = 2,
+            }).WaitAsync(Generous);
 
-        Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
-        Assert.DoesNotContain(mail.Sent, m => m.Subject.StartsWith("Booking confirmed", StringComparison.Ordinal));
+            Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
+            Assert.DoesNotContain(mail.Sent, m => m.Subject.StartsWith("Booking confirmed", StringComparison.Ordinal));
+        }
+        finally
+        {
+            // Also on a failure: a request still held at the gate would keep the host from disposing.
+            gate.Release();
+        }
 
-        gate.Release();
         var confirmation = await PollAsync(() => mail.Sent.FirstOrDefault(m => m.Subject.StartsWith("Booking confirmed", StringComparison.Ordinal)));
         Assert.NotNull(confirmation);
         Assert.Contains("olive.organiser@", confirmation!.To, StringComparison.Ordinal);
@@ -60,14 +73,18 @@ public sealed class BookingConfirmationOffPathHttpTests(PostgresFixture pg) : IC
         Assert.Contains($"Club {club.Slug}", text, StringComparison.Ordinal);
     }
 
+    /// <summary>How long a step may take on a loaded machine. A bound, not a measurement: nothing here passes by being quick.</summary>
+    private static readonly TimeSpan Generous = TimeSpan.FromMinutes(2);
+
     private static async Task<T?> PollAsync<T>(Func<T?> read) where T : class
     {
-        for (var i = 0; i < 200; i++)
+        var deadline = DateTimeOffset.UtcNow + Generous;
+        while (DateTimeOffset.UtcNow < deadline)
         {
             if (read() is { } found) return found;
             await Task.Delay(50);
         }
-        return null;
+        return read();
     }
 
     /// <summary>Holds the receipt's membership read (the only full-row membership read on this path).</summary>
@@ -83,7 +100,7 @@ public sealed class BookingConfirmationOffPathHttpTests(PostgresFixture pg) : IC
             if (command.CommandText.Contains("FROM memberships", StringComparison.Ordinal)
                 && command.CommandText.Contains("\"FullName\"", StringComparison.Ordinal))
             {
-                await _open.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+                await _open.Task.WaitAsync(cancellationToken);
             }
             return result;
         }
