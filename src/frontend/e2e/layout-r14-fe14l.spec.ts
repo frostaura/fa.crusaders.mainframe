@@ -318,6 +318,54 @@ test("L14-3 — a long name a search brings in is measured, even when the list k
   expect(found.filter((f) => f.split), JSON.stringify(found)).toEqual([]);
 });
 
+/** L6-9's three cards: a hyphened name with two badges, a short one, a long one with three. */
+function badgeCards(): unknown[] {
+  return ["Thandiwe Mokoena-Dlamini", "Bea Nkosi", "Alexandra Featherstonehaugh"].map((full_name, i) => ({
+    membership_id: `00000000-0000-4000-8000-00000000071${i}`, user_id: `00000000-0000-4000-8000-00000000070${i}`,
+    email: `b${i}@sample.review.test`, full_name, membership_number: `MEM-200${i}`, photo_url: null, status: "Active",
+    email_verified: i !== 2, is_admin: i !== 1, admin_source: i === 0 ? "config" : "granted",
+    created_at: "2026-09-05T08:00:00Z", rejection_reason: null, balance_minutes: 150,
+  }));
+}
+
+test.describe("L14-3 review — a long-name card's badges wrap in a row, not a column", () => {
+  for (const [width, root] of [[320, 16], [390, 16], [320, 32], [390, 32]] as const) {
+    test(`at ${width} px, ${root} px text: nothing cut, nothing sideways, badges side by side where they fit`, async ({ page, isMobile }) => {
+      test.skip(!isMobile, "phone widths");
+      await open(page, "/admin/members", { width, height: 844 }, adminRoutes([
+        { path: "/api/v1/admin/members/", body: badgeCards() },
+        { path: "/api/v1/admin/biometric/enrollments", body: [] },
+        { path: "/api/v1/admin/member-groups", body: { groups: [] } },
+      ]), root);
+      await expect(page.locator("[data-member-row]")).toHaveCount(3, { timeout: 30_000 });
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      if (process.env.FE14L_SHOTS) await page.screenshot({ path: `${process.env.FE14L_SHOTS}/badges-${width}-${root}.png`, fullPage: true });
+      const m = await page.locator("[data-member-row]").evaluateAll((rows) => rows.map((row) => {
+        const box = row.getBoundingClientRect();
+        const cut = [...row.querySelectorAll<HTMLElement>("a[title], [data-slot='badge']")]
+          .filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent);
+        const past: string[] = [];
+        const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          if (!n.textContent?.trim() || n.parentElement?.closest(".sr-only")) continue;
+          const r = document.createRange();
+          r.selectNodeContents(n);
+          for (const rect of r.getClientRects()) if (rect.width > 0 && (rect.right > box.right + 1 || rect.left < box.left - 1)) past.push(n.textContent);
+        }
+        // Lines of badges by vertical centre (an icon badge sits a pixel off its neighbour's top).
+        const mids = [...row.querySelectorAll("[data-slot='badge']")].map((b) => { const r = b.getBoundingClientRect(); return (r.top + r.bottom) / 2; });
+        const lines = mids.sort((a, b) => a - b).filter((y, i, all) => i === 0 || y - all[i - 1] > 4).length;
+        return { h: Math.round(box.height), long: row.hasAttribute("data-long-name"), cut, past, badgeRows: lines, badges: mids.length };
+      }));
+      expect(m.flatMap((c) => [...c.cut, ...c.past]), JSON.stringify(m)).toEqual([]);
+      await expect.poll(() => page.evaluate(() => Math.max(...[document.scrollingElement!, ...document.querySelectorAll("main")].map((e) => e.scrollWidth - e.clientWidth)))).toBeLessThanOrEqual(1);
+      // A long-name card's three badges never stand one per line at normal text.
+      for (const c of m) if (c.long && root === 16) expect(c.badgeRows, JSON.stringify(m)).toBeLessThan(c.badges);
+      console.log(`${width}/${root} heights ${m.map((c) => `${c.h}${c.long ? "L" : ""}:${c.badgeRows}/${c.badges}`).join(" ")}`);
+    });
+  }
+});
+
 /**
  * The surface, the screen, the root font — and, at 320 / 200 %, the reviewer's own 17-letter case,
  * which must stay WHOLE there: the narrow row steps its type and inset down so that it can.

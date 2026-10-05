@@ -103,6 +103,10 @@ const ROW = cn(
   // R14 L14-3 — under 13rem (the avatar over the name) the inset is p-2, and the name below steps
   // down a size, so a 17-letter surname keeps whole at 320 / 200 % (248px in 206 broke it).
   "[@container(max-width:12.99rem)]:p-2",
+  // A long-name card's second line is balance · badges: the balance as wide as it is, the badges
+  // in ONE wrapping row across the rest ("Active Admin", then "Unverified"), not a column of three
+  // in the who column's leftover (R14 review: 148px, lopsided, ⋯ floating mid-height).
+  "[@container(min-width:20rem)_and_(max-width:47.99rem)]:data-[long-name]:grid-cols-[auto_minmax(0,1fr)_auto]",
   "hover:border-control",
   "[@container(min-width:48rem)]:table-row [@container(min-width:48rem)]:rounded-none",
   "[@container(min-width:48rem)]:border-0 [@container(min-width:48rem)]:p-0 [@container(min-width:48rem)]:shadow-none",
@@ -128,8 +132,9 @@ const GROUPS_WIDE = "[@container(min-width:76rem)]:w-48";
 /*
  * R14 L14-3 — a card whose name holds a word wider than the who column's floor (`useLongNameCards`
  * sets `data-long-name` on the row) puts the who across the card's first line, the balance under
- * it on the left and the badges beside the balance; the ⋯ stays at the end. Card range only (20rem
- * to the table), written whole: the narrow card and the table already give the name the row.
+ * it on the left and the badges in a right-aligned wrapping row beside it; the ⋯ stays at the end.
+ * Card range only (20rem to the table), written whole: the narrow card and the table already give
+ * the name the row.
  */
 const LONG_WHO = "[@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:[grid-column:1/3] [@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:[grid-row:1]";
 const LONG_BALANCE = cn(

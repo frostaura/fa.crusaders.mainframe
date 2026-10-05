@@ -27,7 +27,8 @@ Tests: `e2e/layout-r14-fe14l.spec.ts` (68 cases, mobile + desktop; `FE14L_SWEEP=
   current width:* judging by the width it has now would flip the card back and forth. Card range
   only (20rem–table); under 13rem the card is `p-2` and the name `text-xs`. It re-marks on the
   box's resize AND on row insertion (MutationObserver, childList — never attributes, so its own
-  toggle cannot loop): a search swapping a same-size page left a new long row unmeasured.
+  toggle cannot loop): a search swapping a same-size page left a new long row unmeasured. A long
+  card's columns are `auto · 1fr · auto` so its badges wrap in ONE row (L6-9's 136px cap held).
 - **Pass band from 14rem to 21rem: crest and avatar flank only overline and club; the member's name
   takes the band's width** (169px flanked at 150 % split "Wolfeschlegelstein").
 - **Inbox headline: text-xs under 10rem, text-sm to 17rem, base from 17rem; Change record under its
