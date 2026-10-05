@@ -3,9 +3,13 @@
  * Tests query these constants.
  */
 export const CHUNK_COPY = {
-  /** F4.3 — no signal, and this phone has never fetched this page's code. */
+  /**
+   * F4.3 — no signal, and this page's code is not on the phone. R16 X16-1: never "hasn't opened this
+   * page before" — the phone cannot tell that apart from an install or an update that had not
+   * finished fetching (the wallet was such a page on every fresh install), so it says only what is true.
+   */
   offlineTitle: "You're offline — this page opens when you're back online",
-  offlineBody: "This phone hasn't opened this page before, so it needs signal once. Your code still works on My Code.",
+  offlineBody: "This page isn't on this phone yet, so it needs signal once. Your code still works on My Code.",
   /** Online, and the page's code still would not arrive (after the one reload a new build earns). */
   failedTitle: "This page didn't load",
   /** IX-L (F4-6): said while ONLINE, so never "check your connection" — the phone's is fine. */

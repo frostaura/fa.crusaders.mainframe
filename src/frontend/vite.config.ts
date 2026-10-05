@@ -70,12 +70,17 @@ function buildId(emitted: string[], publicDir: string): string {
 /**
  * What a member's install does NOT fetch — precached last, once the worker is in control. The
  * desk's pages and its frame (`adminFrame.ts` — it was in the member set, 20 kB gzip, because the
- * entry names it lazily), and (R4, P4-6) the report parts: 124 kB gzip of charts that only the
- * wallet's Activity tab and the desk's reports draw, which made up a fifth of a member's install.
+ * entry names it lazily), and (R4, P4-6) the chart code: 124 kB gzip that only the wallet's
+ * Activity tab and the desk's reports draw, which made up a fifth of a member's install.
  */
 const DESK_PAGES = /\/src\/(?:pages\/(?:admin\/|monitoring\/|Admin[A-Z]|DevPrimitives|dev\/)|adminFrame\.ts$)/;
-/** Chart code, by module: a shared chunk has no facade to test, so its modules are looked at. */
-const CHART_MODULES = /\/src\/components\/(?:reports\/|Charts\.tsx$)/;
+/**
+ * Chart code, by module: a shared chunk has no facade to test, so its modules are looked at. ONLY
+ * the chart component and the chart library — R16 X16-1: the rule used to take every module under
+ * `components/reports/`, and `reports/range.ts` and `reports/ReportParts.tsx` are STATIC imports of
+ * the wallet's pages, so `/wallet` and `/wallet/activity` could not open offline after an install.
+ */
+const CHART_MODULES = /\/src\/components\/Charts\.tsx$|\/node_modules\/(?:recharts|d3-[a-z-]+|victory-vendor)\//;
 
 type BundleEntry = {
   type: string; fileName: string; isEntry?: boolean; facadeModuleId?: string | null; moduleIds?: string[];
@@ -88,23 +93,47 @@ type BundleEntry = {
  * desk's pages after, a couple at a time, instead of all ~110 files at once on the member's first
  * visit — which queued the page's own reads behind them on a phone (perf report Frontend 6).
  * `assets` still lists everything: every chunk still ends up on the phone (F4.3).
+ *
+ * <p>
+ * <b>Only a LAZY edge may leave a file for later</b> (R16 X16-1). A static import is part of its
+ * importer — the importer does not run without it — so a chunk reached statically from one in the
+ * set is in the set, whatever it holds. The desk's pages and the chart code are left out only where
+ * a member reaches them through `import()`. {@link memberSetGaps} fails the build if that breaks.
+ * </p>
  */
 function memberFirst(bundle: Record<string, unknown>): string[] {
   const chunks = Object.values(bundle) as BundleEntry[];
   const byName = new Map(chunks.map((c) => [c.fileName, c]));
   const seen = new Set<string>();
-  // Static imports always; lazy ones too (a member page's calendar, the celebration), unless the
-  // lazy chunk IS a desk page — the entry names every route lazily, the desk's included.
-  const visit = (file: string) => {
+  const later = (chunk: BundleEntry) => DESK_PAGES.test(chunk.facadeModuleId ?? "")
+    || (chunk.moduleIds ?? []).some((id) => CHART_MODULES.test(id));
+  const visit = (file: string, lazily: boolean) => {
     const chunk = byName.get(file);
-    if (!chunk || seen.has(file) || DESK_PAGES.test(chunk.facadeModuleId ?? "")) return;
-    if ((chunk.moduleIds ?? []).some((id) => CHART_MODULES.test(id))) return;
+    if (!chunk || seen.has(file) || (lazily && later(chunk))) return;
     seen.add(file);
     for (const css of chunk.viteMetadata?.importedCss ?? []) seen.add(css);
-    for (const dep of [...(chunk.imports ?? []), ...(chunk.dynamicImports ?? [])]) visit(dep);
+    for (const dep of chunk.imports ?? []) visit(dep, false);
+    for (const dep of chunk.dynamicImports ?? []) visit(dep, true);
   };
-  for (const chunk of chunks) if (chunk.type === "chunk" && chunk.isEntry) visit(chunk.fileName);
-  return [...seen].sort().map((file) => `/${file}`);
+  for (const chunk of chunks) if (chunk.type === "chunk" && chunk.isEntry) visit(chunk.fileName, false);
+  const set = [...seen].sort().map((file) => `/${file}`);
+  const gaps = memberSetGaps(chunks, new Set(set));
+  if (gaps.length > 0) throw new Error(`member precache set misses static imports: ${gaps.join(", ")}`);
+  return set;
+}
+
+/**
+ * R16 X16-1 — every chunk in the member's set has its static imports and its CSS in the set too.
+ * A page whose static import is not on the phone does not open offline at all.
+ */
+function memberSetGaps(chunks: BundleEntry[], set: ReadonlySet<string>): string[] {
+  const gaps: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.type !== "chunk" || !set.has(`/${chunk.fileName}`)) continue;
+    const needs = [...(chunk.imports ?? []), ...(chunk.viteMetadata?.importedCss ?? [])];
+    for (const dep of needs) if (!set.has(`/${dep}`)) gaps.push(`${chunk.fileName} → ${dep}`);
+  }
+  return gaps;
 }
 
 /**
