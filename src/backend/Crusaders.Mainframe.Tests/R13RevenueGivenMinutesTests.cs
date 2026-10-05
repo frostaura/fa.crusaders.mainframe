@@ -68,7 +68,12 @@ public sealed class R13RevenueGivenMinutesTests(PostgresFixture pg) : IClassFixt
 
     private static LedgerEntry Row(Guid tenant, Guid user, Guid actor, LedgerEntryType type, int minutes, decimal? zar) => new()
     {
-        TenantId = tenant, UserId = user, ActorUserId = actor, Type = type, AmountMinutes = minutes, ZarPaid = zar,
+        TenantId = tenant,
+        UserId = user,
+        ActorUserId = actor,
+        Type = type,
+        AmountMinutes = minutes,
+        ZarPaid = zar,
         Reason = "seed",
     };
 

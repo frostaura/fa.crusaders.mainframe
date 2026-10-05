@@ -146,6 +146,12 @@ public static partial class AdminMemberTraceAssembly
 
         /// <summary>The court boxes' relay maps NOW, by id — relay index → court number (R12 D12-2).</summary>
         public Dictionary<Guid, List<int>> DeviceCourts { get; init; } = [];
+
+        /// <summary>The owner of every booking the rows name, by id (R13 E13-8: whose earlier booking displaced this one).</summary>
+        public Dictionary<Guid, Guid?> BookingOwners { get; init; } = [];
+
+        /// <summary>The withdrawn seats the share rows name, by participant id — who withdrew, and when (R13 E13-4).</summary>
+        public Dictionary<Guid, Withdrawal> Withdrawals { get; init; } = [];
     }
 
     public static async Task<TraceNight> BuildAsync(
@@ -195,21 +201,28 @@ public static partial class AdminMemberTraceAssembly
             .Select(c => new TraceCourtRef(c.Id, c.CourtNumber, c.Name))
             .ToDictionaryAsync(c => c.Id, c => c, ct);
 
+        // R13 E13-8: an audit row's booking too (`booking_id`, a displacement's `displaced_by_booking_id`),
+        // so a row that stored no court names the booking's, and a displacement names its cause.
         var bookingIds = ledger
             .Where(l => l.RelatedBookingId is not null)
             .Select(l => l.RelatedBookingId!.Value)
+            .Concat(audit.SelectMany(AuditBookingIds))
             .Distinct()
             .ToList();
-        var bookingCourts = await db.Bookings.AsNoTracking()
+        var bookingRows = await db.Bookings.AsNoTracking()
             .Where(b => bookingIds.Contains(b.Id))
-            .Select(b => new { b.Id, b.CourtId })
-            .ToDictionaryAsync(b => b.Id, b => b.CourtId, ct);
+            .Select(b => new { b.Id, b.CourtId, b.UserId })
+            .ToListAsync(ct);
+        var bookingCourts = bookingRows.ToDictionary(b => b.Id, b => b.CourtId);
+        var withdrawals = await WithdrawalsAsync(db, ledger, ct);
 
-        var people = audit.SelectMany(a => new Guid?[] { a.ActorUserId, a.SubjectUserId, CodeHolderOf(a) })
-            .Concat(ledger.SelectMany(l => new Guid?[] { l.ActorUserId, l.UserId }));
+        var people = audit.SelectMany(a => new Guid?[] { a.ActorUserId, a.SubjectUserId, CodeHolderOf(a), OrganiserOf(a) })
+            .Concat(ledger.SelectMany(l => new Guid?[] { l.ActorUserId, l.UserId }))
+            .Concat(bookingRows.Select(b => b.UserId))
+            .Concat(withdrawals.Values.Select(w => (Guid?)w.UserId));
         var names = await PersonNames.ForAsync(db, people, ct);
         var admins = await AdminsAsync(
-            db, audit.Select(a => a.ActorUserId).Concat(ledger.Select(l => l.ActorUserId)), ct);
+            db, audit.Select(a => a.ActorUserId).Concat(ledger.Select(l => l.ActorUserId)).Concat(withdrawals.Values.Select(w => w.UserId)), ct);
 
         var boards = await BoardsAsync(db, audit, receipts, q, ct);
         return new Strands(
@@ -221,6 +234,8 @@ public static partial class AdminMemberTraceAssembly
             DeviceNames = boards.Names,
             Outages = boards.Outages,
             DeviceCourts = boards.Courts,
+            BookingOwners = bookingRows.ToDictionary(b => b.Id, b => b.UserId),
+            Withdrawals = withdrawals,
         };
     }
 
@@ -282,14 +297,23 @@ public static partial class AdminMemberTraceAssembly
     /// scan's instant (<see cref="AuditLog.ScanAt"/>), which is what the list is sorted by.
     /// </para>
     /// </summary>
+    /// <para>
+    /// R13 E13-4: plus a partner's withdrawal from THIS member's game — that row is the partner's
+    /// (actor and subject), and names the organiser only in its details.
+    /// </para>
     private static Task<List<AuditLog>> AuditRowsAsync(
         MainframeDbContext db, AdminMemberTraceQuery q, CancellationToken ct)
-        => db.AuditLogs.AsNoTracking()
-            .Where(a => a.SubjectUserId == q.UserId || a.ActorUserId == q.UserId)
+    {
+        var organiser = JsonSerializer.Serialize(new { organiser_user_id = q.UserId });
+        return db.AuditLogs.AsNoTracking()
+            .Where(a => a.SubjectUserId == q.UserId || a.ActorUserId == q.UserId
+                        || (a.Action == TraceKinds.PartnerWithdrewAction && a.DetailsJson != null
+                            && EF.Functions.JsonContains(a.DetailsJson, organiser)))
             .Where(a => a.CreatedAt >= q.From && a.CreatedAt < q.To)
             .OrderBy(a => a.CreatedAt)
             .Take(q.StrandRows)
             .ToListAsync(ct);
+    }
 
     private static async Task<List<LedgerEntry>> LedgerRowsAsync(
         MainframeDbContext db, AdminMemberTraceQuery q, CancellationToken ct)
@@ -431,6 +455,8 @@ public static partial class AdminMemberTraceAssembly
                     CodeUsed = Text(details, "reason") == MemberCodeIdentity.CodeUsed,
                     Attempt = Text(details, "attempt"),
                     RefusedOffline = Text(details, "outcome") == DoorTrail.RefusedOffline,
+                    OrganiserName = PersonNames.Of(OrganiserOf(row), s.Names),
+                    CausedByName = CauseOf(row.Action, details, s),
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -480,8 +506,12 @@ public static partial class AdminMemberTraceAssembly
             if (own) running += row.AmountMinutes;
 
             var kind = TraceKinds.OfLedger(row.Type);
-            var actorKind = ActorKindOf(row.ActorUserId, hasDevice: false, s.Admins);
-            var actorName = PersonNames.Of(row.ActorUserId, s.Names);
+            // R13 E13-4: a share that went back because the partner withdrew is the partner's act —
+            // also on a row posted before R13 under the system's id (only the partner can withdraw).
+            var withdrew = WithdrewOf(row, s);
+            var actorId = withdrew is { } partner && row.ActorUserId == Guid.Empty ? partner : row.ActorUserId;
+            var actorKind = ActorKindOf(actorId, hasDevice: false, s.Admins);
+            var actorName = PersonNames.Of(actorId, s.Names);
             var court = CourtOfBooking(row.RelatedBookingId, s);
 
             yield return new TraceEventRow(
@@ -501,8 +531,9 @@ public static partial class AdminMemberTraceAssembly
                     SubjectName = own ? null : PersonNames.Of(row.UserId, s.Names),
                     // E8-5: a desk top-up the club took no rand for was given, not sold.
                     NoCharge = row.Type == LedgerEntryType.AdminTopUp && row.ZarPaid == 0m,
+                    WithdrewName = withdrew is { } w ? PersonNames.Of(w, s.Names) ?? "their partner" : null,
                 }),
-                ActorUserId: row.ActorUserId,
+                ActorUserId: actorId,
                 ActorKind: actorKind,
                 ActorName: actorName,
                 SubjectUserId: row.UserId,

@@ -114,6 +114,24 @@ public readonly record struct TraceFacts
     /// recorded at R0.00 — so it was given, not sold (review round 8, E8-5).
     /// </summary>
     public bool NoCharge { get; init; }
+
+    /// <summary>
+    /// The organiser of the game a partner withdrew from, named on the partner's own row (review
+    /// round 13, E13-4). Null when the record does not say, and the sentence says "a game".
+    /// </summary>
+    public string? OrganiserName { get; init; }
+
+    /// <summary>
+    /// A share returned BECAUSE this partner withdrew from the game — the partner's name (E13-4).
+    /// Null on every other share movement, which keeps its own words.
+    /// </summary>
+    public string? WithdrewName { get; init; }
+
+    /// <summary>
+    /// A displaced booking's cause: whose earlier booking's late check-in took the court back
+    /// (review round 13, E13-8). Null when the record cannot say, and the sentence stays neutral.
+    /// </summary>
+    public string? CausedByName { get; init; }
 }
 
 /// <summary>
@@ -231,6 +249,19 @@ public static class TraceKinds
     /// <summary>Somebody else paid for their court at the box (D10). <b>Added beyond D2 §6.2.</b></summary>
     public const string BookingPaidForThem = "booking.paid_for_them";
 
+    /// <summary>
+    /// They withdrew from somebody else's game — a partner's own act (review round 13, E13-4).
+    /// <b>Added beyond D2 §6.2</b>: the withdrawal wrote nothing, and its share return read as the
+    /// club's automatic check.
+    /// </summary>
+    public const string BookingWithdrew = "booking.withdrew";
+
+    /// <summary>A partner withdrew from THEIR game (E13-4) — the organiser's side of the same row.</summary>
+    public const string BookingPartnerWithdrew = "booking.partner_withdrew";
+
+    /// <summary>The audit action a partner's withdrawal writes (C13-4, <c>PlayersService.WithdrewAction</c>).</summary>
+    public const string PartnerWithdrewAction = "players.withdrew";
+
     /// <summary>They bought light time at the court rather than reserving it.</summary>
     public const string WalkUpBought = "walkup.bought";
 
@@ -327,7 +358,7 @@ public static class TraceKinds
         DoorOpened, DoorRefused, DoorOpenedOffline,
         BookingMade, BookingMadeForThem, BookingCancelled, BookingCancelledByClub, BookingNoShow,
         BookingNoShowReversed, BookingBlockedOver, BookingDisplaced, BookingDisplacementReversed,
-        BookingPaidForSomebody, BookingPaidForThem,
+        BookingPaidForSomebody, BookingPaidForThem, BookingWithdrew, BookingPartnerWithdrew,
         WalkUpBought, WalkUpRefunded,
         CourtCheckedIn, CourtRefused,
         LightsOn, LightsOff,
@@ -423,6 +454,7 @@ public static class TraceKinds
             "booking.displacement_reversed" => BookingDisplacementReversed,
             "booking.blocked" => BookingBlockedOver,
             Endpoints.DevicePayForEndpoint.PaidAction => actorIsSubject ? BookingPaidForSomebody : BookingPaidForThem,
+            PartnerWithdrewAction => actorIsSubject ? BookingWithdrew : BookingPartnerWithdrew,
 
             _ => OfAccountAction(action),
         };
@@ -592,10 +624,14 @@ public static class TraceKinds
                 ? "The club took back an outage refund — the check-in arrived late"
                 : "The club took a no-show back",
             BookingBlockedOver => $"The club blocked out {court}",
-            BookingDisplaced => $"The club moved this booking on {court} aside",
+            BookingDisplaced => Displaced(court, facts),
             BookingDisplacementReversed => $"The club put this booking on {court} back",
             BookingPaidForSomebody => $"Paid for {Subject(facts)}'s booking on {court} at the box",
             BookingPaidForThem => $"{Who(facts)} paid for their booking on {court} at the box",
+            BookingWithdrew => string.IsNullOrWhiteSpace(facts.OrganiserName)
+                ? $"Withdrew from a game on {court}"
+                : $"Withdrew from {facts.OrganiserName.Trim()}'s game on {court}",
+            BookingPartnerWithdrew => $"{ActorOr(facts, "A partner")} withdrew from their game on {court}",
 
             WalkUpBought => $"Bought light time at {court}",
             WalkUpRefunded => $"Light time at {court} was given back",
@@ -613,7 +649,7 @@ public static class TraceKinds
             WalletPenalised => Penalised(facts),
             WalletAdjustedByAdmin => AdjustedByAdmin(facts),
             WalletReversed => $"A payment for {Amount(facts)} was reversed",
-            WalletShareMoved => $"A share of a split booking moved: {Amount(facts)}",
+            WalletShareMoved => ShareMoved(facts),
 
             _ => AccountHeadline(kind, facts),
         };
@@ -632,14 +668,51 @@ public static class TraceKinds
     {
         var known = !string.IsNullOrWhiteSpace(facts.CourtName);
         var box = string.IsNullOrWhiteSpace(facts.BoxName) ? null : facts.BoxName.Trim();
-        if (facts.CodeUsed) return TurnedAway(facts, known ? court : box ?? court);
+        if (facts.CodeUsed) return TurnedAway(facts, known ? court : box ?? CourtBoxWords);
         if (facts.RefusedOffline)
         {
             return known
                 ? $"Was refused at {court} while its box was offline"
-                : $"Was refused at {box ?? "the court box"} while it was offline";
+                : $"Was refused at {box ?? CourtBoxWords} while it was offline";
         }
-        return $"Was refused at {(known ? court : box ?? court)}{VerdictWords(facts.Verdict)}";
+        return $"Was refused at {(known ? court : box ?? CourtBoxWords)}{VerdictWords(facts.Verdict)}";
+    }
+
+    /// <summary>
+    /// A court box with only its placeholder name, on every refusal branch (R12 D12-2, R13 D13-1: the
+    /// verdict and used-code branches fell back to "a court").
+    /// </summary>
+    private const string CourtBoxWords = "the court box";
+
+    /// <summary>
+    /// R13 E13-8: a booking the club displaced — cancelled and refunded in full because an earlier
+    /// booking's late check-in restored that session over its slot. Names the court, says both, and
+    /// names whose earlier booking it was when the record knows; never "moved aside".
+    /// </summary>
+    private static string Displaced(string court, TraceFacts facts)
+    {
+        var cause = string.IsNullOrWhiteSpace(facts.CausedByName)
+            ? "an earlier booking there was checked in late"
+            : $"{facts.CausedByName.Trim()}'s earlier booking there was checked in late";
+        return $"The club cancelled this booking on {court} and refunded it — {cause}";
+    }
+
+    /// <summary>
+    /// A share of a split booking moving — and, when it went back because the partner withdrew (R13
+    /// E13-4), said as the withdrawal's: "7 minutes went back to Sam — they withdrew from the game".
+    /// </summary>
+    private static string ShareMoved(TraceFacts facts)
+    {
+        if (string.IsNullOrWhiteSpace(facts.WithdrewName)) return $"A share of a split booking moved: {Amount(facts)}";
+        return facts.AmountMinutes > 0
+            ? $"{Amount(facts)} of their share came back — they withdrew from the game"
+            : $"{Amount(facts)} went back to {facts.WithdrewName.Trim()} — they withdrew from the game";
+    }
+
+    /// <summary>The actor's name, or <paramref name="nobody"/> when the row cannot name them.</summary>
+    private static string ActorOr(TraceFacts facts, string nobody)
+    {
+        return string.IsNullOrWhiteSpace(facts.ActorName) ? nobody : facts.ActorName.Trim();
     }
 
     /// <summary>
@@ -701,8 +774,20 @@ public static class TraceKinds
                 : $"{whose} was charged a penalty of {Amount(facts)}",
             WalletAdjustedByAdmin => $"{Who(facts)} changed {whose}'s minutes by {Amount(facts)}",
             WalletReversed => $"A payment of {whose}'s for {Amount(facts)} was reversed",
-            _ => $"A share of a split booking moved for {whose}: {Amount(facts)}",
+            _ => OthersShareMoved(whose, facts),
         };
+    }
+
+    /// <summary>
+    /// Somebody else's half of a share movement (E7-3) — and, when it went back because the partner
+    /// withdrew (R13 E13-4), said as that: the partner got it back, or the organiser returned it.
+    /// </summary>
+    private static string OthersShareMoved(string whose, TraceFacts facts)
+    {
+        if (string.IsNullOrWhiteSpace(facts.WithdrewName)) return $"A share of a split booking moved for {whose}: {Amount(facts)}";
+        return facts.AmountMinutes > 0
+            ? $"{whose} got {Amount(facts)} of their share back — they withdrew from the game"
+            : $"{whose} returned {Amount(facts)} to them — they withdrew from the game";
     }
 
     /// <summary>

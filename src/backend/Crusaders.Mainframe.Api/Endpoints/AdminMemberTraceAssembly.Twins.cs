@@ -135,7 +135,8 @@ public static partial class AdminMemberTraceAssembly
     {
         if (!IsBoardRow(action))
         {
-            var named = CourtOf(details, s.Courts);
+            // R13 E13-8: a row that stored no court of its own names its booking's.
+            var named = CourtOf(details, s.Courts) ?? CourtOfBooking(GuidOf(details, "booking_id"), s);
             return new RowPlace(named, named?.Name ?? Text(details, "court"), null, null, null);
         }
         var court = CourtOfBoard(details, deviceId, s);
@@ -201,6 +202,72 @@ public static partial class AdminMemberTraceAssembly
         if (deviceId is not { } id || !s.DeviceNames.TryGetValue(id, out var name)) return null;
         var trimmed = name?.Trim();
         return string.IsNullOrEmpty(trimmed) || trimmed == DeviceRegistryService.CourtBoxPlaceholderName ? null : trimmed;
+    }
+
+    /// <summary>A withdrawn seat a share row names: the partner, and when they withdrew (R13 E13-4).</summary>
+    private sealed record Withdrawal(Guid UserId, DateTimeOffset At);
+
+    /// <summary>The booking ids an audit row names — its own, and a displacement's cause (R13 E13-8).</summary>
+    private static IEnumerable<Guid> AuditBookingIds(AuditLog row)
+    {
+        var details = DoorActivityView.Details(row.DetailsJson);
+        if (GuidOf(details, "booking_id") is { } own) yield return own;
+        if (GuidOf(details, "displaced_by_booking_id") is { } cause) yield return cause;
+    }
+
+    /// <summary>The organiser a partner's withdrawal names (C13-4's <c>organiser_user_id</c>), or null on any other row.</summary>
+    private static Guid? OrganiserOf(AuditLog row)
+    {
+        if (row.Action != TraceKinds.PartnerWithdrewAction) return null;
+        return GuidOf(DoorActivityView.Details(row.DetailsJson), "organiser_user_id");
+    }
+
+    /// <summary>R13 E13-8: whose earlier booking displaced this one — its owner's name — on a displacement row; null otherwise.</summary>
+    private static string? CauseOf(string action, JsonElement? details, Strands s)
+    {
+        if (action != "booking.displaced" || GuidOf(details, "displaced_by_booking_id") is not { } cause) return null;
+        return s.BookingOwners.TryGetValue(cause, out var owner) ? PersonNames.Of(owner, s.Names) : null;
+    }
+
+    /// <summary>
+    /// R13 E13-4: the withdrawn seats the member's share rows name — read off the rows' references
+    /// (<c>share:{participant}:{seq}:out|in</c>), never guessed from the booking.
+    /// </summary>
+    private static async Task<Dictionary<Guid, Withdrawal>> WithdrawalsAsync(
+        MainframeDbContext db, List<LedgerEntry> ledger, CancellationToken ct)
+    {
+        var seats = ledger.Select(l => SeatOf(l.ExternalReference)).Where(id => id is not null).Select(id => id!.Value).Distinct().ToList();
+        if (seats.Count == 0) return [];
+        var rows = await db.BookingParticipants.AsNoTracking()
+            .Where(p => seats.Contains(p.Id) && p.Status == ParticipantStatus.Withdrawn && p.UserId != null && p.RespondedAt != null)
+            .Select(p => new { p.Id, p.UserId, p.RespondedAt })
+            .ToListAsync(ct);
+        return rows.ToDictionary(p => p.Id, p => new Withdrawal(p.UserId!.Value, p.RespondedAt!.Value));
+    }
+
+    /// <summary>The seat a share reference names (<c>share:{participant:N}:…</c>), or null for any other reference.</summary>
+    private static Guid? SeatOf(string? reference)
+    {
+        const string prefix = "share:";
+        if (reference is null || !reference.StartsWith(prefix, StringComparison.Ordinal) || reference.Length < prefix.Length + 32) return null;
+        return Guid.TryParseExact(reference.AsSpan(prefix.Length, 32), "N", out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// R13 E13-4: the partner whose withdrawal sent this share row back, or null. A return — out of the
+    /// organiser's wallet, into the partner's — on a seat that is withdrawn, written at or after the
+    /// withdrawal. Only the partner can withdraw their own seat, so the seat is the evidence of who did it;
+    /// a payment before the withdrawal is not the withdrawal's.
+    /// </summary>
+    private static Guid? WithdrewOf(LedgerEntry row, Strands s)
+    {
+        if (row.Type != LedgerEntryType.ShareTransfer || SeatOf(row.ExternalReference) is not { } seat
+            || !s.Withdrawals.TryGetValue(seat, out var w) || row.CreatedAt < w.At)
+        {
+            return null;
+        }
+        var returning = row.UserId == w.UserId ? row.AmountMinutes > 0 : row.AmountMinutes < 0;
+        return returning ? w.UserId : null;
     }
 
     /// <summary>
