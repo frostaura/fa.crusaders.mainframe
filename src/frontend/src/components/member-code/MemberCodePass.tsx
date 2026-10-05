@@ -10,6 +10,8 @@ import { QrSvg } from "@/components/member-door/QrSvg";
 import { STEP_MS } from "@/lib/memberCode/clubDay";
 import { groupToken } from "@/lib/memberCode/token";
 import { MY_CODE, newCodeIn } from "@/lib/myCodeCopy";
+import { phoneIsOffline } from "@/lib/api";
+import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 
 /**
  * The member's pass with the rotating code on it (D1, R9; design-system.md → Pass card).
@@ -110,6 +112,15 @@ function PassSymbol({ token, onOpenFullScreen, triggerRef }: Pick<MemberCodePass
   );
 }
 
+/**
+ * R15 X15-3 — the club could not be reached: "Offline" only when the phone says it has no network;
+ * otherwise "Can't reach the club". The code works at the door either way.
+ */
+function ReachBadge() {
+  if (!phoneIsOffline()) return <Badge tone="warning">{OFFLINE_COPY.unreachableBadge}</Badge>;
+  return <Badge tone="warning" icon={<WifiSlash size={14} weight="bold" aria-hidden="true" />}>{MY_CODE.offlineBadge}</Badge>;
+}
+
 export function MemberCodePass(props: MemberCodePassProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { token, remainingMs, offline, memberName, photoUrl, onOpenFullScreen, triggerRef } = props;
@@ -126,9 +137,7 @@ export function MemberCodePass(props: MemberCodePassProps) {
       meta={(
         <>
           {token ? <StepCountdown remainingMs={remainingMs} /> : <span>{MY_CODE.loading}</span>}
-          {offline ? (
-            <Badge tone="warning" icon={<WifiSlash size={14} weight="bold" aria-hidden="true" />}>{MY_CODE.offlineBadge}</Badge>
-          ) : null}
+          {offline ? <ReachBadge /> : null}
         </>
       )}
       footer={token ? <p className="text-center text-sm">{MY_CODE.fullScreenHint}</p> : null}

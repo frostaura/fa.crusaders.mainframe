@@ -183,7 +183,8 @@ describe("with no signal", () => {
 
     renderOffline("/inbox");
     expect(within(await inboxList()).getByText(ANAS.items[0].headline)).toBeInTheDocument();
-    await screen.findByText(OFFLINE_COPY.staleTitle);
+    // R15 X15-3 — the phone says it has signal, so the club is unreachable, not the phone offline.
+    await screen.findByText(OFFLINE_COPY.unreachableTitle);
     fireEvent.click(screen.getByRole("button", { name: INBOX_COPY.markAll }));
 
     expect(await screen.findByText(new RegExp(OFFLINE_COPY.writeCause.slice(0, 40)))).toBeInTheDocument();
@@ -201,7 +202,7 @@ describe("with no signal", () => {
 
     renderOffline("/inbox");
 
-    expect(await screen.findByText(OFFLINE_COPY.nothingKept.inbox, { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.inbox), { exact: false })).toBeInTheDocument();
     expect(screen.queryByText(INBOX_COPY.empty)).toBeNull();
   });
 });

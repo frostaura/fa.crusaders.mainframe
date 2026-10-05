@@ -12,13 +12,38 @@ export function asOfLabel(at: number, now = Date.now()): string {
   return sameDay ? TIME.format(at) : DAY_TIME.format(at);
 }
 
+/** R15 X15-3 — see {@link OFFLINE_COPY.backOnlineTail}. */
+const OFFLINE_TAIL = /(?:It|They|This page) loads? by (?:itself|themselves) once you're back online/;
+
 export const OFFLINE_COPY = {
-  /** After "Couldn't <action> — ". Known not to have happened: nothing left the phone. */
-  writeCause: "this needs a connection, and this phone is offline. Nothing was sent — try again once you have signal.",
+  /**
+   * After "Couldn't <action> — ". Known not to have happened: nothing left the phone. R15 X15-3 —
+   * true whether the phone has no network or has one that cannot reach the club (it read "this
+   * phone is offline" on Wi-Fi without internet).
+   */
+  writeCause: "this needs a connection to the club, and this phone can't reach it right now. Nothing was sent — try again in a moment.",
   /** The stale banner's heading. */
   staleTitle: "You're offline",
   /** The stale banner's line: what is on screen and when it was true. */
   staleLine: (at: number) => `Showing what we had at ${asOfLabel(at)}. It updates by itself when you're back online.`,
+  /**
+   * R15 X15-3 — the read never reached the club but the phone says it HAS a network (Wi-Fi
+   * without internet, the club's system down): never "You're offline", which only
+   * `navigator.onLine === false` may say.
+   */
+  unreachableTitle: "Can't reach the club",
+  unreachableLine: (at: number) => `showing what we had at ${asOfLabel(at)}. Try again in a moment.`,
+  /** R15 X15-3 — the pass's badge in the same case; the code works at the door either way. */
+  unreachableBadge: "Can't reach the club — your code still works",
+  /**
+   * R15 X15-3 — a nothing-kept line's "comes back by itself once you're back online" tail, and
+   * what it reads when the phone is online but the club cannot be reached (only a fresh read,
+   * on returning to the page or a retry, brings it back then).
+   */
+  backOnlineTail: OFFLINE_TAIL,
+  unreachableTail: "Try again in a moment",
+  /** A nothing-kept line as said when the phone is online but the club cannot be reached. */
+  unreachableNothingKept: (line: string) => line.replace(OFFLINE_TAIL, "Try again in a moment"),
   /** The same, when the club answered with a failure rather than not at all. */
   refreshFailedTitle: "Couldn't refresh",
   refreshFailedLine: (at: number) => `Showing what we had at ${asOfLabel(at)}.`,

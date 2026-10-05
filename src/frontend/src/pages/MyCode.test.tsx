@@ -22,6 +22,8 @@ import { forgetLastKnown, rememberDoor } from "../lib/lastKnown";
 import { fromHex, importHmacKey } from "../lib/memberCode/hotp";
 import { loadMemberCode, saveMemberCode } from "../lib/memberCode/keyStore";
 import { GATE_ROSTER_MAX_ENTRIES } from "../lib/gateCopy";
+import { MY_CODE } from "../lib/myCodeCopy";
+import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 
 /**
  * Waits, in REAL time, for the code to be on the pass.
@@ -185,7 +187,17 @@ describe("MyCode — the one rotating code", () => {
     await seedKey(1);
     renderWith([], { status: unreachable("/api/v1/me/code") });
     expect(await screen.findByLabelText("Your code")).toHaveTextContent(MEMBER_CODE_FIXTURE.anchorToken);
-    expect(await screen.findByText("Offline — your code still works")).toBeInTheDocument();
+    // R15 X15-3 — the phone says it has signal (jsdom's onLine is true): the club is unreachable.
+    expect(await screen.findByText(OFFLINE_COPY.unreachableBadge)).toBeInTheDocument();
+  });
+
+  it("R15 X15-3 — with the phone itself offline the badge says Offline", async () => {
+    atAnchor();
+    await seedKey(1);
+    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    renderWith([], { status: unreachable("/api/v1/me/code") });
+    expect(await screen.findByText(MY_CODE.offlineBadge)).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 
   it("says the first visit needs signal when there is no key and no club", async () => {

@@ -70,7 +70,7 @@ describe("R10 X10-1 — Profile offline with nothing kept says offline, never re
   it("says what is missing and keeps a retry", async () => {
     unreachable();
     renderPage(<ProfileProvider><ProfilePage /></ProfileProvider>, { initialEntries: ["/profile"] });
-    expect(await screen.findByText(OFFLINE_COPY.nothingKept.profile, { exact: false }, WAIT)).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.profile), { exact: false }, WAIT)  /* R15 X15-3: onLine is true */).toBeInTheDocument();
     expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
     expect(screen.queryByText(/Couldn't load your profile/i)).toBeNull();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();

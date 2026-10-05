@@ -16,6 +16,9 @@ import { setDataOwner } from "@/lib/offline/queryCache";
  * `onLine` alone, which memory/decisions-frontend-offline-data says never to trust). Offline is
  * judged from the failed read (a NetworkError). A club that ANSWERS with a failure (503) is not
  * offline: that keeps its red failure and its retry.
+ *
+ * R15 X15-3 — the notice stays, its WORDS follow `navigator.onLine`: online, it is "Can't reach the
+ * club" and the line's "once you're back online" reads "Try again in a moment".
  */
 
 const ANA = "44444444-4444-4444-4444-444444444444";
@@ -47,7 +50,7 @@ describe("X7-3 rest — a connection failure with nothing kept is offline, whate
   it("Invites", async () => {
     lieFiPhone();
     renderPage(<InvitesPage />, { initialEntries: ["/bookings/invites"] });
-    expect(await screen.findByText(OFFLINE_COPY.nothingKept.invites, { exact: false }, WAIT)).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.invites), { exact: false }, WAIT)).toBeInTheDocument();
     expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
     // No `online` event will come on Wi-Fi without internet: the failure's retry stays beside it.
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
@@ -56,14 +59,14 @@ describe("X7-3 rest — a connection failure with nothing kept is offline, whate
   it("a booking's page", async () => {
     lieFiPhone();
     renderPage(<Routes><Route path="/bookings/:bookingId" element={<BookingDetailPage />} /></Routes>, { initialEntries: ["/bookings/bk-1"] });
-    expect(await screen.findByText(OFFLINE_COPY.nothingKept.booking, { exact: false }, WAIT)).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.booking), { exact: false }, WAIT)).toBeInTheDocument();
     expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
   });
 
   it("Profile's My game", async () => {
     lieFiPhone();
     renderPage(<MyGameSection />, { initialEntries: ["/profile"] });
-    expect(await screen.findByText(OFFLINE_COPY.nothingKept.myGame, { exact: false }, WAIT)).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.myGame), { exact: false }, WAIT)).toBeInTheDocument();
     expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
   });
 });

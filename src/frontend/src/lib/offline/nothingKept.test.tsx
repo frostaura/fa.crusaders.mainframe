@@ -93,22 +93,26 @@ describe("offline with nothing kept (R6 X6-4)", () => {
     expect(screen.queryByText(OFFLINE_COPY.nothingKept.wallet, { exact: false })).toBeNull();
   });
 
-  it("R8 X8-2 / X7-3 — Wi-Fi without internet (onLine true, the read fails to connect) is said as offline too", async () => {
+  // R15 X15-3 reverses R8's wording (not its notice): Wi-Fi without internet still gets the
+  // nothing-kept notice, never red — but it is "Can't reach the club", not "You're offline".
+  it("R8 X8-2 / R15 X15-3 — Wi-Fi without internet (onLine true, the read fails to connect): the notice, as Can't reach the club", async () => {
     offlinePhone();
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
     renderPage(<WalletPage />, { initialEntries: ["/wallet"] });
-    expect(await screen.findByText(OFFLINE_COPY.nothingKept.wallet, { exact: false }, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.wallet), { exact: false }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByText(OFFLINE_COPY.unreachableTitle)).toBeInTheDocument();
+    expect(screen.queryByText(OFFLINE_COPY.staleTitle)).toBeNull();
     expect(screen.queryByText(/couldn't be reached|couldn't load/i)).toBeNull();
   });
 
-  it("R8 X7-3 rest — Inbox and Wallet activity say offline on a failed connection even when onLine says true", async () => {
+  it("R8 X7-3 rest / R15 X15-3 — Inbox and Wallet activity keep the notice on a failed connection when onLine says true", async () => {
     offlinePhone();
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
     const inbox = renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
-    expect(await screen.findByText(OFFLINE_COPY.nothingKept.inbox, { exact: false }, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.inbox), { exact: false }, { timeout: 3000 })).toBeInTheDocument();
     inbox.unmount();
     renderPage(<WalletActivityPage />, { initialEntries: ["/wallet/activity"] });
-    expect(await screen.findByText(OFFLINE_COPY.nothingKept.activity, { exact: false }, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.activity), { exact: false }, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
   });
 });
