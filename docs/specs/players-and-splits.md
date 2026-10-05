@@ -438,6 +438,19 @@ Since review round 13:
   reach "You were taken off this game". Invites carry `consented_minutes` so a seat the club added
   is never told its share "went up" (J14-9). `GET /wallet` carries `share_places` (court and start
   only) for a share booking the member can no longer read.
+- **The club's acts are the club's (R15 J15-1, E15-3).**
+  - **Who removed or added a member.** The 404 and `GET /me/invites/{pid}` carry `removed_by: "club" | "organiser" | null`, where null means no removal, or one from before R14. Invites carry `added_by_club`. A member is never told the organiser took them off, or invited them, when the club did.
+  - **Audit rows.** Settle-outside, collect and admin add write `players.settled_outside`, `players.share_collected` and `players.added_by_club`: the subject is the partner, the actor is the admin, and the organiser is in the details.
+  - **The Night.** It reads each act from where the viewer stands:
+    - `booking.club_took_player_off`;
+    - `booking.share_settled_outside`, `booking.partner_share_settled_outside` and `booking.settled_share_outside`;
+    - `booking.share_collected`, `booking.partner_share_collected` and `booking.collected_share`;
+    - `booking.added_to_game`, `booking.club_added_player` and `booking.added_player`;
+    - `booking.game_no_show` and `booking.game_no_show_reversed`, which put the organiser's no-show and its reversal on the Night of a partner who paid into it.
+
+    Share rows state the direction, the other person and the cause, read off the record; the ledger still stores no cause. `players.game_cancelled` is saved before its share rows.
+  - **A split change on a settled seat.** For a share the club settled outside the app, a split change moves nothing in the app and asks for no consent.
+  - **The partner's word on a started session.** When the club cancels a session that had started, the partner is told their share stands.
 
 ## 7. Endpoints
 
