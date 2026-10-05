@@ -140,7 +140,10 @@ public sealed class LightsCueWorker : BackgroundService
             // mirror; its off is said here, once, at the restored end. A reversal before the cue
             // emitted nothing to undo. The row's own cue marker records this second cue.
             var relit = b.NoShowReversedAt is { } reversedAt && b.LightsOffCuedAt is { } cuedAt && reversedAt > cuedAt;
-            if (relit) b.LightsOffCuedAt = now;
+            // R13 E13-1: said at the instant the court is next free, never at this tick — and not at
+            // all while another booking still holds the court (its own off closes it).
+            var offAt = relit ? await NextFreeAsync(db, b, now, ct) : null;
+            if (offAt is not null) b.LightsOffCuedAt = now;
             // Saved on its own, like the lights-off rows above and for the same reason: a
             // lost concurrency race means another writer decided this booking, and its
             // decision stands. Only a save that stuck may announce itself — a
@@ -148,10 +151,45 @@ public sealed class LightsCueWorker : BackgroundService
             // utilisation report counting a session that never closed.
             if (await SaveOneAsync(db, b, ct))
             {
-                if (relit) await FireLightsAsync(db, tenant, b, on: false, ct);
+                if (offAt is { } at) await FireLightsAsync(db, tenant, b, on: false, ct, occurredAt: at);
                 await FireCompletedAsync(db, tenant, b, ct);
             }
         }
+    }
+
+    /// <summary>
+    /// R13 E13-1 (I12 refined): when a relit reversal's extra <c>booking.lights_off</c> is said, or
+    /// null for "not at all".
+    ///
+    /// <para>
+    /// A collided reversal's restored end is the start of the booking that survived on the court,
+    /// so an off stamped at the tick that sent it arrived after that member's <c>lights_on</c> and
+    /// read their paid session dark. Walking forward from the restored end: a live booking
+    /// (<c>Booked</c>, <c>Completed</c> or <c>NoShow</c> — the statuses the off sweep closes) that
+    /// holds the court at that instant and has not been cued off yet means its own off is still to
+    /// come and closes the court later by arrival and by <c>occurred_at</c>, so this one is not sent.
+    /// One already cued off moves the instant to its end; the first instant nobody holds is the
+    /// stamp. A cancelled booking and a club block light nothing and hold nothing. Only bookings
+    /// already started by <paramref name="now"/> are read: the walk only ever moves through holdings
+    /// that are over and cued off, so a later one cannot be in the chain.
+    /// </para>
+    /// </summary>
+    private static async Task<DateTimeOffset?> NextFreeAsync(MainframeDbContext db, Booking b, DateTimeOffset now, CancellationToken ct)
+    {
+        var at = b.EndsAt;
+        var holders = await db.Bookings.IgnoreQueryFilters()
+            .Where(o => o.TenantId == b.TenantId && o.CourtId == b.CourtId && o.Id != b.Id
+                && (o.Status == BookingStatus.Booked || o.Status == BookingStatus.Completed || o.Status == BookingStatus.NoShow)
+                && o.EndsAt > at && o.StartsAt <= now)
+            .OrderBy(o => o.StartsAt)
+            .ToListAsync(ct);
+        foreach (var holder in holders)
+        {
+            if (holder.StartsAt > at) break;
+            if (holder.LightsOffCuedAt is null) return null;
+            if (holder.EndsAt > at) at = holder.EndsAt;
+        }
+        return at;
     }
 
     /// <summary>
@@ -228,7 +266,9 @@ public sealed class LightsCueWorker : BackgroundService
             }), ct);
     }
 
-    private async Task FireLightsAsync(MainframeDbContext db, ITenantContext tenant, Booking b, bool on, CancellationToken ct)
+    /// <param name="occurredAt">When the lights did this, when that is not now (R13 E13-1: a relit reversal's off).</param>
+    private async Task FireLightsAsync(
+        MainframeDbContext db, ITenantContext tenant, Booking b, bool on, CancellationToken ct, DateTimeOffset? occurredAt = null)
     {
         var court = await db.Courts.IgnoreQueryFilters().FirstAsync(c => c.Id == b.CourtId, ct);
         var tenantRow = await db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == b.TenantId, ct);
@@ -249,7 +289,7 @@ public sealed class LightsCueWorker : BackgroundService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: on ? "booking.lights_on" : "booking.lights_off",
             TenantId: b.TenantId, TenantSlug: tenantRow.Slug,
-            OccurredAt: DateTimeOffset.UtcNow,
+            OccurredAt: occurredAt ?? DateTimeOffset.UtcNow,
             ActorUserId: null, ActorIsAdmin: false,
             SubjectUserId: b.UserId,
             Data: data), ct);
