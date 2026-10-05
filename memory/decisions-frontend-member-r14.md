@@ -27,10 +27,12 @@ Tests: `walletMovementR14.test.tsx`, `paged-focus-scan.test.ts`, `routeLazy.test
 - **`cancelled_no_refund` is the one zero movement the chip announces** (BE14b §5, E14-5).
 - **A free cancel of a split booking names the partners** (J14-6/J14-7): `CANCEL_SHEET.free(whose,
   partners)`, `SPLIT_CANCEL.note(whose, partners)`; one partner is singular.
-- **Every paging button is on `usePagedFocus`, by source scan** (X14-1): a `<Button>` whose label is
-  a paging label (literal, or a copy key whose value is one) needs a bare handler in a file that calls
-  the hook, or an allow-list entry with its reason (AdminLedger/AdminDoorsLog follow a sort; AdminMembers
-  reveals client-side; Recent/Upcoming games are disclosures that never unmount).
+- **Every paging control is on `usePagedFocus`, by source scan** (X14-1, hardened after review): the
+  handler on any interactive element with a paging label must be bound by `const x = usePagedFocus(`
+  in its file, or be a prop every call site passes such a handler (resolved across files). Copy keys
+  resolve per table via imports. Allow-list entries must cite a behavioural test by title. *Why:* the
+  first version passed `onOlder={() => …}` because the file called the hook somewhere; the scan now
+  runs five in-memory mutations that must go red.
 - **Offline is said as offline** (X14-3): `ConnectionLost` reads `navigator.onLine` — only `false`
   switches it (Wi-Fi without internet leaves it true). `/profile/results` was NOT made
   offline-capable: nothing of it is kept, so it could only fail its read.
