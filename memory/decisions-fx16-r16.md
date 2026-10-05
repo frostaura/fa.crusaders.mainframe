@@ -18,7 +18,7 @@ last_verified: 2026-10-05
   Pre-fix details (`invalid UTF-8 read as U+FFFD`, `body is not JSON`, `malformed`) stay mapped so
   the history reads without jargon. Version too long: "its record kept the one it had".
 - **A walk-up's purchase and its activation are retried on a PostgreSQL abort** (40P01 deadlock,
-  40001 serialization), up to 3 attempts (`Endpoints/DatabaseRetry`, `DeviceEventEndpoints.SaveAttempts`).
+  40001 serialization), up to 3 attempts (`Persistence/DatabaseRetry`, moved there by BE16c, `DeviceEventEndpoints.SaveAttempts`).
   *Why:* identical walk-up retries in flight together deadlock inside `ck_bookings_no_overlapping_slot`.
   The winner's activation UPDATEs its booking, which makes PostgreSQL check the constraint again for
   the new row version. At the same moment a twin's INSERT of the same slot is checking against that
@@ -31,7 +31,7 @@ last_verified: 2026-10-05
   Modified or Deleted ones are reloaded. Reloading also replaces the old concurrency handler, which
   only reloaded the booking and left a light-state row Modified with values that were never saved.
   A retried purchase either sells, or the winner's booking refuses it and the nonce replay answers it.
-- **The same deadlock shape exists off the walk-up**: any INSERT of a booking that overlaps one whose
-  row is being updated at that moment. Examples are an app booking, or an admin block, while that
-  slot's holder checks in, or during `/device/activate` or `/events` settlement. Those paths are not
-  covered. See `R16WalkUpDeadlockHttpTests` for the interceptor that raises a real 40P01.
+- **The same deadlock shape existed off the walk-up**: any booking INSERT that overlaps a row being
+  updated at that moment. BE16c closed it on every booking write, and added the 503
+  `conflict_retry` net (see `decisions-backend-r16c.md`). `R16WalkUpDeadlockHttpTests` holds the
+  interceptor that raises a real 40P01.
