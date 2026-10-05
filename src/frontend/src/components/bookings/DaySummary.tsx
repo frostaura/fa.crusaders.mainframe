@@ -48,13 +48,28 @@ function OwnSummary({ className, moreToday }: { className?: string; moreToday: n
     <Panel role="group" aria-label={BOOKINGS_COPY.summaryTitle} className={cn("flex flex-col gap-3", className)}>
       <div>
         <p className={typography({ variant: "overline" })}>{BOOKINGS_COPY.summarySpendable}</p>
-        <p className={cn("mt-1 font-display text-2xl font-bold", level === "zero" && "text-danger-strong")}><Minutes value={spendable} /></p>
+        <SpendableFigure spendable={spendable} zero={level === "zero"} />
         {moreToday !== null ? <p data-more-today="" className="mt-1 text-sm text-text-secondary">{BOOKINGS_COPY.summaryMoreToday(moreToday)}</p> : null}
       </div>
       <Button asChild variant={level === "zero" ? "primary" : "secondary"} size="sm" className="self-start">
         <Link to={BUY_MINUTES_PATH}>{BOOKINGS_COPY.summaryBuy(level === "zero")}</Link>
       </Button>
     </Panel>
+  );
+}
+
+/**
+ * R13 J13-1 — the spendable figure. Below zero it is 0, with how far under in words beneath it —
+ * the Booking-for bar's "can spend 0 minutes — 12 minutes below zero" and the wallet card's
+ * `spendableLine` rule. "−12 min" (read "minus 12 minutes") is a debt dressed as spending money.
+ */
+function SpendableFigure({ spendable, zero }: { spendable: number; zero: boolean }) {
+  const under = Math.trunc(spendable) < 0 ? -Math.trunc(spendable) : 0;
+  return (
+    <>
+      <p className={cn("mt-1 font-display text-2xl font-bold", zero && "text-danger-strong")}><Minutes value={Math.max(0, spendable)} /></p>
+      {under > 0 ? <p data-below-zero="" className="mt-1 text-sm text-danger-strong">{BOOKINGS_COPY.summaryBelowZero(under)}</p> : null}
+    </>
   );
 }
 
@@ -76,9 +91,7 @@ function MemberSummary({ className, bookingFor }: { className?: string; bookingF
     <Panel role="group" aria-label={BOOKINGS_COPY.summaryTheirTitle(name)} className={cn("flex flex-col gap-3", className)}>
       <div>
         <p className={typography({ variant: "overline" })}>{BOOKINGS_COPY.summaryTheirSpendable(name)}</p>
-        <p className={cn("mt-1 font-display text-2xl font-bold", level === "zero" && "text-danger-strong")}>
-          <Minutes value={state.member.spendable} />
-        </p>
+        <SpendableFigure spendable={state.member.spendable} zero={level === "zero"} />
       </div>
     </Panel>
   );

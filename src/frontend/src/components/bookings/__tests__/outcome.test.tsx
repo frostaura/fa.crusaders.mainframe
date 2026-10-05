@@ -325,7 +325,7 @@ describe("F1.13 — a split booking's cancel says who gets what back", () => {
     expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}50 min`);
     expect(money).toHaveTextContent(`${SPLIT_CANCEL.youKeep}50 min`);
     expect(money).not.toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}1 h 40 min`);
-    expect(screen.getByText(SPLIT_CANCEL.note)).toBeTruthy();
+    expect(screen.getByText(SPLIT_CANCEL.note(null))).toBeTruthy();
   });
 
   it("the toast after it says the same", async () => {
@@ -364,6 +364,10 @@ describe("F1.13 — the desk cancelling a split booking says the truth even when
     const money = document.querySelector("dl")!;
     expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}2 h 5 min`);
     expect(money).toHaveTextContent(`${CANCEL_SHEET.goesBack("Adm")}2 h 5 min`);
+    // R13 J13-5 — the note under the figures is about Adm's money, said in the third person.
+    expect(screen.getByText(SPLIT_CANCEL.note("Adm"))).toBeTruthy();
+    expect(SPLIT_CANCEL.note("Adm")).toBe("Partners get their shares back from what comes back to Adm.");
+    expect(screen.queryByText(/comes back to you/)).toBeNull();
     // R4 A4-4: a desk cancel of somebody else's booking always carries a reason.
     fireEvent.change(screen.getByLabelText(CANCEL_SHEET.reasonLabel), { target: { value: "Court closed" } });
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));

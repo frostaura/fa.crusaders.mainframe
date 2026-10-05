@@ -30,6 +30,11 @@ export const BOOKINGS_COPY = {
   /** R5 A5-9 — booking FOR a member, the rail's wallet is theirs, never the desk's. */
   summaryTheirTitle: (name: string) => `${name}'s wallet`,
   summaryTheirSpendable: (name: string) => `${name} can spend`,
+  /**
+   * R13 J13-1 — under a spendable figure shown as 0 because it is below zero: how far under, the
+   * Booking-for bar's words (`BOOKING_FOR.canSpend`) — never "−12 min" / "minus 12 minutes".
+   */
+  summaryBelowZero: (minutes: number) => `${minutesSpoken(minutes)} below zero`,
   /** The rail's way to the package shelf (P13): said as a reason when the wallet is empty. */
   summaryBuy: (empty: boolean) => (empty ? "Buy minutes to start booking" : "Buy minutes"),
   /**
@@ -615,7 +620,11 @@ export const SPLIT_CANCEL = {
    * under "penalty −15 min" read as the penalty's opposite.
    */
   youKeep: "Back to you",
-  note: "Partners get their shares back from what comes back to you.",
+  /**
+   * R13 J13-5 — whose money it is: the desk cancelling a member's split booking was told "what
+   * comes back to you" about the member's refund. Null: the viewer's own booking.
+   */
+  note: (whose: string | null) => `Partners get their shares back from what comes back to ${whose ?? "you"}.`,
 } as const;
 
 /* ─────────────────────────────── end SHEETS ─────────────────────────────── */

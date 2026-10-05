@@ -262,15 +262,15 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
       {!loading && !quote ? <QuoteFailed retry={flow.quotes.retry} /> : null}
       {said ? <Alert tone={said.tone} live="polite">{said.text}</Alert> : null}
       {loading || quote ? <MoneyRows rows={singleMoney(quote, waived, subject)} label={CANCEL_SHEET.totalBack} /> : null}
-      <SplitNote quote={quote} waived={waived} />
+      <SplitNote quote={quote} waived={waived} subject={subject} />
     </>
   );
 }
 
-/** F1.13 — why "Back to you" is less than was paid on a split booking. */
-function SplitNote({ quote, waived }: { quote: CancellationQuote | null; waived: boolean }) {
+/** F1.13 — why "Back to you" (or "Back to Thandi", R13 J13-5) is less than was paid on a split booking. */
+function SplitNote({ quote, waived, subject }: { quote: CancellationQuote | null; waived: boolean; subject: string | null }) {
   if (!quote || netOf(quote, waived).partners.length === 0) return null;
-  return <p className="-mt-2 px-1 text-xs text-text-secondary">{SPLIT_CANCEL.note}</p>;
+  return <p className="-mt-2 px-1 text-xs text-text-secondary">{SPLIT_CANCEL.note(subject)}</p>;
 }
 
 function QuoteFailed({ retry }: { retry: () => void }) {
