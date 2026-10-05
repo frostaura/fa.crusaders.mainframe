@@ -94,8 +94,12 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
         Assert.Contains("below zero", Body(taken));
         Assert.DoesNotContain(sam, m => m.Subject.StartsWith("Share paid", StringComparison.Ordinal));
 
-        var olive = Assert.Single(To(mail, club, "olive.organiser"), m => m.Subject.Contains("paid their share", StringComparison.Ordinal));
+        // R16 E16-5: the organiser's subject is the club's act too — never "Sam paid their share"
+        // over a body saying the club collected it.
+        var oliveMail = To(mail, club, "olive.organiser");
+        var olive = Assert.Single(oliveMail, m => m.Subject.StartsWith("The club collected Sam Partner's share", StringComparison.Ordinal));
         Assert.Contains("The club collected", Body(olive));
+        Assert.DoesNotContain(oliveMail, m => m.Subject.Contains("paid their share", StringComparison.Ordinal));
 
         // The inbox says it too.
         var inbox = await club.Client(f, club.Sam).GetFromJsonAsync<JsonElement>("/api/v1/me/notifications");

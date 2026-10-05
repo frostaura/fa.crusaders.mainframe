@@ -120,7 +120,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
 
         // Review round 10, E10-2: Olga's Night names whose code lit her court — Pam's, not hers.
         var night = await c.Member(app, c.AdminId, "admin")
-            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{c.Olga}/trace?day={clock.Now:yyyy-MM-dd}");
+            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{c.Olga}/trace?day={c.DayOf(clock.Now)}");
         var lights = Assert.Single(night.GetProperty("events").EnumerateArray(), e => e.GetProperty("kind").GetString() == TraceKinds.LightsOn);
         Assert.Equal(c.Olga, lights.GetProperty("subject").GetProperty("user_id").GetGuid());
         Assert.Equal(c.Pam, lights.GetProperty("code_holder").GetProperty("user_id").GetGuid());

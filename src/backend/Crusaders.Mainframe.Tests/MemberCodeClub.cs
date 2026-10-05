@@ -43,6 +43,18 @@ internal sealed class MemberCodeClub
     public string Zone { get; init; } = "Africa/Johannesburg";
 
     /// <summary>
+    /// The club day <paramref name="at"/> falls on, as <c>?day=</c> wants it. The Night's
+    /// <c>?day=</c> is a CLUB date; formatting the UTC instant instead asks for yesterday from
+    /// 00:00 to 02:00 in Johannesburg, and a trace of yesterday holds none of today's rows
+    /// (<c>memory/gotchas-clock.md</c>).
+    /// </summary>
+    public string DayOf(DateTimeOffset at)
+    {
+        return DoorClock.LocalDateOf(TimeZoneInfo.FindSystemTimeZoneById(Zone), at)
+            .ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// <see cref="Settings"/> in a club whose local noon is now — for a test about something other
     /// than the club's midnight. A booking or walk-up bought in the last hour of a club day runs
     /// into the midnight close (pro-rata price) or into tomorrow's key, so a test that pins the

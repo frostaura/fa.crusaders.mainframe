@@ -91,7 +91,8 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
 
         var taken = Assert.Single(To(mail, club, "sam.partner"), m => m.Subject.StartsWith("The club collected your share", StringComparison.Ordinal));
         Assert.Contains("Reason given by the club: Plays tonight, pays later", Body(taken));
-        var received = Assert.Single(To(mail, club, "olive.organiser"), m => m.Subject.Contains("paid their share", StringComparison.Ordinal));
+        // R16 E16-5: the organiser's subject names the club's collect, not the partner paying.
+        var received = Assert.Single(To(mail, club, "olive.organiser"), m => m.Subject.StartsWith("The club collected Sam Partner's share", StringComparison.Ordinal));
         Assert.Contains("Reason given by the club: Plays tonight, pays later", Body(received));
     }
 

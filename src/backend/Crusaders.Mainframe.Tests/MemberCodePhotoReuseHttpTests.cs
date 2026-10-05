@@ -271,7 +271,7 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         });
 
         var night = await club.Member(app, club.AdminId, "admin")
-            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.Olga}/trace?day={clock.Now:yyyy-MM-dd}");
+            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.Olga}/trace?day={club.DayOf(clock.Now)}");
         var refused = night.GetProperty("events").EnumerateArray()
             .Where(e => e.GetProperty("kind").GetString() == "court.refused")
             .Select(e => e.GetProperty("headline").GetString()).ToList();
@@ -319,7 +319,7 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         });
 
         var night = await club.Member(app, club.AdminId, "admin")
-            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.Olga}/trace?day={clock.Now:yyyy-MM-dd}");
+            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.Olga}/trace?day={club.DayOf(clock.Now)}");
         var refused = night.GetProperty("events").EnumerateArray()
             .Where(e => e.GetProperty("kind").GetString() == "court.refused")
             .Select(e => e.GetProperty("headline").GetString()).ToList();
@@ -359,7 +359,7 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         Assert.Equal("activate", details.GetProperty("attempt").GetString());
 
         var night = await club.Member(app, club.AdminId, "admin")
-            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.Olga}/trace?day={clock.Now:yyyy-MM-dd}");
+            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.Olga}/trace?day={club.DayOf(clock.Now)}");
         var refused = night.GetProperty("events").EnumerateArray()
             .Where(e => e.GetProperty("kind").GetString() == "court.refused").ToList();
         Assert.Equal(2, refused.Count);
