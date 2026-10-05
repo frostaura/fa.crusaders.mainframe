@@ -43,10 +43,10 @@ export type ShareRowInput = {
 export function shareRowSentence(input: ShareRowInput): string {
   const amount = minutesSpoken(Math.abs(input.signed));
   const court = courtOf(input.place);
-  const who = input.other ? firstName(input.other) : null;
+  const who = personName(input.other);
   const acted = input.cause ? actedShareSentence({
     side: input.side, signed: input.signed, cause: input.cause, cancelledBy: input.cancelledBy,
-    actor: input.actor ? firstName(input.actor) : null, other: who, where: sharePlace(input.place),
+    actor: personName(input.actor), other: who, others: who ? [who] : [], where: sharePlace(input.place),
   }) : null;
   if (acted) return acted;
   const clause = shareCauseClause(input, who);
@@ -65,6 +65,8 @@ type Acted = {
   side: "organiser" | "partner"; signed: number; cause: string; cancelledBy?: "club" | "member";
   /** First names: who acted (the frame's `actor_name`), and the other person on the share. */
   actor: string | null; other: string | null;
+  /** R14 §9 — every partner the frame's share rows name (first names), for a return to two at once. */
+  others: readonly string[];
   /** "Court 3 · Mon 5 Oct", or null when the booking cannot be placed. */
   where: string | null;
 };
@@ -91,6 +93,9 @@ function partnerActed(a: Acted, minutes: string, where: string): string | null {
     share_returned: () => `You withdrew from ${where} — ${minutes} came back`,
     club_removed: () => `The club took you off ${where} — ${minutes} came back`,
     booking_cancelled: () => (a.cancelledBy === "member" && a.actor ? `${a.actor} cancelled ${where} — ${minutes} of your share came back` : null),
+    // R14 §9 — the club recorded the share as paid outside the app; a return no record explains names nobody.
+    club_settled: () => `${minutes} of your share of ${a.where ?? "a split booking"} came back — the club recorded your share as paid outside the app`,
+    share_back: () => `${minutes} of your share of ${a.where ?? "a split booking"} came back`,
   };
   return said[a.cause]?.() ?? null;
 }
@@ -98,7 +103,14 @@ function partnerActed(a: Acted, minutes: string, where: string): string | null {
 /** The organiser's side: a partner's share went back to them. */
 function organiserActed(a: Acted, minutes: string, where: string): string | null {
   const partner = a.other ?? a.actor;
+  // R14 §9 — the record's own cause, naming only whom the minutes went back to: never who did it.
+  const many = a.others.length > 1;
+  const to = a.others.length > 0 ? listed(a.others) : "a partner";
+  const share = many ? "their shares" : "their share";
+  const of = a.where ?? "a split booking";
   const said: Record<string, () => string> = {
+    club_settled: () => `${minutes} went back to ${to} — the club recorded ${share} of ${of} as paid outside the app`,
+    share_back: () => `${minutes} went back to ${to} from ${share} of ${of}`,
     share_returned: () => `${a.actor ?? partner ?? "A partner"} withdrew from ${where} — ${minutes} went back to them`,
     organiser_removed: () => `You took ${partner ?? "a partner"} off ${where} — ${minutes} went back to them`,
     split_changed: () => `You changed the split on ${a.where ?? "your game"} — ${minutes} went back to ${partner ?? "your partner"}`,
@@ -143,15 +155,16 @@ function shareCauseClause(input: ShareRowInput, who: string | null): string {
  */
 export function shareMovementPlain(
   amount: number, cause: string | undefined, kept: number | undefined, by?: string,
-  more: { cancelledBy?: "club" | "member"; place?: SharePlace; actor?: string; other?: string | null } = {},
+  more: { cancelledBy?: "club" | "member"; place?: SharePlace; actor?: string; other?: string | null; others?: readonly (string | null | undefined)[] } = {},
 ): string {
   // A collection (paid, collected, taken again) leaves the PARTNER; a return comes back to them.
   const collected = cause === "share_paid" || cause === "club_collected" || cause === "attended";
   const side = (collected ? amount < 0 : amount > 0) ? "partner" : "organiser";
   // R14 X14-2 — a removal, a split change, a withdrawal or a member's cancel: said as the act.
   const acted = cause ? actedShareSentence({
-    side, signed: amount, cause, cancelledBy: more.cancelledBy, actor: more.actor ? firstName(more.actor) : null,
-    other: more.other ? firstName(more.other) : null, where: sharePlace(more.place),
+    side, signed: amount, cause, cancelledBy: more.cancelledBy, actor: personName(more.actor),
+    other: personName(more.other), where: sharePlace(more.place),
+    others: [...new Set((more.others ?? [more.other]).map(personName).filter((n): n is string => n !== null))],
   }) : null;
   if (acted) return `${acted}.`;
   const row = { side, signed: amount, place: more.place ?? null, other: null, cause, kept, by, cancelledBy: more.cancelledBy } as const;
@@ -164,3 +177,19 @@ export function shareMovementPlain(
   const clause = shareCauseClause(row, null);
   return clause ? `${plain.replace(/\.$/, "")}${clause}.` : plain;
 }
+
+/**
+ * A person's first name for a sentence, or null for nobody. R14 §9 — a member's wallet says "The
+ * club" for an admin, which is never cut to "The"; a blank name is nobody, never "" or "null".
+ */
+function personName(name: string | null | undefined): string | null {
+  const said = name?.trim() ?? "";
+  if (said === "" || said === "null") return null;
+  return /^the club$/i.test(said) ? "The club" : firstName(said);
+}
+
+/** "a", "a and b", "a, b and c". */
+function listed(items: readonly string[]): string {
+  return items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+

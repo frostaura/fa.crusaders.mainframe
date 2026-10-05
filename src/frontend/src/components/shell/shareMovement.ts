@@ -47,9 +47,10 @@ export async function namedShareMovement(
  */
 export async function shareToast(delta: BalanceDelta, me: string | null): Promise<string> {
   // R14 X14-2 — who acted (`actor_name`) and the other member on the share row.
-  const other = delta.parts?.find((p) => p.reason === "share_transfer")?.counterparty_name ?? null;
+  const shares = (delta.parts ?? []).filter((p) => p.reason === "share_transfer");
+  const other = shares[0]?.counterparty_name ?? null;
   const plain = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy, {
-    cancelledBy: delta.cancelledBy, place: delta.place, actor: delta.actorName, other,
+    cancelledBy: delta.cancelledBy, place: delta.place, actor: delta.actorName, other, others: shares.map((p) => p.counterparty_name),
   });
   try {
     return (await namedShareMovement(delta.amount, me, delta)) ?? plain;

@@ -217,3 +217,53 @@ describe("R14 E14-5 (BE14b §5) — the club cancels a session that had started:
     expect([...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /Court 3/.test(t))).toEqual([]);
   }, 15_000);
 });
+
+describe("R14 §9 — club_settled and share_back: the record's cause, nobody named who did not act", () => {
+  const out = { from: "Omar Organiser", to: "Sam Partner", actorUserId: SAM, actorName: "Sam Partner" };
+  const part = (name: string, n: number) => ({ reason: "share_transfer", delta_minutes: n, counterparty_name: name });
+
+  it("partner, club_settled (plain): '… of your share of Court 3 · Mon 7 Oct came back — the club recorded your share as paid outside the app.'", async () => {
+    expect(await share([GONE], 7, { share_cause: "club_settled", actor_name: null, parts: [part("Omar Organiser", 7)] }))
+      .toEqual(["7 minutes of your share of Court 3 · Mon 7 Oct came back — the club recorded your share as paid outside the app."]);
+  }, 15_000);
+
+  it("partner, club_settled (booking readable, named path): the same words", async () => {
+    const readable = { path: `/api/v1/bookings/${BOOKING}`, body: { ...detail([]), organiser: { user_id: OMAR, name: "Omar Organiser", photo_url: null } } };
+    expect(await share([readable], 7, { share_cause: "club_settled", actor_name: null }))
+      .toEqual(["7 minutes of your share of Court 3 · Mon 7 Oct came back — the club recorded your share as paid outside the app"]);
+  }, 15_000);
+
+  it("organiser, club_settled, one partner: '7 minutes went back to Sam — the club recorded their share of … as paid outside the app.'", async () => {
+    expect(await share([GONE], -7, { share_cause: "club_settled", actor_name: null, parts: [part("Sam Partner", -7)] }, out))
+      .toEqual(["7 minutes went back to Sam — the club recorded their share of Court 3 · Mon 7 Oct as paid outside the app."]);
+  }, 15_000);
+
+  it("organiser, club_settled, two partners in one frame: both named, plural", async () => {
+    expect(await share([GONE], -14, { share_cause: "club_settled", actor_name: null, parts: [part("Sam Partner", -7), part("Nomsa Dube", -7)] }, out))
+      .toEqual(["14 minutes went back to Sam and Nomsa — the club recorded their shares of Court 3 · Mon 7 Oct as paid outside the app."]);
+  }, 15_000);
+
+  it("partner, share_back: plain, nobody named", async () => {
+    const said = await share([GONE], 16, { share_cause: "share_back", actor_name: null, parts: [part("Omar Organiser", 16)] });
+    expect(said).toEqual(["16 minutes of your share of Court 3 · Mon 7 Oct came back."]);
+  }, 15_000);
+
+  it("organiser, share_back, one and two partners: who it went back to, never who did it", async () => {
+    expect(await share([GONE], -16, { share_cause: "share_back", actor_name: null, parts: [part("Sam Partner", -16)] }, out))
+      .toEqual(["16 minutes went back to Sam from their share of Court 3 · Mon 7 Oct."]);
+  }, 15_000);
+
+  it("organiser, share_back, two partners", async () => {
+    expect(await share([GONE], -20, { share_cause: "share_back", actor_name: null, parts: [part("Sam Partner", -10), part("Nomsa Dube", -10)] }, out))
+      .toEqual(["20 minutes went back to Sam and Nomsa from their shares of Court 3 · Mon 7 Oct."]);
+  }, 15_000);
+
+  it("share_paid with actor_name null, both sides: no 'null', no empty name", async () => {
+    for (const [signed, row] of [[7, {}], [-7, out]] as const) {
+      const said = await share([GONE], signed, { share_cause: "share_paid", actor_name: null }, row);
+      expect(said).toHaveLength(1);
+      expect(said[0]).not.toMatch(/null|undefined| {2}|^ | paid you|\bby\s*[—.]/);
+      document.body.innerHTML = "";
+    }
+  }, 30_000);
+});
