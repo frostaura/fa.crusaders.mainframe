@@ -14,6 +14,7 @@ import { heldPartsLine } from "@/lib/walletCopy";
 import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { Minutes } from "@/components/Minutes";
 import { inviteCapSentence, inviteRefusal, inviteWhen, organiserName } from "./inviteFacts";
+import type { AcceptAnswer } from "@/lib/playersApi";
 import type { AcceptFlow } from "./useAcceptFlow";
 import { useDailyCap } from "./useDailyCap";
 
@@ -219,28 +220,39 @@ function Problem({ flow }: { flow: AcceptFlow }) {
   );
 }
 
-/** The calm confirmation — no confetti (P12). */
+/** The calm confirmation — no confetti (P12). Split by outcome (the complexity gate). */
 function OutcomeView({ flow, headed }: { flow: AcceptFlow; headed: boolean }) {
   const name = organiserName(flow.invite);
-  if (flow.outcome?.kind === "declined") {
-    return (
-      <div role="status" className="flex flex-col gap-1" data-outcome="declined">
-        {headed ? null : <p className="text-base font-semibold text-text-primary">{INVITES_COPY.declinedTitle}</p>}
-        <p className="text-sm text-text-secondary">{declinedLine(name)}</p>
-        {flow.outcome.proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.declineProvenNote}</p> : null}
-      </div>
-    );
-  }
-  const answer = flow.outcome?.kind === "accepted" ? flow.outcome.answer : null;
-  const proven = flow.outcome?.kind === "accepted" && flow.outcome.proven === true;
-  // R15 J15-11 — what this accept paid, with the seat's total beside it when it is more.
-  const total = answer?.paid_minutes ?? 0;
-  const paidNow = flow.outcome?.kind === "accepted" ? Math.min(flow.outcome.paidNow ?? total, total) : 0;
-  const line = acceptedLine(paidNow, name, total);
+  const outcome = flow.outcome;
+  if (outcome?.kind === "declined") return <DeclinedView name={name} headed={headed} proven={outcome.proven === true} />;
+  return <AcceptedView flow={flow} name={name} headed={headed} />;
+}
+
+function DeclinedView({ name, headed, proven }: { name: string; headed: boolean; proven: boolean }) {
+  return (
+    <div role="status" className="flex flex-col gap-1" data-outcome="declined">
+      {headed ? null : <p className="text-base font-semibold text-text-primary">{INVITES_COPY.declinedTitle}</p>}
+      <p className="text-sm text-text-secondary">{declinedLine(name)}</p>
+      {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.declineProvenNote}</p> : null}
+    </div>
+  );
+}
+
+/** R15 J15-11 — what this accept paid, with the seat's total beside it when it is more. */
+function acceptedWords(outcome: AcceptFlow["outcome"], name: string): { line: string; answer: AcceptAnswer | null; proven: boolean } {
+  if (outcome?.kind !== "accepted") return { line: acceptedLine(0, name, 0), answer: null, proven: false };
+  const total = outcome.answer.paid_minutes ?? 0;
+  const paidNow = Math.min(outcome.paidNow ?? total, total);
+  return { line: acceptedLine(paidNow, name, total), answer: outcome.answer, proven: outcome.proven === true };
+}
+
+function AcceptedView({ flow, name, headed }: { flow: AcceptFlow; name: string; headed: boolean }) {
+  const { line, answer, proven } = acceptedWords(flow.outcome, name);
+  const title = headed ? null : <span className="font-semibold">{INVITES_COPY.acceptedTitle}</span>;
   return (
     <div className="flex flex-col items-start gap-3" data-outcome="accepted">
       <Alert tone="success" className="w-full">
-        {headed ? null : <span className="font-semibold">{INVITES_COPY.acceptedTitle}</span>}
+        {title}
         {headed ? line : ` — ${line}`}
       </Alert>
       {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.provenNote}</p> : null}
