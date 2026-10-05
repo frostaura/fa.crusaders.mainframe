@@ -567,6 +567,18 @@ There are two frames per movement, as today.
 
 The named event also carries `parts` (R10 E10-1) — each row `{reason, delta_minutes}`, summing to `delta_minutes` (`[]` on `share_set_aside`); `share_cause` (R11 E11-1) — null unless a `share_transfer` row moved, else one of `share_paid | club_collected | attended | share_returned | booking_cancelled | club_removed | outage_refund | no_show | displaced` (direction is the sign of `delta_minutes`); and `share_kept_minutes` — with `no_show` only: the partner's part of the no-show penalty that did not come back. The same keys are used on `GET /api/v1/wallet`, together with `entries`, `total_entries`, `offset`, `limit` and `share_bookings`.
 
+**One action, one frame (R12 C1, R13 C13-2).** A cancellation of a shared booking, the no-show /
+outage sweep and a late check-in's reversal each send ONE named frame per member, not a settlement
+frame followed by a `share_transfer` frame: `reason` is the settlement's (`cancellation_refund`,
+`no_show_settled`, `outage_refund`, `no_show_reversed`, `outage_refund_reversed`), `delta_minutes` the
+net of every row, and `parts` every row in order with the share rows last (one per partner, in seat
+order). The frame also carries `cancelled_by` (`member | club`, on a cancellation — the partner's
+share frame too; null otherwise) and `checked_in_by_name` (on a reversal, the scanner when it was
+not this member; null for their own scan). Each `share_transfer` part names the other member on it,
+`counterparty_name`, and a share frame carries `court_name` and `booking_starts_at` so a member no
+longer on the game is still told which one (R13 C13-7). Backend: `NoShowWorker` holds a booking's
+frames until its share follow-up has run (`Realtime/WalletFrameHolds`).
+
 ### 3.11 Quotes
 
 **`GET /api/v1/admin/bookings/quote`:**
