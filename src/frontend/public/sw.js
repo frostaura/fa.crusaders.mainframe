@@ -214,31 +214,42 @@ async function buildChunks() {
     .filter((url) => typeof url === "string" && /^\/assets\/[A-Za-z0-9._-]+$/.test(url));
   try {
     const response = await fetch("/precache.json", { cache: "no-cache" });
-    if (!response.ok) return { all: [], first: [] };
+    if (!response.ok) return { all: [], first: [], read: false };
     const body = await response.json();
     const all = assetsOnly(body && body.assets);
     // `first` (perf, 2026-09-30): what a member's pages need. A list from before it existed puts
     // everything first, as before.
     const first = body && Array.isArray(body.first) ? assetsOnly(body.first).filter((url) => all.includes(url)) : all;
-    return { all, first };
+    // R16 X16-2: `read` tells "the build lists nothing missing" from "the list never arrived".
+    return { all, first, read: all.length > 0 };
   } catch {
-    return { all: [], first: [] };
+    return { all: [], first: [], read: false };
   }
 }
 
 /**
  * Every listed chunk not yet in the cache — the desk's pages, after install — two at a time, once
  * this worker is in control. Still every chunk on the phone (F4.3), just not ahead of the page.
+ *
+ * Resolves true only when the build's list was READ and this build's cache now holds every file on
+ * it (R16 X16-2) — the one state in which the earlier build's files are no longer needed. Offline,
+ * the list does not read, nothing looks missing, and "done" was a lie the purge acted on.
  */
 async function precacheRest() {
   try {
     const listed = await buildChunks();
+    if (!listed.read) return false;
     const cache = await caches.open(ASSET_CACHE);
-    const missing = [];
-    for (const url of listed.all) if (!(await cache.match(url))) missing.push(url);
-    await fetchInto(missing, 2, true);
+    const missing = async () => {
+      const gaps = [];
+      for (const url of listed.all) if (!(await cache.match(url))) gaps.push(url);
+      return gaps;
+    };
+    await fetchInto(await missing(), 2, true);
+    return (await missing()).length === 0;
   } catch {
-    // Offline after install: first use fills the cache instead.
+    // Offline after install: first use fills the cache instead, and the next navigation tries again.
+    return false;
   }
 }
 
@@ -302,8 +313,9 @@ self.addEventListener("install", (event) => {
 
 /**
  * The rest of the build — the desk's chunks — fetched once this worker is in control, and THEN the
- * last build's assets removed. Once per worker lifetime (`restRun` is single-flight), and never
- * inside `activate` (R15 X15-2).
+ * last build's assets removed. Once per worker lifetime once it has COMPLETED (`restRun` is
+ * single-flight; a run that could not fetch every file clears it, so the next navigation tries
+ * again — R16 X16-2), and never inside `activate` (R15 X15-2).
  *
  * WHY NOT IN ACTIVATE: a worker is "activating" until activate's `waitUntil` settles, and the
  * browser HOLDS every fetch from a page it controls — navigations included — until then. With the
@@ -319,7 +331,14 @@ function finishInstall() {
   if (!restRun) {
     restRun = (async () => {
       // The desk's chunks, taking any file the last build already had from its cache (P4-3)…
-      await precacheRest();
+      const complete = await precacheRest();
+      // R16 X16-2: …short of every file (no signal, a file that would not come), the last build's
+      // assets stay — they are what an offline page still opens from — and the next navigation
+      // runs this again.
+      if (!complete) {
+        restRun = null;
+        return;
+      }
       // …and then the last build's assets go too: this build's cache now holds everything it names.
       await purgeOwnedCaches(OWNED);
     })().catch(() => {
