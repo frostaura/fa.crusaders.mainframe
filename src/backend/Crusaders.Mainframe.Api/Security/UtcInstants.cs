@@ -36,16 +36,98 @@ public sealed class UtcInstantConverter : JsonConverter<DateTimeOffset>
 /// The answer to an exception nothing handled (review round 2, B-9): <c>500 {"error":"internal_error"}</c>,
 /// in every environment — never a stack trace, which the developer page served to anyone who could
 /// reach a Development host. The exception is still logged in full by the handler middleware.
+///
+/// <para>
+/// <b>Except a body the caller sent that cannot be read</b> (review round 15, D15-3). Every exception
+/// came here, so cut JSON, a wrong type or invalid UTF-8 answered 500 on the live stack (Development,
+/// where the framework THROWS on a bad body) and an empty 400 everywhere else (where it does not).
+/// A 500 is the server saying it failed; a box reads it as "try again" and a member's screen as
+/// "something broke". So the framework is told to throw in every environment, and a bad request is
+/// answered here with a code:
+/// </para>
+/// <list type="bullet">
+/// <item>a device route (<c>/api/v1/device/…</c>): <c>400 {"error":"malformed_body"}</c> — the code the
+/// firmware and the error log already name (<see cref="Services.DeviceErrorCodes.MalformedBody"/>);
+/// the fault itself is filed by <see cref="Endpoints.DeviceBody"/>, which reads those bodies;</item>
+/// <item>any other route: <c>400 {"error":"invalid_body"}</c> when the body could not be read, and
+/// <c>400 {"error":"bad_request"}</c> for any other binding failure (a route or query value);</item>
+/// <item>a size or media-type refusal keeps its own status (<c>413 body_too_large</c>,
+/// <c>415 unsupported_media_type</c>).</item>
+/// </list>
 /// </summary>
 public static class InternalErrors
 {
     public const string Code = "internal_error";
 
-    public static IApplicationBuilder UseStableInternalErrors(this IApplicationBuilder app) =>
-        app.UseExceptionHandler(errors => errors.Run(async ctx =>
+    /// <summary>A member or admin route's body could not be read (D15-3).</summary>
+    public const string InvalidBody = "invalid_body";
+
+    /// <summary>Some other part of the request could not be bound (a route or query value).</summary>
+    public const string BadRequest = "bad_request";
+
+    public static IApplicationBuilder UseStableInternalErrors(this IApplicationBuilder app)
+    {
+        // Development throws on a bad body and every other environment answers an empty 400; one
+        // behaviour everywhere, answered below. Set before the first request builds the endpoints,
+        // which is when RouteHandlerOptions is read.
+        if (app.ApplicationServices.GetService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Routing.RouteHandlerOptions>>()
+            is { } routing)
         {
-            ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            ctx.Response.ContentType = "application/json";
-            await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { error = Code }));
-        }));
+            routing.Value.ThrowOnBadRequest = true;
+        }
+
+        return app.UseExceptionHandler(new ExceptionHandlerOptions
+        {
+            ExceptionHandler = AnswerAsync,
+            // A caller's bad body is not a server fault: no error-level "unhandled exception" for it.
+            SuppressDiagnosticsCallback = c => Classify(c.Exception, c.HttpContext.Request).Status < 500,
+        });
+    }
+
+    private static async Task AnswerAsync(HttpContext ctx)
+    {
+        var feature = ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+        var request = ctx.Request;
+        var (status, code) = Classify(feature?.Error, request, feature?.Path);
+        ctx.Response.StatusCode = status;
+        ctx.Response.ContentType = "application/json";
+        await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { error = code }));
+    }
+
+    /// <summary>
+    /// The status and code an exception is answered with. <paramref name="originalPath"/> is the path
+    /// the request was for (the handler may run with the endpoint cleared).
+    /// </summary>
+    internal static (int Status, string Code) Classify(Exception? error, HttpRequest request, string? originalPath = null)
+    {
+        var device = new PathString(originalPath ?? request.Path.Value).StartsWithSegments("/api/v1/device");
+        if (error is BadHttpRequestException bad && bad.StatusCode is >= 400 and < 500)
+        {
+            return (bad.StatusCode, device ? Services.DeviceErrorCodes.MalformedBody : CodeOf(bad));
+        }
+
+        // A JsonException a handler let escape while reading the body it was sent (ReadFromJsonAsync).
+        if (error is JsonException && CarriesBody(request))
+        {
+            return (StatusCodes.Status400BadRequest, device ? Services.DeviceErrorCodes.MalformedBody : InvalidBody);
+        }
+
+        return (StatusCodes.Status500InternalServerError, Code);
+    }
+
+    /// <remarks>Block body: a switch expression's braces trip lizard (memory/gotchas-build.md).</remarks>
+    private static string CodeOf(BadHttpRequestException bad)
+    {
+        return bad.StatusCode switch
+        {
+            StatusCodes.Status413PayloadTooLarge => "body_too_large",
+            StatusCodes.Status415UnsupportedMediaType => "unsupported_media_type",
+            _ when bad.InnerException is JsonException
+                || bad.Message.Contains("body", StringComparison.OrdinalIgnoreCase) => InvalidBody,
+            _ => BadRequest,
+        };
+    }
+
+    private static bool CarriesBody(HttpRequest request) =>
+        HttpMethods.IsPost(request.Method) || HttpMethods.IsPut(request.Method) || HttpMethods.IsPatch(request.Method);
 }

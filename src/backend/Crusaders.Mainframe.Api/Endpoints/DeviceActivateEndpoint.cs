@@ -374,7 +374,11 @@ public sealed record DeviceActivateRequest(
     [property: JsonPropertyName("token")] string? Token,
     [property: JsonPropertyName("court")] int? Court,
     /// <summary>How long ago the scanner read a v1 token, ms (member-code §4.2). Absent means 0; a legacy body never carries it.</summary>
-    [property: JsonPropertyName("scan_age_ms")] long? ScanAgeMs = null);
+    [property: JsonPropertyName("scan_age_ms")] long? ScanAgeMs = null)
+{
+    /// <summary>R15 D15-1: read through <see cref="DeviceBody"/> — lenient UTF-8, 400 <c>malformed_body</c> for anything not JSON.</summary>
+    public static ValueTask<DeviceActivateRequest> BindAsync(HttpContext ctx) => DeviceBody.ReadAsync<DeviceActivateRequest>(ctx);
+}
 
 /// <summary>
 /// The activation answer. <c>granted_seconds</c> is what goes on the relay timer; zero on

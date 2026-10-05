@@ -176,7 +176,11 @@ public sealed record GateServices(
 public sealed record GateScanRequest(
     [property: JsonPropertyName("mac")] string? Mac,
     [property: JsonPropertyName("method")] string? Method,
-    [property: JsonPropertyName("token")] string? Token);
+    [property: JsonPropertyName("token")] string? Token)
+{
+    /// <summary>R15 D15-1: read through <see cref="DeviceBody"/> — lenient UTF-8, 400 <c>malformed_body</c> for anything not JSON.</summary>
+    public static ValueTask<GateScanRequest> BindAsync(HttpContext ctx) => DeviceBody.ReadAsync<GateScanRequest>(ctx);
+}
 
 /// <summary>
 /// The door's answer. <c>unlock_seconds</c> is what goes on the lock's release timer and is

@@ -977,6 +977,9 @@ public sealed record HeartbeatRequest(
     /// </summary>
     [property: JsonPropertyName("caps")] string?[]? Caps = null)
 {
+    /// <summary>R15 D15-1: read through <see cref="DeviceBody"/> — lenient UTF-8, 400 <c>malformed_body</c> for anything not JSON.</summary>
+    public static ValueTask<HeartbeatRequest> BindAsync(HttpContext ctx) => DeviceBody.ReadAsync<HeartbeatRequest>(ctx);
+
     /// <summary>The reported version under either name, trimmed — or null when neither was sent.</summary>
     public string? EffectiveRunningVersion
     {

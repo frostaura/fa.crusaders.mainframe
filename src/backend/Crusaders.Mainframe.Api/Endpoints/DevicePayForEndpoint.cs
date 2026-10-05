@@ -643,7 +643,11 @@ public sealed record PayForRequest(
     [property: JsonPropertyName("nonce")] string? Nonce,
     [property: JsonPropertyName("confirm")] bool Confirm,
     [property: JsonPropertyName("amount_label")] string? AmountLabel = null,
-    [property: JsonPropertyName("scan_age_ms")] long? ScanAgeMs = null);
+    [property: JsonPropertyName("scan_age_ms")] long? ScanAgeMs = null)
+{
+    /// <summary>R15 D15-1: read through <see cref="DeviceBody"/> — lenient UTF-8, 400 <c>malformed_body</c> for anything not JSON.</summary>
+    public static ValueTask<PayForRequest> BindAsync(HttpContext ctx) => DeviceBody.ReadAsync<PayForRequest>(ctx);
+}
 
 /// <summary>The quote's answer. Declaration order is the corpus's byte order.</summary>
 public sealed record PayForQuoteResponse(

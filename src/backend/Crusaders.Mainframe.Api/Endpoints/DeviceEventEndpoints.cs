@@ -2214,7 +2214,11 @@ public sealed record DeviceEventBatch(
     [property: JsonPropertyName("mac")] string? Mac,
     [property: JsonPropertyName("uptime_ms")] long UptimeMs,
     [property: JsonPropertyName("events")] IReadOnlyList<DeviceEventDto>? Events,
-    [property: JsonPropertyName("boot_id")] long BootId = 0);
+    [property: JsonPropertyName("boot_id")] long BootId = 0)
+{
+    /// <summary>R15 D15-1: read through <see cref="DeviceBody"/> — lenient UTF-8, 400 <c>malformed_body</c> for anything not JSON.</summary>
+    public static ValueTask<DeviceEventBatch> BindAsync(HttpContext ctx) => DeviceBody.ReadAsync<DeviceEventBatch>(ctx);
+}
 
 /// <summary>
 /// What a box asks for when somebody buys court time at it. <c>court</c> is the court
@@ -2229,4 +2233,8 @@ public sealed record WalkUpRequest(
     [property: JsonPropertyName("court")] int Court,
     [property: JsonPropertyName("nonce")] string? Nonce,
     /// <summary>How long ago the scanner read a v1 token, ms (member-code §4.2). Absent means 0.</summary>
-    [property: JsonPropertyName("scan_age_ms")] long? ScanAgeMs = null);
+    [property: JsonPropertyName("scan_age_ms")] long? ScanAgeMs = null)
+{
+    /// <summary>R15 D15-1: read through <see cref="DeviceBody"/> — lenient UTF-8, 400 <c>malformed_body</c> for anything not JSON.</summary>
+    public static ValueTask<WalkUpRequest> BindAsync(HttpContext ctx) => DeviceBody.ReadAsync<WalkUpRequest>(ctx);
+}

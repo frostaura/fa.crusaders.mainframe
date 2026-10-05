@@ -69,6 +69,25 @@ public sealed class DeviceFaultSink
             FoldByCode: true));
     }
 
+    /// <summary>
+    /// R15 D15-1: a board sent a body the server could not read as it was — invalid UTF-8 it read
+    /// as U+FFFD, or something that is not JSON at all (<see cref="Endpoints.DeviceBody"/>).
+    ///
+    /// <para>
+    /// Against the board when the bytes still named a MAC this club registered: one row per board,
+    /// route and kind of fault, under the per-board bounds. Otherwise FOLDED BY CODE, like
+    /// <see cref="UnregisteredMac"/> and for the same reason — anything holding the club's key can
+    /// send a thousand different garbled bodies, and they must not open a thousand rows.
+    /// </para>
+    /// </summary>
+    public void MalformedBody(string route, string detail, Device? device)
+    {
+        Record(new DeviceErrorReport(
+            DeviceErrorCodes.MalformedBody, DeviceErrorSource.Server,
+            DeviceId: device?.Id, ClaimedDeviceCode: device?.DeviceCode,
+            Detail: $"{route}: {detail}", FoldByCode: device is null));
+    }
+
     /// <summary>The club is at its ceiling of boards nobody has acknowledged. Folded, for the same reason.</summary>
     public void TooManyUnacknowledged(string? claimedMac)
     {

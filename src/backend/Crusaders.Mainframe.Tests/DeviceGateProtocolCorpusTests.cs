@@ -465,8 +465,10 @@ public class DeviceGateProtocolCorpusTests
         // 7 and 19 since the device-link round: three request vectors (restored_relays,
         // relay_state, and the court box's event body carrying a real boot_id) and ten
         // response vectors (five for the power-dip relay restore, two for the nine `config`
-        // settings, three for `member_display`).
-        Assert.Equal(7, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
+        // settings, three for `member_display`). Four more requests in R15 D15-1: the activate,
+        // walk-up and pay-for bodies and the event body carrying a scan with a quote, a backslash
+        // and two bytes above 0x7F, escaped.
+        Assert.Equal(11, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
         Assert.Equal(19, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
     }
 
