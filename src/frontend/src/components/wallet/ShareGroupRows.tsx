@@ -21,6 +21,8 @@ type ShareGroupRowsProps = {
   columns: Column[];
   /** The booking, once read; `null` when it could not be; `undefined` while it is read. */
   booking: ShareBooking | null | undefined;
+  /** R13 J13-3 — the member is no longer on the booking (the club said so): no "View booking". */
+  gone?: boolean;
 };
 
 /** The newest movement in the group — the line's own time. */
@@ -51,7 +53,7 @@ function otherParty(row: LedgerRow, side: ShareSide, booking: ShareBooking | nul
  * </p>
  */
 export function ShareGroupRows(props: ShareGroupRowsProps) {
-  const { group, columns, booking } = props;
+  const { group, columns, booking, gone = false } = props;
   const [open, setOpen] = useState(false);
   const baseId = useId();
   const side = shareSide(group);
@@ -59,7 +61,7 @@ export function ShareGroupRows(props: ShareGroupRowsProps) {
   const childIds = group.rows.map((_, i) => `${baseId}-share-${i}`);
   const head = {
     group, side, sentence, open, onToggle: () => setOpen((o) => !o), controls: childIds.join(" "),
-    organiser: booking?.organiserName ?? null,
+    organiser: booking?.organiserName ?? null, gone,
   };
 
   return (
@@ -85,6 +87,8 @@ type Head = {
   group: Group; side: ShareSide; sentence: string; open: boolean; onToggle: () => void; controls: string;
   /** The booking's organiser, once read — the partner line's To (D10). */
   organiser: string | null;
+  /** R13 J13-3 — no longer on the booking: the link would open "Booking not found". */
+  gone: boolean;
 };
 
 /** "Olivia Newton (organiser)" — or "Organiser" while the booking is read, or when it cannot be. */
@@ -153,10 +157,12 @@ function GroupComment({ head }: { head: Head }) {
         <StackedAmount signed={head.group.net} ink={head.group.net === 0 ? "text-text-secondary" : amountInk(head.group.net)} under={COPY.movements(head.group.rows.length)} />
         <PhoneTime at={newest(head.group.rows).at} />
         {/* A 44px target in the compact form (a phone, where it is tapped); a line of text in a wide box. */}
-        <TextLink to={`/bookings/${head.group.bookingId}`} className="relative z-10 inline-flex min-h-touch scroll-mt-14 items-center text-sm @[36rem]/ledger:min-h-0 @[36rem]/ledger:pt-1">
-          {COPY.viewBooking}
-          <span className="sr-only">{`: ${head.sentence}`}</span>
-        </TextLink>
+        {head.gone ? null : (
+          <TextLink to={`/bookings/${head.group.bookingId}`} className="relative z-10 inline-flex min-h-touch scroll-mt-14 items-center text-sm @[36rem]/ledger:min-h-0 @[36rem]/ledger:pt-1">
+            {COPY.viewBooking}
+            <span className="sr-only">{`: ${head.sentence}`}</span>
+          </TextLink>
+        )}
       </div>
     </TableCell>
   );

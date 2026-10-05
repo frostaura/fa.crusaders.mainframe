@@ -180,6 +180,14 @@ function nextSort(current: Sort, key: Column): Sort {
  * court is the product working, not something to look at. The sign is the non-colour cue.
  * </p>
  */
+/**
+ * R13 J13-3 — the club SAID this member can no longer read the booking (its summary is null, not
+ * absent): taken off it, pulled out, declined. Absent means not summarised, which proves nothing.
+ */
+function isGone(bookings: ShareBookings, bookingId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(bookings, bookingId) && bookings[bookingId] === null;
+}
+
 export function LedgerTable(props: LedgerTableProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { rows, columns = DEFAULT_COLUMNS, emptyText = "No movements yet.", fill = false, label, groupShares = false } = props;
@@ -222,7 +230,7 @@ export function LedgerTable(props: LedgerTableProps) {
           <TableBody>
             {items.map((item) => (item.kind === "row"
               ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} fold={fold} selected={item.row.id === selectedId} />
-              : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId] ?? null} />))}
+              : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId] ?? null} gone={isGone(bookings, item.bookingId)} />))}
           </TableBody>
         </table>
       </ScrollArea>
