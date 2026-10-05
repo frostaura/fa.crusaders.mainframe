@@ -39,6 +39,12 @@ last_verified: 2026-10-05
 - `minutes.sold_at_desk` data adds `zar_received` (number, 0 on a gift) and `given`
   (`GivenMinutes.IsGiven`) (E15-5). The named `balance` SSE frame is sent BEFORE its unnamed twin
   (X15-6 server half). An older client then sees the twin as a zero diff.
+- **An S4 fixture ("checked in, then cancelled") cancels at the desk.** The money is the same:
+  `SettleCancellation` gives (0, 0) whoever cancels, and shares key on Status and `CheckedInAt`.
+  Only the words and the record differ. The property's mid-run step desk-cancels only unstarted
+  games, so S4 neither shrinks (a 409 was silently swallowed by `Status`) nor widens.
+- A pay-for leg names the other member (`LedgerPosting.CounterpartyUserId`, unstored), so each side's
+  frame part carries `counterparty_name` (E15-7).
 - Tests, each red at HEAD first: `R15DeviceBodyHttpTests`, `R15BE15aHttpTests`,
   `R15BE15aLightsHttpTests`, `DeviceEventHttpTests+R15BE15a`. The S4 fixtures, "checked in and
   cancelled", now cancel at the desk.
