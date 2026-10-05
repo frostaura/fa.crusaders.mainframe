@@ -171,9 +171,11 @@ function noMemberData(report: Awaited<ReturnType<typeof cacheReport>>) {
  */
 test("a member's install set leaves out the desk's frame and the charts", () => {
   const list = JSON.parse(readFileSync(join(distA, "precache.json"), "utf8")) as { assets: string[]; first: string[] };
-  const later = list.first.filter((p) => /\/(ReportParts|Charts|adminFrame)-[^/]*\.js$/.test(p));
+  // R16 X16-1: ReportParts is a static import of the Wallet, so it is in the member set now; the
+  // lazily loaded Charts and the desk frame are still left for later.
+  const later = list.first.filter((p) => /\/(Charts|adminFrame)-[^/]*\.js$/.test(p));
   expect(later).toEqual([]);
-  expect(list.assets.some((p) => /\/ReportParts[^/]*\.js$/.test(p)), "the charts are still listed for later").toBe(true);
+  expect(list.assets.some((p) => /\/Charts[^/]*\.js$/.test(p)), "the charts are still listed for later").toBe(true);
   expect(list.first.some((p) => /\/index-[^/]+\.js$/.test(p))).toBe(true);
 });
 

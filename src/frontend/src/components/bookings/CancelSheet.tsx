@@ -14,7 +14,7 @@ import { ADMIN_CANCEL } from "@/lib/adminCancelCopy";
 import { ALREADY_CHECKED_IN_TEXT, cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
 import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
-import { playersEndpoints } from "@/lib/playersApi";
+import { playersEndpoints, type BookingDetail } from "@/lib/playersApi";
 import { firstName } from "@/lib/playersNames";
 import { standingShares } from "@/lib/standingShares";
 import { useAsyncAction } from "@/lib/useAsyncAction";
@@ -285,6 +285,7 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
   const said = quote && flow.refused(booking)
     ? { tone: "warning" as const, text: ALREADY_CHECKED_IN_TEXT }
     : quote ? consequence(quote, waived, subject) : null;
+  const sharesWanted = Boolean(quote?.checkedIn) && flow.forOthers && !flow.refused(booking);
   return (
     <>
       <SlotList lines={[lineFor(booking, undefined, false)]} label={CANCEL_SHEET.title(1)} refusedWord="" />
@@ -293,31 +294,33 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
       {said ? <Alert tone={said.tone} live="polite">{said.text}</Alert> : null}
       {loading || quote ? <MoneyRows rows={singleMoney(quote, waived, subject)} label={CANCEL_SHEET.totalBack} /> : null}
       <SplitNote quote={quote} waived={waived} subject={subject} />
-      <SharesStand bookingId={booking.bookingId} wanted={Boolean(quote?.checkedIn) && flow.forOthers && !flow.refused(booking)} organiser={booking.memberFirstName} />
+      <SharesStand bookingId={booking.bookingId} wanted={sharesWanted} organiser={booking.memberFirstName} />
     </>
   );
 }
 
 /**
- * R16 J16-7 — "Owen's 15 minutes" for each partner whose paid share stands when the club cancels a
- * session somebody checked in to: nothing is refunded, and the partners' shares stay with the
- * organiser. The same rule as the booking page's panel: a seat paid by hand, not accepted, or that
- * paid nothing has nothing in the app to stand.
+ * R16 J16-7 — who keeps a paid share when the club cancels a session somebody checked in to, by the
+ * booking page panel's rule (standingShares). The quote lists no partner refunds then, so the
+ * booking record says who stands: read only on such a cancel, null until read and on a failed read,
+ * when the sheet claims nothing about the shares.
  */
-/**
- * The booking's record, read only when the quote says somebody checked in on a club cancel — the
- * quote names partners' refunds and there are none, so who stands is the record's to say. Null
- * until it is read, and on a failed read: the sheet then claims nothing about the shares.
- */
-function useStandingShares(bookingId: string, wanted: boolean): { shares: string[]; organiser: string | null } | null {
-  const [read, setRead] = useState<{ id: string; shares: string[]; organiser: string | null } | null>(null);
+function standingReadOf(bookingId: string, d: BookingDetail) {
+  const organiser = d.organiser.name?.trim() ? firstName(d.organiser.name) : null;
+  return { id: bookingId, shares: standingShares(d), organiser };
+}
+
+type StandingRead = ReturnType<typeof standingReadOf>;
+
+function useStandingShares(bookingId: string, wanted: boolean): StandingRead | null {
+  const [read, setRead] = useState<StandingRead | null>(null);
   useEffect(() => {
     if (!wanted) return undefined;
     let live = true;
-    playersEndpoints.detail(bookingId).then(
-      (d) => { if (live) setRead({ id: bookingId, shares: standingShares(d), organiser: d.organiser.name?.trim() ? firstName(d.organiser.name) : null }); },
-      () => undefined,
-    );
+    const keep = (d: BookingDetail) => {
+      if (live) setRead(standingReadOf(bookingId, d));
+    };
+    playersEndpoints.detail(bookingId).then(keep, () => undefined);
     return () => { live = false; };
   }, [bookingId, wanted]);
   return wanted && read?.id === bookingId ? read : null;
