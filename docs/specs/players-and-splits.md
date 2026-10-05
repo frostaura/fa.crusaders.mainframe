@@ -414,14 +414,19 @@ Since review round 13:
 - **Every share move names who caused it (R14).** The share cause says which act moved it:
   `share_returned` is only "the partner withdrew"; `organiser_removed` (the organiser took them
   off); `split_changed` (the organiser lowered their share while they stay on the game); an admin's
-  removal stays `club_removed`. A return posted later by the sweep keeps its cause, decided from the
-  seat (Withdrawn / Removed / still on). Share rows from an organiser removal, a split change, a
+  removal stays `club_removed`; the club recording a share as paid outside the app is `club_settled`;
+  a return that no record explains (a desk adjustment to the booking, a removal from before R14) is
+  `share_back`, which names nobody. A cause and its actor come **only from a record** — the
+  removal's or the split's own audit row, newer than the seat's last share move — never from the
+  seat's state alone, so a later desk adjustment can't read as the organiser's split change. Share rows from an organiser removal, a split change, a
   member cancel (on time or late) and a club cancel carry the **acting person** as ledger actor,
   like the refund beside them. Audit rows `players.removed`, `players.split_changed` and
   `players.game_cancelled` are written in the act's own save; the Night shows `booking.taken_off` /
   `booking.took_player_off`, `booking.split_changed` / `booking.changed_split` and
   `booking.game_cancelled`. The live frame carries `actor_name` — the player who acted, only when
-  that is another player on the game (members are told "the club", never an admin's name).
+  that is another player on the game (members are told "the club", never an admin's name);
+  `share_paid` frames name nobody on either side. On a member's own wallet rows an admin actor reads
+  "The club"; the admin ledger, the Night and the CSV keep the admin's name.
 - **A late check-in's reversal is the scanner's (R14 E14-3)** on the audit row, both money legs,
   the re-collected shares, the Night ("Sam's check-in reached the club late — no-show reversed") and
   every webhook.
