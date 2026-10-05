@@ -142,7 +142,9 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.5 and Mega 2.0.0**: 2.2.5
+`platformio.ini`. The current images are **bridge 2.2.6 and Mega 2.0.0**: 2.2.6
+paces the event drain — a refused upload waits 15 s, doubling to 5 min, instead
+of being re-posted on every pass, and a 404 keeps the event; 2.2.5
 escapes the scanned token in the activate, walk-up and pay-for bodies and writes
 every byte above 0x7E as `\u00XX`, so a scan of a quote or a stray high byte
 the Mega passed through is no longer a body the server cannot parse; 2.2.4
@@ -540,6 +542,14 @@ Three details of that flow that were each a review finding:
   and the event drain waits; the heartbeat keeps its cadence and is the probe.
   Any completed answer, 401 and 429 included, closes it. Without this, a host that
   was off with the AP up cost every scan two 4 s connect timeouts.
+- **The event drain has its own backoff** (`lib/bridgelogic/EventDrain`). A
+  post that leaves the head event where it was — 401, 403, 404, 408, 429, a 5xx,
+  or a 200 that acknowledges nothing — waits 15 s, doubling to 5 min, before the
+  next; anything that moves the queue clears it. The event is kept through all of
+  those (a 404 means the console deleted the box, and its next heartbeat
+  registers it again); only another 4xx drops it. Without this, a disabled box
+  re-posted its `boot` event every pass and spent the club's whole device
+  budget, so every other box was answered 429 too.
 - **`granted_seconds: 0` is a refusal** (`SLOT ENDED`), not a one-second relay
   pulse: a rescan inside the post-slot grace window answers `activated:true` with
   nothing left to grant. The API now says so itself — `activated:false,

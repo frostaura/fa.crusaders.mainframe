@@ -91,6 +91,7 @@
 #include "src/arduino_hal/SerialTransport.h"
 #include "src/bridgelogic/AuthPolicy.h"
 #include "src/bridgelogic/BootId.h"
+#include "src/bridgelogic/EventDrain.h"
 #include "src/bridgelogic/FaultLog.h"
 #include "src/bridgelogic/MegaLink.h"
 #include "src/bridgelogic/MemberScan.h"
@@ -425,6 +426,13 @@ bridgelogic::WalkUpNonce gWalkUpNonce;
 /// straight to the roster and the event drain waits, instead of every scan
 /// standing in a 4 s connect timeout twice (review #13).
 devlink::ApiBreaker gBreaker;
+
+/// The event drain's own backoff: 15 s doubling to 5 min, armed by every post
+/// that left the head event where it was and cleared by one that moved the
+/// queue. The breaker does not cover this and must not: a 401, 403, 404 or 429
+/// means the API is THERE, so it keeps the breaker closed and scans online, but
+/// the same event re-posted every pass is a hot loop (review round 16, D16-2).
+bridgelogic::DrainPace gDrainPace;
 
 /// Which courts have a booking longer than the ninety-minute relay cap, and
 /// when each needs its `!EXT`. The Mega's cap is still the safety net.
@@ -1696,64 +1704,32 @@ void applyButtonMap(const char* body, size_t len) {
 /// the API has taken it, or a flaky link loses exactly the events it produces. The response
 /// names the highest sequence accepted, so a partial success costs nothing — whatever came
 /// after simply stays queued and is offered again.
+///
+/// The step itself — the pace, the render, the outcome table — is
+/// bridgelogic::pumpEventDrain, where the host suite can run it across an hour
+/// of passes. It used to be here, and re-posted a refused head event on EVERY
+/// pass: a disabled box answered 403 in milliseconds spent the club's whole
+/// device budget and pushed every other box into 429 (review round 16, D16-2).
 void drainEvents(uint32_t nowMs) {
-  if (!gWifiUp || gQueue.empty() || gBreaker.open(nowMs)) {
+  if (!gWifiUp || gBreaker.open(nowMs)) {
     // The breaker: with the host unreachable this used to cost a 4 s connect
     // timeout on EVERY loop pass, in front of every scan, for as long as the
     // queue was non-empty — which after the first scan is always.
     return;
   }
 
-  // One event per pass. A board back from a week offline has a full ring, and draining it
-  // all in one loop iteration would starve the Mega link — which is how a flooded uplink
-  // becomes a court whose lights stay on.
-  eventq::Event event;
-  if (!gQueue.peek(event)) {
-    return;
-  }
-
-  // devlink::renderEventBody, not a local snprintf: both `uptime_ms` fields
-  // have to be 64-bit and survive the 49.7-day millis() wrap, and this file is
-  // filtered out of the host test build, so a wrap bug here is a wrap bug no
-  // test can reach (review 3, finding 25).
-  char body[devlink::kEventBodyCap];
   // THIS BOOT'S ID, not the literal 0 that stood here with a comment saying the
   // fix was owed. 0 omits the field and gives the server the old (device, seq)
   // key, so the torn-checkpoint renumbering round G4's C2 describes was a
   // court-box defect exactly as it was a gate defect. See gBootId.
-  if (devlink::renderEventBody(body, sizeof(body), gMacHex, gBootId, gUptime.value(), event) == 0U) {
-    // Unrenderable. The caps make this unreachable — the longest possible body
-    // is well under half the buffer — but if it ever happened, KEEPING the event
-    // would pin every later one behind it forever and the box would stop
-    // reporting attendance at all. Dropping it costs one member's event, which
-    // is the same outcome the pre-render truncation had (a malformed body comes
-    // back 4xx and the queue drops it as one the box caused), without putting
-    // half a JSON object on the wire.
-    static_cast<void>(gQueue.release());
-    return;
-  }
-
-  char response[192] = {};
-  const uint16_t status = callApi("/api/v1/device/events", body, response, sizeof(response));
-
-  switch (devapi::react(status)) {
-  case devapi::Reaction::Accepted: {
-    uint32_t through = 0U;
-    if (devapi::json::topLevelUnsignedField(response, strlen(response), "accepted_through", through)) {
-      static_cast<void>(gQueue.releaseThrough(through));
-    }
-    return;
-  }
-  case devapi::Reaction::Rejected:
-    // A 4xx the box caused. Retrying an identical request forever pins every later event
-    // behind one the server will never take, so it is dropped and the next one gets a turn.
-    static_cast<void>(gQueue.release());
-    return;
-  case devapi::Reaction::Retry:
-    // Transient, or a 401 saying the compiled-in key is wrong — which is about
-    // every request rather than this event. Keep it and try again next pass.
-    return;
-  }
+  bridgelogic::DrainSource source;
+  source.mac = gMacHex;
+  source.bootId = gBootId;
+  source.uptimeMs = gUptime.value();
+  static_cast<void>(bridgelogic::pumpEventDrain(
+      gQueue, gDrainPace, source, gClock, [](const char* body, char* response, size_t cap) -> uint16_t {
+        return callApi("/api/v1/device/events", body, response, cap);
+      }));
 }
 
 /// Re-energises the courts a power dip took out, EXACTLY ONCE.
