@@ -19,8 +19,18 @@ public sealed class NoShowWorker : BackgroundService
     private readonly IEventBus _bus;
     private readonly ILogger<NoShowWorker> _logger;
 
+    /// <summary>
+    /// R15 D14-4: the club's injected clock, as every device route reads it — the sweep decides its
+    /// windows, truncates ends and stamps its ledger rows on it. From the container, so the suites'
+    /// hand-built workers get the host's clock without a new constructor parameter.
+    /// </summary>
+    private readonly TimeProvider _clock;
+
     public NoShowWorker(IServiceProvider services, IEventBus bus, ILogger<NoShowWorker> logger)
-    { _services = services; _bus = bus; _logger = logger; }
+    {
+        _services = services; _bus = bus; _logger = logger;
+        _clock = services.GetService<TimeProvider>() ?? TimeProvider.System;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -228,7 +238,7 @@ public sealed class NoShowWorker : BackgroundService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountMinutes: b.AmountChargedMinutes,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: RefundReason(courtWasDark, court))
-            { StreamReason = SweepStreamReason(courtWasDark) });
+            { StreamReason = SweepStreamReason(courtWasDark), At = now });
         }
 
         // A penalty is only collectable against money that moved: charging one for a booking never
@@ -239,7 +249,7 @@ public sealed class NoShowWorker : BackgroundService
                 UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountMinutes: -penalty,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
                 Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Min(b.AmountChargedMinutes)})")
-            { StreamReason = SweepStreamReason(courtWasDark) });
+            { StreamReason = SweepStreamReason(courtWasDark), At = now });
         }
 
         // Status FIRST, then one save carrying it and both movements together.
@@ -399,7 +409,7 @@ public sealed class NoShowWorker : BackgroundService
         return row;
     }
 
-    internal Task TickAsync(CancellationToken ct) => TickAsync(DateTimeOffset.UtcNow, ct);
+    internal Task TickAsync(CancellationToken ct) => TickAsync(_clock.GetUtcNow(), ct);
 
     /// <summary>
     /// The same sweep at a stated instant, so a test can drive the REAL worker rather than a

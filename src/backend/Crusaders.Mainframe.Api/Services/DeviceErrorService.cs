@@ -76,13 +76,17 @@ public sealed class DeviceErrorService
     private readonly IRealtimeBus _bus;
     private readonly TenantSettingsAccessor _settings;
 
+    /// <summary>R15 D14-4: the device routes' clock — a report with no time of its own is stamped on it.</summary>
+    private readonly TimeProvider _clock;
+
     public DeviceErrorService(
-        MainframeDbContext db, ITenantContext tenant, IRealtimeBus bus, TenantSettingsAccessor settings)
+        MainframeDbContext db, ITenantContext tenant, IRealtimeBus bus, TenantSettingsAccessor settings, TimeProvider clock)
     {
         _db = db;
         _tenant = tenant;
         _bus = bus;
         _settings = settings;
+        _clock = clock;
     }
 
     /// <summary>
@@ -110,7 +114,7 @@ public sealed class DeviceErrorService
             ? Truncate($"{report.Code.Trim()}{(string.IsNullOrWhiteSpace(report.Detail) ? "" : " — " + report.Detail.Trim())}")
             : Truncate(report.Detail);
 
-        var at = report.At ?? DateTimeOffset.UtcNow;
+        var at = report.At ?? _clock.GetUtcNow();
         var count = Math.Clamp(report.Count, 1, MaxReportedCount);
 
         if (await SuppressedAsync(report, settings, at, ct))

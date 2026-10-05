@@ -661,7 +661,8 @@ public static class DeviceEventEndpoints
         var booking = found!;
 
         var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
-        if (court is null) return new ActivationOutcome("unresolved", booking.Id);
+        // R15 D14-3 residual: a refusal of a code that named its member names them, on every path.
+        if (court is null) return new ActivationOutcome("unresolved", booking.Id, SubjectUserId: userId);
 
         // The event's court is the RELAY INDEX the box lit (eventq::Event::court, 0-3),
         // and the device's court list is the relay mapping — so the relay must be wired
@@ -670,7 +671,7 @@ public static class DeviceEventEndpoints
         if (e.Court is not { } relay || relay < 0 || relay >= device.CourtNumbers.Count
             || device.CourtNumbers[relay] != court.CourtNumber)
         {
-            return new ActivationOutcome("wrong_court", booking.Id);
+            return new ActivationOutcome("wrong_court", booking.Id, SubjectUserId: userId);
         }
 
         var target = new ActivationTarget(court, booking, userId, e.Method ?? "offline", occurredAt, e.DurationMs) { DeviceId = device.Id };

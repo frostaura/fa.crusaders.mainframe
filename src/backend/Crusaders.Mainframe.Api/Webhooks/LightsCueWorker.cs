@@ -18,8 +18,19 @@ public sealed class LightsCueWorker : BackgroundService
     private readonly IEventBus _bus;
     private readonly ILogger<LightsCueWorker> _logger;
 
+    /// <summary>
+    /// R15 D14-4: the club's injected clock — the one every device route and the reversal's cue stamp
+    /// read — so the sweep's <c>now</c>, its <c>LightsOffCuedAt</c> and its events' <c>occurred_at</c>
+    /// are on the same clock as the check-ins they close. Read from the container, so the hand-built
+    /// workers in the suites get the host's clock without a new constructor parameter.
+    /// </summary>
+    private readonly TimeProvider _clock;
+
     public LightsCueWorker(IServiceProvider services, IEventBus bus, ILogger<LightsCueWorker> logger)
-    { _services = services; _bus = bus; _logger = logger; }
+    {
+        _services = services; _bus = bus; _logger = logger;
+        _clock = services.GetService<TimeProvider>() ?? TimeProvider.System;
+    }
 
     /// <summary>
     /// Tests only: runs after a booking's off has been DECIDED and before it is saved and sent — the
@@ -53,7 +64,7 @@ public sealed class LightsCueWorker : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var tenant = scope.ServiceProvider.GetRequiredService<ITenantContext>();
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.GetUtcNow();
 
         // NOTE: this worker no longer cues lights ON.
         //
@@ -221,7 +232,15 @@ public sealed class LightsCueWorker : BackgroundService
     /// close the session the reversal re-lit; the attended-and-over pass will.
     /// </para>
     /// </summary>
-    internal static async Task<DateTimeOffset?> NextFreeAsync(MainframeDbContext db, Booking b, CancellationToken ct)
+    internal static async Task<DateTimeOffset?> NextFreeAsync(MainframeDbContext db, Booking b, CancellationToken ct) =>
+        (await WalkAsync(db, b, ct)).FreeAt;
+
+    /// <summary>
+    /// The walk behind <see cref="NextFreeAsync"/>: the first instant no lit booking holds the court
+    /// (null when one whose off is still to come holds it), and that HOLDER. R15 D15-2: a reversal
+    /// needs to know not only that the court is held at its restored end but by whom, and since when.
+    /// </summary>
+    internal static async Task<CourtWalk> WalkAsync(MainframeDbContext db, Booking b, CancellationToken ct)
     {
         var at = b.EndsAt;
         // Untracked: a tracked row would answer with what this tick read before the lock, not now.
@@ -237,15 +256,18 @@ public sealed class LightsCueWorker : BackgroundService
         foreach (var holder in lit.OrderBy(LitFrom))
         {
             if (LitFrom(holder) > at) break;
-            if (OffStillToCome(holder)) return null;
+            if (OffStillToCome(holder)) return new CourtWalk(null, holder);
             if (holder.EndsAt > at) at = holder.EndsAt;
         }
-        return at;
+        return new CourtWalk(at, null);
     }
+
+    /// <summary>R15 D15-2: what <see cref="WalkAsync"/> found — the free instant, or the lit booking holding the court.</summary>
+    internal sealed record CourtWalk(DateTimeOffset? FreeAt, Booking? Holder);
 
     /// <summary>R14 D14-1: when a lit booking's lights came on — its scan, when that was before its start.</summary>
     /// <remarks>Block body: an expression body holding a property pattern's braces trips lizard (memory/gotchas-build.md).</remarks>
-    private static DateTimeOffset LitFrom(Booking lit)
+    internal static DateTimeOffset LitFrom(Booking lit)
     {
         return lit.CheckedInAt is { } scan && scan < lit.StartsAt ? scan : lit.StartsAt;
     }
@@ -317,7 +339,7 @@ public sealed class LightsCueWorker : BackgroundService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: "booking.completed",
             TenantId: b.TenantId, TenantSlug: tenantRow.Slug,
-            OccurredAt: DateTimeOffset.UtcNow,
+            OccurredAt: _clock.GetUtcNow(),
             ActorUserId: null, ActorIsAdmin: false,
             SubjectUserId: b.UserId,
             Data: new()
@@ -351,13 +373,13 @@ public sealed class LightsCueWorker : BackgroundService
             ["user_id"] = b.UserId,
             ["starts_at"] = b.StartsAt,
             ["ends_at"] = b.EndsAt,
-            ["duration_seconds"] = on ? Math.Max(0, (int)(b.EndsAt - DateTimeOffset.UtcNow).TotalSeconds) : 0,
+            ["duration_seconds"] = on ? Math.Max(0, (int)(b.EndsAt - _clock.GetUtcNow()).TotalSeconds) : 0,
         };
         await _bus.EmitAsync(new DomainEvent(
             Id: $"evt_{Guid.NewGuid():N}",
             Type: on ? "booking.lights_on" : "booking.lights_off",
             TenantId: b.TenantId, TenantSlug: tenantRow.Slug,
-            OccurredAt: occurredAt ?? DateTimeOffset.UtcNow,
+            OccurredAt: occurredAt ?? _clock.GetUtcNow(),
             ActorUserId: null, ActorIsAdmin: false,
             SubjectUserId: b.UserId,
             Data: data), ct);

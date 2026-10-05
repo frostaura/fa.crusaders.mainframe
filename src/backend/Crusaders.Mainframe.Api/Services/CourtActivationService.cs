@@ -540,20 +540,30 @@ public class CourtActivationService
     /// So it is decided by the same rule, under the same lock, and when skipped the booking's cue is
     /// stamped past its reversal so the attended-and-over pass owes it no off either. Pair or nothing.
     /// </remarks>
+    /// <remarks>
+    /// R15 D15-2: <b>"covered" means lit at the scan.</b> For a collision the restored end IS the
+    /// survivor's start, so a lit survivor was always found there and the on was always suppressed —
+    /// even when the survivor was lit minutes AFTER the late scan, leaving the court's dark-to-lit at the
+    /// scan unsaid. Now the on is suppressed only when the holder's lit-from (<c>min(StartsAt,
+    /// CheckedInAt)</c>) is at or before the scan; otherwise it is sent at the scan, and the survivor's
+    /// own off closes the court (court-level pairing, webhooks.md) — this booking is still cue-stamped
+    /// so the attended-and-over pass says no second off.
+    /// </remarks>
     public async ValueTask EmitReversedLightsOnAsync(
         Court court, Booking booking, (Guid Identified, DateTimeOffset ScannedAt) scan, string method, CancellationToken ct)
     {
         var payer = booking.PaidByUserId ?? booking.UserId ?? scan.Identified;
         // R13: under the court's cue lock, like every lights_on — the reversal committed its check-in first.
         await using var cue = await CourtCueLock.BeginAsync(_db, _tenant.TenantId, court.Id, ct);
-        if (await LightsCueWorker.NextFreeAsync(_db, booking, ct) is null)
-        {
-            await CoveredBySurvivorAsync(booking, ct);
-        }
-        else
+        var walk = await LightsCueWorker.WalkAsync(_db, booking, ct);
+        // R15 D15-2: covered only when the holder was ALREADY lit at the scan. A survivor lit after it
+        // did not cover the scan: the court came on at the scan, so that on is said — and its off is
+        // the survivor's, which closes the court (so this booking's own off is still never owed).
+        if (walk.Holder is null || LightsCueWorker.LitFrom(walk.Holder) > scan.ScannedAt)
         {
             await _bus.EmitAsync(LightsOnEvent(court, booking, (payer, scan.Identified), method, scan.ScannedAt), ct);
         }
+        if (walk.FreeAt is null) await CoveredBySurvivorAsync(booking, ct);
         await cue.CommitAsync(ct);
     }
 

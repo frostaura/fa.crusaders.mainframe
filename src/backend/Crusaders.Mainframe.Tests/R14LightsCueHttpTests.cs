@@ -230,13 +230,13 @@ public sealed class R14LightsCueHttpTests(PostgresFixture pg) : IClassFixture<Po
         await PlayersClub.ReadAsync(r.App, db => db.Bookings.IgnoreQueryFilters().Where(x => x.Id == booking).Select(x => x.EndsAt).SingleAsync());
 
     /// <summary>
-    /// A lit booking cancelled by the desk mid-session, and one its own member cancelled after
-    /// scanning in early (before its start, the only time a member may). Once the lit grant has run
+    /// A lit booking cancelled by the desk mid-session, and one the desk cancelled before its start
+    /// after its member scanned in early (R15 D15-5: she may not cancel it herself). Once the lit grant has run
     /// out the sweep says the off, once, at the grant's end.
     /// </summary>
     [SkippableTheory]
     [InlineData("admin")]
-    [InlineData("member")]
+    [InlineData("early")]
     public async Task A_lit_booking_cancelled_afterwards_is_cued_off_at_its_end(string by)
     {
         Skip.IfNot(pg.Available, Skipped);
@@ -246,10 +246,15 @@ public sealed class R14LightsCueHttpTests(PostgresFixture pg) : IClassFixture<Po
         await LightAsync(r, booking, r.Club.Organiser);
         Assert.Single(Of(r, "booking.lights_on", booking));
 
-        var response = by == "admin"
-            ? await r.Club.Client(r.App, r.Club.Admin, admin: true)
-                .PostAsJsonAsync($"/api/v1/admin/bookings/{booking}/cancel", new { reason = "Court flooded" })
-            : await r.Club.Client(r.App, r.Club.Organiser).PostAsync($"/api/v1/bookings/{booking}/cancel", null);
+        // R15 D15-5: the member who scanned in early may no longer cancel it herself (409
+        // already_checked_in); the desk cancelling it before its start is the lit-cancelled case now.
+        if (by == "early")
+        {
+            var own = await r.Club.Client(r.App, r.Club.Organiser).PostAsync($"/api/v1/bookings/{booking}/cancel", null);
+            Assert.Equal(System.Net.HttpStatusCode.Conflict, own.StatusCode);
+        }
+        var response = await r.Club.Client(r.App, r.Club.Admin, admin: true)
+            .PostAsJsonAsync($"/api/v1/admin/bookings/{booking}/cancel", new { reason = "Court flooded" });
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
         await TickAsync(r);
@@ -397,7 +402,8 @@ public sealed class R14LightsCueHttpTests(PostgresFixture pg) : IClassFixture<Po
         var r = await RigAsync("r14rev");
         var restoredEnd = DateTimeOffset.UtcNow.AddMinutes(-1);
         var a = await SeedAsync(r, Relit(r.Club, restoredEnd, restoredEnd.AddMinutes(-14)));
-        var s = await SeedAsync(r, new Slot(restoredEnd, 15, r.Club.Sam) { CheckedIn = survivorLit ? restoredEnd.AddSeconds(10) : null });
+        // R15 D15-2: "covered" means lit at A's scan (restoredEnd - 14 min), so the survivor scanned in early, before it.
+        var s = await SeedAsync(r, new Slot(restoredEnd, 15, r.Club.Sam) { CheckedIn = survivorLit ? restoredEnd.AddMinutes(-20) : null });
 
         await EmitReversalAsync(r, a);
         await TickAsync(r);

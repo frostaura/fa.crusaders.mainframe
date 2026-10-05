@@ -71,6 +71,25 @@ public sealed class BookingService
     private readonly TimeProvider _clock;
 
     /// <summary>
+    /// R15 D14-4: a posting made by a device-triggered path (walk-up void, check-in charge, reversal,
+    /// release, displacement, reinstatement), stamped on the injected clock that path decided at —
+    /// so the row's <c>CreatedAt</c> (and the <c>minutes.*</c> webhook's <c>occurred_at</c>) is the
+    /// act's instant, not the wall's. Member-facing create/cancel keep the wall (R14 decision).
+    /// </summary>
+    /// <remarks>Block body: an expression body holding a <c>with { }</c> trips lizard (memory/gotchas-build.md).</remarks>
+    private Task<LedgerEntry> PostOnClockAsync(LedgerPosting posting, CancellationToken ct)
+    {
+        return _ledger.PostAsync(posting with { At = _clock.GetUtcNow() }, ct);
+    }
+
+    /// <summary>The batch form of <see cref="PostOnClockAsync"/>: every row on one instant.</summary>
+    private Task<IReadOnlyList<LedgerEntry>> PostManyOnClockAsync(IReadOnlyList<LedgerPosting> postings, CancellationToken ct)
+    {
+        var at = _clock.GetUtcNow();
+        return _ledger.PostManyAsync([.. postings.Select(p => p with { At = at })], ct);
+    }
+
+    /// <summary>
     /// Where a confirmation is composed: a scope of its own, after the response (perf round).
     /// </summary>
     private readonly IServiceScopeFactory _scopes;
@@ -577,7 +596,7 @@ public sealed class BookingService
         var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
 
         booking.Status = BookingStatus.Cancelled;
-        booking.CancelledAt = DateTimeOffset.UtcNow;
+        booking.CancelledAt = _clock.GetUtcNow();
 
         _db.AuditLogs.Add(new AuditLog
         {
@@ -604,7 +623,7 @@ public sealed class BookingService
             {
                 // Carries the status change with it: LedgerService.PostAsync saves through
                 // this tracked context, so the released slot and the money back are one write.
-                await _ledger.PostAsync(new LedgerPosting(
+                await PostOnClockAsync(new LedgerPosting(
                     UserId: payerUserId,
                     Type: LedgerEntryType.LightsPurchase,
                     AmountMinutes: booking.AmountChargedMinutes,
@@ -859,7 +878,9 @@ public sealed class BookingService
                     ActorUserId: actorId,
                     RelatedBookingId: booking.Id,
                     Reason: $"Booking {court.Name} · {SlotLabel(booking, settings)}",
-                    ExternalReference: spec.ExternalReference), ct);
+                    ExternalReference: spec.ExternalReference)
+                // R15 D14-4: a walk-up is a device decision; its charge is on the clock it was sold at.
+                { At = spec.IsWalkUp ? booking.ChargedAt : null }, ct);
             }
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -970,7 +991,8 @@ public sealed class BookingService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: "booking.created",
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-            OccurredAt: DateTimeOffset.UtcNow,
+            // R15 D14-4: a walk-up was sold at the device clock's instant (its ChargedAt).
+            OccurredAt: spec.IsWalkUp && booking.ChargedAt is { } sold ? sold : DateTimeOffset.UtcNow,
             // R13 (E13-2's rule, here): the actor's own role, never "acting for somebody else".
             ActorUserId: actorId, ActorIsAdmin: await HoldsAdminAsync(actorId, ct),
             SubjectUserId: userId,
@@ -1292,8 +1314,16 @@ public sealed class BookingService
         // it cost.
         if (!actorIsAdmin && !isSelfCancel) return new CancellationResult.NotFound();
 
-        if (isSelfCancel && booking.StartsAt <= DateTimeOffset.UtcNow)
+        // The member's own refusals. The ADMIN route is the club acting, so neither applies to it —
+        // not even when the admin owns the booking (R15 J15-2: the desk cancels a started session).
+        if (!actorIsAdmin && booking.StartsAt <= DateTimeOffset.UtcNow)
             return new CancellationResult.AlreadyStarted();
+
+        // R15 D15-5: once checked in, a member may not cancel their own booking. Attendance means no
+        // refund (charge-at-booking invariant), so a self-cancel after an early scan refunded nothing
+        // AND freed the slot for resale — the club paid twice for one court. The desk still can.
+        if (!actorIsAdmin && booking.CheckedInAt is not null)
+            return new CancellationResult.AlreadyCheckedIn();
 
         var settings = await _settings.GetAsync(ct);
         var minutesUntilStart = (booking.StartsAt - DateTimeOffset.UtcNow).TotalMinutes;
@@ -1659,7 +1689,7 @@ public sealed class BookingService
             foreach (var other in tail.Displaced) _db.AuditLogs.Add(DisplacedAudit(booking, other, tail.Amounts[other.Id], actorUserId));
             if (scan is not null) stamped = await RecordReversalScanAsync(booking, scan, attendedAt, payerUserId, ct);
 
-            await _ledger.PostManyAsync(postings, ct);
+            await PostManyOnClockAsync(postings, ct);
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException
                                    || (ex is DbUpdateException due && (IsDuplicateReference(due) || IsOverlapViolation(due))))
@@ -2144,7 +2174,7 @@ public sealed class BookingService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: "booking.displaced",
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-            OccurredAt: DateTimeOffset.UtcNow, ActorUserId: null, ActorIsAdmin: false, SubjectUserId: other.UserId,
+            OccurredAt: _clock.GetUtcNow(), ActorUserId: null, ActorIsAdmin: false, SubjectUserId: other.UserId,
             Data: new()
             {
                 ["booking_id"] = other.Id,
@@ -2254,7 +2284,7 @@ public sealed class BookingService
 
         try
         {
-            await _ledger.PostAsync(new LedgerPosting(
+            await PostOnClockAsync(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.LightsPurchase,
                 AmountMinutes: -amount,
@@ -2303,7 +2333,7 @@ public sealed class BookingService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: "booking.cancelled_lights_charged",
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-            OccurredAt: DateTimeOffset.UtcNow, ActorUserId: null, ActorIsAdmin: false, SubjectUserId: booking.UserId,
+            OccurredAt: _clock.GetUtcNow(), ActorUserId: null, ActorIsAdmin: false, SubjectUserId: booking.UserId,
             Data: new()
             {
                 ["booking_id"] = booking.Id,
@@ -2403,7 +2433,7 @@ public sealed class BookingService
 
         try
         {
-            await _ledger.PostAsync(new LedgerPosting(
+            await PostOnClockAsync(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.LightsPurchase,
                 AmountMinutes: back,
@@ -2441,7 +2471,7 @@ public sealed class BookingService
         var newEnd = litEnd < booking.StartsAt ? booking.StartsAt : litEnd;
         if (newEnd >= booking.EndsAt) return ReleaseSettlement.NotApplicable;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.GetUtcNow();
         var displaced = await _db.Bookings
             .Where(b => b.DisplacedByBookingId == booking.Id && b.Status == BookingStatus.Cancelled)
             .ToListAsync(ct);
@@ -2529,7 +2559,7 @@ public sealed class BookingService
 
         try
         {
-            await _ledger.PostManyAsync(postings, ct);
+            await PostManyOnClockAsync(postings, ct);
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException
                                    || (ex is DbUpdateException due && (IsDuplicateReference(due) || IsOverlapViolation(due))))
@@ -2564,7 +2594,7 @@ public sealed class BookingService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: "booking.displacement_reversed",
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-            OccurredAt: DateTimeOffset.UtcNow, ActorUserId: null, ActorIsAdmin: false, SubjectUserId: other.UserId,
+            OccurredAt: _clock.GetUtcNow(), ActorUserId: null, ActorIsAdmin: false, SubjectUserId: other.UserId,
             Data: new()
             {
                 ["booking_id"] = other.Id,
@@ -2617,7 +2647,7 @@ public sealed class BookingService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: "booking.no_show_reversed",
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-            OccurredAt: DateTimeOffset.UtcNow, ActorUserId: scan?.UserId, ActorIsAdmin: false, SubjectUserId: booking.UserId,
+            OccurredAt: _clock.GetUtcNow(), ActorUserId: scan?.UserId, ActorIsAdmin: false, SubjectUserId: booking.UserId,
             Data: new()
             {
                 ["booking_id"] = booking.Id,
@@ -2731,7 +2761,7 @@ public sealed class BookingService
             var slotLabel = await SlotLabelAsync(booking, ct);
             try
             {
-                await _ledger.PostManyAsync(
+                await PostManyOnClockAsync(
                 [
                     new LedgerPosting(
                         UserId: currentPayer,
@@ -2777,7 +2807,7 @@ public sealed class BookingService
         if (balance < booking.AmountChargedMinutes)
             return new ChargeResult.InsufficientBalance(payerUserId, balance, booking.AmountChargedMinutes);
 
-        await _ledger.PostAsync(new LedgerPosting(
+        await PostOnClockAsync(new LedgerPosting(
             UserId: payerUserId,
             Type: LedgerEntryType.BookingCharge,
             AmountMinutes: -booking.AmountChargedMinutes,
@@ -2786,7 +2816,7 @@ public sealed class BookingService
             Reason: $"Booking {court.Name} · {await SlotLabelAsync(booking, ct)}"), ct);
 
         booking.PaidByUserId = payerUserId;
-        booking.ChargedAt = DateTimeOffset.UtcNow;
+        booking.ChargedAt = _clock.GetUtcNow();
 
         _db.AuditLogs.Add(new AuditLog
         {
@@ -2815,7 +2845,7 @@ public sealed class BookingService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: BookingEvents.PayerChanged,
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-            OccurredAt: DateTimeOffset.UtcNow,
+            OccurredAt: _clock.GetUtcNow(),
             ActorUserId: actorUserId == Guid.Empty ? null : actorUserId, ActorIsAdmin: false,
             SubjectUserId: booking.PaidByUserId,
             Data: new()
@@ -3268,6 +3298,9 @@ public abstract record CancellationResult
     public sealed record Ok(int RefundedMinutes, int PenaltyMinutes) : CancellationResult;
     public sealed record NotFound : CancellationResult;
     public sealed record AlreadyStarted : CancellationResult;
+
+    /// <summary>R15 D15-5: a member's own cancel of a booking they have checked in to — 409 <c>already_checked_in</c>.</summary>
+    public sealed record AlreadyCheckedIn : CancellationResult;
 }
 
 /// <summary>

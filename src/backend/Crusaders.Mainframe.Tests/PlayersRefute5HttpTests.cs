@@ -71,7 +71,8 @@ public sealed class PlayersRefute5HttpTests(PostgresFixture pg) : IClassFixture<
         var sam = (await AddAsync(club, f, x, (club.Sam, 16)))[0];
         await AcceptAsync(club, f, club.Sam, x, sam, 16);
         await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == x).CheckedInAt = DateTimeOffset.UtcNow);
-        Assert.True((await club.Client(f, club.Organiser).PostAsJsonAsync($"/api/v1/bookings/{x}/cancel", new { })).IsSuccessStatusCode);
+        // R15 D15-5: a member may not cancel a booking once checked in — only the desk can (S4 is the desk's now).
+        Assert.True((await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/bookings/{x}/cancel", new { reason = "Court flooded" })).IsSuccessStatusCode);
         await club.CreditAsync(f, club.Organiser, -16);   // Sam's 16, spent: it was the organiser's to spend
 
         // Z: Alex pays 16, held for him.

@@ -467,6 +467,8 @@ public static class BookingEndpoints
             CancellationResult.Ok ok => Results.Ok(new { refunded_minutes = ok.RefundedMinutes, penalty_minutes = ok.PenaltyMinutes }),
             CancellationResult.NotFound => Results.NotFound(new { error = "booking_not_found" }),
             CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
+            // R15 D15-5: checked in (often early, before the start): the member's cancel is refused; the desk's is not.
+            CancellationResult.AlreadyCheckedIn => Results.Conflict(new { error = "already_checked_in" }),
             _ => Unmapped(result, ctx),
         };
     }

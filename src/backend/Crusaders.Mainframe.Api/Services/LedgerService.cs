@@ -232,11 +232,12 @@ public sealed class LedgerService
             ? await _db.Memberships.AsNoTracking().Where(m => m.UserId == scanner).Select(m => m.FullName).FirstOrDefaultAsync(token)
             : null;
 
-        _realtime.Publish(topic, new RealtimeMessage(
-            string.Empty, JsonSerializer.Serialize(new { balance_minutes = balance })));
-
         // D11: the held part rides on the named frame, so the badge can say "12 min held until
-        // Tue 18:00" beside the total. The legacy unnamed frame above stays verbatim.
+        // Tue 18:00" beside the total. R15 X15-6/E15-2/J15-3: the NAMED frame goes FIRST and the
+        // legacy unnamed frame (verbatim) after it. Sent the other way round, a client that read
+        // the unnamed frame as a movement raised a reasonless toast ~1 ms before the named one
+        // raised the real one; now the unnamed twin always arrives at a figure the client already
+        // has, so even an older client sees a zero diff and stays quiet.
         _realtime.Publish(topic, new RealtimeMessage(BalanceEvent, JsonSerializer.Serialize(new
         {
             balance_minutes = balance,
@@ -271,6 +272,9 @@ public sealed class LedgerService
             // R14 E14-2: on a share frame, the player whose act moved it when it was not this member; null otherwise.
             actor_name = await ShareActorNameAsync(frame.Share, userId, token),
         })));
+
+        _realtime.Publish(topic, new RealtimeMessage(
+            string.Empty, JsonSerializer.Serialize(new { balance_minutes = balance })));
 
         // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
         if (retry is not null) await retry.AfterMinutesArriveAsync(tenantId, slug, [userId], token);
@@ -457,6 +461,24 @@ public sealed class LedgerService
         // Queued behind the commit, exactly as the balance frame is: a webhook consumer told a
         // penalty was applied and then left with no such row is worse off than one told a
         // moment late, because nothing ever retracts it (D2-B07).
+        var data = new Dictionary<string, object?>
+        {
+            ["entry_id"] = entry.Id,
+            ["user_id"] = entry.UserId,
+            ["entry_type"] = entry.Type.ToString(),
+            ["amount_minutes"] = entry.AmountMinutes,
+            ["booking_id"] = entry.RelatedBookingId,
+            ["reason"] = entry.Reason,
+        };
+        // R15 E15-5: a desk sale says what the desk took and whether it was a gift — a consumer could
+        // not tell a R0.00 "Give" from a paid sale. zar_received is the rand (0 on a gift, never null);
+        // given is GivenMinutes.IsGiven, the one rule reports, the Night and the desk mail already use.
+        if (type == MinutesEvents.SoldAtDesk)
+        {
+            data["zar_received"] = entry.ZarPaid ?? 0m;
+            data["given"] = GivenMinutes.IsGiven(entry.Type, entry.ZarPaid);
+        }
+
         await _outbox.EnqueueAsync(async token => await _bus.EmitAsync(new DomainEvent(
             Id: $"evt_{Guid.NewGuid():N}",
             Type: type,
@@ -464,15 +486,7 @@ public sealed class LedgerService
             OccurredAt: entry.CreatedAt,
             ActorUserId: actorUserId, ActorIsAdmin: actorIsAdmin,
             SubjectUserId: entry.UserId,
-            Data: new()
-            {
-                ["entry_id"] = entry.Id,
-                ["user_id"] = entry.UserId,
-                ["entry_type"] = entry.Type.ToString(),
-                ["amount_minutes"] = entry.AmountMinutes,
-                ["booking_id"] = entry.RelatedBookingId,
-                ["reason"] = entry.Reason,
-            }), token), ct);
+            Data: data), token), ct);
     }
 
     /// <summary>
@@ -539,6 +553,7 @@ public sealed class LedgerService
             ActorUserId = posting.ActorUserId,
             Reason = posting.Reason,
             ExternalReference = posting.ExternalReference,
+            CreatedAt = posting.At ?? DateTimeOffset.UtcNow,
         };
     }
 
@@ -555,6 +570,7 @@ public sealed class LedgerService
             ActorUserId = posting.ActorUserId,
             Reason = posting.Reason,
             ExternalReference = posting.ExternalReference,
+            CreatedAt = posting.At ?? DateTimeOffset.UtcNow,
         };
         _db.LedgerEntries.Add(entry);
         await _db.SaveChangesAsync(ct);
@@ -592,6 +608,14 @@ public sealed record LedgerPosting(
     /// refund told the partner the organiser had returned it. Null elsewhere. Never stored.
     /// </summary>
     public ShareWhy? Share { get; init; }
+
+    /// <summary>
+    /// R15 D14-4: when the act that wrote this row happened, on the caller's clock — the injected
+    /// <see cref="TimeProvider"/> on every device-triggered path (a walk-up, a pay-for, a check-in's
+    /// charge, a reversal, a release, the no-show sweep). Null: the wall clock, as before. Stored as
+    /// the row's <c>CreatedAt</c>, so a device decision and its money are on one clock.
+    /// </summary>
+    public DateTimeOffset? At { get; init; }
 
     /// <summary>Review round 12, C1: on a cancellation's refund and penalty, who cancelled (<see cref="WalletCancelledBy"/>). Never stored.</summary>
     public string? CancelledBy { get; init; }
