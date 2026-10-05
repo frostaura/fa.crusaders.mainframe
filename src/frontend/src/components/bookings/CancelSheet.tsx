@@ -230,7 +230,13 @@ function CancelBody({ flow, bookings }: { flow: CancelFlow; bookings: GridBookin
 function consequence(quote: CancellationQuote, waived: boolean, subject: string | null) {
   if (quote.checkedIn) return { tone: "danger" as const, text: CANCEL_SHEET.checkedIn(subject) };
   if (quote.penaltyMinutes > 0 && !waived) return { tone: "warning" as const, text: CANCEL_SHEET.late(quote.penaltyPct) };
-  return { tone: "success" as const, text: CANCEL_SHEET.free(subject) };
+  // R14 J14-6 — a split booking's partners get their shares back; "every minute" would be false.
+  return { tone: "success" as const, text: CANCEL_SHEET.free(subject, partnerNames(quote, waived)) };
+}
+
+/** The partners whose shares go back on this cancel, by name (R14 J14-6 / J14-7). */
+function partnerNames(quote: CancellationQuote, waived: boolean): string[] {
+  return netOf(quote, waived).partners.map((p) => p.name);
 }
 
 function singleMoney(quote: CancellationQuote | null, waived: boolean, subject: string | null): MoneyRow[] {
@@ -269,8 +275,9 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
 
 /** F1.13 — why "Back to you" (or "Back to Thandi", R13 J13-5) is less than was paid on a split booking. */
 function SplitNote({ quote, waived, subject }: { quote: CancellationQuote | null; waived: boolean; subject: string | null }) {
-  if (!quote || netOf(quote, waived).partners.length === 0) return null;
-  return <p className="-mt-2 px-1 text-xs text-text-secondary">{SPLIT_CANCEL.note(subject)}</p>;
+  const partners = quote ? partnerNames(quote, waived) : [];
+  if (partners.length === 0) return null;
+  return <p className="-mt-2 px-1 text-xs text-text-secondary">{SPLIT_CANCEL.note(subject, partners)}</p>;
 }
 
 function QuoteFailed({ retry }: { retry: () => void }) {

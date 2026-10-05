@@ -320,12 +320,12 @@ describe("F1.13 — a split booking's cancel says who gets what back", () => {
   it("names each partner's share and what the organiser keeps — the quote's camelCase or snake_case", async () => {
     stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: split }]);
     openCancel();
-    await screen.findByText(CANCEL_SHEET.free(null));
+    await screen.findByText(CANCEL_SHEET.free(null, ["Sam"]));
     const money = document.querySelector("dl")!;
     expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}50 min`);
     expect(money).toHaveTextContent(`${SPLIT_CANCEL.youKeep}50 min`);
     expect(money).not.toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}1 h 40 min`);
-    expect(screen.getByText(SPLIT_CANCEL.note(null))).toBeTruthy();
+    expect(screen.getByText(SPLIT_CANCEL.note(null, ["Sam"]))).toBeTruthy();
   });
 
   it("the toast after it says the same", async () => {
@@ -360,18 +360,53 @@ describe("F1.13 — the desk cancelling a split booking says the truth even when
       { method: "POST", path: "/api/v1/admin/bookings/bk-1/cancel", body: { refunded_minutes: 250, penalty_minutes: 0 } },
     ]);
     openCancel({ bookings: [ADM], isAdmin: true });
-    await screen.findByText(CANCEL_SHEET.free("Adm"));
+    await screen.findByText(CANCEL_SHEET.free("Adm", ["Sam"]));
     const money = document.querySelector("dl")!;
     expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}2 h 5 min`);
     expect(money).toHaveTextContent(`${CANCEL_SHEET.goesBack("Adm")}2 h 5 min`);
     // R13 J13-5 — the note under the figures is about Adm's money, said in the third person.
-    expect(screen.getByText(SPLIT_CANCEL.note("Adm"))).toBeTruthy();
-    expect(SPLIT_CANCEL.note("Adm")).toBe("Partners get their shares back from what comes back to Adm.");
+    expect(screen.getByText(SPLIT_CANCEL.note("Adm", ["Sam"]))).toBeTruthy();
+    expect(SPLIT_CANCEL.note("Adm", ["Sam"])).toBe("Sam gets their share back from what comes back to Adm.");
     expect(screen.queryByText(/comes back to you/)).toBeNull();
     // R4 A4-4: a desk cancel of somebody else's booking always carries a reason.
     fireEvent.change(screen.getByLabelText(CANCEL_SHEET.reasonLabel), { target: { value: "Court closed" } });
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
     expect(await screen.findByText("Booking cancelled. 2 hours 5 minutes back to Adm's balance; 2 hours 5 minutes to Sam.")).toBeTruthy();
     expect(screen.queryByText(/4 hours 10 minutes back to Adm/)).toBeNull();
+  });
+});
+
+describe("R14 J14-6 / J14-7 — a free cancel of a split booking says who gets what, one partner singular", () => {
+  const one = { ...QUOTE, amountChargedMinutes: 100, refundMinutes: 100, net_minutes: 50, partner_refunds: [{ name: "Sam", minutes: 50 }] };
+  const two = { ...QUOTE, amountChargedMinutes: 90, refundMinutes: 90, net_minutes: 30, partner_refunds: [{ name: "Sam", minutes: 30 }, { name: "Nomsa", minutes: 30 }] };
+
+  it("one partner: never 'every minute goes back to your balance', never 'Partners … their shares'", async () => {
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: one }]);
+    openCancel();
+    expect(await screen.findByText("Cancelling now is free — nothing is kept: Sam gets their share back, and the rest goes back to your balance.")).toBeTruthy();
+    expect(screen.getByText("Sam gets their share back from what comes back to you.")).toBeTruthy();
+    expect(screen.queryByText(/every minute goes back/)).toBeNull();
+    expect(screen.queryByText(/Partners get/)).toBeNull();
+  });
+
+  it("two partners: both named, plural", async () => {
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: two }]);
+    openCancel();
+    expect(await screen.findByText("Cancelling now is free — nothing is kept: Sam and Nomsa get their shares back, and the rest goes back to your balance.")).toBeTruthy();
+    expect(screen.getByText("Sam and Nomsa get their shares back from what comes back to you.")).toBeTruthy();
+  });
+
+  it("the desk's sheet says it of the member: 'the rest goes back to Adm's balance'", async () => {
+    const ADM: GridBooking = { ...MINE, mine: false, memberFirstName: "Adm", amountChargedMinutes: 100 };
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: one }]);
+    openCancel({ bookings: [ADM], isAdmin: true });
+    expect(await screen.findByText("Cancelling now is free — nothing is kept: Sam gets their share back, and the rest goes back to Adm's balance.")).toBeTruthy();
+    expect(screen.getByText("Sam gets their share back from what comes back to Adm.")).toBeTruthy();
+  });
+
+  it("a booking without players keeps the plain sentence", async () => {
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: QUOTE }]);
+    openCancel();
+    expect(await screen.findByText("Cancelling now is free — every minute goes back to your balance.")).toBeTruthy();
   });
 });

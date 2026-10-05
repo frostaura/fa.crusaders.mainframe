@@ -451,8 +451,15 @@ export const CANCEL_SHEET = {
   goesBack: (whose: string | null) => (whose ? `Back to ${whose}` : "Back to you"),
   totalBack: "Goes back in total",
 
-  free: (whose: string | null) =>
-    `Cancelling now is free — every minute goes back to ${whose ? `${whose}'s` : "your"} balance.`,
+  /**
+   * R14 J14-6 — on a split booking "every minute goes back to your balance" contradicted the rows
+   * under it (each partner's share goes back to them): `partners` names them, singular for one.
+   */
+  free: (whose: string | null, partners: readonly string[] = []) => {
+    const balance = `${whose ? `${whose}'s` : "your"} balance`;
+    if (partners.length === 0) return `Cancelling now is free — every minute goes back to ${balance}.`;
+    return `Cancelling now is free — nothing is kept: ${sharesBack(partners)}, and the rest goes back to ${balance}.`;
+  },
   late: (pct: number) => `This is inside the late-cancellation window, so ${pct}% is kept as a penalty.`,
   checkedIn: (name: string | null) =>
     (name
@@ -624,8 +631,15 @@ export const SPLIT_CANCEL = {
    * R13 J13-5 — whose money it is: the desk cancelling a member's split booking was told "what
    * comes back to you" about the member's refund. Null: the viewer's own booking.
    */
-  note: (whose: string | null) => `Partners get their shares back from what comes back to ${whose ?? "you"}.`,
+  note: (whose: string | null, partners: readonly string[] = []) =>
+    `${partners.length > 0 ? sharesBack(partners) : "Partners get their shares back"} from what comes back to ${whose ?? "you"}.`,
 } as const;
+
+/** R14 J14-7 — "Sam gets their share back" / "Sam and Nomsa get their shares back": one partner is one share. */
+function sharesBack(partners: readonly string[]): string {
+  const names = partners.length === 1 ? partners[0] : `${partners.slice(0, -1).join(", ")} and ${partners[partners.length - 1]}`;
+  return partners.length === 1 ? `${names} gets their share back` : `${names} get their shares back`;
+}
 
 /* ─────────────────────────────── end SHEETS ─────────────────────────────── */
 
