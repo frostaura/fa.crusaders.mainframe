@@ -90,12 +90,14 @@ test("losing signal keeps the code and says so with a badge", async ({ page, con
   await context.setOffline(false);
 });
 
-test("a first visit with no signal says the code needs it once, and draws no QR", async ({ page }) => {
+// R15 X15-3 — the phone has a network here (the enrol is aborted, `onLine` stays true): the club is
+// unreachable, so it says the code needs the club, never "needs signal".
+test("a first visit that cannot reach the club says the code needs it once, and draws no QR", async ({ page }) => {
   await signIn(page);
   await serveApi(page, routes());
   await page.route("**/api/v1/me/code/enrol", (route) => route.abort("failed"));
   await page.goto("/my-code");
-  await expect(page.getByRole("heading", { name: "Your code needs signal the first time" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your code needs the club the first time" })).toBeVisible();
   await expect(page.getByRole("img", { name: /QR code/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
 });

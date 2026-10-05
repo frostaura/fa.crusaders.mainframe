@@ -50,7 +50,12 @@ afterEach(async () => {
 });
 
 describe("the minutes chip offline with nothing kept (X8-2)", () => {
-  it("says it has no figure and that the phone is offline — never 'loading' for ever", async () => {
+  // R15 X15-3 — "You're offline" only when the phone says so; otherwise "Can't reach the club".
+  it.each([
+    ["the phone offline", false, OFFLINE_COPY.staleTitle, OFFLINE_COPY.unreachableTitle],
+    ["the phone online, the club unreachable", true, OFFLINE_COPY.unreachableTitle, OFFLINE_COPY.staleTitle],
+  ])("%s: says it has no figure, and why — never 'loading' for ever", async (_n, onLine, said, notSaid) => {
+    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(onLine);
     localStorage.setItem("crusaders.mainframe.last-identity", ID);
     setDataOwner(ID);
     window.history.pushState({}, "", "/my-code");
@@ -58,10 +63,12 @@ describe("the minutes chip offline with nothing kept (X8-2)", () => {
     render(<App />);
 
     const bar = await header();
-    const chip = await within(bar).findByRole("link", { name: new RegExp(OFFLINE_COPY.staleTitle) }, { timeout: 8_000 });
+    const chip = await within(bar).findByRole("link", { name: new RegExp(said) }, { timeout: 8_000 });
+    expect(chip.getAttribute("aria-label")).not.toContain(notSaid);
     expect(chip.getAttribute("aria-label")).not.toMatch(/loading/i);
     expect(chip.querySelector("[data-chip-skeleton]")).toBeNull();
     expect(chip).not.toHaveTextContent("0 min");
+    vi.restoreAllMocks();
   }, 15_000);
 });
 

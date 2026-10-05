@@ -50,7 +50,8 @@ export const OFFLINE_COPY = {
   /** The grid's reason booking is off while it is the phone's copy. */
   gridStale: "Booking needs a connection. This is the grid as it was — a slot shown free may have gone since.",
   /** A Book press on a remembered grid. */
-  bookNeedsConnection: "Booking needs a connection — this grid is from earlier and may have changed. Try again once you have signal.",
+  /** R15 X15-3 — true whether the phone has no network or one that cannot reach the club. */
+  bookNeedsConnection: "Booking needs a connection to the club — this grid is from earlier and may have changed. Try again in a moment.",
   /**
    * R6 X6-4 — offline, and this page was never drawn on this phone, so nothing is kept to show.
    * After {@link OFFLINE_COPY.staleTitle}: what is missing, and that it loads by itself.

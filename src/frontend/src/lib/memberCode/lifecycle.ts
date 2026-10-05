@@ -1,4 +1,4 @@
-import { ApiError, endpoints, NetworkError, type MemberCodeEnrolment, type MemberCodeStatus } from "../api";
+import { ApiError, endpoints, NetworkError, OfflineError, type MemberCodeEnrolment, type MemberCodeStatus } from "../api";
 import { assertKnownZone, STEP_MS } from "./clubDay";
 import { fromBase64Url, importHmacKey } from "./hotp";
 import { loadMemberCode, saveMemberCode, wipeMemberCode, type MemberCodeRecord } from "./keyStore";
@@ -46,7 +46,9 @@ export class InvalidEnrolment extends Error {
 }
 
 function classify(e: unknown): SyncFailure {
-  if (e instanceof NetworkError) return { kind: "network" };
+  // R15 X15-3 — a phone with no network refuses the enrolment POST before sending (OfflineError):
+  // that is "needs signal", not a failure the club gave.
+  if (e instanceof NetworkError || e instanceof OfflineError) return { kind: "network" };
   if (e instanceof ApiError) {
     if (e.status === 403 && e.code && BARRING.has(e.code)) return { kind: "barred", code: e.code };
     if (e.status === 404) return { kind: "unavailable" };

@@ -200,9 +200,17 @@ describe("MyCode — the one rotating code", () => {
     vi.restoreAllMocks();
   });
 
-  it("says the first visit needs signal when there is no key and no club", async () => {
+  it("R15 X15-3 — no key, the phone offline: the first visit needs signal", async () => {
+    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    renderWith([], { enrol: unreachable("/api/v1/me/code/enrol", "POST") });
+    expect(await screen.findByRole("heading", { name: MY_CODE.needsSignal.title })).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("says the first visit needs the club when there is no key and the club can't be reached (phone online)", async () => {
     const stub = renderWith([], { enrol: unreachable("/api/v1/me/code/enrol", "POST") });
-    expect(await screen.findByRole("heading", { name: "Your code needs signal the first time" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: MY_CODE.needsClub.title })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: MY_CODE.needsSignal.title })).toBeNull();
     expect(screen.queryByLabelText("Your code")).toBeNull();
     expect(screen.queryByRole("img", { name: /QR code/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -1634,7 +1642,8 @@ describe("MyCode at a club with a door", () => {
     ]);
     renderPage(<MyCodePage />);
 
-    await screen.findByRole("heading", { name: "Your code needs signal the first time" });
+    // R15 X15-3 — onLine is true here: the club is unreachable, not the phone offline.
+    await screen.findByRole("heading", { name: MY_CODE.needsClub.title });
     expect(screen.queryByRole("heading", { name: /What opens the door for you right now/ })).toBeNull();
     expect(screen.queryByRole("link", { name: "Your door history" })).toBeNull();
   });

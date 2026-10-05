@@ -90,3 +90,11 @@ describe("the pass's badge (R15 X15-3)", () => {
     expect(screen.getByText(MY_CODE.offlineBadge)).toBeInTheDocument();
   });
 });
+
+describe("words said whatever navigator.onLine says (R15 X15-3 class sweep)", () => {
+  it("never claim the phone is offline or out of signal", () => {
+    for (const line of [OFFLINE_COPY.writeCause, OFFLINE_COPY.bookNeedsConnection, OFFLINE_COPY.unreachableNothingKept(OFFLINE_COPY.nothingKept.wallet)]) {
+      expect(line, line).not.toMatch(/offline|signal|back online/i);
+    }
+  });
+});

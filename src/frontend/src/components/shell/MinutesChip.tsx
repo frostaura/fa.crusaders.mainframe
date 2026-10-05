@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
 import { movementSentence } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/useAuth";
+import { phoneIsOffline } from "@/lib/api";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { useChipBalance, type ChipFigures, type NoFigure } from "./chipBalance";
 import { useToast } from "../toastContext";
@@ -221,12 +222,15 @@ function ChipFigure({ balance, loading, displayed }: { balance: number | null; l
 
 /**
  * R8 X8-2 — the chip's name and title with no figure and none coming: "Wallet balance unavailable.
- * You're offline." (the stale notice's own words) when the club could not be reached; the plain
+ * You're offline." (the stale notice's own words) when the club could not be reached and the phone
+ * has no network, "… Can't reach the club." when it has one (R15 X15-3); the plain
  * "unavailable" when it answered busy or failing.
  */
 function noFigureLabel(none: NoFigure): string {
   const plain = walletLabel(null, false);
-  return none === "offline" ? `${plain}. ${OFFLINE_COPY.staleTitle}.` : `${plain}.`;
+  if (none !== "offline") return `${plain}.`;
+  // R15 X15-3 — "You're offline" only when the phone says so; a club it cannot reach is said as that.
+  return `${plain}. ${phoneIsOffline() ? OFFLINE_COPY.staleTitle : OFFLINE_COPY.unreachableTitle}.`;
 }
 
 /** "Last known at 18:04 — …": a kept figure says it is one. */

@@ -39,10 +39,17 @@ export const MY_CODE = {
   loading: "Getting your code…",
   tryAgain: "Try again",
   checkAgain: "Check again",
+  /** R15 X15-3 — the phone says it has no network (`navigator.onLine === false`). */
   needsSignal: {
     title: "Your code needs signal the first time",
     body: "This phone hasn't set up your code yet, and it can only do that while it can reach the club. "
       + "Open this page once with signal — after that your code works with no signal at all.",
+  },
+  /** R15 X15-3 — the phone has a network but the club could not be reached: never "needs signal". */
+  needsClub: {
+    title: "Your code needs the club the first time",
+    body: "This phone hasn't set up your code yet, and it can only do that while it can reach the club — it can't "
+      + "right now. Try again in a moment; after that your code works with no signal at all.",
   },
   /**
    * F4.1 — the session lapsed; the code is still made from the key on this phone. Said once,

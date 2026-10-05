@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { type MemberDoor } from "../lib/api";
+import { phoneIsOffline, type MemberDoor } from "../lib/api";
 import { cn } from "../lib/utils";
 import { type LastKnown, minutesSince, readLastKnown } from "../lib/lastKnown";
 import {
@@ -251,8 +251,9 @@ function CodeArea({ view }: { view: MemberCodeView }) {
     return (
       <Card>
         <CardContent className="flex flex-col items-start gap-3 pt-6">
-          <h2 className="text-base font-semibold text-text-primary">{MY_CODE.needsSignal.title}</h2>
-          <p className="text-sm text-text-secondary">{MY_CODE.needsSignal.body}</p>
+          {/* R15 X15-3 — "needs signal" only when the phone has none; else the club is unreachable. */}
+          <h2 className="text-base font-semibold text-text-primary">{firstVisit().title}</h2>
+          <p className="text-sm text-text-secondary">{firstVisit().body}</p>
           <Button variant="outline" pending={view.checking} onClick={() => void view.resync()}>{MY_CODE.tryAgain}</Button>
         </CardContent>
       </Card>
@@ -383,4 +384,9 @@ function DoorFooter({ doorsKnowledge, contact }: { doorsKnowledge: "yes" | "no" 
       <ClubContact contact={contact} />
     </>
   );
+}
+
+/** R15 X15-3 — the first visit's words: no signal on the phone, or a club it cannot reach. */
+function firstVisit(): { title: string; body: string } {
+  return phoneIsOffline() ? MY_CODE.needsSignal : MY_CODE.needsClub;
 }
