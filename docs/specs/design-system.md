@@ -288,6 +288,23 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   chunk). Every other page is `React.lazy` behind the page-shaped `RouteSkeleton` — except the admin
   frame, Overview and the two doors pages, which read the shared doors store (it dedupes only in
   flight). React + the router are a vendor chunk of their own; nothing else is grouped by hand.
+- **Focus rings in a list that clips its rows (R15 L15-1).** A list that sets `overflow-hidden` with
+  `divide-y` insets its rows' focus rings with `[&_:focus-visible]:-outline-offset-2` on the list.
+  Without it, the house outside ring is clipped to nothing. Guarded by `clipped-focus-scan.test.ts`.
+- **A URL-bound text field keeps what was typed (R15 L15-2).** It holds the text locally and writes
+  the URL after 250 ms of no typing (`lib/useUrlText`). Writing the URL on every key dropped
+  characters at normal typing speed. A URL change from elsewhere (Clear filters, Back) still
+  replaces the text.
+- **Stepper arrows keep their focus (R15 X15-5).** Next and Previous are `aria-disabled` at their
+  ends, never `disabled`. A focused button that becomes disabled drops focus to the page body.
+  Guarded by `paged-focus-scan.test.ts`.
+- **Skeletons never push the page sideways (R15 L15-5).** `Skeleton` is `max-w-full` by default,
+  and a flex or grid column holding a fixed-rem skeleton needs `min-w-0` or a `minmax(0,1fr)` track.
+- **The service worker's activate is short (R15 X15-2).** Activate ends once it has claimed the
+  pages and purged earlier shells. The rest of the build is precached in a `FINISH_INSTALL` message
+  the worker posts to itself, and resumed on the first navigation of a later lifetime; the earlier
+  build's files are purged after that. An activate that awaited the whole precache held every
+  reload and request for 2–7 s on a slow connection. Offline guarantees are unchanged.
 - **"Offline" means the phone says so (R15 X15-3).** Copy says "You're offline" only when
   `navigator.onLine === false`. When the phone is online but the club can't be reached, it says
   "Can't reach the club" ("…showing what we had at 18:00"). This applies to stale notices, the My Code
