@@ -391,6 +391,9 @@ export function memberLedgerRows<T extends { comment: string }>(rows: T[]): T[] 
     : rows;
 }
 
+/** The ledger's paging button (R14 X14-1: on `usePagedFocus`, like every "show older/more"). */
+export const showOlderLabel = (more: number) => `Show older (${more} more)`;
+
 /** Said once under the ledger, not on every row — the same rule the door history follows. */
 export const LEDGER_CLOCK_NOTE = "Times are the club's own.";
 

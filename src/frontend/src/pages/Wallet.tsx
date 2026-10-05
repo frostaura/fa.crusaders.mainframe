@@ -23,7 +23,7 @@ import { WALLET_PAGE_SIZE as PAGE_SIZE } from "../lib/offline/memberReads";
 import { WalletNav } from "../components/wallet/WalletNav";
 import { HeldLine } from "../components/wallet/HeldLine";
 import {
-  BALANCE_TONE, LEDGER_CLOCK_NOTE, SHORT_TONE, TOP_UP_LABEL, WALLET_LAYOUT, balanceSentence, cardLevel, memberLedgerRows,
+  BALANCE_TONE, LEDGER_CLOCK_NOTE, SHORT_TONE, TOP_UP_LABEL, WALLET_LAYOUT, balanceSentence, cardLevel, memberLedgerRows, showOlderLabel,
   type BalanceLevel, type CardLevel,
 } from "../lib/walletCopy";
 import { useSmallestSlot } from "../components/wallet/useSmallestSlot";
@@ -31,6 +31,7 @@ import { ContextBar } from "../components/ui/context-bar";
 import { useMediaQuery } from "../components/ui/use-media-query";
 import { WithAside } from "../components/ui/with-aside";
 import { WalletMiniTotals } from "../components/wallet/WalletMiniTotals";
+import { usePagedFocus } from "../lib/usePagedFocus";
 
 /**
  * The figure, its sentence and the way to fix it — one component because they are one claim.
@@ -174,7 +175,7 @@ function LedgerSection(props: LedgerProps) {
       )}
       {shown < total && (
         <Button variant="outline" block pending={busy} onClick={onOlder}>
-          {`Show older (${total - shown} more)`}
+          {showOlderLabel(total - shown)}
         </Button>
       )}
     </Section>
@@ -199,6 +200,9 @@ export default function WalletPage() {
   // One buy button, in one place: beside the figure from lg, docked in thumb reach below it.
   const wide = useMediaQuery(LG_UP);
   const card = useCardState(balance, held);
+  // R14 X14-1 — the last page takes "Show older" away; the first movement it brought takes focus.
+  // Visible lines only: a closed share group's member rows are `hidden` and never focusable.
+  const showOlder = usePagedFocus(WALLET_ROWS, () => load(shown + PAGE_SIZE));
 
   return (
     <PageShell width="wide">
@@ -233,7 +237,7 @@ export default function WalletPage() {
                 {wide ? <WalletMiniTotals offline={offline} /> : null}
               </>
             }>
-              <LedgerSection rows={rows} shareBookings={shareBookings} total={total} busy={busy} error={stale ? null : error} onOlder={() => void load(shown + PAGE_SIZE)} />
+              <LedgerSection rows={rows} shareBookings={shareBookings} total={total} busy={busy} error={stale ? null : error} onOlder={showOlder} />
             </WithAside>
           ) : null}
         </StateBlock>
@@ -249,3 +253,5 @@ export default function WalletPage() {
 }
 
 const LG_UP = "(min-width: 1024px)";
+/** The wallet ledger's drawn lines, in order: its own rows and each share group's line. */
+const WALLET_ROWS = "[data-ledger-box] tbody > tr:not([hidden])";
