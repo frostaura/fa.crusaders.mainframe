@@ -383,6 +383,8 @@ const PRECISE_MOVEMENT: Record<string, (s: Said) => string> = {
   mixed: (s) => s.split
     ? `${s.split.back} came back and ${s.split.charged} went on a charge, ${net(s)}.`
     : s.up ? `Your wallet went up by ${s.minutes}.` : `${s.minutes} left your wallet.`,
+  // R14 (BE14b §5) — the club cancelled a session that had started: nothing moved, said with where and when.
+  cancelled_no_refund: (s) => `The club cancelled your session${s.whereAt ? ` on ${s.whereAt}` : ""} — it had started, so nothing was refunded.`,
   displaced_reinstated: (s) => s.up
     ? `A booking was reinstated: ${s.minutes} back in your wallet.`
     : `A refunded booking was reinstated: ${s.minutes} went back on it.`,

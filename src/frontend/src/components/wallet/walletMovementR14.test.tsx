@@ -195,3 +195,25 @@ describe("R14 J14-4 — a late cancel of a split booking: the penalty, then each
     expect(toasts()).toEqual(["15 minutes came back and 4 minutes went on a charge, so 11 minutes came back to your wallet."]);
   }, 15_000);
 });
+
+describe("R14 E14-5 (BE14b §5) — the club cancels a session that had started: nothing moved, but it is said", () => {
+  const said = () => [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /cancelled your session/.test(t));
+
+  it("a balance-neutral cancelled_no_refund frame raises one toast with court, day and time", async () => {
+    const { push } = mount();
+    await push({ balance_minutes: 200 });
+    await wait(120);
+    await push({ balance_minutes: 200, delta_minutes: 0, reason: "cancelled_no_refund", parts: [], cancelled_by: "club", share_cause: null, ...PLACE });
+    await wait(400);
+    expect(said()).toEqual(["The club cancelled your session on Court 3 · Mon 7 Oct, 18:00 — it had started, so nothing was refunded."]);
+  }, 15_000);
+
+  it("any other zero-minute frame stays silent", async () => {
+    const { push } = mount();
+    await push({ balance_minutes: 200 });
+    await wait(120);
+    await push({ balance_minutes: 200, delta_minutes: 0, reason: "cancellation_refund", parts: [], ...PLACE });
+    await wait(400);
+    expect([...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /Court 3/.test(t))).toEqual([]);
+  }, 15_000);
+});
