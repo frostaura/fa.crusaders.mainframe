@@ -384,7 +384,9 @@ public static partial class WalletEndpoints
             return Crusaders.Mainframe.Api.Email.EmailTemplates.PackageSoldAtDesk(club, to, new Crusaders.Mainframe.Api.Email.DeskPackageSale(
                 item.Package.Name, item.Package.Minutes, posted.Entry.ZarPaid ?? 0m, posted.BalanceAfter, symbol)
             {
-                NoCharge = movement.Kind.Code == AdminCreditReasons.PackageFree,
+                // R14 J14-5: a sale taken for R0.00 is a gift whatever the payment code said — the
+                // change record and the Night already read ZarPaid; the mail said "sold you".
+                NoCharge = movement.Kind.Code == AdminCreditReasons.PackageFree || (posted.Entry.ZarPaid ?? 0m) == 0m,
             });
         }
         // J10-3: a take-back that leaves less than the club's shortest court says so.

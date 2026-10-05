@@ -519,4 +519,44 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         Assert.Equal(JsonValueKind.Null, adjusted.GetProperty("zar_paid").ValueKind);
         Assert.DoesNotContain(rows, r => r.GetProperty("reason_code").GetString() == "top_up_cash");
     }
+    /// <summary>
+    /// Review round 14, J14-5: a desk sale recorded at R0.00 is a gift, whatever the payment code —
+    /// the change record and the Night already said "at no charge", but the mail said "sold you a
+    /// package" with "Amount received R0.00". Varied: a priced package taken for R0.00 in cash, and
+    /// a 100%-discounted one keyed as cash; a paid sale beside them still says bought.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_sale_recorded_at_no_rand_mails_the_given_words_whatever_the_payment_code()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkz");
+        var mail = new StubEmailService();
+        await using var app = WithMail(f, mail);
+        var admin = Admin(app, club);
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.OtherUserId),
+            new { packageId = club.OneHour, reasonCode = "top_up_cash", reason = "Staff", quotedPriceZar = 120m, zarReceived = 0m })).StatusCode);
+        var priced = await mail.WaitFor(m => m.To != club.MemberEmail);
+        Assert.NotNull(priced);
+        Assert.StartsWith("Minutes given at the desk", priced!.Subject, StringComparison.Ordinal);
+        Assert.DoesNotContain("Amount received", priced.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("sold you", priced.HtmlBody, StringComparison.Ordinal);
+        mail.Clear();
+
+        await SetDiscountAsync(f, club.LeagueGroupId, 10_000);
+        await JoinAsync(f, club, club.MemberUserId, club.LeagueGroupId);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.OneHour, reasonCode = "top_up_cash", reason = "Staff", quotedPriceZar = 0m })).StatusCode);
+        var discounted = await mail.WaitFor(m => m.To == club.MemberEmail);
+        Assert.NotNull(discounted);
+        Assert.StartsWith("Minutes given at the desk", discounted!.Subject, StringComparison.Ordinal);
+        mail.Clear();
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.OtherUserId),
+            new { packageId = club.OneHour, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 120m })).StatusCode);
+        var paid = await mail.WaitFor(m => m.To != club.MemberEmail);
+        Assert.NotNull(paid);
+        Assert.StartsWith("Minutes bought at the desk", paid!.Subject, StringComparison.Ordinal);
+    }
 }

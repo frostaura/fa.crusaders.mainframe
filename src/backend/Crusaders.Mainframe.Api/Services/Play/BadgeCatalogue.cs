@@ -38,7 +38,7 @@ public static class BadgeCatalogue
         new(Sessions10, "Ten up", "Played 10 sessions.", 10),
         new(Sessions50, "Regular", "Played 50 sessions.", 50),
         new(Sessions100, "Centurion", "Played 100 sessions.", 100),
-        new(FirstResult, "On the record", "Recorded your first match result.", null),
+        new(FirstResult, "On the record", "Your first match result is on the record.", null),
         new(FirstWin, "First win", "Won a match.", null),
         new(Partners5, "Good company", "Played with 5 different members.", 5),
         new(EarlyBird, "Early bird", "Played a session that started before 07:00.", null),

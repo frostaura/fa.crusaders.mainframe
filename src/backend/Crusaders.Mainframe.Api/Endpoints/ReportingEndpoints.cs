@@ -231,6 +231,10 @@ public static class ReportingEndpoints
                 {
                     date = d.ToString("yyyy-MM-dd"),
                     top_ups_minutes = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    // R14 J14-2: the part of top_ups_minutes the club GAVE (a desk package_free, or a
+                    // sale at R0.00) — a SUBSET, so the buckets still sum to net_movement_minutes. The
+                    // page's "Sold" is top-ups less this, as the revenue totals' sold already is.
+                    given_minutes = GivenMinutes(le),
                     booking_charges_minutes = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     refunds_minutes = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     penalties_minutes = -le.Where(x => LedgerEntryTypes.Penalty.Contains(x.Type)).Sum(x => x.AmountMinutes),
