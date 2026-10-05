@@ -43,9 +43,9 @@ last_verified: 2026-10-05
   `DeviceIdentity` (a shut board's `ShutHeardAt`/`LastSeenAt`; `ResolveOrRegisterAsync` takes a
   `DeviceCall` bundle), `MemberCodeService` (a use's `UsedAt`, which an offline twin of the same scan
   is matched against: on the wall clock the twin read as a forgery) and `CourtLightStateService`
-  (`UpdatedAt`, the live frame's `at`/countdown) take the injected clock too. Still on the wall clock:
-  `BookingService` (walk-up start, reversal; asked of BE14b), the gate route's resolve and
-  `ControlBoardReader` (asked of the integrator).
+  (`UpdatedAt`, the live frame's `at`/countdown) take the injected clock too, as do the gate route's
+  resolve, `ControlBoardReader`'s snapshot (`generated_at`, countdown, staleness) and BE14b's
+  `BookingService` walk-up start and reversal (839bbdad). No device path reads the wall clock now.
 - **Pay-for targets the booking about to start** (E14-6, spec §9.2 delta). The candidates are the two
   earliest live member bookings that have started or whose cue window is open. If the earliest is
   running, ends inside the cue window, and a later one has not started, the LATER one is the target

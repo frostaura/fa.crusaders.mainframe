@@ -229,6 +229,52 @@ public sealed class R14DevicePathsHttpTests(PostgresFixture pg) : IClassFixture<
         }
     }
 
+    /// <summary>The door's route resolves its board at the same instant: a shut door is heard at the club's clock too.</summary>
+    [SkippableFact]
+    public async Task A_shut_door_is_heard_at_the_clubs_instant()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        var r = await RigAsync("r14shutg", TimeSpan.FromMinutes(-60));
+        await using var _ = r.App;
+        var c = r.Club;
+        await c.WriteAsync(r.App, async db => (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == c.DoorMac)).Enabled = false);
+
+        var (status, _) = await SendAsync(r, c.Gate(c.Code(c.Olga, at: r.Clock.Now)));
+
+        Assert.Equal(HttpStatusCode.Forbidden, status);
+        var door = await c.ReadAsync(r.App, db => db.Devices.IgnoreQueryFilters().AsNoTracking().SingleAsync(d => d.MacAddress == c.DoorMac));
+        Near(r.Clock.Now, door.ShutHeardAt, "ShutHeardAt");
+        Near(r.Clock.Now, door.LastSeenAt, "LastSeenAt");
+    }
+
+    /// <summary>
+    /// The control board's snapshot reads the same clock as the light it shows: generated at the
+    /// club's instant, the countdown from it, and a court lit a moment ago is not stale.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(60)]
+    [InlineData(-60)]
+    public async Task The_control_board_snapshot_is_on_the_clubs_clock(int clockMinutesFromWall)
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        var r = await RigAsync($"r14cbs{(clockMinutesFromWall > 0 ? "a" : "b")}", TimeSpan.FromMinutes(clockMinutesFromWall));
+        await using var _ = r.App;
+        var c = r.Club;
+        await c.BookAsync(r.App, c.Olga, courtIndex: 0, startsInMinutes: clockMinutesFromWall + 5, minutes: 60);
+        var (_, activated) = await SendAsync(r, c.Activate(c.Code(c.Olga, at: r.Clock.Now)));
+        Assert.True(activated.GetProperty("activated").GetBoolean(), activated.ToString());
+
+        var response = await c.Member(r.App, c.AdminId, "admin").GetAsync("/api/v1/admin/control-board");
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, text);
+        using var json = JsonDocument.Parse(text);
+        Near(r.Clock.Now, json.RootElement.GetProperty("generated_at").GetDateTimeOffset(), "generated_at");
+        var lights = json.RootElement.GetProperty("courts").EnumerateArray()
+            .Single(t => t.GetProperty("court_number").GetInt32() == 1).GetProperty("lights");
+        Assert.InRange(lights.GetProperty("seconds_remaining").GetInt32(), 64 * 60, 66 * 60);
+        Assert.False(lights.GetProperty("stale").GetBoolean(), lights.ToString());
+    }
+
     // ------------------------------------------------------------------ D14-3
 
     private static async Task<AuditLog> WrongCourtRowAsync(Rig r)

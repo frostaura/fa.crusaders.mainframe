@@ -34,8 +34,16 @@ public sealed class ControlBoardReader
     private readonly ITenantContext _tenant;
     private readonly TenantSettingsAccessor _settings;
 
-    public ControlBoardReader(MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settings)
+    /// <summary>
+    /// R14 D14-4: the clock the light it shows was stamped on (<see cref="CourtLightStateService"/>),
+    /// so the snapshot's countdown, staleness and box health agree with the live frame. Optional so a
+    /// hand-built reader compiles; the container supplies it.
+    /// </summary>
+    private readonly TimeProvider _clock;
+
+    public ControlBoardReader(MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settings, TimeProvider? clock = null)
     {
+        _clock = clock ?? TimeProvider.System;
         _db = db;
         _tenant = tenant;
         _settings = settings;
@@ -44,7 +52,7 @@ public sealed class ControlBoardReader
     /// <summary>The whole payload, as the endpoint and the stream's snapshot both send it.</summary>
     public async Task<Dictionary<string, object?>> BuildAsync(CancellationToken ct)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.GetUtcNow();
         var s = await _settings.GetAsync(ct);
         var zone = ZoneOf(s.Timezone);
         var day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, zone).DateTime);

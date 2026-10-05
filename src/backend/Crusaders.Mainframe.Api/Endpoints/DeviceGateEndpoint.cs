@@ -43,7 +43,8 @@ public static class DeviceGateEndpoint
     {
         var (db, tenant, _, settingsAccessor, _, clock) = services;
 
-        var (device, refusal) = await DeviceIdentity.ResolveAsync(db, req.Mac, ct);
+        // R14 D14-4: a shut door's ShutHeardAt/LastSeenAt on the route's clock, like every device route.
+        var (device, refusal) = await DeviceIdentity.ResolveAsync(db, req.Mac, ct, clock);
         if (refusal is not null) return refusal;
 
         var now = clock.GetUtcNow();
