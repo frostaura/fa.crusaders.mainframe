@@ -54,9 +54,9 @@ const COLS_START: Record<At, string> = {
   "72rem": "@[72rem]/aside:grid-cols-[var(--aside-w)_minmax(0,1fr)]",
 };
 const STICKY: Record<At, string> = {
-  "56rem": "@[56rem]/aside:sticky @[56rem]/aside:top-6 @[56rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[56rem]/aside:overflow-y-auto",
-  "64rem": "@[64rem]/aside:sticky @[64rem]/aside:top-6 @[64rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[64rem]/aside:overflow-y-auto",
-  "72rem": "@[72rem]/aside:sticky @[72rem]/aside:top-6 @[72rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[72rem]/aside:overflow-y-auto",
+  "56rem": "@[56rem]/aside:sticky @[56rem]/aside:top-6 @[56rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[56rem]/aside:overflow-y-auto overscroll-contain p-1 -m-1 scroll-p-1",
+  "64rem": "@[64rem]/aside:sticky @[64rem]/aside:top-6 @[64rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[64rem]/aside:overflow-y-auto overscroll-contain p-1 -m-1 scroll-p-1",
+  "72rem": "@[72rem]/aside:sticky @[72rem]/aside:top-6 @[72rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[72rem]/aside:overflow-y-auto overscroll-contain p-1 -m-1 scroll-p-1",
 };
 /** The rail's width, widened from 3xl (`asideWide`) where a 1920 screen has the room. */
 const WIDTH: Record<AsideWidth, string> = {
@@ -112,8 +112,8 @@ export function WithAside(props: WithAsideProps) {
         gap === "md" ? "gap-4" : "gap-6",
         placement === "sheet" ? SHOW_AT[at] : "flex",
         first && SECOND_COLUMN[at],
-        // Room for a focus outline inside the rail's own scroller.
-        sticky && cn(STICKY[at], "overscroll-contain p-1 -m-1"),
+        // Room for a focus outline inside the rail's own scroller (in STICKY, with its overflow).
+        sticky && STICKY[at],
       )}
     >
       {aside}

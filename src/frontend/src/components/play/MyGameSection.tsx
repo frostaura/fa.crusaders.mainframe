@@ -88,10 +88,10 @@ function MyGameSkeleton() {
   return (
     <div className="flex flex-col gap-6" aria-hidden="true">
       <div className="flex items-center gap-4">
-        <Skeleton className="size-28 rounded-full" />
-        <div className="flex flex-1 flex-col gap-2">
+        <Skeleton className="size-28 shrink-0 rounded-full" />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
           <Skeleton className="h-4 w-40 max-w-full" />
-          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-3 w-24 max-w-full" />
         </div>
       </div>
       <Skeleton className="h-6" />

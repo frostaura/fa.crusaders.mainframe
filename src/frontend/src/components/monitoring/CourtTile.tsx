@@ -224,7 +224,7 @@ function DuplicateBoxes({ parts }: { parts: NonNullable<ReturnType<typeof duplic
         {parts.others.length > 0 ? (
           <>
             <p className="font-semibold">{DUPLICATE_BOXES_OTHERS}</p>
-            <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+            <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto [&_:focus-visible]:-outline-offset-2">
               {parts.others.map((line) => <li key={line} className="min-w-0 break-words">{line}</li>)}
             </ul>
           </>

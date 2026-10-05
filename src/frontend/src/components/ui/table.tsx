@@ -33,8 +33,10 @@ export function Table({ className, stickyHeader = false, containerClassName, lab
         data-slot="table-container"
         {...(label ? { role: "region", "aria-label": label, tabIndex: 0 } : {})}
         className={cn(
-          "relative w-full overflow-x-auto", stickyHeader && "overflow-y-auto",
-          label && "rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong",
+          // R16 FE16s2: rings inside the frame are drawn inside their control — a sort button fills
+          // its head's height on the scroller's top edge — and the frame's own is the house outline.
+          "relative w-full overflow-x-auto [&_:focus-visible]:-outline-offset-2", stickyHeader && "overflow-y-auto",
+          label && "rounded-lg focus-visible:-outline-offset-2",
           containerClassName,
         )}
       >

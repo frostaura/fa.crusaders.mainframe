@@ -405,7 +405,7 @@ function DialogHeader({ className, children, ...props }: React.ComponentProps<"d
       ref={ref}
       data-slot="dialog-header"
       className={cn(
-        "relative flex shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain pb-2 pt-[min(1rem,16px)] sm:pt-6",
+        "relative flex shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain scroll-py-2 pb-2 pt-[min(1rem,16px)] sm:pt-6",
         // Its rows never shrink: the header scrolls instead (a floor on the first row let it squeeze).
         "[&>*]:shrink-0", SHEET_GUTTER, HEADER_CAP, CLEAR_OF_CLOSE,
         className,
@@ -480,7 +480,7 @@ function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-body"
-      className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain py-2 [&>*]:shrink-0", SHEET_GUTTER, className)}
+      className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-py-2 py-2 [&>*]:shrink-0", SHEET_GUTTER, className)}
       {...props}
     />
   );

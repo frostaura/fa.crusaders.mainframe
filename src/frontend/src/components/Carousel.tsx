@@ -50,7 +50,7 @@ export function Carousel({ slides, label = "Charts", className }: { slides: Caro
       */}
       <div
         ref={scrollerRef}
-        className="no-scrollbar flex snap-x snap-mandatory overflow-x-auto md:mx-10"
+        className="no-scrollbar flex snap-x snap-mandatory overflow-x-auto md:mx-10 [&_:focus-visible]:-outline-offset-2"
         style={{ scrollbarWidth: "none" }}
       >
         {slides.map((s, i) => (

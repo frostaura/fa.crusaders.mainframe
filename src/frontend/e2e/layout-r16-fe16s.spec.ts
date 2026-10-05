@@ -137,17 +137,35 @@ async function open(page: Page, path: string, options: { width?: number; root?: 
 type Cut = { name: string; by: number; box: string };
 
 /**
- * Clipping boxes in files outside this lane (R16 FE16s), whose cuts this spec measured and reported
- * to their owner rather than fixed: the wallet's chart carousel (`components/Carousel.tsx`) and the
- * admin rail (`components/admin/AdminRail.tsx`). `clipped-focus-scan.test.ts` holds them in its
- * ratchet; delete an entry here when its box is fixed.
+ * The focused control's ring (outline width + offset) against every clipping ancestor's padding
+ * box — only while the control itself is inside that box, so a row scrolled half out of a table is
+ * not a ring cut. The reviewer's probe (R16 L16-1), kept.
  */
-const OTHER_LANES = ["div.no-scrollbar.flex.snap-x", "div.sticky.overflow-y-auto.overscroll-contain"];
+function focusedCut(page: Page): Promise<Cut | null> {
+  return page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || el === document.body) return null;
+    const cs = getComputedStyle(el);
+    const ext = cs.outlineStyle === "none" ? 0 : parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset);
+    const q = el.getBoundingClientRect();
+    const name = `${el.tagName.toLowerCase()} "${(el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 40)}"`;
+    if (ext <= 0) return { name, by: 0, box: "" };
+    for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+      const s = getComputedStyle(a);
+      if (s.overflowX === "visible" && s.overflowY === "visible") continue;
+      const z = a.getBoundingClientRect();
+      const l = z.left + a.clientLeft, t = z.top + a.clientTop, rr = l + a.clientWidth, b = t + a.clientHeight;
+      const inside = q.left >= l - 1 && q.right <= rr + 1 && q.top >= t - 1 && q.bottom <= b + 1;
+      if (!inside) continue;
+      const by = Math.max(l - (q.left - ext), t - (q.top - ext), (q.right + ext) - rr, (q.bottom + ext) - b);
+      if (by > 0.5) return { name, by: Math.round(by * 10) / 10, box: `${a.tagName.toLowerCase()}.${String(a.className).split(" ").slice(0, 4).join(".")}` };
+    }
+    return { name, by: 0, box: "" };
+  });
+}
 
 /**
- * Tabs through the page and measures each focused control's ring (outline width + offset) against
- * every clipping ancestor's padding box — only while the control itself is inside that box, so a
- * row scrolled half out of a table is not a ring cut. The reviewer's probe (R16 L16-1), kept.
+ * Tabs through the page and measures each focused control's ring ({@link focusedCut}).
  */
 async function ringCuts(page: Page, stops = 70): Promise<Cut[]> {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -155,26 +173,7 @@ async function ringCuts(page: Page, stops = 70): Promise<Cut[]> {
   const seen = new Set<string>();
   for (let i = 0; i < stops; i++) {
     await page.keyboard.press("Tab");
-    const r = await page.evaluate(() => {
-      const el = document.activeElement as HTMLElement | null;
-      if (!el || el === document.body) return null;
-      const cs = getComputedStyle(el);
-      const ext = cs.outlineStyle === "none" ? 0 : parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset);
-      const q = el.getBoundingClientRect();
-      const name = `${el.tagName.toLowerCase()} "${(el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 40)}"`;
-      if (ext <= 0) return { name, by: 0, box: "" };
-      for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
-        const s = getComputedStyle(a);
-        if (s.overflowX === "visible" && s.overflowY === "visible") continue;
-        const z = a.getBoundingClientRect();
-        const l = z.left + a.clientLeft, t = z.top + a.clientTop, rr = l + a.clientWidth, b = t + a.clientHeight;
-        const inside = q.left >= l - 1 && q.right <= rr + 1 && q.top >= t - 1 && q.bottom <= b + 1;
-        if (!inside) continue;
-        const by = Math.max(l - (q.left - ext), t - (q.top - ext), (q.right + ext) - rr, (q.bottom + ext) - b);
-        if (by > 0.5) return { name, by: Math.round(by * 10) / 10, box: `${a.tagName.toLowerCase()}.${String(a.className).split(" ").slice(0, 4).join(".")}` };
-      }
-      return { name, by: 0, box: "" };
-    });
+    const r = await focusedCut(page);
     if (!r || seen.has(r.name)) continue;
     seen.add(r.name);
     if (r.by > 0) cuts.push(r);
@@ -195,12 +194,125 @@ test.describe("L16-1 — a ring inside a clipping or scrolling box is not cut", 
         await open(page, path, { width, admin });
         await expect(page.locator(anchor).first()).toBeVisible(ARRIVES);
         await page.waitForTimeout(400);
-        // OTHER_LANES: boxes in files outside this lane, reported and held by the guard's ratchet.
-        const cuts = (await ringCuts(page)).filter((c) => !OTHER_LANES.some((box) => c.box.startsWith(box)));
-        expect(cuts).toEqual([]);
+        // FE16s2: no exceptions left — the chart carousel and the admin rail are inset now.
+        expect(await ringCuts(page)).toEqual([]);
       });
     }
   }
+});
+
+/** Three rows for the members table: its sort heads sit on the scroller's top edge. */
+const MEMBERS = [0, 1, 2].map((i) => ({
+  user_id: `00000000-0000-4000-8000-00000000070${i}`, membership_id: `00000000-0000-4000-8000-00000000071${i}`,
+  full_name: ["Bea Nkosi", "Sipho Dlamini", "Anke de Wet"][i], email: `m${i}@r16.review.test`, membership_number: `MEM-70${i}`,
+  status: "Active", email_verified: true, balance_minutes: 120 + i, created_at: "2026-09-01T08:00:00Z", photo_url: null,
+  is_admin: false, admin_source: null, groups: [],
+}));
+
+/** Keyboard modality, then focus — so `:focus-visible` (the house ring) applies to a programmatic focus. */
+async function keyFocus(page: Page, selector: string, index: number): Promise<Cut | null> {
+  await page.keyboard.press("Shift");
+  const focused = await page.locator(selector).nth(index).evaluate((el: HTMLElement) => {
+    if (el.getClientRects().length === 0) return null; // not drawn at this width: no ring to cut
+    el.focus({ preventScroll: true });
+    // A roving group (Radix's radiogroup) hands its focus on to the checked item: measure that.
+    return document.activeElement?.matches(":focus-visible") ?? false;
+  });
+  if (focused === null) return null;
+  return focused ? focusedCut(page) : { name: `${selector} #${index}`, by: -1, box: "not focus-visible" };
+}
+
+/**
+ * R16 FE16s2 — the clipping boxes that keep the OUTWARD ring and leave it room instead (a primary
+ * button's fill is the ring's colour, so a ring drawn over its edge vanishes). Each is measured
+ * here; `clipped-focus-scan.test.ts` names them in `MEASURED_UNCUT`, or passes them by their room.
+ */
+test.describe("L16-1 measured (FE16s2) — boxes that give the ring room", () => {
+  // Tab stops only: a roving week parks its other days at -1.
+  const FOCUSABLE = ":is(a[href], button:not([disabled]), input, select, [tabindex='0']):not([tabindex='-1'])";
+  for (const [path, width, head] of [
+    ["/wallet/activity", 1280, "[data-range-bar]"],
+    ["/bookings", 390, "[data-day-strip]"],
+  ] as const) {
+    test(`<main>: ${path} at ${width}, ${head} stuck at the scroller's top edge — its controls' rings are whole`, async ({ page }) => {
+      await open(page, path, { width });
+      await expect(page.locator(head)).toBeVisible(ARRIVES);
+      await page.waitForTimeout(400);
+      await page.locator("main#main-content").evaluate((m) => { m.scrollTop = m.scrollHeight; });
+      await expect(page.locator(head)).toHaveAttribute("data-sticks", /.*/, ARRIVES);
+      const count = await page.locator(`${head} :is(${FOCUSABLE})`).count();
+      expect(count, "controls in the stuck head").toBeGreaterThan(0);
+      const cuts: Cut[] = [];
+      for (let i = 0; i < count; i++) {
+        const r = await keyFocus(page, `${head} :is(${FOCUSABLE})`, i);
+        if (r && r.by !== 0) cuts.push(r);
+      }
+      expect(cuts).toEqual([]);
+    });
+  }
+
+  test("dialog: the cancel sheet at 320 / 200 % — header and body rings are whole", async ({ page }) => {
+    const slot = {
+      courtId: "c2", courtNumber: 2, startsAtUtc: tomorrowAt(18), endsAtUtc: tomorrowAt(18, 45), bookingId: BOOKING, isMine: true,
+      ownerUserId: ME, ownerFirstName: "Nomsa", ownerPhotoUrl: null, checkedIn: null, amountChargedMinutes: 45, status: "booked",
+    };
+    const quote = { bookingId: BOOKING, amountChargedMinutes: 45, refundMinutes: 45, penaltyMinutes: 0, penaltyPct: 30,
+      penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false };
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 320, height: 640 });
+    await signIn(page);
+    await serveApi(page, routes([
+      { path: "/api/v1/schedule", body: schedule([slot]) },
+      { path: `/api/v1/bookings/${BOOKING}/cancellation-quote`, body: quote },
+    ]));
+    await page.addInitScript(() => document.addEventListener("DOMContentLoaded", () => { document.documentElement.style.fontSize = "32px"; }));
+    await page.goto(`/bookings?date=${tomorrowAt(10).slice(0, 10)}`);
+    const cell = page.locator("[role=grid]").getByRole("button", { name: /Court 2 at 18:00/ }).first();
+    await expect(cell).toBeVisible(ARRIVES);
+    await cell.click();
+    await expect(page.getByRole("dialog").locator("[data-slot=dialog-body]")).toBeVisible(ARRIVES);
+    await page.waitForTimeout(300);
+    expect(await ringCuts(page, 20)).toEqual([]);
+  });
+
+  test("dropdown: the account menu at 390 / 200 % — every row's ring is whole as the panel scrolls", async ({ page }) => {
+    await open(page, "/wallet", { width: 390, root: 32 });
+    const trigger = page.getByRole("button", { name: "Account menu" });
+    await expect(trigger).toBeVisible(ARRIVES);
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible(ARRIVES);
+    const rows = await menu.getByRole("menuitem").count();
+    const cuts: Cut[] = [];
+    for (let i = 0; i < rows + 1; i++) {
+      const r = await focusedCut(page);
+      if (r && r.by > 0) cuts.push(r);
+      await page.keyboard.press("ArrowDown");
+      await page.waitForTimeout(50);
+    }
+    expect(cuts).toEqual([]);
+  });
+
+  for (const width of [390, 1280]) {
+    test(`ScrollArea + table: /admin/members at ${width} — the sort heads' rings are whole`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.setViewportSize({ width, height: 800 });
+      await signIn(page);
+      // First match wins: ahead of adminRoutes' own empty list.
+      await serveApi(page, [{ path: "/api/v1/admin/members/", body: MEMBERS }, ...adminRoutes()]);
+      await page.goto("/admin/members");
+      await expect(page.locator("[data-member-row]").first()).toBeVisible(ARRIVES);
+      await page.waitForTimeout(400);
+      expect(await ringCuts(page, 60)).toEqual([]);
+    });
+  }
+
+  test("split view: /bookings/invites at 1280 — the sticky list's rings are whole", async ({ page }) => {
+    await open(page, "/bookings/invites", { width: 1280 });
+    await page.waitForTimeout(600);
+    expect(await ringCuts(page, 40)).toEqual([]);
+  });
 });
 
 test("L16-2 — /wallet/buy at 320 / 200 %, a package picked: the pay bar stays under a third of the screen", async ({ page }) => {
@@ -304,8 +416,8 @@ test.describe("L16-5 — a card in the Bookings rail's strip is never wider than
 
 /**
  * L16-3's sweep: every member and admin route at 320 / 200 % with every read but who-am-I held, so
- * each page sits on its loading state. `FE16S_SWEEP=1` runs it (it is the slow half); the named
- * cases above are the ones that run every time.
+ * each page sits on its loading state. It runs every time (R16 FE16s2: all 31 clean, the opt-in
+ * `FE16S_SWEEP` switch gone).
  */
 const SWEEP = ["/my-code", "/bookings", "/bookings/invites", `/bookings/${BOOKING}`, "/inbox", "/wallet", "/wallet/buy", "/wallet/activity",
   "/profile", "/profile/results", "/admin", "/admin/members", `/admin/members/${ME}`, `/admin/members/${ME}/wallet`,
@@ -314,7 +426,6 @@ const SWEEP = ["/my-code", "/bookings", "/bookings/invites", `/bookings/${BOOKIN
   "/admin/monitoring/faults", "/admin/monitoring/changes", "/admin/schedules", "/admin/courts", "/admin/settings", "/admin/webhooks"];
 
 test.describe("L16-3 sweep — every route's loading state at 320 / 200 %", () => {
-  test.skip(!process.env.FE16S_SWEEP, "FE16S_SWEEP=1 runs the sweep");
   for (const path of SWEEP) {
     test(path, async ({ page }) => {
       await open(page, path, { width: 320, root: 32, admin: true, hang: /^\/api\/v1\/(?!whoami$|me\/profile$|wallet$|me\/notifications\/unread-count$|me\/invites$|me\/door$|me\/play\/celebrations$|admin\/monitoring\/summary$|admin\/play\/results\/disputed\/count$)/ });
@@ -324,9 +435,13 @@ test.describe("L16-3 sweep — every route's loading state at 320 / 200 %", () =
         const past = [...document.querySelectorAll("main [data-slot='skeleton']")]
           .filter((el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
           .map((el) => `${el.parentElement?.className.slice(0, 50)} > ${el.className.slice(0, 40)}`);
-        return { doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, main: main.scrollWidth - main.clientWidth, past };
+        // Not only skeletons: whatever runs past the scroller's edge is named, so a failure says where.
+        const edge = main.getBoundingClientRect().left + main.clientWidth + 1;
+        const over = main.scrollWidth <= main.clientWidth ? [] : [...main.querySelectorAll("*")].filter((el) => el.getBoundingClientRect().right > edge && el.getBoundingClientRect().width > 0)
+          .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 90)}`).slice(0, 3);
+        return { doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, main: main.scrollWidth - main.clientWidth, past, over };
       });
-      expect(m, "sideways while loading").toEqual({ doc: 0, main: 0, past: [] });
+      expect(m, "sideways while loading").toEqual({ doc: 0, main: 0, past: [], over: [] });
     });
   }
 });

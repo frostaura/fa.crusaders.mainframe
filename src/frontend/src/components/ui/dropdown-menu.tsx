@@ -27,11 +27,13 @@ const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
  * at what Radix measures is left beside the trigger, and the panel scrolls (roving focus scrolls
  * the highlighted row into view), so the last row — Sign out — is always reachable.
  */
-const PANEL = [
-  "z-popover min-w-[min(12rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] rounded-xl border border-border bg-bg-raised p-1",
-  "max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overflow-x-hidden overscroll-contain",
-  "text-text-primary shadow-md animate-pop-in data-[state=closed]:animate-pop-out motion-reduce:animate-none",
-].join(" ");
+// R16 FE16s2: ONE string — the box's room for a row's ring (p-1 = the ring's 4px, kept in view when
+// the roving highlight scrolls a row in: scroll-py-1) written with the overflow it answers, and no
+// join, so the entry chunk did not grow by it.
+const PANEL =
+  "z-popover min-w-[min(12rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] rounded-xl border border-border bg-bg-raised " +
+  "max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overflow-x-hidden overscroll-contain p-1 scroll-py-1 " +
+  "text-text-primary shadow-md animate-pop-in data-[state=closed]:animate-pop-out motion-reduce:animate-none";
 
 const ROW = [
   "no-lift relative flex min-h-touch cursor-default select-none items-center gap-2 rounded-lg border border-transparent [&>svg]:size-4 [&>svg]:shrink-0",

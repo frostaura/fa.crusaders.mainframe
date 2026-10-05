@@ -159,7 +159,7 @@ export function AdminRail({ pathname, counts }: { pathname: string; counts: Badg
       {/* A div, not <aside> (F3.22): the rail renders inside <main>, where a complementary
           landmark is misplaced (axe landmark-complementary-is-top-level). The <nav> is the landmark. */}
       <div
-        className="sticky overflow-y-auto overscroll-contain"
+        className="sticky overflow-y-auto overscroll-contain [&_:focus-visible]:-outline-offset-2"
         style={{ top: "var(--app-content-top, 0px)", maxHeight: RAIL_MAX_HEIGHT }}
       >
         <nav aria-label="Admin" className={cn("flex flex-col gap-4 pb-10 pt-8", ADMIN_RAIL_INSET)}>

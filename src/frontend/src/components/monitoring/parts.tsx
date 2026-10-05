@@ -166,10 +166,12 @@ export function CardListSkeleton({ rows = 3, className }: { rows?: number; class
 /** A grid of tiles, loading — the control board's and the doors overview's shape. */
 export function TileGridSkeleton({ tiles = 3, className }: { tiles?: number; className?: string }) {
   return (
-    <div className={cn("grid gap-4 sm:grid-cols-2 xl:grid-cols-3", className)}>
+    // `minmax(0,1fr)`, not the implicit `auto` track: that one is floored at a tile's widest
+    // skeleton, and ran a 320 / 200 % phone 2px sideways while the board loaded (R16 L16-3).
+    <div className={cn("grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 xl:grid-cols-3", className)}>
       {Array.from({ length: tiles }, (_, i) => (
-        <div key={i} className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4">
-          <Skeleton className="h-5 w-28" />
+        <div key={i} className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4">
+          <Skeleton className="h-5 w-28 max-w-full" />
           <Skeleton className="h-20 w-full" />
           <Skeleton className="h-4 w-2/3" />
           <Skeleton className="h-4 w-1/2" />

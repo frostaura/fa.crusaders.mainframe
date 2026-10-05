@@ -108,7 +108,12 @@ export function ScrollArea(props: ScrollAreaProps) {
         role="region"
         aria-label={label}
         className={cn(
-          "h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong rounded-lg",
+          // R16 FE16s2: the house outline, drawn inside — a ring-2 shadow around the region was cut
+          // by a clipping frame round it (the members table's card) — and every ring inside the
+          // region drawn inside its control, so one at the region's edge is not cut either. Not a
+          // control that draws its OWN outline (`.outline`, WeekPainter's roving cell): inset, it
+          // landed on the cell's inset ring and a focused allowed cell looked like any other.
+          "h-full rounded-lg focus-visible:-outline-offset-2 [&_:focus-visible:not(.outline)]:-outline-offset-2",
           scrolls ? "overflow-auto" : "overflow-visible",
         )}
       >

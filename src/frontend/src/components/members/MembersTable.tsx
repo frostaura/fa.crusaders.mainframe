@@ -281,7 +281,8 @@ function SortHead({ label, k, sort, onSort, className, align = "left" }: {
         title={label}
         onClick={() => onSort(k)}
         className={cn(
-          "no-lift inline-flex min-h-touch max-w-full items-center gap-1 uppercase tracking-overline hover:text-text-primary",
+          // `-mx-1 px-1` (R16 FE16s2): the frame insets this ring, and inset it ran over the label's first letter.
+          "no-lift -mx-1 inline-flex min-h-touch max-w-full items-center gap-1 px-1 uppercase tracking-overline hover:text-text-primary",
           align === "right" && "flex-row-reverse",
           active && "text-text-primary",
         )}
@@ -455,11 +456,11 @@ function DateCell({ row, dateColumn, now }: { row: MemberRow; dateColumn: "joine
 /** Rows shaped like the rows that are coming, while the first read is out. */
 export function MembersTableSkeleton() {
   return (
-    <div className="grid gap-3" aria-hidden="true">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3" aria-hidden="true">
       {[0, 1, 2, 3, 4].map((i) => (
         <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-bg-surface p-3">
-          <Skeleton className="size-10 rounded-full" />
-          <div className="grid flex-1 gap-2">
+          <Skeleton className="size-10 shrink-0 rounded-full" />
+          <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-2">
             <Skeleton className="h-4 w-40 max-w-full" />
             <Skeleton className="h-3 w-56 max-w-full" />
           </div>
