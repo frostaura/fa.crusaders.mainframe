@@ -523,6 +523,10 @@ export const CHANGE_SPLIT = {
   cancel: "Cancel",
   done: "The split is changed.",
   doneAskedAgain: "The split is changed. Anyone whose share went up has been asked again.",
+  /** R14 J14-9 — seats the club accepted without asking agreed to nothing: asked, not "again". */
+  doneAskedFirst: "The split is changed. Anyone who hasn't agreed a share yet has been asked for theirs.",
+  doneAskedBoth: "The split is changed. Anyone whose share went up has been asked again, and anyone who hasn't "
+    + "agreed a share yet has been asked for theirs.",
   action: "change the split",
   /** R5 I5-2 — said in place of Cancel while the save is on its way, and again on each refused way out. */
   sending: "Saving the split — waiting for the club. This stays open until it answers.",
@@ -893,11 +897,15 @@ export const INVITES_COPY = {
   toInvites: "See your invites",
   statusWaiting: "Waiting for your answer",
   statusAskedAgain: "Your share went up — asked again",
+  /** R14 J14-9 — the club accepted the seat without asking: nothing agreed, so nothing "went up". */
+  statusAskedFirst: "The club added you — your share needs a yes",
   sheetTitle: "Join this game?",
   sheetDescription: "Check your share, then say yes or no.",
   linkTitle: "You're invited",
   /** R4 M4-8 — a seat that already said yes, asked again because its share went up. */
   askedAgainTitle: "Your share went up",
+  /** R14 J14-9 — the heading for a seat the club accepted without asking. */
+  askedFirstTitle: "The club added you to this game",
   court: "Court",
   when: "When",
   organiser: "Booked by",
@@ -1000,6 +1008,11 @@ export function acceptedUnpaidLine(toPay: number): string {
 }
 
 /** R4 M4-8 — "Sam changed the split: your share is now 30 min. Check it and say yes again." */
+/** R14 J14-9 — the line under `askedFirstTitle`: the share asked for, the first time. */
+export function askedFirstLine(share: number): string {
+  return `The club has asked you for ${minutesSpoken(share)} — check it and say yes.`;
+}
+
 export function askedAgainLine(organiser: string, share: number): string {
   return `${organiser} changed the split: your share is now ${minutesSpoken(share)}. Check it and say yes again.`;
 }

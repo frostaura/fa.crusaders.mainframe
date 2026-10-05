@@ -3,7 +3,7 @@ import { UnsureOutcome } from "@/lib/bookingOutcome";
 import { clubClock } from "@/lib/clubClock";
 import type { Invite, PartnerCap } from "@/lib/playersApi";
 import {
-  INVITE_REFUSAL, INVITE_UNSURE, INVITES_COPY, PLAYERS_UNSURE, acceptedUnpaidLine, askedAgainLine, firstName, invitedLine,
+  INVITE_REFUSAL, INVITE_UNSURE, INVITES_COPY, PLAYERS_UNSURE, acceptedUnpaidLine, askedAgainLine, askedFirstLine, firstName, invitedLine,
   playersRefusal, playersWhen,
 } from "@/lib/playersCopy";
 
@@ -14,8 +14,20 @@ import {
 
 export type InviteTone = "info" | "warning" | "brand";
 
-/** Where the seat stands, as one line: waiting · asked again · accepted with something to pay. */
-export function inviteStatus(invite: Invite): { text: string; tone: InviteTone } {
+/**
+ * R14 J14-9 — the invite as the server may send it: `consented_minutes` (what the seat last said yes
+ * to; BE asked to add it). 0 means the club accepted the seat without asking — nothing was agreed, so
+ * nothing "went up". Absent (an older server): read as agreed, the words of before.
+ */
+type InviteWire = Invite & { consented_minutes?: number };
+
+function neverAgreed(invite: InviteWire): boolean {
+  return invite.needs_consent && invite.consented_minutes === 0;
+}
+
+/** Where the seat stands, as one line: waiting · asked (again) · accepted with something to pay. */
+export function inviteStatus(invite: InviteWire): { text: string; tone: InviteTone } {
+  if (neverAgreed(invite)) return { text: INVITES_COPY.statusAskedFirst, tone: "warning" };
   if (invite.needs_consent) return { text: INVITES_COPY.statusAskedAgain, tone: "warning" };
   if (invite.status === "accepted") return { text: acceptedUnpaidLine(invite.to_pay_minutes), tone: "info" };
   return { text: INVITES_COPY.statusWaiting, tone: "brand" };
@@ -25,8 +37,11 @@ export function inviteStatus(invite: Invite): { text: string; tone: InviteTone }
  * R4 M4-8 — the heading and the line under it. A seat that already said yes and is asked again
  * (its share went up) is not "invited": it reads "Your share went up" and names the new share.
  */
-export function inviteHeading(invite: Invite, invitedTitle: string): { title: string; line: string } {
+export function inviteHeading(invite: InviteWire, invitedTitle: string): { title: string; line: string } {
   const organiser = organiserName(invite);
+  if (invite.status === "accepted" && neverAgreed(invite)) {
+    return { title: INVITES_COPY.askedFirstTitle, line: askedFirstLine(invite.share_minutes) };
+  }
   if (invite.status === "accepted" && invite.needs_consent) {
     return { title: INVITES_COPY.askedAgainTitle, line: askedAgainLine(organiser, invite.share_minutes) };
   }

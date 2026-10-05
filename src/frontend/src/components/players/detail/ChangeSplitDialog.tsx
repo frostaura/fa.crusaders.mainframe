@@ -57,6 +57,21 @@ function useSplitEditor(detail: BookingDetail): SplitEditor {
   };
 }
 
+/**
+ * R14 J14-9 — who the change asked, in words that are true of them: a seat that had agreed to less is
+ * asked AGAIN; one the club accepted without asking (nothing agreed, read off the booking as it stood)
+ * is asked for its share — never "went up".
+ */
+function splitDoneWords(detail: BookingDetail, shares: readonly { participant_id: string; needs_consent: boolean }[]): string {
+  const agreed = (id: string) => (detail.players.find((p) => p.participant_id === id)?.consented_minutes ?? 1) > 0;
+  const asked = shares.filter((s) => s.needs_consent);
+  const again = asked.some((s) => agreed(s.participant_id));
+  const first = asked.some((s) => !agreed(s.participant_id));
+  if (again && first) return CHANGE_SPLIT.doneAskedBoth;
+  if (first) return CHANGE_SPLIT.doneAskedFirst;
+  return again ? CHANGE_SPLIT.doneAskedAgain : CHANGE_SPLIT.done;
+}
+
 export function ChangeSplitDialog(props: Props) {
   const { detail, onClose, onDone, onStale, onBusyChange, refused = 0 } = props;
   const editor = useSplitEditor(detail);
@@ -74,8 +89,7 @@ export function ChangeSplitDialog(props: Props) {
     {
       success: ({ value, proven }) => {
         onBusyChange?.(false); // answered: the close that follows is not a way out mid-flight
-        const askedAgain = value.shares.some((s) => s.needs_consent);
-        const text = askedAgain ? CHANGE_SPLIT.doneAskedAgain : CHANGE_SPLIT.done;
+        const text = splitDoneWords(detail, value.shares);
         onDone({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
         void refresh({ expectSelf: true });
       },

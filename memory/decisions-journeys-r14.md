@@ -27,8 +27,11 @@ Earlier: `decisions-backend-r13a.md` (given minutes are not sold), `decisions-fr
 - **"Your share went up" needs something agreed first** (J14-9): `needs_consent` with
   `consented_minutes > 0` → `askedAgain`; with 0 (the club accepted the seat without asking) →
   `DETAIL_PLAYER.askedFirst`: "The club has asked you for 12 minutes — review it to say yes."
-  Not changed (other lanes' files): the seat chip "Asked again" and the invites page's
-  `askedAgainTitle` / `statusAskedAgain` say the same for a never-agreed seat.
+  The whole class keys on consent: invite card / heading / title (`inviteFacts.neverAgreed` →
+  `statusAskedFirst`, `askedFirstTitle`, `askedFirstLine`; reads optional `consented_minutes`, which
+  BE was asked to add to the invite view — absent = old words); the change-split notice
+  (`splitDoneWords`: again / first / both, consent read off the booking before the change). The seat
+  chip and money row were already right via `statusKey` → `not_agreed`; pinned, not changed.
 - **One first-result badge, reworded, not split** (J14-11): `first_result` is earned by the first
   confirmed result the member played in, recording OR confirming (`BadgeRules`). Description:
   "Your first match result is on the record." Splitting would need a second rule, a catalogue
@@ -36,4 +39,4 @@ Earlier: `decisions-backend-r13a.md` (given minutes are not sold), `decisions-fr
   §5.6's table still has the old sentence — an integrator doc delta.
 - Tests (each seen red first): `R14DailyGivenMinutesTests`, `R14BadgeWordsTests`,
   `DeskSaleHttpTests.A_sale_recorded_at_no_rand_…`, `Charts.r14.test.tsx`, `AdminReports.test.tsx`
-  (R14 block), `SellPackageSheet.r14.test.tsx`, `players/__tests__/detailR14.test.tsx`.
+  (R14 block), `SellPackageSheet.r14.test.tsx`, `players/__tests__/detailR14.test.tsx`, `consentWordsR14.test.tsx`.
