@@ -289,26 +289,27 @@ function BarRow(props: {
   return (
     <>
     {/*
-      `justify-end` and the bell's own `ml-auto` (P11): the bell is a ROW item, not one of the
-      actions, so that when large text wraps the row it stays up beside the crest and the
-      chip and avatar drop to the next line together, right-aligned — two lines, not three.
-      On one line the bell's auto margin takes the free space and the actions follow it.
-      V5-3: it pulls the chip closer by 0.75rem, not 1rem — at 1rem the chip sat OVER the
-      bell's box, and over the count hanging off its glyph.
+      R13 L13-3 — the bell, the chip and the avatar are ONE group, pushed right by its own
+      `ml-auto`: if the row ever wraps they go together, never the bell alone top-right with the
+      chip and the avatar hung under it (P11 kept the bell up beside the crest; at 1536–1920 px
+      and 200 % text that read as a stray bell, not as a row). An admin's tabs join the bar only
+      where the whole row fits (PrimaryNav `INLINE`), so at large text the bar stays one row.
     */}
     <div className={frame.header}>
       <div data-app-crest="" className={frame.crest}>
         <CrestLink to={memberChrome ? LANDING_PATH : "/"} />
       </div>
       {memberChrome ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
-      {/*
-        P5-6 (review round 5) — for the member this phone confirmed, not only once the club has
-        said so again: on one bar of signal the check is out for many seconds, and the bell,
-        the chip and Sign out went with it while the page and the tab bar were already drawn.
-      */}
-      {memberChrome ? <NotificationBell className="ml-auto @[44rem]/appbar:-mr-3" /> : null}
-      <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !memberChrome && "ml-auto")}>
-        {memberChrome ? <><MinutesChip /><AccountMenu /></> : null}
+      <div data-app-header-actions="" className="ml-auto flex min-w-0 items-center justify-end gap-2">
+        {/*
+          P5-6 (review round 5) — for the member this phone confirmed, not only once the club has
+          said so again: on one bar of signal the check is out for many seconds, and the bell,
+          the chip and Sign out went with it while the page and the tab bar were already drawn.
+        */}
+        {/* V5-3: on the wide bar the bell sits against the chip (the group's 0.5rem pulled back), as it
+            did beside the actions before they were one group — 768 px holds the admin's whole row
+            with ~8px to spare. z-raised keeps its count over the chip. */}
+        {memberChrome ? <><NotificationBell className="@[44rem]/appbar:-mr-2" /><MinutesChip /><AccountMenu /></> : null}
         {anonymous ? (
           <Button asChild variant="outline" size="sm"><Link to="/login">Sign in</Link></Button>
         ) : null}

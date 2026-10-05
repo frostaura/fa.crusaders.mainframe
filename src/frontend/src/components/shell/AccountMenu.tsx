@@ -200,11 +200,14 @@ function WalletItem({ onSelect }: { onSelect: () => void }) {
   const { figures } = useChipBalance();
   const shown = figures.shown;
   return (
-    <DropdownMenuItem asChild onSelect={onSelect}>
+    // R13 L13-2: the figure WRAPS under "Wallet" when the row cannot hold both (a 320 phone at
+    // 200 % text: the menu ended at 296 and "2 h 45 min" ran to 320, clipped). `flex-wrap` with the
+    // figure's `ml-auto` keeps it right-aligned on its own line; `py-2` so the two lines breathe.
+    <DropdownMenuItem asChild onSelect={onSelect} className="flex-wrap py-2">
       <Link to={walletHref(shown)}>
         <Wallet size={16} aria-hidden="true" className="text-text-muted" />
         Wallet{" "}
-        <span className="ml-auto whitespace-nowrap font-semibold tabular-nums">
+        <span data-wallet-figure="" className="ml-auto max-w-full whitespace-nowrap font-semibold tabular-nums">
           {/* R6 X6-2: the figure is heard in words — "1 hour 30 minutes", never "1 h 30 min". */}
           {shown === null
             ? <><span aria-hidden="true">— min</span><span className="sr-only">{NO_FIGURE_SPOKEN}</span></>

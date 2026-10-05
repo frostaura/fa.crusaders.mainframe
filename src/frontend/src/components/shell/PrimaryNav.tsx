@@ -13,7 +13,8 @@ import type { AdminAttention } from "@/lib/adminAttention";
  *   equal-width tabs (24px icon, filled when active, over an xs label) plus the home-indicator
  *   safe area. Its height is published as <code>--app-bottom-bar-height</code> so the page, the
  *   toast strip and the multiselect ActionBar all sit above it.</li>
- *   <li><b>Where the top bar is 44rem wide or more</b> it is inline in the top bar: 44px pills, icon
+ *   <li><b>Where the top bar is 44rem wide or more</b> (61rem from xl for an admin's four tabs, over the rail — `INLINE`,
+ *   R13 L13-3) it is inline in the top bar: 44px pills, icon
  *   + label. V5-3 (review round 5): this was the viewport's `md`, and at 200 % text from 768 to
  *   1440 px the tabs did not fit beside the crest and the actions — the crest stood alone on a row,
  *   the icons were squeezed to slivers. The bar's own width in rem (`@container/appbar` in
@@ -32,6 +33,7 @@ export function PrimaryNav({ isAdmin, attention }: { isAdmin: boolean; attention
   const ref = useRef<HTMLElement>(null);
   usePublishBottomBarHeight(ref);
   const items = destinationsFor(isAdmin);
+  const inline = isAdmin ? INLINE.admin : INLINE.member;
   return (
     <nav
       ref={ref}
@@ -44,19 +46,19 @@ export function PrimaryNav({ isAdmin, attention }: { isAdmin: boolean; attention
         // (Written as a raw @container variant: the plugin's `@[44rem]/appbar:` emits nothing for
         // a `[container-type:…]` arbitrary property.)
         "@container/tabbar fixed inset-x-0 bottom-0 z-chrome border-t border-border bg-bg-surface shadow-md",
-        "[@container_appbar_(min-width:44rem)]:![container-type:normal] @[44rem]/appbar:static @[44rem]/appbar:z-auto @[44rem]/appbar:min-w-0 @[44rem]/appbar:border-0 @[44rem]/appbar:bg-transparent @[44rem]/appbar:shadow-none",
+        inline.nav,
       )}
       style={{ paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)" }}
     >
-      <ul style={{ "--tab-count": items.length } as React.CSSProperties} className="grid auto-cols-fr grid-flow-col @[44rem]/appbar:flex @[44rem]/appbar:items-center @[44rem]/appbar:gap-1">
+      <ul style={{ "--tab-count": items.length } as React.CSSProperties} className={cn("grid auto-cols-fr grid-flow-col", inline.list)}>
         {items.map((item) => (
           <li key={item.to} className="min-w-0">
-            <PrimaryLink item={item} badge={item.adminOnly ? attention : null} />
+            <PrimaryLink item={item} inline={inline} badge={item.adminOnly ? attention : null} />
           </li>
         ))}
       </ul>
       {/* The home indicator's inset, on the phone bar only — it is 0 on a desktop anyway. */}
-      <div aria-hidden="true" className="@[44rem]/appbar:hidden" style={{ height: "env(safe-area-inset-bottom)" }} />
+      <div aria-hidden="true" className={inline.spacer} style={{ height: "env(safe-area-inset-bottom)" }} />
     </nav>
   );
 }
@@ -64,10 +66,63 @@ export function PrimaryNav({ isAdmin, attention }: { isAdmin: boolean; attention
 const LINK = [
   "no-lift group relative flex min-h-tabbar flex-col items-center justify-center gap-1 px-0.5 text-xs font-medium",
   "transition-colors duration-fast ease-standard motion-reduce:transition-none",
-  "@[44rem]/appbar:min-h-touch @[44rem]/appbar:flex-row @[44rem]/appbar:gap-2 @[44rem]/appbar:rounded-lg @[44rem]/appbar:px-2 @[44rem]/appbar:text-sm @[56rem]/appbar:px-3",
-  // The label's size (TAB_LABEL): capped by the column on a phone, the row's text-sm inline.
-  "[--tab-label-size:min(0.75rem,5vw)] @[44rem]/appbar:[--tab-label-size:0.875rem]",
+  // The label's size (TAB_LABEL): capped by the column on a phone — and inline too. A container
+  // variant setting this property never won: Tailwind emits an arbitrary property AFTER the
+  // plugin's `@[…]/appbar:` rules, so inline labels have always been 12px (measured, R13). The
+  // dead override is gone rather than kept as a promise; every one-row width was measured at 12px.
+  "[--tab-label-size:min(0.75rem,5vw)]",
 ].join(" ");
+
+/**
+ * Where the tabs join the top bar, by the BAR's width in rem (V5-3) — and per tab set (R13 L13-3).
+ *
+ * <p>
+ * A member's three tabs fit beside the crest, the bell, the chip and the avatar from 44rem. An
+ * admin's four, with the Admin count, did not: on /admin from xl the crest sits in a box as wide
+ * as the rail (24vw at large text), and at 1536–1920 px with 200 % text (1280 px with 150 %) it
+ * wrapped, and the bell stood alone top-right while the chip and the avatar hung under it. Swept
+ * in Chromium (768–1920 px, 16–32 px text, a "99+" count, 42 unread and a "208 h 20 min" chip):
+ * from xl the row needed more than its bar up to 58rem of content (1440 px / 24 px: 58.4 in 58),
+ * and the club's name joining the crest at 60rem makes 60–61rem the tightest fit (1280 / 20 px:
+ * 60.3 in 62). So from xl an admin's tabs join the bar at 61rem; under that they are the bottom
+ * tab bar, as on a phone, and the top bar is one row. Below xl there is no rail and the admin's
+ * switch stays the member's 44rem (768 px at normal text holds the whole row — `app-chrome`).
+ * Not per route: from xl the tabs never jump between the top and the bottom as an admin goes from
+ * My Code to the console.
+ * </p>
+ *
+ * <p>
+ * Every class whole (Tailwind's scanner never sees one built from parts). The container-type
+ * override is the raw variant: the plugin's `@[…]/appbar:` emits nothing for an arbitrary
+ * `[container-type:…]` (L12-1).
+ * </p>
+ */
+const INLINE = {
+  member: {
+    nav: "[@container_appbar_(min-width:44rem)]:![container-type:normal] @[44rem]/appbar:static @[44rem]/appbar:z-auto @[44rem]/appbar:min-w-0 @[44rem]/appbar:border-0 @[44rem]/appbar:bg-transparent @[44rem]/appbar:shadow-none",
+    list: "@[44rem]/appbar:flex @[44rem]/appbar:items-center @[44rem]/appbar:gap-1",
+    link: "@[44rem]/appbar:min-h-touch @[44rem]/appbar:flex-row @[44rem]/appbar:gap-2 @[44rem]/appbar:rounded-lg @[44rem]/appbar:px-2 @[44rem]/appbar:text-sm @[56rem]/appbar:px-3",
+    active: "@[44rem]/appbar:bg-accent-soft",
+    idle: "@[44rem]/appbar:hover:bg-bg-muted",
+    pill: "@[44rem]/appbar:contents",
+    glyph: "@[44rem]/appbar:size-5",
+    label: "@[44rem]/appbar:whitespace-nowrap",
+    spacer: "@[44rem]/appbar:hidden",
+  },
+  admin: {
+    nav: "max-xl:[@container_appbar_(min-width:44rem)]:![container-type:normal] xl:[@container_appbar_(min-width:61rem)]:![container-type:normal] max-xl:@[44rem]/appbar:static xl:@[61rem]/appbar:static max-xl:@[44rem]/appbar:z-auto xl:@[61rem]/appbar:z-auto max-xl:@[44rem]/appbar:min-w-0 xl:@[61rem]/appbar:min-w-0 max-xl:@[44rem]/appbar:border-0 xl:@[61rem]/appbar:border-0 max-xl:@[44rem]/appbar:bg-transparent xl:@[61rem]/appbar:bg-transparent max-xl:@[44rem]/appbar:shadow-none xl:@[61rem]/appbar:shadow-none",
+    list: "max-xl:@[44rem]/appbar:flex xl:@[61rem]/appbar:flex max-xl:@[44rem]/appbar:items-center xl:@[61rem]/appbar:items-center max-xl:@[44rem]/appbar:gap-1 xl:@[61rem]/appbar:gap-1",
+    link: "max-xl:@[44rem]/appbar:min-h-touch xl:@[61rem]/appbar:min-h-touch max-xl:@[44rem]/appbar:flex-row xl:@[61rem]/appbar:flex-row max-xl:@[44rem]/appbar:gap-2 xl:@[61rem]/appbar:gap-2 max-xl:@[44rem]/appbar:rounded-lg xl:@[61rem]/appbar:rounded-lg max-xl:@[44rem]/appbar:px-2 max-xl:@[56rem]/appbar:px-3 xl:@[61rem]/appbar:px-3 max-xl:@[44rem]/appbar:text-sm xl:@[61rem]/appbar:text-sm",
+    active: "max-xl:@[44rem]/appbar:bg-accent-soft xl:@[61rem]/appbar:bg-accent-soft",
+    idle: "max-xl:@[44rem]/appbar:hover:bg-bg-muted xl:@[61rem]/appbar:hover:bg-bg-muted",
+    pill: "max-xl:@[44rem]/appbar:contents xl:@[61rem]/appbar:contents",
+    glyph: "max-xl:@[44rem]/appbar:size-5 xl:@[61rem]/appbar:size-5",
+    label: "max-xl:@[44rem]/appbar:whitespace-nowrap xl:@[61rem]/appbar:whitespace-nowrap",
+    spacer: "max-xl:@[44rem]/appbar:hidden xl:@[61rem]/appbar:hidden",
+  },
+} as const;
+
+type Inline = (typeof INLINE)[keyof typeof INLINE];
 
 /**
  * The icon's backdrop: a pill behind the active tab's icon on the phone. From `md` it is
@@ -108,7 +163,7 @@ const PILL_BOX = { height: 32, maxWidth: 56 } as const;
 
 const ICON_PILL = [
   "relative flex w-full items-center justify-center rounded-full transition-colors duration-fast ease-standard",
-  "motion-reduce:transition-none @[44rem]/appbar:contents",
+  "motion-reduce:transition-none",
 ].join(" ");
 
 /**
@@ -121,7 +176,7 @@ const ICON_PILL = [
  */
 const TAB_LABEL = { fontSize: "var(--tab-label-size)" } as const;
 
-function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<AdminAttention, "total" | "label"> | null }) {
+function PrimaryLink({ item, inline, badge }: { item: PrimaryDestination; inline: Inline; badge: Pick<AdminAttention, "total" | "label"> | null }) {
   const { to, label, icon: Glyph } = item;
   return (
     <NavLink
@@ -131,14 +186,15 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
       {...intentProps(to)}
       className={({ isActive }) => cn(
         LINK,
-        isActive ? "font-semibold text-accent-strong @[44rem]/appbar:bg-accent-soft" : "text-text-secondary hover:text-text-primary @[44rem]/appbar:hover:bg-bg-muted",
+        inline.link,
+        isActive ? cn("font-semibold text-accent-strong", inline.active) : cn("text-text-secondary hover:text-text-primary", inline.idle),
       )}
     >
       {({ isActive }) => (
         <>
-          <span className={cn(ICON_PILL, isActive && "bg-accent-soft")} style={PILL_BOX}>
+          <span className={cn(ICON_PILL, inline.pill, isActive && "bg-accent-soft")} style={PILL_BOX}>
             {/* shrink-0 (V5-3): inline, the icon is the link's own flex item, and a long label squeezed it to a sliver. */}
-            <Glyph size={24} weight={isActive ? "fill" : "regular"} aria-hidden="true" className="shrink-0 @[44rem]/appbar:size-5" />
+            <Glyph size={24} weight={isActive ? "fill" : "regular"} aria-hidden="true" className={cn("shrink-0", inline.glyph)} />
             {badge ? <CountBadge attention={badge} /> : null}
           </span>
           {/*
@@ -148,7 +204,7 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
             its neighbours' words are shorter) rather than losing letters. The bar grows by the
             label's lines and publishes its new height, so nothing sits under it.
           */}
-          <span data-tab-label="" className="whitespace-normal break-normal text-center leading-tight @[44rem]/appbar:whitespace-nowrap" style={TAB_LABEL}>{label}</span>
+          <span data-tab-label="" className={cn("whitespace-normal break-normal text-center leading-tight", inline.label)} style={TAB_LABEL}>{label}</span>
         </>
       )}
     </NavLink>
@@ -181,8 +237,9 @@ function CountBadge({ attention }: { attention: Pick<AdminAttention, "total" | "
         // L12-1: 16 px on the phone bar (14 px for "99+"), so a count kept inside a 320 px
         // screen's last tab still leaves three quarters of the shield showing; inline, 20 px.
         text.length > 2 ? "text-[min(0.75rem,14px)]" : "text-[min(0.75rem,16px)]",
-        "bg-danger-solid @[44rem]/appbar:text-[min(0.75rem,20px)] font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
-        "@[44rem]/appbar:static @[44rem]/appbar:order-last @[44rem]/appbar:ml-0 @[44rem]/appbar:ring-0",
+        "bg-danger-solid font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
+        // Inline only where the ADMIN's tabs are (R13 L13-3, `INLINE.admin`): only an admin has this tab.
+        "max-xl:@[44rem]/appbar:text-[min(0.75rem,20px)] xl:@[61rem]/appbar:text-[min(0.75rem,20px)] max-xl:@[44rem]/appbar:static xl:@[61rem]/appbar:static max-xl:@[44rem]/appbar:order-last xl:@[61rem]/appbar:order-last max-xl:@[44rem]/appbar:ml-0 xl:@[61rem]/appbar:ml-0 max-xl:@[44rem]/appbar:ring-0 xl:@[61rem]/appbar:ring-0",
       )}
       style={badgeBox(text)}
     >
