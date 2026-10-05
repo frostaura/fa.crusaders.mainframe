@@ -17,36 +17,55 @@ export type SeatActions = (player: DetailPlayer) => ReactNode;
 type Props = { detail: BookingDetail; actions?: SeatActions };
 
 export function PlayerChips({ detail, actions }: Props) {
-  const seats = positions(detail);
   const former = formerPlayers(detail);
   const mine = detail.viewer.participant_id;
   const cancelled = isCancelled(detail);
+  const teams = drawnTeams(detail);
+  const lone = teams.length === 1;
   return (
     <div className="flex flex-col gap-6">
       {/* R8 L8-3 — `grid-cols-1`, not an implicit column: that one is floored at its longest word and
-          pushed the page 15px sideways at 320 / 200 % (gotchas-frontend-layout). */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Team label={DETAIL_COPY.teamA} seats={seats.slice(0, 2)} mine={mine} actions={actions} cancelled={cancelled} players={detail.players} />
-        <Team label={DETAIL_COPY.teamB} seats={seats.slice(2, 4)} mine={mine} actions={actions} cancelled={cancelled} players={detail.players} />
+          pushed the page 15px sideways at 320 / 200 % (gotchas-frontend-layout). R14 L14-2 — two
+          columns only while there are two teams to put in them. */}
+      <div className={cn("grid grid-cols-1 gap-4", !lone && "sm:grid-cols-2")}>
+        {teams.map((t) => (
+          <Team key={t.label} label={t.label} seats={t.seats} lone={lone} mine={mine} actions={actions} cancelled={cancelled} players={detail.players} />
+        ))}
       </div>
       {former.length > 0 ? <Former players={former} all={detail.players} actions={actions} /> : null}
     </div>
   );
 }
 
+/**
+ * The teams worth drawing. R2 F2-9 — a cancelled game has no seat left to fill, and nor has one
+ * that is over (R14 L14-2: completed, no-show): no dashed "Free seat" placeholders, and a team
+ * nobody sat on is not drawn at all — its column was a 760px empty band beside Team A at 1920.
+ */
+function drawnTeams(detail: BookingDetail): { label: string; seats: SeatPosition[] }[] {
+  const seats = positions(detail);
+  const over = isCancelled(detail) || detail.status === "completed" || detail.status === "no_show";
+  return [
+    { label: DETAIL_COPY.teamA, seats: seats.slice(0, 2) },
+    { label: DETAIL_COPY.teamB, seats: seats.slice(2, 4) },
+  ]
+    .map((t) => ({ ...t, seats: over ? t.seats.filter((s) => s.player) : t.seats }))
+    .filter((t) => t.seats.length > 0);
+}
+
 type TeamProps = {
-  label: string; seats: SeatPosition[]; mine: string | null; actions?: SeatActions; cancelled: boolean; players: readonly DetailPlayer[];
+  label: string; seats: SeatPosition[]; lone: boolean; mine: string | null; actions?: SeatActions; cancelled: boolean;
+  players: readonly DetailPlayer[];
 };
 
 function Team(props: TeamProps) {
-  const { label, mine, actions, cancelled, players } = props;
-  // R2 F2-9 — a cancelled game has no seat left to fill: no dashed "Free seat" placeholders.
-  const seats = cancelled ? props.seats.filter((s) => s.player) : props.seats;
-  if (seats.length === 0) return null;
+  const { label, seats, lone, mine, actions, cancelled, players } = props;
   return (
-    <div className="flex flex-col gap-2">
+    // A lone team takes the block's whole width, its chips two-up once its own box holds two
+    // (32rem, so at 200 % text they stay one a row — gotchas-frontend-layout: rem queries are text queries).
+    <div className={cn("flex flex-col gap-2", lone && "@container/team")}>
       <h3 className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{label}</h3>
-      <ul className="flex flex-col gap-2">
+      <ul className={cn("grid grid-cols-1 gap-2", lone && "@[32rem]/team:grid-cols-2")}>
         {seats.map((s) => (s.player
           ? <SeatChip key={s.seat} player={s.player} isMe={s.player.participant_id !== null && s.player.participant_id === mine} actions={actions} cancelled={cancelled} players={players} />
           : <FreeSeat key={s.seat} seat={s.seat} />))}

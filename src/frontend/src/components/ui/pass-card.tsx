@@ -90,9 +90,18 @@ const BODY_MASK = notchMask("top");
   and the overline shares the avatar's row rather than taking its own, so the stepped band costs
   one row, not two: the QR stays inside one screen of `<main>` at 320 × 568 with a 32px root.
 */
+/*
+  R14 L14-3 — between the two, from 14rem to 21rem of band (a 360px band at 17–25px text, any band
+  under 336px at normal text), the crest and the avatar flank only the overline and the club; the
+  member's name takes the band's whole width under them. Flanked, the name had 320px less 6.5rem —
+  169px at 150 % — and a long single-word surname broke mid-word ("Wolfeschlegelste/in"); Chromium's
+  `hyphens: auto` never splits a Capitalised word, so a line of its own is the only cure.
+*/
 const BAND_AREAS = [
   "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3",
   "[grid-template-areas:'crest_over_avatar'_'crest_club_avatar'_'crest_member_avatar']",
+  "[@container_pass-band_(min-width:14.01rem)_and_(max-width:21rem)]:[grid-template-areas:'crest_over_avatar'_'crest_club_avatar'_'member_member_member']",
+  "[@container_pass-band_(min-width:14.01rem)_and_(max-width:21rem)]:gap-y-1",
   "[@container_pass-band_(max-width:14rem)]:[grid-template-areas:'over_over_avatar'_'club_club_club'_'member_member_member']",
   "[@container_pass-band_(max-width:14rem)]:gap-y-1",
 ].join(" ");

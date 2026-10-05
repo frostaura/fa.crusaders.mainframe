@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert } from "../../components/Alert";
+import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
@@ -220,12 +221,18 @@ const PERIOD_OPTIONS: FilterOption[] = [
  * 1080 into "18:00" is the place that knows the club's clock, which is not the browser.
  * </p>
  */
+/** A name on a change row: whole words where the row can hold them (R14 L14-3, see the row's inset). */
+const CHANGE_NAME = "min-w-0 break-words text-xs @[12rem]/changes:text-sm";
+
 function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | undefined }) {
   return (
     // tabIndex -1: focusable by script only, so "Load more" can hand focus to the first row it brought.
     // R10 L10-6: the card's inset and the headline step down by the LIST's box in rem — at 320 /
     // 200 % text "administrator" was wider than the card's text column and broke "administrato/r".
-    <li data-change-row="" tabIndex={-1} className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-3 shadow-xs @[12rem]/changes:p-4">
+    // R14 L14-3 — and under 12rem the inset is p-2 and the names (who did it, who it was done to)
+    // text-xs: at 320 / 200 % a 17-letter surname was 244px in a 206px column and broke mid-word;
+    // it is 209px of 222 now. Chromium's `hyphens: auto` never splits a Capitalised word.
+    <li data-change-row="" tabIndex={-1} className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-2 shadow-xs @[12rem]/changes:p-4">
       <div className="flex min-w-0 flex-wrap items-baseline gap-2">
         <time dateTime={row.occurred_at} className="shrink-0 text-sm tabular-nums text-text-muted">
           {clubDayAndClock(row.occurred_at, timezone)}
@@ -236,9 +243,9 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
           {changeHeadline(row)}
         </p>
         {/* Wraps, never shrink-0 (R4 V4-6): a long name made the record scroll sideways at 320. */}
-        {row.actor?.name && <span className="min-w-0 break-words text-sm text-text-muted">{row.actor.name}</span>}
+        {row.actor?.name && <span className={cn(CHANGE_NAME, "text-text-muted")}>{row.actor.name}</span>}
       </div>
-      {row.subject?.label && <p className="text-sm text-text-secondary">{row.subject.label}</p>}
+      {row.subject?.label && <p className={cn(CHANGE_NAME, "text-text-secondary")}>{row.subject.label}</p>}
       {row.reason && <p className="text-sm text-text-secondary">{`Reason: “${row.reason}”`}</p>}
 
       {hasChangeDiff(row) ? (

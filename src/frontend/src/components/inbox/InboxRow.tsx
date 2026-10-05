@@ -92,6 +92,12 @@ const CARET = "col-start-3 row-start-1 mt-3 hidden shrink-0 justify-self-end tex
 // left dangling at the end of "Reply ·". From 17rem: "Reply · Today, 08:44" on one line.
 const WHEN = "basis-full [@container(min-width:17rem)]:basis-auto [@container(min-width:17rem)]:whitespace-nowrap";
 const SEPARATOR = "hidden [@container(min-width:17rem)]:inline";
+// R14 L14-3 — on a narrow row the headline steps down: a 17-letter surname ("Featherstonehaugh")
+// was 281px at 32px in the 222px a 320 phone's row holds at 200 %, and broke mid-word — the line was
+// already its own, and Chromium's `hyphens: auto` never splits a Capitalised word. Under 10rem
+// (320 / 200 %) it is text-xs, 211px; to 17rem (390 / 200 %) text-sm; from 17rem the body size.
+// One rule per range (gotchas-frontend-layout), each class whole.
+const HEADLINE = "break-words text-xs [@container(min-width:10rem)_and_(max-width:16.99rem)]:text-sm [@container(min-width:17rem)]:text-base";
 
 type BodyProps = {
   notice: MemberNotification;
@@ -116,7 +122,7 @@ function RowBody(props: BodyProps) {
         {unread ? <span data-unread-dot="" className={DOT} /> : null}
       </span>
       <span className={HEAD}>
-        <span id={ids.headlineId} className={cn("break-words", resolved ? "text-text-secondary" : "text-text-primary", unread ? "font-bold" : "font-medium")}>
+        <span id={ids.headlineId} className={cn(HEADLINE, resolved ? "text-text-secondary" : "text-text-primary", unread ? "font-bold" : "font-medium")}>
           {notice.headline}
         </span>
         {resolved ? <span data-resolved="" className="text-sm text-text-secondary">{COPY.resolvedHint}</span> : null}

@@ -18,6 +18,7 @@ import { KeptMinutes } from "./KeptMinutes";
 import { initialsOf, type GroupChip, type MemberRow, type Sort, type SortKey } from "./membersModel";
 import { EmailWithBreaks } from "./EmailWithBreaks";
 import { RowActions, type RowActionHandlers } from "./RowActions";
+import { useLongNameCards } from "./useLongNameCards";
 
 /**
  * The members table (P5): a table when its card is wide enough, a stack of cards when it is not.
@@ -99,6 +100,9 @@ const ROW = cn(
   // in what is left (min 0) instead of taking their one-line width and cutting the name to nothing.
   "no-lift group grid grid-cols-[minmax(50%,1fr)_minmax(0,auto)_auto] items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-bg-surface p-3 shadow-xs",
   "[@container(max-width:19.99rem)]:grid-cols-[minmax(0,1fr)_auto] [@container(max-width:19.99rem)]:gap-y-2",
+  // R14 L14-3 — under 13rem (the avatar over the name) the inset is p-2, and the name below steps
+  // down a size, so a 17-letter surname keeps whole at 320 / 200 % (248px in 206 broke it).
+  "[@container(max-width:12.99rem)]:p-2",
   "hover:border-control",
   "[@container(min-width:48rem)]:table-row [@container(min-width:48rem)]:rounded-none",
   "[@container(min-width:48rem)]:border-0 [@container(min-width:48rem)]:p-0 [@container(min-width:48rem)]:shadow-none",
@@ -121,9 +125,23 @@ const EMAIL_COLUMN = "hidden [@container(min-width:48rem)]:hidden [@container(mi
 /** Groups widen to 12rem where the email has its own column and the member column has the room. */
 const GROUPS_WIDE = "[@container(min-width:76rem)]:w-48";
 
+/*
+ * R14 L14-3 — a card whose name holds a word wider than the who column's floor (`useLongNameCards`
+ * sets `data-long-name` on the row) puts the who across the card's first line, the balance under
+ * it on the left and the badges beside the balance; the ⋯ stays at the end. Card range only (20rem
+ * to the table), written whole: the narrow card and the table already give the name the row.
+ */
+const LONG_WHO = "[@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:[grid-column:1/3] [@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:[grid-row:1]";
+const LONG_BALANCE = cn(
+  "[@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:[grid-column:1] [@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:[grid-row:2]",
+  "[@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:justify-self-start [@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:self-center",
+  "[@container(min-width:20rem)_and_(max-width:47.99rem)]:group-data-[long-name]:text-left",
+);
+
 const COL = {
   identity: cn(
     CELL,
+    LONG_WHO,
     "col-start-1 row-span-2 row-start-1",
     "[@container(max-width:19.99rem)]:col-span-2 [@container(max-width:19.99rem)]:row-span-1",
     "[@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:left-0 [@container(min-width:48rem)]:z-raised",
@@ -139,6 +157,7 @@ const COL = {
   date: cn(CELL, "hidden [@container(min-width:48rem)]:hidden [@container(min-width:65rem)]:!table-cell [@container(min-width:48rem)]:w-24"),
   balance: cn(
     CELL,
+    LONG_BALANCE,
     "col-start-2 row-start-1 self-end text-right",
     "[@container(max-width:19.99rem)]:col-start-1 [@container(max-width:19.99rem)]:row-start-2",
     "[@container(max-width:19.99rem)]:justify-self-start [@container(max-width:19.99rem)]:text-left",
@@ -208,10 +227,11 @@ export function MembersTable(props: MembersTableProps) {
   const navigate = useNavigate();
   // The same 48rem the container queries use: below it the card's Top up lives in the ⋯ (§4.3).
   const [box, table] = useBoxAtLeast(48);
+  const cards = useLongNameCards();
   const dateKey: SortKey = dateColumn === "lastSeen" ? "last_login_at" : "created_at";
   return (
     <div ref={box} className="[container-type:inline-size]">
-      <div className={FRAME}>
+      <div ref={cards} className={FRAME}>
       <ScrollArea label={MEMBERS_PAGE.tableLabel}>
         <Table className={TABLE} containerClassName="overflow-visible" aria-label="Members">
           <TableHeader className={HEAD}>
@@ -326,6 +346,7 @@ function Identity({ row }: { row: MemberRow }) {
           <Link
             to={memberHref(row.user_id)}
             title={row.full_name}
+            data-member-name=""
             // A 44px target on a 20px line (R5 X5-12): the padding grows the hit area, the margin
             // gives the line its height back.
             // L6-9: on a phone's card the name WRAPS, never cut — the badges beside it took the
@@ -333,7 +354,7 @@ function Identity({ row }: { row: MemberRow }) {
             // is sized for it, keeps one line.
             className={cn(
               "no-lift -my-3 min-w-0 py-3 font-semibold text-text-primary underline-offset-2 hover:underline",
-              "break-words hyphens-auto [@container(min-width:48rem)]:truncate",
+              "break-words hyphens-auto [@container(max-width:12.99rem)]:text-xs [@container(min-width:48rem)]:truncate",
             )}
           >
             {row.full_name}

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { intentProps } from "@/routeChunks";
 import { Link, useNavigate } from "react-router-dom";
+import { EmailWithBreaks } from "@/components/members/EmailWithBreaks";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
@@ -218,17 +219,29 @@ function WalletItem({ onSelect }: { onSelect: () => void }) {
   );
 }
 
-/** Who is signed in — not interactive, so it is a label row rather than an item. */
+/**
+ * Who is signed in — not interactive, so it is a label row rather than an item.
+ *
+ * <p>
+ * R14 L14-4 — the name and the address WRAP, never cut: at 200 % the 80px avatar beside them left
+ * "Chiama…" and "l14c+mu…". The address breaks after its "@" and before each "." (`EmailWithBreaks`),
+ * mid-word only where one part alone is wider than the menu. And when the TEXT is large for the menu
+ * (a rem query on the row's own box, under 13.5rem — the menu is 16rem until a phone caps it) the
+ * avatar stands over the name, so the words have the menu's whole width.
+ * </p>
+ */
 function Identity({ name, known, email, photo }: { name: string; known: boolean; email: string | null; photo: string | null }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2">
-      <Avatar size={40}>
-        {photo ? <AvatarImage src={photo} alt="" /> : null}
-        <AvatarFallback aria-hidden="true"><Mark name={known ? name : null} /></AvatarFallback>
-      </Avatar>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-text-primary">{name}</p>
-        {email && email !== name ? <p className="truncate text-xs text-text-muted">{email}</p> : null}
+    <div data-account-identity="" className="px-3 py-2 [container-type:inline-size]">
+      <div className="flex items-center gap-3 [@container(max-width:13.49rem)]:flex-col [@container(max-width:13.49rem)]:items-start">
+        <Avatar size={40}>
+          {photo ? <AvatarImage src={photo} alt="" /> : null}
+          <AvatarFallback aria-hidden="true"><Mark name={known ? name : null} /></AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 max-w-full">
+          <p className="break-words text-sm font-semibold text-text-primary">{name}</p>
+          {email && email !== name ? <p className="break-words text-xs text-text-muted"><EmailWithBreaks email={email} /></p> : null}
+        </div>
       </div>
     </div>
   );

@@ -138,10 +138,17 @@ function NavGroup({ label, hideLabel, inset, children }: { label: string; hideLa
  * <p>
  * <b>The sticky offset is a contract with the app shell.</b> `top` reads `--app-content-top`
  * (default 0), for a shell that scrolls the document under a sticky top bar; the height subtracts
- * `--app-chrome-height`, which `Layout` already publishes for the toast strip. Inline styles rather
- * than classes because arbitrary lengths are banned outside `components/ui` (theme-vocabulary).
+ * `--app-chrome-height`, which `Layout` already publishes for the toast strip, AND the bottom bars
+ * fixed over the foot of `<main>`: `--app-bottom-bar-height` (the tab bar, which an admin's tabs
+ * join from xl at large text since R13) and `--context-bar-height` (a docked ContextBar) — R14
+ * L14-1: without them Settings and Webhooks sat under the tab bar and a click on Webhooks opened
+ * My Code. Inline styles rather than classes because arbitrary lengths are banned outside
+ * `components/ui` (theme-vocabulary).
  * </p>
  */
+const RAIL_MAX_HEIGHT =
+  "calc(100dvh - var(--app-chrome-height, 0px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px))";
+
 export function AdminRail({ pathname, counts }: { pathname: string; counts: BadgeCounts }) {
   // Two boxes: the column stretches to the content's full height so its edge runs the length of
   // the page, and the aside inside it is the part that sticks.
@@ -153,7 +160,7 @@ export function AdminRail({ pathname, counts }: { pathname: string; counts: Badg
           landmark is misplaced (axe landmark-complementary-is-top-level). The <nav> is the landmark. */}
       <div
         className="sticky overflow-y-auto overscroll-contain"
-        style={{ top: "var(--app-content-top, 0px)", maxHeight: "calc(100dvh - var(--app-chrome-height, 0px))" }}
+        style={{ top: "var(--app-content-top, 0px)", maxHeight: RAIL_MAX_HEIGHT }}
       >
         <nav aria-label="Admin" className={cn("flex flex-col gap-4 pb-10 pt-8", ADMIN_RAIL_INSET)}>
           <p aria-hidden="true" className={cn(typography({ variant: "overline" }), ADMIN_RAIL_INSET, "text-accent-strong")}>Admin console</p>

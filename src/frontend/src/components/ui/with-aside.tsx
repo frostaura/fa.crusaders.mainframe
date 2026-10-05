@@ -25,7 +25,8 @@ import { cn } from "@/lib/utils";
  * <p>
  * <b>Sticky, with its own scroll.</b> Beside the main column the rail sticks 1.5rem under the top
  * of the scroller (`<main>` sits under the app bar, so that is `top-6`, not the bar's height) and
- * is capped at the screen's height less the measured chrome, scrolling inside itself — so the
+ * is capped at the screen's height less the measured chrome — the top bar AND whatever is fixed
+ * over the foot of `<main>` (the tab bar, a docked ContextBar; R14 L14-1) — scrolling inside itself — so the
  * money stays in view while the players are worked. From 3xl it widens to `asideWide`.
  * </p>
  *
@@ -53,9 +54,9 @@ const COLS_START: Record<At, string> = {
   "72rem": "@[72rem]/aside:grid-cols-[var(--aside-w)_minmax(0,1fr)]",
 };
 const STICKY: Record<At, string> = {
-  "56rem": "@[56rem]/aside:sticky @[56rem]/aside:top-6 @[56rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-3rem)] @[56rem]/aside:overflow-y-auto",
-  "64rem": "@[64rem]/aside:sticky @[64rem]/aside:top-6 @[64rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-3rem)] @[64rem]/aside:overflow-y-auto",
-  "72rem": "@[72rem]/aside:sticky @[72rem]/aside:top-6 @[72rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-3rem)] @[72rem]/aside:overflow-y-auto",
+  "56rem": "@[56rem]/aside:sticky @[56rem]/aside:top-6 @[56rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[56rem]/aside:overflow-y-auto",
+  "64rem": "@[64rem]/aside:sticky @[64rem]/aside:top-6 @[64rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[64rem]/aside:overflow-y-auto",
+  "72rem": "@[72rem]/aside:sticky @[72rem]/aside:top-6 @[72rem]/aside:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[72rem]/aside:overflow-y-auto",
 };
 /** The rail's width, widened from 3xl (`asideWide`) where a 1920 screen has the room. */
 const WIDTH: Record<AsideWidth, string> = {

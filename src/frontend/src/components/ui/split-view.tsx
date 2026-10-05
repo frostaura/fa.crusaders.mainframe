@@ -69,9 +69,9 @@ const PLACEHOLDER: Record<SplitAt, string> = {
   "64rem": "hidden @[64rem]/split:block",
 };
 const STICKY: Record<SplitAt, string> = {
-  "48rem": "@[48rem]/split:sticky @[48rem]/split:top-6 @[48rem]/split:max-h-[calc(100dvh-var(--app-chrome-height,0px)-3rem)] @[48rem]/split:overflow-y-auto",
-  "56rem": "@[56rem]/split:sticky @[56rem]/split:top-6 @[56rem]/split:max-h-[calc(100dvh-var(--app-chrome-height,0px)-3rem)] @[56rem]/split:overflow-y-auto",
-  "64rem": "@[64rem]/split:sticky @[64rem]/split:top-6 @[64rem]/split:max-h-[calc(100dvh-var(--app-chrome-height,0px)-3rem)] @[64rem]/split:overflow-y-auto",
+  "48rem": "@[48rem]/split:sticky @[48rem]/split:top-6 @[48rem]/split:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[48rem]/split:overflow-y-auto",
+  "56rem": "@[56rem]/split:sticky @[56rem]/split:top-6 @[56rem]/split:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[56rem]/split:overflow-y-auto",
+  "64rem": "@[64rem]/split:sticky @[64rem]/split:top-6 @[64rem]/split:max-h-[calc(100dvh-var(--app-chrome-height,0px)-var(--app-bottom-bar-height,0px)-var(--context-bar-height,0px)-3rem)] @[64rem]/split:overflow-y-auto",
 };
 /** The back control: only when stacked (CSS decides, so the first paint is right). */
 const BACK: Record<SplitAt, string> = {
