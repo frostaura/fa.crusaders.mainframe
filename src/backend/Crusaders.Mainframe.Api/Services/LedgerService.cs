@@ -361,7 +361,7 @@ public sealed class LedgerService
         var type = MirrorTypeOf(entry);
         if (type is null) return;
 
-        var (actorUserId, actorIsAdmin) = ActorOf(entry);
+        var (actorUserId, actorIsAdmin) = ActorOf(entry, await HoldsAdminAsync(entry.ActorUserId, ct));
         var tenantId = _tenant.TenantId;
         var tenantSlug = _tenant.TenantSlug;
 
@@ -409,19 +409,30 @@ public sealed class LedgerService
     /// </para>
     ///
     /// <para>
-    /// <b>What is NOT claimed:</b> a human actor different from the subject is reported
-    /// <c>is_admin: true</c> only because this row is one of the four types mirrored above, and
-    /// three of those four are reachable only from an admin route. The honest test — does this
-    /// actor hold the admin role — needs a user read this method does not have and the callers
-    /// do not carry; <c>AdminTopUp</c> and <c>AdminAdjustment</c> are admin-only by route, and
-    /// the refund/penalty pair is system-posted. Recorded rather than papered over, so the next
-    /// reader knows which half is structural and which is inference.
+    /// <b>Review round 13, E13-2: the role is READ.</b> A human actor different from the subject
+    /// was reported <c>is_admin: true</c> by inference — "three of the four mirrored types are
+    /// admin-only by route". The fourth is not: a member paying for somebody else's court at the
+    /// box posts that member's <c>minutes.refunded</c>, and the webhook named an ordinary member
+    /// an administrator. <paramref name="actorHoldsAdmin"/> is the actor's own
+    /// <see cref="User.IsAdmin"/> in this club (<see cref="HoldsAdminAsync"/>), so an admin is an
+    /// admin on their own wallet as well, and nobody else ever is.
     /// </para>
     /// </summary>
-    internal static (Guid? ActorUserId, bool ActorIsAdmin) ActorOf(LedgerEntry entry)
+    internal static (Guid? ActorUserId, bool ActorIsAdmin) ActorOf(LedgerEntry entry, bool actorHoldsAdmin)
         => entry.ActorUserId == Guid.Empty
             ? (null, false)
-            : (entry.ActorUserId, entry.ActorUserId != entry.UserId);
+            : (entry.ActorUserId, actorHoldsAdmin);
+
+    /// <summary>
+    /// E13-2: whether this person holds the admin role in this club now — one read of one
+    /// column, tenant-filtered like every <c>Users</c> read. The system (<see cref="Guid.Empty"/>)
+    /// never does, and is not read.
+    /// </summary>
+    private async Task<bool> HoldsAdminAsync(Guid actorUserId, CancellationToken ct)
+    {
+        if (actorUserId == Guid.Empty) return false;
+        return await _db.Users.AsNoTracking().AnyAsync(u => u.Id == actorUserId && u.IsAdmin, ct);
+    }
 
     // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
     // object initialiser as the END of the function and dumps the rest of the file into a

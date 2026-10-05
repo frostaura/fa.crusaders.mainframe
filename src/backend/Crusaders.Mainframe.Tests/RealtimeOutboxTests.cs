@@ -258,7 +258,7 @@ public class LedgerActorTests
     public void A_system_posting_has_no_actor_and_is_not_an_admin()
     {
         var (actorUserId, actorIsAdmin) =
-            Crusaders.Mainframe.Api.Services.LedgerService.ActorOf(Entry(Guid.Empty, Guid.NewGuid()));
+            Crusaders.Mainframe.Api.Services.LedgerService.ActorOf(Entry(Guid.Empty, Guid.NewGuid()), actorHoldsAdmin: true);
 
         Assert.Null(actorUserId);
         Assert.False(actorIsAdmin);
@@ -269,7 +269,7 @@ public class LedgerActorTests
     public void A_members_own_movement_is_not_an_admin_action()
     {
         var member = Guid.NewGuid();
-        var (actorUserId, actorIsAdmin) = Crusaders.Mainframe.Api.Services.LedgerService.ActorOf(Entry(member, member));
+        var (actorUserId, actorIsAdmin) = Crusaders.Mainframe.Api.Services.LedgerService.ActorOf(Entry(member, member), actorHoldsAdmin: false);
 
         Assert.Equal(member, actorUserId);
         Assert.False(actorIsAdmin);
@@ -281,9 +281,24 @@ public class LedgerActorTests
     {
         var admin = Guid.NewGuid();
         var (actorUserId, actorIsAdmin) = Crusaders.Mainframe.Api.Services.LedgerService.ActorOf(
-            Entry(admin, Guid.NewGuid()));
+            Entry(admin, Guid.NewGuid()), actorHoldsAdmin: true);
 
         Assert.Equal(admin, actorUserId);
         Assert.True(actorIsAdmin);
+    }
+
+    /// <summary>
+    /// R13 E13-2: somebody else's wallet is not an admin's act unless the actor holds the role — a
+    /// member paying for a friend's court at the box is named and is not an administrator.
+    /// </summary>
+    [Fact]
+    public void A_member_acting_on_somebody_elses_wallet_is_not_an_admin()
+    {
+        var member = Guid.NewGuid();
+        var (actorUserId, actorIsAdmin) = Crusaders.Mainframe.Api.Services.LedgerService.ActorOf(
+            Entry(member, Guid.NewGuid()), actorHoldsAdmin: false);
+
+        Assert.Equal(member, actorUserId);
+        Assert.False(actorIsAdmin);
     }
 }
