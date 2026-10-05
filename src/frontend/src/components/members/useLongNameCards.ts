@@ -16,8 +16,9 @@ import { useLayoutEffect, useRef } from "react";
  * The test is the FLOOR, not the width the name has now — a long card's name is wider than the
  * floor, so judging by the current width would flip the card back and forth. Words are what the
  * name breaks at: spaces, and after a hyphen. Measured with a canvas in the link's own font, so it
- * follows the text size; re-run whenever the list's box changes (a resize, a text-size change, a
- * page of rows). The table (48rem) and the narrow card (under 20rem) already give the name the
+ * follows the text size; re-run whenever the list's box changes (a resize, a text-size change)
+ * and whenever rows come or go (a search or a filter that keeps the box the same size). The table
+ * (48rem) and the narrow card (under 20rem) already give the name the
  * row; the attribute is harmless there, because every `LONG_*` rule is scoped to the card range.
  * </p>
  */
@@ -38,9 +39,19 @@ export function useLongNameCards() {
     };
     const observer = new ResizeObserver(mark);
     observer.observe(root);
+    // R14 review — a search, a status chip or a sort that swaps one page of rows for another the
+    // same size never resizes the box, so new rows are also measured as they are inserted (or their
+    // name's text changes). Attributes are not watched: `mark` toggling one cannot re-trigger it.
+    const rows = typeof MutationObserver === "undefined" ? null : new MutationObserver(mark);
+    rows?.observe(root, { childList: true, subtree: true, characterData: true });
     mark();
-    void document.fonts?.ready.then(mark);
-    return () => observer.disconnect();
+    let live = true;
+    void document.fonts?.ready.then(() => { if (live) mark(); });
+    return () => {
+      live = false;
+      observer.disconnect();
+      rows?.disconnect();
+    };
   }, []);
   return ref;
 }

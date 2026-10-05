@@ -231,7 +231,7 @@ export function MembersTable(props: MembersTableProps) {
   const dateKey: SortKey = dateColumn === "lastSeen" ? "last_login_at" : "created_at";
   return (
     <div ref={box} className="[container-type:inline-size]">
-      <div ref={cards} className={FRAME}>
+      <div ref={cards} data-members-frame="" className={FRAME}>
       <ScrollArea label={MEMBERS_PAGE.tableLabel}>
         <Table className={TABLE} containerClassName="overflow-visible" aria-label="Members">
           <TableHeader className={HEAD}>

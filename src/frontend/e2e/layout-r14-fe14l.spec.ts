@@ -300,6 +300,24 @@ const SURFACES = {
   },
 } as const;
 
+test("L14-3 — a long name a search brings in is measured, even when the list keeps its size", async ({ page, isMobile }) => {
+  test.skip(isMobile, "one width");
+  const s = SURFACES.members;
+  await open(page, s.path, { width: 768, height: 900 }, s.routes(), 16);
+  await s.ready(page);
+  // Pin the frame's size, as a same-size page swap leaves it: nothing about the BOX changes.
+  await page.locator("[data-members-frame]").evaluate((el) => { el.style.height = `${el.getBoundingClientRect().height}px`; });
+  const search = page.getByPlaceholder("Name, email or member no.");
+  await search.fill("Naledi");
+  await expect(page.locator("tr[data-member-row]")).toHaveCount(1);
+  await search.fill("Bartholomew");
+  const row = page.locator("tr[data-member-row]", { hasText: LONG });
+  await expect(row).toHaveCount(1);
+  await expect(row, "the new row was never measured").toHaveAttribute("data-long-name", "");
+  const found = await splitWords(page, s.scope, s.row, LONG);
+  expect(found.filter((f) => f.split), JSON.stringify(found)).toEqual([]);
+});
+
 /**
  * The surface, the screen, the root font — and, at 320 / 200 %, the reviewer's own 17-letter case,
  * which must stay WHOLE there: the narrow row steps its type and inset down so that it can.

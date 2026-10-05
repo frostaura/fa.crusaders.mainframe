@@ -25,7 +25,9 @@ Tests: `e2e/layout-r14-fe14l.spec.ts` (68 cases, mobile + desktop; `FE14L_SWEEP=
   against the who column's FLOOR** (half the card less the avatar) and sets `data-long-name`; such
   a card puts the who across the first line and balance · badges under it. *Why the floor, not the
   current width:* judging by the width it has now would flip the card back and forth. Card range
-  only (20rem–table); under 13rem the card is `p-2` and the name `text-xs`.
+  only (20rem–table); under 13rem the card is `p-2` and the name `text-xs`. It re-marks on the
+  box's resize AND on row insertion (MutationObserver, childList — never attributes, so its own
+  toggle cannot loop): a search swapping a same-size page left a new long row unmeasured.
 - **Pass band from 14rem to 21rem: crest and avatar flank only overline and club; the member's name
   takes the band's width** (169px flanked at 150 % split "Wolfeschlegelstein").
 - **Inbox headline: text-xs under 10rem, text-sm to 17rem, base from 17rem; Change record under its
