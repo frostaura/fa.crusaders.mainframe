@@ -298,9 +298,41 @@ public sealed partial class PlayersService
         seat.RespondedAt = now.Storable();
         seat.UpdatedAt = now.Storable();
         MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "withdrew", ct), game.Settings);
+        _db.AuditLogs.Add(await WithdrewAuditAsync(game.Booking, seat, ct));
         if (await SaveAsync(ct) is { } conflict) return conflict;
         await AbsorbFreedShareAsync(game.Booking, ct);
-        await AfterAsync(game.Booking.Id, [game.Booking.UserId!.Value], ct);
+        // R13 E13-4: the share going back is the partner's own act, not the club's system — the
+        // ledger rows name them, and their receipt is born read like any receipt of their own.
+        await AfterAsync(game.Booking.Id, [game.Booking.UserId!.Value], ct, new ReconcileOptions(me));
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
     }
+
+    /// <summary>
+    /// R13 E13-4 (contract C13-4): the withdrawal on the club's record, in the withdrawal's own save —
+    /// it wrote none, so the Night told the share's return as the club's automatic check. The partner
+    /// is actor and subject; <c>paid_minutes</c> is what they had paid in, which goes back after.
+    /// </summary>
+    private async Task<AuditLog> WithdrewAuditAsync(Booking booking, BookingParticipant seat, CancellationToken ct)
+    {
+        var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => (int?)c.CourtNumber).FirstOrDefaultAsync(ct);
+        return new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = seat.UserId!.Value,
+            SubjectUserId = seat.UserId,
+            Action = WithdrewAction,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = booking.Id,
+                participant_id = seat.Id,
+                organiser_user_id = booking.UserId,
+                court_number = court,
+                starts_at = booking.StartsAt,
+                paid_minutes = await _p.Shares.PaidAsync(seat, ct),
+            }),
+        };
+    }
+
+    /// <summary>The audit action a partner's withdrawal writes (R13 E13-4).</summary>
+    public const string WithdrewAction = "players.withdrew";
 }

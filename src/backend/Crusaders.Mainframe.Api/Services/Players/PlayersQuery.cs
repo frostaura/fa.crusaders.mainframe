@@ -106,6 +106,7 @@ public sealed partial class PlayersQuery
         var table = await TableAsync(new DetailContext(booking, seats, people, owed, role, mySeat?.Id, settings), ct);
         var (refunded, penalty) = await SettledAsync(booking, ct);
         var cost = await OrganiserCostAsync(booking, owed, ct);
+        var (cancelledBy, cancelCause, cancelReason) = BookingCancellation.Wire(await BookingCancellation.ForAsync(_db, booking, ct));
 
         return new
         {
@@ -121,6 +122,11 @@ public sealed partial class PlayersQuery
             // R6 (E6-6): a no-show the sweep refunded in full because no box on its court was
             // reachable. The status stays the settlement's; this says it is not held against them.
             refunded_for_outage = NoShows.IsRefundedForOutage(booking),
+            // R13 J13-6 (C13-1): who cancelled a cancelled booking — "member" or "club" — the system's
+            // displacement as cause "displaced", and the desk's own words on a club cancel. Null otherwise.
+            cancelled_by = cancelledBy,
+            cancel_cause = cancelCause,
+            cancel_reason = cancelReason,
             split_mode = seats.FirstOrDefault(s => s.Seat == 1)?.SplitMode ?? SplitModes.Equal,
             viewer = new { role, participant_id = mySeat?.Id },
             organiser = Member(booking.UserId, people),

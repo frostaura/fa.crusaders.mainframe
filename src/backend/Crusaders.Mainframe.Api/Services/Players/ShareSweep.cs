@@ -154,13 +154,15 @@ public sealed class ShareSweep
         var settings = await _settings.GetAsync(ct);
         var game = await GameText.ForAsync(_db, booking, settings, ct);
         var organiser = PersonNames.Of(booking.UserId, await PersonNames.ForAsync(_db, [booking.UserId], ct)) ?? "The organiser";
+        // R13 E13-6: who cancelled it, and why — the partner was never told the club had.
+        var by = await BookingCancellation.ForAsync(_db, booking, ct);
         var told = new List<Guid>();
         foreach (var seat in seats.Where(p => p.Seat > 1 && p.UserId is not null && p.IsLive))
         {
             var notice = new MemberNotice(
                 seat.UserId!.Value, MemberEventCatalogue.GameCancelled, $"game-cancelled:{bookingId:N}:{seat.UserId:N}",
-                new GameCancelledPayload(bookingId, organiser, game.CourtName, game.StartsLocal),
-                $"Cancelled — {game.CourtName}, {game.StartsLocal}", $"/bookings/{bookingId}", bookingId)
+                new GameCancelledPayload(bookingId, organiser, game.CourtName, game.StartsLocal, by?.ByClub, by?.Reason, CauseOf(by)),
+                CancelledHeadline(by, organiser, game), $"/bookings/{bookingId}", bookingId)
             {
                 Email = seat.Status == ParticipantStatus.Accepted,
             };
@@ -168,6 +170,19 @@ public sealed class ShareSweep
         }
         return told;
     }
+
+    /// <summary>R13 E13-6: the inbox line says who cancelled — the club, or the organiser — when it is on the record.</summary>
+    private static string CancelledHeadline(BookingCancellation? by, string organiser, GameText game)
+    {
+        if (by is null) return $"Cancelled — {game.CourtName}, {game.StartsLocal}";
+        return by.ByClub
+            ? $"The club cancelled {game.CourtName}, {game.StartsLocal}"
+            : $"{organiser} cancelled {game.CourtName}, {game.StartsLocal}";
+    }
+
+    /// <summary>The system's cause in the mail's vocabulary (<see cref="Email.ShareRefundCauses"/>), or null.</summary>
+    private static string? CauseOf(BookingCancellation? by) =>
+        by?.Cause == BookingCancellation.Displaced ? Email.ShareRefundCauses.Displaced : null;
 
     /// <summary>
     /// Once per club, when the worker starts (review round 3): every booking on which a return

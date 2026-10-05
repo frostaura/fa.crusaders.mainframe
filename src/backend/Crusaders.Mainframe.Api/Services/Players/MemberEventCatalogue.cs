@@ -15,11 +15,16 @@ public sealed record InvitePayload(
 /// <param name="BalanceAfterMinutes">The partner's balance after a club collect (B8).</param>
 /// <param name="ClubRemoved">The club took the partner off the game; this is that removal's return (review round 2, B-8).</param>
 /// <param name="ClubReason">The reason the admin recorded for a club collect or removal (B-8). Null on older rows.</param>
+/// <param name="Withdrew">R13 E13-4: the share went back because the partner withdrew. False on older rows.</param>
+/// <param name="OffGameSeatId">
+/// R13 J13-3: the reader's own seat when they are no longer on the game (taken off, withdrew) — the
+/// booking page 404s for them, so the link names the seat and the page says what became of it.
+/// </param>
 public sealed record SharePayload(
     Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes,
     string? HeldUntilLocal = null, bool ByClub = false, int? BalanceAfterMinutes = null,
     bool ClubRemoved = false, string? ClubReason = null, bool AfterAttendance = false, string? ClubRefund = null,
-    int? KeptMinutes = null);
+    int? KeptMinutes = null, bool Withdrew = false, Guid? OffGameSeatId = null);
 
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
 public sealed record ClubSeatPayload(
@@ -34,10 +39,17 @@ public sealed record LapsedPayload(
     Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, int UnpaidMinutes, bool ToOrganiser, Guid? SeatId = null);
 
 /// <summary>A return of a paid share that waits for the organiser's minutes to cover it (review round 2).</summary>
+/// <param name="OffGame">R13 J13-3: the partner reading it is no longer on the game; their link names <paramref name="SeatId"/>.</param>
 public sealed record ReturnWaitingPayload(
-    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes, bool ToOrganiser, Guid? SeatId = null);
+    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes, bool ToOrganiser, Guid? SeatId = null,
+    bool OffGame = false);
 
-public sealed record GameCancelledPayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal);
+/// <param name="ByClub">R13 E13-6: the club cancelled it (true), the organiser did (false); null on older rows and unrecorded cancels.</param>
+/// <param name="ClubReason">The desk's recorded words on a club cancel.</param>
+/// <param name="Cause">The system's cause (<see cref="ShareRefundCauses.Displaced"/>) when nobody at the desk did it.</param>
+public sealed record GameCancelledPayload(
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool? ByClub = null, string? ClubReason = null,
+    string? Cause = null);
 
 /// <summary>D14: a result the reader is asked to confirm, frozen at the first recording (§8).</summary>
 public sealed record ResultToConfirmPayload(
@@ -54,6 +66,16 @@ public sealed record MemberMailContext(ClubIdentity Club, string To, AdminNotifi
         ?? throw new InvalidOperationException($"member notice {Row.Id} ({Row.Kind}) carries no payload");
 
     public string BookingUrl(Guid bookingId) => $"{BaseUrl}/bookings/{bookingId}";
+
+    /// <summary>
+    /// R13 J13-3: the booking's link for a reader no longer on it — naming their seat, which the
+    /// page reads to say "You were taken off this game" instead of "Booking not found".
+    /// </summary>
+    public string BookingUrl(Guid bookingId, Guid? offGameSeat)
+    {
+        // Block body: lizard loses its scope on a property pattern in an expression body (memory/gotchas-gates.md).
+        return offGameSeat.HasValue ? $"{BookingUrl(bookingId)}?seat={offGameSeat.Value}" : BookingUrl(bookingId);
+    }
 }
 
 /// <summary>
@@ -161,9 +183,10 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<SharePayload>();
         return EmailTemplates.ShareMoved(c.Club, c.To, new ShareMovement(
-            p.Direction, p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountMinutes, c.BookingUrl(p.BookingId),
+            p.Direction, p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountMinutes, c.BookingUrl(p.BookingId, p.OffGameSeatId),
             p.HeldUntilLocal, p.ByClub, p.BalanceAfterMinutes)
         {
+            Withdrew = p.Withdrew,
             ClubRemoved = p.ClubRemoved,
             ClubReason = p.ClubReason,
             AfterAttendance = p.AfterAttendance,
@@ -196,14 +219,16 @@ public static class MemberEventCatalogue
     private static EmailMessage ComposeCancelled(MemberMailContext c)
     {
         var p = c.Payload<GameCancelledPayload>();
-        return EmailTemplates.PlayersBookingCancelled(c.Club, c.To, p.OrganiserName, p.CourtName, p.StartsAtLocal);
+        var by = p.ByClub is { } club ? new GameCancelledBy(club, p.ClubReason, p.Cause) : null;
+        return EmailTemplates.PlayersBookingCancelled(c.Club, c.To, p.OrganiserName, p.CourtName, p.StartsAtLocal, by);
     }
 
     private static EmailMessage ComposeReturnWaiting(MemberMailContext c)
     {
         var p = c.Payload<ReturnWaitingPayload>();
         return EmailTemplates.ShareReturnWaiting(c.Club, c.To, new ShareReturnWaitingNotice(
-            p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountMinutes, p.ToOrganiser, c.BookingUrl(p.BookingId)));
+            p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountMinutes, p.ToOrganiser,
+            c.BookingUrl(p.BookingId, p.OffGame && !p.ToOrganiser ? p.SeatId : null)));
     }
 
     private static EmailMessage ComposeResultToConfirm(MemberMailContext c)
@@ -217,7 +242,8 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<GameChangedPayload>();
         return EmailTemplates.PlayersChanged(c.Club, c.To, new PlayersChange(
-            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.Removed, p.NewShareMinutes, p.NeedsConsent, c.BookingUrl(p.BookingId))
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.Removed, p.NewShareMinutes, p.NeedsConsent,
+            c.BookingUrl(p.BookingId, p.Removed ? p.SeatId : null))
         {
             ByClub = p.ByClub,
         });

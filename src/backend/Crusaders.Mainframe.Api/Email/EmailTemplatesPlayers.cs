@@ -59,6 +59,9 @@ public sealed record ShareMovement(
 
     /// <summary>A no-show return that kept part of the share (E11-2).</summary>
     public bool KeptForNoShow => ClubRefund == ShareRefundCauses.NoShow && KeptMinutes is > 0;
+
+    /// <summary>Review round 13, E13-4: the share went back because the partner withdrew from the game.</summary>
+    public bool Withdrew { get; init; }
 }
 
 /// <summary>Why the club refunded a split session, so a returned share can say so (E10-7).</summary>
@@ -106,6 +109,13 @@ public sealed record ShareLapsedNotice(
 /// <summary>A paid share on its way back to a partner, waiting until the organiser's minutes cover it.</summary>
 public sealed record ShareReturnWaitingNotice(
     string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes, bool ToOrganiser, string BookingUrl);
+
+/// <summary>
+/// Who cancelled a game, for the partner's mail (review round 13, E13-6): the club (with the desk's
+/// <paramref name="Reason"/>, or the system's <paramref name="Cause"/> — one of <see cref="ShareRefundCauses"/>)
+/// or the organiser.
+/// </summary>
+public sealed record GameCancelledBy(bool ByClub, string? Reason, string? Cause);
 
 /// <summary>A change to a game the reader is in — they were taken off it, or their share moved.</summary>
 public sealed record PlayersChange(
@@ -226,7 +236,8 @@ public static partial class EmailTemplates
         if (n.ShareMinutes > 0)
         {
             blocks.Add(new Callout(CalloutTone.Info, n.Accepted
-                ? "Nothing is taken from your balance for your share until you accept it yourself in the app."
+                // R13 J13-7: "until you accept it yourself" was broken by the desk's Collect, which takes it.
+                ? "Your share is not taken automatically: it moves when you accept it in the app, or if the club collects it — you get a receipt either way."
                 : "Nothing is taken until you accept. If you would rather not play, decline and the seat goes back to the organiser."));
         }
         blocks.Add(new CallToAction(n.Accepted ? "Open the booking" : "See the invite", n.Url));
@@ -288,19 +299,42 @@ public static partial class EmailTemplates
             ],
             WhyThis: WhyGame));
 
-    /// <summary>A game the reader was in has been cancelled.</summary>
+    /// <summary>
+    /// A game the reader was in has been cancelled — and, since review round 13 (E13-6), by whom and
+    /// why: a partner was never told the CLUB had cancelled it, nor the reason the desk recorded.
+    /// <paramref name="by"/> null keeps the plain words (a cancellation nobody recorded).
+    /// </summary>
     public static EmailMessage PlayersBookingCancelled(
-        ClubIdentity club, string to, string organiserName, string courtName, string startsAtLocal) =>
+        ClubIdentity club, string to, string organiserName, string courtName, string startsAtLocal, GameCancelledBy? by = null) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Game cancelled — {courtName}",
             Preheader: $"{startsAtLocal}. Any share you paid comes back to you.",
-            Heading: "This game has been cancelled",
-            Blocks:
-            [
-                new Paragraph($"The booking {organiserName} made for {courtName} at {startsAtLocal} has been cancelled."),
-                new Callout(CalloutTone.Info, "If you had paid a share, it comes back to your balance — you will get a separate receipt for it."),
-            ],
+            Heading: by?.ByClub == true ? "The club cancelled this game" : "This game has been cancelled",
+            Blocks: CancelledBlocks(organiserName, courtName, startsAtLocal, by),
             WhyThis: WhyGame));
+
+    private static List<EmailBlock> CancelledBlocks(string organiserName, string courtName, string startsAtLocal, GameCancelledBy? by)
+    {
+        var blocks = new List<EmailBlock> { new Paragraph(CancelledSentence(organiserName, courtName, startsAtLocal, by)) };
+        if (by?.ByClub == true && ShareRefundCauses.Because(by.Cause) is { } because)
+        {
+            blocks.Add(new Callout(CalloutTone.Info, $"Why: {because}."));
+        }
+        else if (by?.ByClub == true && by.Reason is { Length: > 0 } reason)
+        {
+            blocks.Add(new Callout(CalloutTone.Info, $"Reason given by the club: {reason}"));
+        }
+        blocks.Add(new Callout(CalloutTone.Info, "If you had paid a share, it comes back to your balance — you will get a separate receipt for it."));
+        return blocks;
+    }
+
+    private static string CancelledSentence(string organiserName, string courtName, string startsAtLocal, GameCancelledBy? by)
+    {
+        if (by is null) return $"The booking {organiserName} made for {courtName} at {startsAtLocal} has been cancelled.";
+        return by.ByClub
+            ? $"The club has cancelled the booking {organiserName} made for {courtName} at {startsAtLocal}."
+            : $"{organiserName} has cancelled the booking for {courtName} at {startsAtLocal}.";
+    }
 
     /// <summary>The reader was taken off a game, or their share of it changed.</summary>
     public static EmailMessage PlayersChanged(ClubIdentity club, string to, PlayersChange c) =>
@@ -388,6 +422,7 @@ public static partial class EmailTemplates
         if (m.ClubRemoved) return ClubRemovedSentence(m);
         if (m.KeptForNoShow) return NoShowSentence(m);
         if (ShareRefundCauses.Because(m.ClubRefund) is { } because) return ClubRefundSentence(m, because);
+        if (m.Withdrew) return WithdrewSentence(m);
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"You paid {Min(m.AmountMinutes)} to {m.OtherName} for your share of the court.";
@@ -406,6 +441,14 @@ public static partial class EmailTemplates
         return m.Direction == ShareDirection.Refunded
             ? $"The club took you off the game {m.OtherName} booked, and {Min(m.AmountMinutes)} of your share came back to your balance."
             : $"The club took {m.OtherName} off your game, and {Min(m.AmountMinutes)} of their share went back to them from your balance.";
+    }
+
+    /// <summary>R13 E13-4: the partner pulled out, and their share went back — the organiser was given no cause.</summary>
+    private static string WithdrewSentence(ShareMovement m)
+    {
+        return m.Direction == ShareDirection.Refunded
+            ? $"You withdrew from the game {m.OtherName} booked, so {Min(m.AmountMinutes)} of your share came back to your balance."
+            : $"{m.OtherName} withdrew from the game, so {Min(m.AmountMinutes)} of their share went back to them from your balance.";
     }
 
     /// <summary>

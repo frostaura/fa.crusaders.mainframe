@@ -59,7 +59,8 @@ public static partial class EmailTemplates
             Blocks:
             [
                 new Paragraph($"Hello {change.SubjectName}. {change.ActorName} has removed your administrator rights at {club.Name}."),
-                new Callout(CalloutTone.Danger, change.Reason ?? "No reason was given."),
+                // R13 J13-9: labelled as the grant's is — a bare sentence read as the club's own words.
+                new Facts([new FactRow("Reason", string.IsNullOrWhiteSpace(change.Reason) ? "No reason was given." : change.Reason)]),
                 new Paragraph("Your membership, your minutes and your bookings are exactly as they were. Only the admin console has gone."),
                 new Paragraph("If that looks like a mistake, speak to the club committee."),
             ],

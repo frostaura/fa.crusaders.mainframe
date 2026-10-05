@@ -378,15 +378,25 @@ public sealed class ShareLedger
         {
             MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
                 to, MemberEventCatalogue.ReturnWaiting, $"{key}:{(toOrganiser ? "organiser" : "partner")}",
-                new ReturnWaitingPayload(booking.Id, other, game.CourtName, game.StartsLocal, amount, toOrganiser, seat.Id),
+                new ReturnWaitingPayload(booking.Id, other, game.CourtName, game.StartsLocal, amount, toOrganiser, seat.Id, OffGame: !seat.IsLive),
                 toOrganiser ? $"{Cr(amount)} for {other} is waiting on your balance" : $"{Cr(amount)} of your share is on its way back",
-                $"/bookings/{booking.Id}", booking.Id), settings);
+                BookingPath(booking.Id, !toOrganiser && !seat.IsLive ? seat.Id : null), booking.Id), settings);
         }
         await _db.SaveChangesAsync(ct);
         await _ledger.PublishSetAsideAsync(organiser, ct);
     }
 
     private static string Cr(int amount) => MoneyFormat.Minutes(amount);
+
+    /// <summary>
+    /// R13 J13-3: the app path a notice links to — the booking, or for a reader no longer on it
+    /// (<paramref name="offGameSeat"/>) the booking naming their seat, which the page answers with
+    /// what became of them rather than "Booking not found".
+    /// </summary>
+    internal static string BookingPath(Guid bookingId, Guid? offGameSeat)
+    {
+        return offGameSeat is { } seat ? $"/bookings/{bookingId}?seat={seat}" : $"/bookings/{bookingId}";
+    }
 
     /// <summary>A return caused by the club's removal of THIS seat is told as the club's (review round 2, B-8); anything else is not.</summary>
     private static ClubReceipt? RemovalReceipt(ReconcileOptions options, ShareMove move)
@@ -560,18 +570,33 @@ public sealed class ShareLedger
         var refund = RefundCauseOf(booking, move, club);
         // R11 E11-2: a no-show return is the share LESS the partner's part of the penalty — say that part.
         var kept = refund == ShareRefundCauses.NoShow ? await KeptOfNoShowAsync(move, amount, ct) : null;
+        var (withdrew, offGame) = await SeatFactsAsync(move, club, refund, ct);
+        var why = new HeadlineWhy(byClub, attended, refund, kept) { Withdrew = withdrew };
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
                 ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason,
-                AfterAttendance: attended, ClubRefund: refund, KeptMinutes: kept),
-            move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, new HeadlineWhy(byClub, attended, refund, kept)), settings,
+                AfterAttendance: attended, ClubRefund: refund, KeptMinutes: kept, Withdrew: withdrew, OffGameSeatId: offGame),
+            move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, why), settings,
             Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended,
-                ClubRefund: refund, KeptMinutes: kept),
-            move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, new HeadlineWhy(byClub, attended, refund, kept)), settings,
+                ClubRefund: refund, KeptMinutes: kept, Withdrew: withdrew),
+            move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, why), settings,
             Own(move.OrganiserUserId));
         return new ShareWhy(CauseOf(booking, move, club, attended, refund), kept, attended ? await ScannerOfAsync(booking, ct) : null);
+    }
+
+    /// <summary>
+    /// R13 E13-4 / J13-3: whether this return goes to a partner who withdrew (neither the club's hand,
+    /// <paramref name="club"/>, nor a club refund, <paramref name="refund"/>), and the partner's seat when
+    /// they are no longer on the game — their links name it, because the booking page 404s for them.
+    /// </summary>
+    private async Task<(bool Withdrew, Guid? OffGameSeat)> SeatFactsAsync(ShareMove move, ClubReceipt? club, string? refund, CancellationToken ct)
+    {
+        var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == move.ParticipantId, ct);
+        if (seat is null || seat.IsLive) return (false, null);
+        var plainReturn = club is null && refund is null && move.Delta < 0;
+        return (plainReturn && seat.Status == ParticipantStatus.Withdrawn, seat.Id);
     }
 
     /// <summary>
@@ -631,7 +656,7 @@ public sealed class ShareLedger
     private void Stage(SharePayload payload, Guid userId, string key, string headline, TenantSettingsView settings, bool ownAction)
     {
         MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
-            userId, MemberEventCatalogue.ShareMoved, key, payload, headline, $"/bookings/{payload.BookingId}", payload.BookingId)
+            userId, MemberEventCatalogue.ShareMoved, key, payload, headline, BookingPath(payload.BookingId, payload.OffGameSeatId), payload.BookingId)
         {
             BornRead = ownAction,
         }, settings);
@@ -656,10 +681,25 @@ public sealed class ShareLedger
 
     /// <summary>The receipt's headline: a club refund's words when there is one (E10-7), else <see cref="ShareHeadline"/>.</summary>
     private static string HeadlineFor(ShareDirection d, string other, int amount, HeadlineWhy why) =>
-        NoShowHeadline(d, other, amount, why) ?? RefundHeadline(d, other, amount, why.Refund) ?? ShareHeadline(d, other, amount, why.ByClub, why.Attended);
+        NoShowHeadline(d, other, amount, why) ?? RefundHeadline(d, other, amount, why.Refund) ?? WithdrewHeadline(d, other, amount, why)
+        ?? ShareHeadline(d, other, amount, why.ByClub, why.Attended);
+
+    /// <summary>R13 E13-4: "7 minutes went back to Paula — they withdrew from the game", or the partner's own.</summary>
+    private static string? WithdrewHeadline(ShareDirection d, string other, int amount, HeadlineWhy why)
+    {
+        if (!why.Withdrew) return null;
+        var minutes = MoneyFormat.Minutes(amount);
+        return d == ShareDirection.Refunded
+            ? $"{minutes} of your share came back — you withdrew from the game"
+            : $"{minutes} went back to {other} — they withdrew from the game";
+    }
 
     /// <summary>The facts a receipt's headline is worded from.</summary>
-    private sealed record HeadlineWhy(bool ByClub, bool Attended, string? Refund, int? Kept);
+    private sealed record HeadlineWhy(bool ByClub, bool Attended, string? Refund, int? Kept)
+    {
+        /// <summary>R13 E13-4: the partner withdrew, so their share went back.</summary>
+        public bool Withdrew { get; init; }
+    }
 
     /// <summary>
     /// R11 E11-2: a no-show return names the penalty and the partner's part of it. "The club refunded

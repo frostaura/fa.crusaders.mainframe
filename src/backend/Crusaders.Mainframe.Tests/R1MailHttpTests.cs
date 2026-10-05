@@ -87,7 +87,8 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
 
         var sam = To(mail, club, "sam.partner");
         var inGame = Assert.Single(sam, m => m.Subject.StartsWith("The club put you in", StringComparison.Ordinal));
-        Assert.Contains("until you accept it yourself", Body(inGame));
+        // R13 J13-7: the promise covers the club's collect, which the next lines show taking it.
+        Assert.Contains("it moves when you accept it in the app, or if the club collects it", Body(inGame));
         var taken = Assert.Single(sam, m => m.Subject.StartsWith("The club collected your share", StringComparison.Ordinal));
         Assert.Contains("The club collected", Body(taken));
         Assert.Contains("below zero", Body(taken));
