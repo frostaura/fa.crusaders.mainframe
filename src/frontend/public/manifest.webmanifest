@@ -1,7 +1,7 @@
 {
   "name": "Crusaders Mainframe",
   "short_name": "Crusaders",
-  "description": "Book a court, check your credits, and open the lights.",
+  "description": "Book a court, check your minutes, and open the lights.",
   "id": "/",
   "start_url": "/my-code",
   "scope": "/",
@@ -18,6 +18,6 @@
   "shortcuts": [
     { "name": "My Code", "short_name": "My Code", "description": "Your code for the court box and the club door", "url": "/my-code" },
     { "name": "Bookings", "short_name": "Bookings", "description": "Book a court", "url": "/bookings" },
-    { "name": "Wallet", "short_name": "Wallet", "description": "Your credits and top-ups", "url": "/wallet" }
+    { "name": "Wallet", "short_name": "Wallet", "description": "Your minutes, and buy more", "url": "/wallet" }
   ]
 }

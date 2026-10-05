@@ -50,9 +50,42 @@ function hits(): string[] {
   });
 }
 
+/**
+ * R13 D13-2 — the shell outside `src/`: `index.html`'s meta description and the install manifest's
+ * description and shortcuts are what a phone's home screen, a share card and a search result show,
+ * and they still said "credits" after every screen had stopped. HTML comments are prose; the
+ * manifest is JSON and has none, so every character of it is read.
+ */
+const ROOT = join(SRC, "..");
+
+function shellFiles(): string[] {
+  const pub = join(ROOT, "public");
+  const extra = readdirSync(pub).filter((name) => /\.(?:webmanifest|html|js)$/.test(name)).map((name) => join(pub, name));
+  return [join(ROOT, "index.html"), ...extra];
+}
+
+/** A comment, blanked to its own line breaks so every hit keeps its real line number. */
+function blank(comment: string): string {
+  return comment.replace(/[^\n]/g, "");
+}
+
+function shellHits(): string[] {
+  return shellFiles().flatMap((file) => {
+    let text = readFileSync(file, "utf8").replace(/<!--[\s\S]*?-->/g, blank);
+    if (file.endsWith(".js")) text = text.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/(^|[^:])\/\/.*$/gm, "$1");
+    return text.split("\n").flatMap((line, i) =>
+      /credit/i.test(line) ? [`${relative(ROOT, file).split(sep).join("/")}:${i + 1}: ${line.trim()}`] : []);
+  });
+}
+
 describe("minutes, not credits (P13 source scan)", () => {
   it("no code in the console says credit outside the §2.5 allow-list", () => {
     expect(hits()).toEqual([]);
+  });
+
+  it("the page shell and install manifest never say credit (R13 D13-2)", () => {
+    expect(shellFiles().some((file) => file.endsWith("manifest.webmanifest"))).toBe(true);
+    expect(shellHits()).toEqual([]);
   });
 
   it("the old credit formatters are gone for good", () => {
