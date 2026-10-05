@@ -57,6 +57,42 @@
       "path_and_query": "/api/v1/device/events",
       "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
       "body_hex": "7b226d6163223a22356363663766306131623263222c22626f6f745f6964223a323539363036393130342c22757074696d655f6d73223a343239343938373239362c226576656e7473223a5b7b22736571223a34312c22757074696d655f6d73223a343239343936333230302c226b696e64223a2261637469766174696f6e222c22636f757274223a312c226d6574686f64223a227172222c227375626a656374223a22544f4b454e2d42222c226475726174696f6e5f6d73223a323730303030307d5d7d"
+    },
+    {
+      "id": "activate-request-escaped-scan",
+      "note": "R15 D15-1: the Mega passes every scanner byte through, quotes, backslashes and bytes above 0x7F included, and the bridge interpolated the token raw \u2014 invalid JSON (the quote ended the string) and invalid UTF-8 (a lone 0xE9). `token_hex` is the scan as it came off the serial link: Q \" \\ X 0xE9 0xFF. The body escapes it with devapi::json::escapeInto: the two-character forms for the quote and the backslash, and every byte above 0x7E as \\u00XX, its Latin-1 code point, so the body is pure ASCII, valid JSON and valid UTF-8 whatever was scanned. Not a v1 member code, so no scan_age_ms. The server reads the token as the string Q\"\\X\u00e9\u00ff and refuses it like any unknown code.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/activate",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "token_hex": "51225c58e9ff",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d6574686f64223a227172222c22746f6b656e223a22515c225c5c585c75303065395c7530306666227d"
+    },
+    {
+      "id": "walkup-request-escaped-scan",
+      "note": "the same scan as activate-request-escaped-scan, in the walk-up body (60 minutes on court 3): the token is escaped exactly as it is there.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/walkup",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "token_hex": "51225c58e9ff",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d696e75746573223a36302c226d6574686f64223a227172222c22746f6b656e223a22515c225c5c585c75303065395c7530306666222c22636f757274223a332c226e6f6e6365223a2239663261346336653862306431663361227d"
+    },
+    {
+      "id": "payfor-request-escaped-scan",
+      "note": "the same scan as activate-request-escaped-scan, in the D10 pay-for quote body (court 2, confirm:false): the token is escaped exactly as it is there.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/pay-for",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "token_hex": "51225c58e9ff",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d6574686f64223a227172222c22746f6b656e223a22515c225c5c585c75303065395c7530306666222c22636f757274223a322c226e6f6e6365223a2239663261346336653862306431663361222c22636f6e6669726d223a66616c73657d"
+    },
+    {
+      "id": "events-request-escaped-subject",
+      "note": "the same scan, refused offline and queued as an unknown_scan: its subject was already escaped for the quote and the backslash (round G4, B1) but carried 0xE9 raw, and the server answered that body 500 \u2014 the drain retried it for ever and the breaker read it as an outage. `subject_hex` is the queued subject. Boot id 0, so the field is omitted.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/events",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "subject_hex": "51225c58e9ff",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c22757074696d655f6d73223a38363430303030302c226576656e7473223a5b7b22736571223a372c22757074696d655f6d73223a38363339303030302c226b696e64223a22756e6b6e6f776e5f7363616e222c22636f757274223a2d312c226d6574686f64223a227172222c227375626a656374223a22515c225c5c585c75303065395c7530306666222c226475726174696f6e5f6d73223a307d5d7d"
     }
   ],
   "responses": [

@@ -202,6 +202,11 @@ size_t renderWalkUpBody(char* out, size_t cap, const WalkUpRequest& request) {
       request.mac == nullptr || request.mac[0] == '\0') {
     return 0U;
   }
+  char safeToken[kEscapedScanCap] = {};
+  if (!escapeScan(request.token, safeToken, sizeof(safeToken))) {
+    out[0] = '\0';
+    return 0U;
+  }
   char age[32] = {};
   if (memcode::looksLikeV1(request.token)) {
     snprintf(age, sizeof(age), ",\"scan_age_ms\":%lu", static_cast<unsigned long>(request.scanAgeMs));
@@ -209,7 +214,7 @@ size_t renderWalkUpBody(char* out, size_t cap, const WalkUpRequest& request) {
   const int n = snprintf(
       out, cap,
       "{\"mac\":\"%s\",\"minutes\":%u,\"method\":\"qr\",\"token\":\"%s\",\"court\":%d,\"nonce\":\"%s\"%s}",
-      request.mac, static_cast<unsigned>(request.intent.minutes), request.token,
+      request.mac, static_cast<unsigned>(request.intent.minutes), safeToken,
       static_cast<int>(request.courtNumber), request.nonce, age);
   if (n <= 0 || static_cast<size_t>(n) >= cap) {
     out[0] = '\0';

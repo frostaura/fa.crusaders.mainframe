@@ -1313,7 +1313,7 @@ bool activateOnline(const char* token) {
   // walk-up's sentence and false here (D8-2).
   showScreen(bridgelogic::kActivateWaitScreen, gClock.nowMs());
 
-  char body[128];
+  char body[bridgelogic::kActivateBodyCap];
   if (bridgelogic::renderActivateBody(body, sizeof(body), gMacHex, token, scanAgeMs()) == 0U) {
     return false;
   }
@@ -1377,9 +1377,9 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   request.nonce = gWalkUpNonce.forPurchase(intent, gLastScan, gRequestEntropy);
   request.scanAgeMs = scanAgeMs();
 
-  // 320 holds the contract body with ~180 bytes to spare: a 12-hex MAC, minutes
-  // (3), a 24-byte token, a court number (5) and a 16-hex nonce come to under 140.
-  char body[320];
+  // kWalkUpBodyCap holds the worst body there is — a 24-byte scan escaped six
+  // bytes for one (R15 D15-1) — and the host suite renders into the same size.
+  char body[bridgelogic::kWalkUpBodyCap];
   if (bridgelogic::renderWalkUpBody(body, sizeof(body), request) == 0U) {
     showScreen(bridgelogic::ScreenId::SeeTheDesk, gClock.nowMs());
     return;
@@ -1450,7 +1450,7 @@ void confirmPayFor() {
   request.confirm = true;
   request.amountLabel = gPayFor.amountLabel();
   request.scanAgeMs = scanAgeMs();
-  char body[256];
+  char body[bridgelogic::kPayForBodyCap];
   if (bridgelogic::renderPayForBody(body, sizeof(body), request) == 0U) {
     gPayFor.clear();
     gPad.clear();
@@ -1567,7 +1567,7 @@ bool quotePayFor(uint8_t relay, uint32_t nowMs) {
   request.nonce = gPayFor.quoteNonce(gRequestEntropy);
   request.confirm = false;
   request.scanAgeMs = scanAgeMs();
-  char body[256];
+  char body[bridgelogic::kPayForBodyCap];
   if (bridgelogic::renderPayForBody(body, sizeof(body), request) == 0U) {
     return false;
   }

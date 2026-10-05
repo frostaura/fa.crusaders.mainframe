@@ -178,15 +178,25 @@ bool regrantsHeldCourt(const roster::Decision& decision, const HeldState held[kS
   return true;
 }
 
+bool escapeScan(const char* token, char* out, size_t cap) {
+  return token != nullptr && devapi::json::escapeInto(token, strlen(token), out, cap);
+}
+
 size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* token, uint32_t scanAgeMs) {
   if (out == nullptr || cap == 0U || token == nullptr || mac == nullptr || mac[0] == '\0') {
+    return 0U;
+  }
+  char safeToken[kEscapedScanCap] = {};
+  if (!escapeScan(token, safeToken, sizeof(safeToken))) {
+    out[0] = '\0';
     return 0U;
   }
   char age[32] = {};
   if (memcode::looksLikeV1(token)) {
     snprintf(age, sizeof(age), ",\"scan_age_ms\":%lu", static_cast<unsigned long>(scanAgeMs));
   }
-  const int n = snprintf(out, cap, "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\"%s}", mac, token, age);
+  const int n =
+      snprintf(out, cap, "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\"%s}", mac, safeToken, age);
   if (n <= 0 || static_cast<size_t>(n) >= cap) {
     out[0] = '\0';
     return 0U;

@@ -142,7 +142,10 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.4 and Mega 2.0.0**: 2.2.4
+`platformio.ini`. The current images are **bridge 2.2.5 and Mega 2.0.0**: 2.2.5
+escapes the scanned token in the activate, walk-up and pay-for bodies and writes
+every byte above 0x7E as `\u00XX`, so a scan of a quote or a stray high byte
+the Mega passed through is no longer a body the server cannot parse; 2.2.4
 keeps a walk-up's scan through a refusal the member can fix by choosing less
 time (`TOO LONG / TRY LESS TIME`), forgetting it only for a used or unknown
 code, and reads a used code at pay-for as `CODE USED`; 2.2.3

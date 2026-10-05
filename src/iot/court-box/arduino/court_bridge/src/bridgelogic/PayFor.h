@@ -80,6 +80,11 @@ struct PayForRequest {
 /// body — when it does not fit or a field is missing.
 size_t renderPayForBody(char* out, size_t cap, const PayForRequest& request);
 
+/// The buffer the bridge renders a pay-for body into; see kActivateBodyCap.
+/// The worst body — an escaped 24-byte scan, court -32768, a confirm with a
+/// four-digit label — is 271 bytes, past the 256 this used to be.
+inline constexpr size_t kPayForBodyCap = 320U;
+
 /// What an answer means.
 enum class PayForKind : uint8_t {
   /// A confirm that got no decision: keep the quote and its nonce.

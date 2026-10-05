@@ -30,6 +30,7 @@
 #include "bridgelogic/BootId.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
+#include "bridgelogic/PayFor.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterTokenFits.h"
 #include "bridgelogic/ScanFlow.h"
@@ -39,6 +40,7 @@
 #include "bridgelogic/WallClock.h"
 #include "court/Session.h"
 #include "devapi/DeviceClient.h"
+#include "devapi/Json.h"
 #include "devlink/Cadence.h"
 #include "devlink/EventUpload.h"
 #include "devlink/LcdSettings.h"
@@ -1555,6 +1557,10 @@ const char* const kBoundHttpVectors[] = {
     "activate-request",
     "walkup-request",
     "events-request-across-the-millis-wrap",
+    "activate-request-escaped-scan",
+    "walkup-request-escaped-scan",
+    "payfor-request-escaped-scan",
+    "events-request-escaped-subject",
     "activate-response-ok",
     "activate-response-too-early",
     "activate-response-ended",
@@ -1661,6 +1667,196 @@ void test_corpus_walkup_body_is_byte_identical_to_the_contract() {
   TEST_ASSERT_EQUAL_size_t(n, renderedLen);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
   TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
+// ---------------------------------------------------------------------------
+// R15 D15-1 — a scanned byte the Mega passed through
+// ---------------------------------------------------------------------------
+//
+// The Mega's assembler admits quotes, backslashes and every byte above 0x7F,
+// and the three scan bodies interpolated the token with a bare `%s`: a quote
+// ended the string early, a lone 0xE9 was invalid UTF-8, and the server
+// answered both 500. Each vector's `token_hex` is the scan as it came off the
+// serial link; its `body_hex` is the escaped body, byte for byte.
+
+/// The scan a vector declares in `field`, NUL-terminated into `out`.
+void scanOf(const char* vector, const char* field, char* out, size_t cap) {
+  uint8_t bytes[proto::kMaxArgLen] = {};
+  size_t n = 0U;
+  TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, field, bytes, sizeof(bytes), &n), field);
+  TEST_ASSERT_TRUE(n < cap);
+  memcpy(out, bytes, n);
+  out[n] = '\0';
+}
+
+/// True when every byte is printable ASCII: no raw high byte, no control byte.
+bool asciiOnly(const char* s) {
+  for (size_t i = 0U; s[i] != '\0'; ++i) {
+    const unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c < 0x20U || c > 0x7EU) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void test_corpus_activate_escapes_a_scan_the_mega_passed_through() {
+  loadHttpCorpus();
+  const char* vector = requestVector("activate-request-escaped-scan");
+  char expected[512] = {};
+  const size_t n = bodyOf(vector, expected, sizeof(expected));
+  char token[proto::kMaxArgLen + 1U] = {};
+  scanOf(vector, "token_hex", token, sizeof(token));
+
+  char rendered[bridgelogic::kActivateBodyCap] = {};
+  const size_t renderedLen = bridgelogic::renderActivateBody(rendered, sizeof(rendered), corpusMac(), token);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_TRUE(asciiOnly(rendered));
+}
+
+void test_corpus_walkup_escapes_a_scan_the_mega_passed_through() {
+  loadHttpCorpus();
+  const char* vector = requestVector("walkup-request-escaped-scan");
+  char expected[512] = {};
+  const size_t n = bodyOf(vector, expected, sizeof(expected));
+  char token[proto::kMaxArgLen + 1U] = {};
+  scanOf(vector, "token_hex", token, sizeof(token));
+
+  bridgelogic::WalkUpRequest request;
+  request.mac = corpusMac();
+  request.intent.court = 2U;
+  request.intent.minutes = 60U;
+  request.courtNumber = kCorpusCourts[request.intent.court];
+  request.token = token;
+  request.nonce = "9f2a4c6e8b0d1f3a";
+
+  char rendered[bridgelogic::kWalkUpBodyCap] = {};
+  const size_t renderedLen = bridgelogic::renderWalkUpBody(rendered, sizeof(rendered), request);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_TRUE(asciiOnly(rendered));
+}
+
+void test_corpus_payfor_escapes_a_scan_the_mega_passed_through() {
+  loadHttpCorpus();
+  const char* vector = requestVector("payfor-request-escaped-scan");
+  char expected[512] = {};
+  const size_t n = bodyOf(vector, expected, sizeof(expected));
+  char token[proto::kMaxArgLen + 1U] = {};
+  scanOf(vector, "token_hex", token, sizeof(token));
+
+  bridgelogic::PayForRequest request;
+  request.mac = corpusMac();
+  request.token = token;
+  request.courtNumber = 2;
+  request.nonce = "9f2a4c6e8b0d1f3a";
+  request.confirm = false;
+
+  char rendered[bridgelogic::kPayForBodyCap] = {};
+  const size_t renderedLen = bridgelogic::renderPayForBody(rendered, sizeof(rendered), request);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_TRUE(asciiOnly(rendered));
+}
+
+/// The event half: the subject was escaped for `"` and `\` already (G4 B1),
+/// but carried 0xE9 raw, and that body is the one that pinned the queue.
+void test_corpus_event_escapes_a_subject_the_mega_passed_through() {
+  loadHttpCorpus();
+  const char* vector = requestVector("events-request-escaped-subject");
+  char expected[512] = {};
+  const size_t n = bodyOf(vector, expected, sizeof(expected));
+  char subject[proto::kMaxArgLen + 1U] = {};
+  scanOf(vector, "subject_hex", subject, sizeof(subject));
+
+  eventq::Event event;
+  event.seq = 7U;
+  event.kind = eventq::Kind::UnknownScan;
+  event.court = eventq::Event::kNoCourt;
+  event.method = eventq::Method::Qr;
+  event.uptimeMs = 86390000UL;
+  TEST_ASSERT_TRUE(event.setSubject(subject));
+
+  char rendered[devlink::kEventBodyCap] = {};
+  const size_t renderedLen =
+      devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 0U, 86400000ULL, event);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_TRUE(asciiOnly(rendered));
+}
+
+/// THE BUFFERS THE BRIDGE ACTUALLY RENDERS INTO hold the worst scan there is:
+/// a full-length one of bytes the escaper writes six for one, beside the
+/// longest value of every other field. A body that does not fit is not sent —
+/// the box falls back to the roster or the desk — and that fallback must be a
+/// choice about the token, never an accident of a buffer sized for ASCII.
+void test_the_scan_bodies_fit_the_worst_scan_in_the_bridges_own_buffers() {
+  char token[proto::kMaxArgLen + 1U] = {};
+  for (size_t i = 0U; i < proto::kMaxArgLen; ++i) {
+    token[i] = static_cast<char>(0xFF);
+  }
+
+  char activate[bridgelogic::kActivateBodyCap] = {};
+  TEST_ASSERT_TRUE(bridgelogic::renderActivateBody(activate, sizeof(activate), corpusMac(), token) > 0U);
+  TEST_ASSERT_TRUE(asciiOnly(activate));
+
+  bridgelogic::WalkUpRequest walkUp;
+  walkUp.mac = corpusMac();
+  walkUp.intent.court = 3U;
+  walkUp.intent.minutes = UINT16_MAX;
+  walkUp.courtNumber = INT16_MIN;
+  walkUp.token = token;
+  walkUp.nonce = "9f2a4c6e8b0d1f3a";
+  char walkUpBody[bridgelogic::kWalkUpBodyCap] = {};
+  TEST_ASSERT_TRUE(bridgelogic::renderWalkUpBody(walkUpBody, sizeof(walkUpBody), walkUp) > 0U);
+  TEST_ASSERT_TRUE(asciiOnly(walkUpBody));
+
+  bridgelogic::PayForRequest payFor;
+  payFor.mac = corpusMac();
+  payFor.token = token;
+  payFor.courtNumber = INT16_MIN;
+  payFor.nonce = "9f2a4c6e8b0d1f3a";
+  payFor.confirm = true;
+  payFor.amountLabel = "9999";
+  char payForBody[bridgelogic::kPayForBodyCap] = {};
+  TEST_ASSERT_TRUE(bridgelogic::renderPayForBody(payForBody, sizeof(payForBody), payFor) > 0U);
+  TEST_ASSERT_TRUE(asciiOnly(payForBody));
+}
+
+/// Fuzzed: whatever the Mega hands over, the token cannot end its string or
+/// add a field. Every body keeps exactly its own quotes, and its `mac` and
+/// `method` survive — the two fields a crafted scan used to be able to reach.
+void test_the_scan_bodies_hold_their_shape_whatever_was_scanned() {
+  static const char kAlphabet[] = "\"\\:,{}[]aZ09 \t\x01\x7f\x80\xc3\xa9\xe9\xff";
+  const size_t alphabetLen = sizeof(kAlphabet) - 1U;
+  uint32_t state = 0x1D15F00DU;
+  for (int iteration = 0; iteration < 5000; ++iteration) {
+    char token[proto::kMaxArgLen + 1U] = {};
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    const size_t length = 1U + state % proto::kMaxArgLen;
+    for (size_t i = 0U; i < length; ++i) {
+      state ^= state << 13;
+      state ^= state >> 17;
+      state ^= state << 5;
+      token[i] = kAlphabet[state % alphabetLen];
+    }
+
+    char body[bridgelogic::kActivateBodyCap] = {};
+    TEST_ASSERT_TRUE_MESSAGE(bridgelogic::renderActivateBody(body, sizeof(body), corpusMac(), token) > 0U,
+                             "a scan within the arg cap must always render");
+    TEST_ASSERT_TRUE_MESSAGE(asciiOnly(body), body);
+    TEST_ASSERT_TRUE_MESSAGE(devapi::json::isCompleteObject(body, strlen(body)), body);
+    char text[16] = {};
+    TEST_ASSERT_TRUE_MESSAGE(
+        devapi::json::topLevelStringField(body, strlen(body), "method", text, sizeof(text)), body);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("qr", text, body);
+    TEST_ASSERT_TRUE_MESSAGE(devapi::json::topLevelStringField(body, strlen(body), "mac", text, sizeof(text)),
+                             body);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(corpusMac(), text, body);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3242,6 +3438,12 @@ int main(int, char**) {
   RUN_TEST(test_corpus_member_display_names_the_member_or_greets_them_anyway);
   RUN_TEST(test_corpus_the_event_body_carries_this_boots_id);
   RUN_TEST(test_corpus_every_http_section_is_declared_and_every_vector_is_bound);
+  RUN_TEST(test_corpus_activate_escapes_a_scan_the_mega_passed_through);
+  RUN_TEST(test_corpus_walkup_escapes_a_scan_the_mega_passed_through);
+  RUN_TEST(test_corpus_payfor_escapes_a_scan_the_mega_passed_through);
+  RUN_TEST(test_corpus_event_escapes_a_subject_the_mega_passed_through);
+  RUN_TEST(test_the_scan_bodies_fit_the_worst_scan_in_the_bridges_own_buffers);
+  RUN_TEST(test_the_scan_bodies_hold_their_shape_whatever_was_scanned);
 
   RUN_TEST(test_scan_flow_a_box_with_no_court_list_is_not_online);
   RUN_TEST(test_scan_flow_an_open_breaker_is_the_rosters_scan);

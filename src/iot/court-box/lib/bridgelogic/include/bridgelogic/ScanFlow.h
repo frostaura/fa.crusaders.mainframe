@@ -47,7 +47,9 @@
 
 #include "bridgelogic/StateReconcile.h"
 #include "court/Session.h"
+#include "devapi/Json.h"
 #include "devlink/RosterSync.h"
+#include "protocol/Protocol.h"
 
 namespace bridgelogic {
 
@@ -161,6 +163,28 @@ bool regrantsHeldCourt(const roster::Decision& decision, const HeldState held[kS
 /// the instant it was read (docs/specs/member-code.md §5). A legacy code's body
 /// is byte-for-byte the one the server has always been sent.
 size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* token, uint32_t scanAgeMs = 0U);
+
+/// The buffer the bridge renders an activate body into. A constant here rather
+/// than a literal in main.cpp so the host suite renders into the SAME size: the
+/// longest body is a 24-byte scan of bytes the escaper writes six for one —
+/// 191 bytes and its terminator.
+inline constexpr size_t kActivateBodyCap = 224U;
+
+/// Room for a scan of up to proto::kMaxArgLen bytes once escaped, terminator
+/// included.
+inline constexpr size_t kEscapedScanCap = proto::kMaxArgLen * devapi::json::kMaxEscapeExpansion + 1U;
+
+/// Writes the scanned `token` as the CONTENTS of a JSON string into `out`
+/// (R15 D15-1). False, with `out` emptied, when it does not fit.
+///
+/// ESCAPED, NOT INTERPOLATED. The Mega's assembler passes every byte the
+/// scanner sent — a quote, a backslash, anything above 0x7F — and the
+/// activate, walk-up and pay-for bodies all put the token in with a bare `%s`.
+/// A quote ended the string and let a printed code rewrite the fields around
+/// it; a lone 0xE9 was invalid UTF-8. The server could parse neither and
+/// answered 500. The one escaper is devapi::json::escapeInto, so these three
+/// bodies and the event subject cannot disagree about what a scan looks like.
+bool escapeScan(const char* token, char* out, size_t cap);
 
 /// The decision core. Stateless; every input is an argument so the host suite
 /// can drive each branch without a socket.

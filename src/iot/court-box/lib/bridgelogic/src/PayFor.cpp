@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bridgelogic/ScanFlow.h"
 #include "devapi/Json.h"
 #include "devcrypto/Hex.h"
 #include "memcode/Token.h"
@@ -92,14 +93,25 @@ bool validAmountLabel(const char* label) {
   return label[0] != '0' || len == 1U; // "0" is a number; "045" is not the server's
 }
 
+namespace {
+
+/// Every field a pay-for body needs is present, and a confirm's label is one
+/// the server could have sent.
+bool renderable(const PayForRequest& request) {
+  return request.mac != nullptr && request.mac[0] != '\0' && request.token != nullptr &&
+         request.token[0] != '\0' && request.nonce != nullptr &&
+         (!request.confirm || validAmountLabel(request.amountLabel));
+}
+
+} // namespace
+
 size_t renderPayForBody(char* out, size_t cap, const PayForRequest& request) {
   if (out == nullptr || cap == 0U) {
     return 0U;
   }
   out[0] = '\0';
-  if (request.mac == nullptr || request.mac[0] == '\0' || request.token == nullptr ||
-      request.token[0] == '\0' || request.nonce == nullptr ||
-      (request.confirm && !validAmountLabel(request.amountLabel))) {
+  char safeToken[kEscapedScanCap] = {};
+  if (!renderable(request) || !escapeScan(request.token, safeToken, sizeof(safeToken))) {
     return 0U;
   }
 
@@ -116,7 +128,7 @@ size_t renderPayForBody(char* out, size_t cap, const PayForRequest& request) {
   const int n = snprintf(out, cap,
                          "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\",\"court\":%d,\"nonce\":\"%s\","
                          "\"confirm\":%s%s%s}",
-                         request.mac, request.token, static_cast<int>(request.courtNumber), request.nonce,
+                         request.mac, safeToken, static_cast<int>(request.courtNumber), request.nonce,
                          request.confirm ? "true" : "false", label, age);
   if (n <= 0 || static_cast<size_t>(n) >= cap) {
     out[0] = '\0';

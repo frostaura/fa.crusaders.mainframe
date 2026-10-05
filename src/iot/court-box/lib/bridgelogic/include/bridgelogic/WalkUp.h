@@ -101,6 +101,11 @@ struct WalkUpRequest {
 /// field order is the corpus's (`http/cases.json`, `walkup-request`).
 size_t renderWalkUpBody(char* out, size_t cap, const WalkUpRequest& request);
 
+/// The buffer the bridge renders a walk-up body into; see kActivateBodyCap.
+/// The worst body — an escaped 24-byte scan, 65535 minutes, court -32768 — is
+/// 251 bytes.
+inline constexpr size_t kWalkUpBodyCap = 320U;
+
 /// What the API's answer means for the box.
 struct WalkUpResult {
   /// The API decided — granted or refused — as opposed to not answering. A
