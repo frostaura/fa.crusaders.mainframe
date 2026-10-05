@@ -1,4 +1,4 @@
-import type { ShareBookingSummary, WalletResponse } from "@/lib/api";
+import type { ShareBookingSummary, SharePlaceWire, WalletResponse } from "@/lib/api";
 import type { BookingDetail } from "@/lib/playersApi";
 
 /**
@@ -20,6 +20,11 @@ export type ShareBooking = {
   organiserName: string | null;
   /** Members on the booking other than the organiser, with what they have paid. */
   partners: { userId: string; name: string | null; paid: number }[];
+  /**
+   * R14 E14-7 — the member can no longer read this booking (its summary was null) and only its
+   * place is known (`share_places`): the line names the court and day, and offers no link.
+   */
+  gone?: true;
 };
 
 export function summariseBooking(detail: BookingDetail): ShareBooking {
@@ -54,8 +59,14 @@ export function shareBookingFromWire(wire: ShareBookingSummary): ShareBooking {
  * slow phone — and are now the `share_bookings` the read carries. A booking the club did not
  * summarise reads as `null`, so its line says "a split booking", which is true.
  */
-export function shareBookingsFrom(wire: WalletResponse["share_bookings"]): ShareBookings {
+export function shareBookingsFrom(wire: WalletResponse["share_bookings"], places?: WalletResponse["share_places"]): ShareBookings {
   const out: Record<string, ShareBooking | null> = {};
-  for (const [id, summary] of Object.entries(wire ?? {})) out[id] = summary ? shareBookingFromWire(summary) : null;
+  for (const [id, summary] of Object.entries(wire ?? {})) out[id] = summary ? shareBookingFromWire(summary) : goneAt(places?.[id]);
   return out;
+}
+
+/** R14 E14-7 — a booking the member is off: its place alone (`share_places`), else null as before. */
+function goneAt(place: SharePlaceWire | undefined): ShareBooking | null {
+  if (!place?.starts_at) return null;
+  return { courtName: place.court_name, startsAt: place.starts_at, organiserId: null, organiserName: null, partners: [], gone: true };
 }

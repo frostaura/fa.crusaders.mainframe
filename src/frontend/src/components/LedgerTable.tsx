@@ -185,7 +185,9 @@ function nextSort(current: Sort, key: Column): Sort {
  * absent): taken off it, pulled out, declined. Absent means not summarised, which proves nothing.
  */
 function isGone(bookings: ShareBookings, bookingId: string): boolean {
-  return Object.prototype.hasOwnProperty.call(bookings, bookingId) && bookings[bookingId] === null;
+  if (!Object.prototype.hasOwnProperty.call(bookings, bookingId)) return false;
+  // R14 E14-7 — or it is known only by its place (`share_places`): still gone, now named.
+  return bookings[bookingId] === null || bookings[bookingId]?.gone === true;
 }
 
 export function LedgerTable(props: LedgerTableProps) {

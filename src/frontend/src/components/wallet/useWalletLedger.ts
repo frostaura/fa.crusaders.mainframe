@@ -101,7 +101,7 @@ export function useWalletLedger() {
       setStale(false);
       setUnreachable(false);
       setRows(data.entries);
-      setShareBookings(shareBookingsFrom(data.share_bookings));
+      setShareBookings(shareBookingsFrom(data.share_bookings, data.share_places));
       setCardBalance(data.balance_minutes);
       setReadHeld(heldFrom(data));
       setTotal(data.total_entries);
@@ -215,7 +215,7 @@ function useMoneyAnnouncement(
 function fromKept(page: WalletResponse, liveBalance: number | null, liveHeld: HeldFigures | null, countUp: number | null) {
   const balance = liveBalance ?? page.balance_minutes;
   return {
-    rows: page.entries, shareBookings: shareBookingsFrom(page.share_bookings), cardBalance: page.balance_minutes,
+    rows: page.entries, shareBookings: shareBookingsFrom(page.share_bookings, page.share_places), cardBalance: page.balance_minutes,
     total: page.total_entries, balance, painted: countUp ?? balance, held: liveHeld ?? heldFrom(page),
   };
 }

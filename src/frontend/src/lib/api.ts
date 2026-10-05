@@ -514,7 +514,7 @@ let walletInFlight: {
 /** A shared answer, cut to the page and the parts this reader asked for. */
 function cutWallet(w: WalletResponse, want: number, shareBookings: boolean): WalletResponse {
   const cut = w.entries.length > want ? { ...w, entries: w.entries.slice(0, want), limit: want } : { ...w };
-  if (!shareBookings) delete cut.share_bookings;
+  if (!shareBookings) { delete cut.share_bookings; delete cut.share_places; }
   return cut;
 }
 
@@ -760,7 +760,14 @@ export type WalletResponse = {
    * the member can no longer read (a declined or removed seat: the old 404).
    */
   share_bookings?: Record<string, ShareBookingSummary | null>;
+  /**
+   * R14 E14-7 — with `include=share_bookings`: the court and start of every booking the share rows
+   * name, readable or not (a member taken off a game still sees where their share was). Null without
+   * the include; absent from an older API.
+   */
+  share_places?: Record<string, SharePlaceWire> | null;
 };
+export type SharePlaceWire = { court_name: string | null; starts_at: string };
 export type ShareBookingSummary = {
   booking_id: string;
   court_name: string | null;
