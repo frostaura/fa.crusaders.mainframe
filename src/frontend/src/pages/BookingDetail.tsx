@@ -17,7 +17,7 @@ import { useBookingDetail, type DetailRead } from "@/components/players/detail/u
 import { useDetailLiveness } from "@/components/players/detail/useDetailLiveness";
 import { useOrganiserHands, type Notice } from "@/components/players/detail/useOrganiserHands";
 import {
-  adminActs, canNudge, canRemove, canShareLink, detailTitle, isCancelled, organiserName, showsResult,
+  adminActs, canNudge, canRemove, canShareLink, cancellationWords, detailTitle, isCancelled, organiserName, showsResult,
 } from "@/components/players/detail/detailModel";
 import { ResultCard } from "@/components/play/ResultCard";
 import { ContextBar } from "@/components/ui/context-bar";
@@ -231,6 +231,21 @@ const CANCEL = "min-w-0 @[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72re
 const ADMIN = "min-w-0 @[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-1 @[72rem]/page:row-start-3";
 const LG_UP = "(min-width: 1024px)";
 
+/**
+ * R13 J13-6 — the cancelled game says who cancelled it and why (contract C13-1): "The club
+ * cancelled this game." with the club's reason on its own line, a displacement's cause, or the
+ * organiser's own cancel. `data-cancelled` is where the cancel panel's focus lands.
+ */
+function CancelledBanner({ detail }: { detail: BookingDetail }) {
+  const { said, reason } = cancellationWords(detail);
+  return (
+    <Alert tone="info" live="off" data-cancelled="">
+      {said}
+      {reason ? <span className="mt-1 block break-words" data-cancel-reason="">{reason}</span> : null}
+    </Alert>
+  );
+}
+
 type ViewProps = {
   detail: BookingDetail; readAt: number | null; reload: () => void; say: (notice: Notice) => void; earlyResult: EarlyResult | null;
 };
@@ -257,7 +272,7 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
   };
   return (
     <>
-      {cancelled ? <Alert tone="info" live="off" data-cancelled="">{DETAIL_CANCELLED.banner}</Alert> : null}
+      {cancelled ? <CancelledBanner detail={detail} /> : null}
       <div data-detail-layout="" className={LAYOUT}>
         <Section
           title={DETAIL_COPY.playersTitle}

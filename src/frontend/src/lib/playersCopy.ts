@@ -641,7 +641,15 @@ export const DETAIL_MONEY = {
  * where the money went. No deadline, no "not paid yet", no "all paid up", no result to record.
  */
 export const DETAIL_CANCELLED = {
+  /** An older server, which says nothing of who cancelled. */
   banner: "This game was cancelled.",
+  /** R13 J13-6 (contract C13-1) — who cancelled it, and why. */
+  byClub: "The club cancelled this game.",
+  byYou: "You cancelled this game.",
+  byOrganiser: (name: string) => `${name} cancelled this game.`,
+  /** The admin's own recorded words, as the member's mail says them. */
+  reason: (reason: string) => `Reason: ${reason}`,
+  displaced: "The club cancelled this game and refunded it — the court was still in use by an earlier booking.",
   playersDescription: "Who was on the game when it was cancelled.",
   moneyNote: "The booking was cancelled — this is where the money went.",
   refunded: (who: string | null) => (who ? `Refunded to ${who}` : "Refunded to you"),
