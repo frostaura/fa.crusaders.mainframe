@@ -353,11 +353,13 @@ public sealed class LedgerService
     }
 
     /// <summary>
-    /// R13 X13-2: on a share leg, the member on the pair's other leg — the leg posted beside it under
+    /// R13 X13-2: on a share leg, the member on the pair's other leg (R15 E15-7: or whoever the posting names) — the leg posted beside it under
     /// the same <c>share:{seat}:{seq}:</c> reference (<c>:out</c> / <c>:in</c>). Null on anything else.
     /// </summary>
     internal static Guid? CounterpartyOf(LedgerPosting posting, IReadOnlyList<LedgerPosting>? unitOfWork)
     {
+        // R15 E15-7: a posting that names its other member says so itself (a pay-for).
+        if (posting.CounterpartyUserId is { } named) return named;
         if (posting.Type != LedgerEntryType.ShareTransfer || unitOfWork is null || PairKey(posting.ExternalReference) is not { } key) return null;
         return unitOfWork.FirstOrDefault(o => !ReferenceEquals(o, posting) && o.Type == LedgerEntryType.ShareTransfer
                                               && o.UserId != posting.UserId && PairKey(o.ExternalReference) == key)?.UserId;
@@ -608,6 +610,13 @@ public sealed record LedgerPosting(
     /// refund told the partner the organiser had returned it. Null elsewhere. Never stored.
     /// </summary>
     public ShareWhy? Share { get; init; }
+
+    /// <summary>
+    /// R15 E15-7: the other member a non-share movement is about — on a pay-for, the payer on the
+    /// booker's refund and the booker on the payer's charge — so the frame's part carries
+    /// <c>counterparty_name</c> as a share leg's does. Never stored.
+    /// </summary>
+    public Guid? CounterpartyUserId { get; init; }
 
     /// <summary>
     /// R15 D14-4: when the act that wrote this row happened, on the caller's clock — the injected

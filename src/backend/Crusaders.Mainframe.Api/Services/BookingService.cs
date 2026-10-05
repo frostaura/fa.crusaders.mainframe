@@ -2770,7 +2770,8 @@ public sealed class BookingService
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
                         Reason: $"Payer changed at court — refunded, {court.Name} · {slotLabel}")
-                    { StreamReason = WalletStreamReasons.PayForRefund },
+                    // R15 E15-7: each side's frame names the other member — the payer here, the booker below.
+                    { StreamReason = WalletStreamReasons.PayForRefund, CounterpartyUserId = reassignTo.Value },
                     new LedgerPosting(
                         UserId: reassignTo.Value,
                         Type: LedgerEntryType.BookingCharge,
@@ -2778,7 +2779,7 @@ public sealed class BookingService
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
                         Reason: $"Paid at court on behalf of another member — {court.Name} · {slotLabel}")
-                    { StreamReason = WalletStreamReasons.PayForCharge },
+                    { StreamReason = WalletStreamReasons.PayForCharge, CounterpartyUserId = currentPayer },
                 ], ct);
             }
             catch (DbUpdateConcurrencyException)

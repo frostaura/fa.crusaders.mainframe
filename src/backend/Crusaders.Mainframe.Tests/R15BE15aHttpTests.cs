@@ -281,14 +281,22 @@ public sealed class R15BE15aHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         var c = r.Club;
         var package = new MinutePackage
         {
-            TenantId = c.TenantId, Name = "One hour", Minutes = 60, PriceZar = 120m, SortOrder = 1, CreatedByUserId = c.AdminId,
+            TenantId = c.TenantId,
+            Name = "One hour",
+            Minutes = 60,
+            PriceZar = 120m,
+            SortOrder = 1,
+            CreatedByUserId = c.AdminId,
         };
         await c.WriteAsync(r.App, db => { db.MinutePackages.Add(package); return Task.CompletedTask; });
 
         var response = await c.Member(r.App, c.AdminId, "admin").PostAsJsonAsync($"/api/v1/admin/minutes/{c.Pam}/sell", new
         {
-            packageId = package.Id, reasonCode = "top_up_cash", reason = "Desk",
-            quotedPriceZar = 120m, zarReceived = (decimal)rand,
+            packageId = package.Id,
+            reasonCode = "top_up_cash",
+            reason = "Desk",
+            quotedPriceZar = 120m,
+            zarReceived = (decimal)rand,
         });
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
@@ -342,6 +350,59 @@ public sealed class R15BE15aHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         finally
         {
             bus.Unsubscribe(topic, frames);
+        }
+    }
+
+    // ------------------------------------------------------------------ E15-7 (server half)
+
+    private static async Task<JsonElement> NamedFrameAsync(System.Threading.Channels.ChannelReader<RealtimeMessage> frames, string reason)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (true)
+        {
+            var frame = await frames.ReadAsync(cts.Token);
+            if (frame.Event != LedgerService.BalanceEvent) continue;
+            var json = JsonDocument.Parse(frame.JsonPayload).RootElement.Clone();
+            if (json.GetProperty("reason").GetString() == reason) return json;
+        }
+    }
+
+    /// <summary>
+    /// Pam pays for Olga's booking at the box: Olga's frame (pay_for_refund) names Pam on its part, and
+    /// Pam's (pay_for_charge) names Olga — the client's pay-for toast says who. Before, only a share
+    /// row's part carried <c>counterparty_name</c>, so both read "another member". Varied: a booking
+    /// already running and one about to start (its cue window open).
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(-10)]
+    [InlineData(5)]
+    public async Task A_pay_for_frame_names_the_other_member_on_each_side(int startsIn)
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        var r = await RigAsync($"r15pf{(startsIn > 0 ? "a" : "b")}", 0);
+        await using var _ = r.App;
+        var c = r.Club;
+        await c.BookAsync(r.App, c.Olga, courtIndex: 1, startsInMinutes: startsIn, minutes: 60);
+        var bus = r.App.Services.GetRequiredService<IRealtimeBus>();
+        var (olgaTopic, pamTopic) = (RealtimeTopic.Wallet(c.TenantId, c.Olga), RealtimeTopic.Wallet(c.TenantId, c.Pam));
+        var (olga, pam) = (bus.Subscribe(olgaTopic), bus.Subscribe(pamTopic));
+        try
+        {
+            var code = c.Code(c.Pam, at: r.Clock.Now);
+            var http = r.App.CreateClient();
+            await http.SendAsync(c.PayFor(code, 2, "a1b2c3d4e5f60718", confirm: false));
+            var paid = await http.SendAsync(c.PayFor(code, 2, "a1b2c3d4e5f60718", confirm: true, label: "60"));
+            Assert.True(paid.IsSuccessStatusCode, await paid.Content.ReadAsStringAsync());
+
+            var refund = await NamedFrameAsync(olga.Reader, WalletStreamReasons.PayForRefund);
+            var charge = await NamedFrameAsync(pam.Reader, WalletStreamReasons.PayForCharge);
+            Assert.Equal("Pam Payer", Assert.Single(refund.GetProperty("parts").EnumerateArray()).GetProperty("counterparty_name").GetString());
+            Assert.Equal("Olga Organiser", Assert.Single(charge.GetProperty("parts").EnumerateArray()).GetProperty("counterparty_name").GetString());
+        }
+        finally
+        {
+            bus.Unsubscribe(olgaTopic, olga);
+            bus.Unsubscribe(pamTopic, pam);
         }
     }
 }
