@@ -96,7 +96,7 @@ describe("Charts — net series and the sign of a day", () => {
     const bars = propsOf(tree, Bar);
     expect(bars.find((b) => b.dataKey === "penalties_minutes")?.name).toBe("Penalties (net)");
     // P13: the club SELLS minutes; "Top-ups" was the old verb for a member's purchase.
-    expect(bars.find((b) => b.dataKey === "top_ups_minutes")?.name).toBe("Minutes sold");
+    expect(bars.find((b) => b.dataKey === "sold_minutes")?.name).toBe("Minutes sold");
   });
 
   it("gives the member's flow chart the same treatment for refunds", () => {

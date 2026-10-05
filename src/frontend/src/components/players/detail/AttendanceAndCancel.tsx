@@ -9,7 +9,7 @@ import { clubClock } from "@/lib/clubClock";
 import { focusAfterAction } from "@/lib/focusAfterAction";
 import type { BookingDetail } from "@/lib/playersApi";
 import { DETAIL_ATTENDANCE, DETAIL_CANCEL, DETAIL_NO_SHOW } from "@/lib/playersCopy";
-import { isNoShow, lightsOffAt, liveCount } from "./detailModel";
+import { isLive, isNoShow, lightsOffAt, liveCount, seatName } from "./detailModel";
 import { gridBookingOf, rereadAsDay } from "./gridBooking";
 
 /** Checked in or not, and how many of the players have scanned. */
@@ -36,6 +36,15 @@ export function Attendance({ detail }: { detail: BookingDetail }) {
 type Props = { detail: BookingDetail; reload: () => void };
 
 /**
+ * R14 J14-7 — the partners named, one share for one partner; a guest or an open seat holds no
+ * share to give back, so a game with neither member partner says only the penalty line.
+ */
+function cancelNote(detail: BookingDetail): string {
+  const partners = detail.players.filter((p) => p.kind === "member" && isLive(p)).map((p) => seatName(p, detail.players));
+  return [DETAIL_CANCEL.partnersBack(partners), DETAIL_CANCEL.penaltyYours].filter(Boolean).join(" ");
+}
+
+/**
  * The organiser cancelling: the partners' side said first — their shares come back, and a late
  * penalty is the organiser's alone — then the grid's own sheet with the server's quote.
  */
@@ -55,7 +64,7 @@ export function CancelPanel({ detail, reload }: Props) {
   return (
     <Section title={DETAIL_CANCEL.title}>
       {detail.money.is_split ? (
-        <Alert tone="info" live="off">{`${DETAIL_CANCEL.partnersBack} ${DETAIL_CANCEL.penaltyYours}`}</Alert>
+        <Alert tone="info" live="off">{cancelNote(detail)}</Alert>
       ) : null}
       <div>
         <Button variant="danger-soft" onClick={() => setOpen(true)}>{DETAIL_CANCEL.open}</Button>

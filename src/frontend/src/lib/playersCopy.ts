@@ -731,6 +731,8 @@ export const DETAIL_PLAYER = {
   toPay: "Still to pay",
   paidAll: "You're all paid up.",
   askedAgain: (share: string) => `Your share went up to ${share}. Review it to say yes again.`,
+  /** R14 J14-9 — the club accepted the seat without asking and nothing was ever agreed: not "went up". */
+  askedFirst: (share: string) => `The club has asked you for ${share} — review it to say yes.`,
   review: "Review your share",
   withdraw: "Pull out",
   withdrawUntil: (when: string) => `You can pull out until ${when}.`,
@@ -766,7 +768,16 @@ export const DETAIL_ATTENDANCE = {
 /** The organiser cancelling — the grid's own CancelSheet, with the partners' side said first. */
 export const DETAIL_CANCEL = {
   title: "Cancel this booking",
-  partnersBack: "Your partners get back what they paid for their shares.",
+  /**
+   * R14 J14-7 — each partner named, one share for one partner: "Sam gets back what they paid for
+   * their share." / "Sam and Alex get back … their shares." Empty when no member holds a seat.
+   */
+  partnersBack: (names: readonly string[]) => {
+    if (names.length === 0) return "";
+    return names.length === 1
+      ? `${names[0]} gets back what they paid for their share.`
+      : `${listNames(names)} get back what they paid for their shares.`;
+  },
   penaltyYours: "Any late-cancellation penalty is yours alone — it isn't split.",
   open: "Cancel booking",
   cancelled: "The booking is cancelled.",

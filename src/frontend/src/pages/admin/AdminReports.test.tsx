@@ -71,3 +71,50 @@ describe("Club reports — minutes the club gave are never sold (R13 J13-2)", ()
     }
   });
 });
+
+describe("Club reports — Sold is paid minutes only, Given apart (R14 J14-2)", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const day = (date: string, topUps: number, given?: number) => ({
+    date, top_ups_minutes: topUps, booking_charges_minutes: 0, refunds_minutes: 0, penalties_minutes: 0, adjustments_minutes: 0,
+    reversals_minutes: 0, share_transfers_minutes: 0, net_movement_minutes: topUps, bookings: 0, no_shows: 0,
+    ...(given === undefined ? {} : { given_minutes: given }),
+  });
+
+  function withDays(days: ReturnType<typeof day>[]) {
+    return routes().map((r) => r.path === "/api/v1/admin/reports/daily" ? { ...r, body: days } : r);
+  }
+
+  const totals = async () => within(await screen.findByRole("region", { name: CLUB_REPORT_COPY.totals.title }));
+  /** The figure under a totals label, as its words. */
+  const figure = (card: ReturnType<typeof within>, label: string) => card.getByText(label, { selector: "dt" }).nextElementSibling;
+
+  it("the totals card's Sold leaves out what the club gave, and Given says it", async () => {
+    // 3 h of top-ups, 1 h 15 min of it given: 1 h 45 min sold.
+    stubFetch(withDays([day("2026-09-01", 120, 45), day("2026-09-02", 60, 30)]));
+    renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
+    const card = await totals();
+    expect(figure(card, CLUB_REPORT_COPY.totals.sold)).toHaveTextContent("1 hour 45 minutes");
+    expect(figure(card, CLUB_REPORT_COPY.totals.given)).toHaveTextContent("1 hour 15 minutes");
+    expect(card.getByText(CLUB_REPORT_COPY.totals.netTail(true), { exact: false })).toBeInTheDocument();
+
+    const daily = within(await screen.findByRole("region", { name: CLUB_REPORT_COPY.daily.title }));
+    expect(daily.getByRole("columnheader", { name: CLUB_REPORT_COPY.daily.given })).toBeInTheDocument();
+    const row = daily.getByText("1 Sep", { exact: false }).closest("tr")!;
+    expect(row).toHaveTextContent("1 hour 15 minutes"); // sold that day: 2 h − 45 min
+    expect(row).toHaveTextContent("45 minutes");
+  });
+
+  it("with nothing given, Sold is every top-up and there is no Given at all", async () => {
+    for (const given of [0, undefined]) {
+      stubFetch(withDays([day("2026-09-01", 120, given), day("2026-09-02", 60, given)]));
+      const { unmount } = renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
+      const card = await totals();
+      expect(figure(card, CLUB_REPORT_COPY.totals.sold)).toHaveTextContent("3 hours");
+      expect(card.queryByText(CLUB_REPORT_COPY.totals.given, { selector: "dt" })).toBeNull();
+      expect(card.getByText(CLUB_REPORT_COPY.totals.netTail(false), { exact: false })).toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: CLUB_REPORT_COPY.daily.given })).toBeNull();
+      unmount(); vi.unstubAllGlobals();
+    }
+  });
+});

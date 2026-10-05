@@ -81,7 +81,7 @@ describe("booking detail — the organiser's view", () => {
     serve();
     renderDetail();
     const section = await screen.findByRole("region", { name: DETAIL_CANCEL.title });
-    expect(section).toHaveTextContent(DETAIL_CANCEL.partnersBack);
+    expect(section).toHaveTextContent(DETAIL_CANCEL.partnersBack(["Sam", "Alex"]));
     expect(section).toHaveTextContent(DETAIL_CANCEL.penaltyYours);
     expect(within(section).getByRole("button", { name: DETAIL_CANCEL.open })).toBeInTheDocument();
   });

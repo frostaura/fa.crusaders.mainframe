@@ -46,7 +46,9 @@ export const CLUB_REPORT_COPY = {
   totals: {
     title: "Club minutes — totals",
     description: "Every movement of members' minutes across the club in this period.",
+    /** R14 J14-2 — paid minutes only: what the club gave is Given, beside it. */
     sold: "Sold",
+    given: "Given",
     charges: "Bookings",
     refunds: "Refunds (net)",
     penalties: "Penalties (net)",
@@ -57,8 +59,10 @@ export const CLUB_REPORT_COPY = {
     days: "Days",
     /** The sentence under the card; `net` is the figure, already rendered. */
     netLead: "Members' minutes moved by",
-    netTail: "over this period — sold − bookings + refunds − penalties + adjustments + reversals, which is every "
-      + "ledger movement in the club summed.",
+    /** With a Given figure on the card, the sum names it too (R14 J14-2). */
+    netTail: (given: boolean) => `over this period — sold ${given ? "+ given " : ""}− bookings + refunds − penalties + adjustments `
+      + "+ reversals, which is every ledger movement in the club summed.",
+    givenNote: "is free packages the desk handed over — never counted as sold;",
     adjustmentsNote: "is what the desk added or took back by hand;",
     reversalsNote: "is a payment clawed back after the fact.",
   },
@@ -92,6 +96,7 @@ export const CLUB_REPORT_COPY = {
     empty: "No activity in this window.",
     date: "Date",
     sold: "Sold",
+    given: "Given",
     charges: "Bookings",
     refunds: "Refunds (net)",
     penalties: "Penalties (net)",

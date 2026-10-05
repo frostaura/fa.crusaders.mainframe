@@ -189,6 +189,15 @@ function isFree(pkg: ShelfPackage): boolean {
 }
 
 /**
+ * R14 J14-5: no rand taken — a free package, or a priced one the desk recorded at R0.00 — is a gift
+ * on every word the admin sees (button, confirm, receipt), as the member's mail and the change
+ * record already say. The payment code still goes on the ledger as typed.
+ */
+function isGiven(flow: Flow): boolean {
+  return flow.free || flow.zar === 0;
+}
+
+/**
  * The `/sell` code: how the desk was paid, or — for a package that costs the member nothing —
  * `package_free` (integrator's call, R7 J7-10: valid only when their shelf price is R0.00), so a
  * gift never sits on the ledger as "Cash paid at the desk".
@@ -245,7 +254,7 @@ function settleOutcome(outcome: Awaited<ReturnType<typeof attemptSale>>, ctx: Se
     return outcome.said;
   }
   props.onSold(outcome.balanceAfterMinutes);
-  flow.setDone({ pkg: flow.pkg!, balanceAfter: outcome.balanceAfterMinutes, recovered: outcome.recovered, free: flow.free });
+  flow.setDone({ pkg: flow.pkg!, balanceAfter: outcome.balanceAfterMinutes, recovered: outcome.recovered, free: isGiven(flow) });
   return doneSentence(props.name, outcome.balanceAfterMinutes);
 }
 
@@ -538,7 +547,7 @@ function SaleFooter({ flow, guard, sale, shelf, name }: FooterProps) {
       <Button variant="outline" disabled={sale.busy} onClick={() => flow.setStep(2)}>{COPY.back}</Button>
       <div className="min-w-0" data-sale-confirm="">
         <ConfirmButton
-          idleLabel={COPY.idleFor(pkg.minutes, flow.free)}
+          idleLabel={COPY.idleFor(pkg.minutes, isGiven(flow))}
           cancelLabel={COPY.cancel}
           confirmLabel={COPY.confirmFor(name, pkg.name, flow.zar ?? pkg.price_zar)}
           ariaLabel={name}

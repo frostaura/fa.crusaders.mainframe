@@ -99,6 +99,15 @@ function NoShowShare({ seat }: { seat: DetailPlayer }) {
   );
 }
 
+/**
+ * R14 J14-9 — "went up" only when the seat had agreed to something smaller; a seat the club
+ * accepted without asking (nothing agreed) is being asked for the first time.
+ */
+function consentAsk(seat: DetailPlayer): string {
+  const share = minutesSpoken(seat.share_minutes);
+  return seat.consented_minutes > 0 ? DETAIL_PLAYER.askedAgain(share) : DETAIL_PLAYER.askedFirst(share);
+}
+
 function ShareFigures({ seat }: { seat: DetailPlayer }) {
   return (
     <div className="flex flex-col gap-3">
@@ -107,7 +116,7 @@ function ShareFigures({ seat }: { seat: DetailPlayer }) {
         <Figure term={DETAIL_PLAYER.paid} value={seat.paid_minutes} />
         <Figure term={DETAIL_PLAYER.toPay} value={seat.unpaid_minutes} strong />
       </dl>
-      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(DETAIL_PLAYER.askedAgain(minutesSpoken(seat.share_minutes)))}</Alert> : null}
+      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(consentAsk(seat))}</Alert> : null}
       {seat.status === "accepted" && seat.unpaid_minutes <= 0 && !seat.needs_consent ? (
         <p className="text-sm text-success-strong">{DETAIL_PLAYER.paidAll}</p>
       ) : null}

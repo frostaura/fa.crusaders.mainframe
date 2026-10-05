@@ -226,7 +226,7 @@ function stackedExtremes(rows: readonly Record<string, unknown>[], stacks: reado
 }
 
 /** Which series share a stack, per chart — mirroring the `stackId`s on the bars below. */
-const CLUB_FLOW_STACKS = [["top_ups_minutes"], ["booking_charges_minutes", "penalties_minutes"]];
+const CLUB_FLOW_STACKS = [["sold_minutes", "given_minutes"], ["booking_charges_minutes", "penalties_minutes"]];
 const MEMBER_FLOW_STACKS = [["top_ups_minutes", "given_minutes", "refunds_minutes"], ["spent_minutes"]];
 /** F4-15 — the axis in the club's format ("1 Sep"), not the reader's locale ("Sep 01"). */
 const fmtDate = (d: string) => clubCalendarDate(d, { weekday: false });
@@ -246,15 +246,24 @@ function fillGradient(id: string, color: string, top: number) {
   );
 }
 
+/**
+ * R14 J14-2 — the club's days with "sold" as paid minutes only: top-ups less the part the club
+ * GAVE (`given_minutes`, a subset the daily report carries; absent from an older server, so 0).
+ */
+function clubSoldRows(data: readonly DailyAdminPoint[]) {
+  return data.map((d) => ({ ...d, sold_minutes: d.top_ups_minutes - givenMinutes(d), given_minutes: givenMinutes(d) }));
+}
+
 export function drawRevenueArea(data: DailyAdminPoint[], c: ChartPalette) {
+  const rows = clubSoldRows(data);
   return (
-    <AreaChart data={data} margin={MARGIN}>
+    <AreaChart data={rows} margin={MARGIN}>
       {fillGradient("revFill", c.accent, 0.35)}
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis {...minuteYAxis(stackedExtremes(data, [["top_ups_minutes"]]), c)} />
+      <YAxis {...minuteYAxis(stackedExtremes(rows, [["sold_minutes"]]), c)} />
       <Tooltip {...tooltipProps(c)} {...minutesTooltip} />
-      <Area type="monotone" dataKey="top_ups_minutes" name="Minutes sold" stroke={c.accent} fill="url(#revFill)" strokeWidth={2} />
+      <Area type="monotone" dataKey="sold_minutes" name="Minutes sold" stroke={c.accent} fill="url(#revFill)" strokeWidth={2} />
     </AreaChart>
   );
 }
@@ -264,15 +273,19 @@ export function drawRevenueArea(data: DailyAdminPoint[], c: ChartPalette) {
  * labelled as such, and the bar goes below the solid zero line on a reversal day.
  */
 export function drawDailyFlow(data: DailyAdminPoint[], c: ChartPalette) {
+  // R14 J14-2 — sold is paid only; a gift is its own series, "Given by the club", only when there was one.
+  const rows = clubSoldRows(data);
+  const anyGiven = rows.some((d) => d.given_minutes > 0);
   return (
-    <BarChart data={data} margin={MARGIN} stackOffset="sign">
+    <BarChart data={rows} margin={MARGIN} stackOffset="sign">
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis {...minuteYAxis(stackedExtremes(data, CLUB_FLOW_STACKS), c)} />
+      <YAxis {...minuteYAxis(stackedExtremes(rows, CLUB_FLOW_STACKS), c)} />
       <ReferenceLine y={0} stroke={c.muted} strokeWidth={1} />
       <Tooltip {...tooltipProps(c)} {...minutesTooltip} />
       <Legend {...legendProps(c)} />
-      <Bar dataKey="top_ups_minutes" name="Minutes sold" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="sold_minutes" name="Minutes sold" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      {anyGiven ? <Bar dataKey="given_minutes" name={BUCKET_LABELS.given} stackId="a" fill={c.info} radius={[3, 3, 0, 0]} /> : null}
       <Bar dataKey="booking_charges_minutes" name="Bookings" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
       <Bar dataKey="penalties_minutes" name="Penalties (net)" stackId="b" fill={c.warning} radius={[3, 3, 0, 0]} />
     </BarChart>

@@ -20,6 +20,7 @@ import {
 } from "../../components/reports/ReportParts";
 import { prettyDay, useReport, useReportRange } from "../../components/reports/range";
 import { REPORT_SHARES_COPY } from "../../lib/playersCopy";
+import { givenMinutes } from "../../components/wallet/walletBuckets";
 
 /**
  * `/admin/reports` — the club's money, minutes, courts and attendance for a period.
@@ -166,8 +167,12 @@ function SalesFootnote({ given }: { given: number | undefined }) {
  */
 function sumDays(days: DailyAdminPoint[]) {
   const sum = (pick: (d: DailyAdminPoint) => number) => days.reduce((s, d) => s + pick(d), 0);
+  const given = sum(givenMinutes);
   return {
-    topUps: sum((d) => d.top_ups_minutes),
+    // R14 J14-2: "Sold" is paid minutes only — top-ups less what the club gave (a subset the daily
+    // report carries; 0 from an older server), so it agrees with the Sales card's minutes sold.
+    sold: sum((d) => d.top_ups_minutes) - given,
+    given,
     charges: sum((d) => d.booking_charges_minutes),
     refunds: sum((d) => d.refunds_minutes),
     penalties: sum((d) => d.penalties_minutes),
@@ -183,6 +188,15 @@ function sumDays(days: DailyAdminPoint[]) {
 /** D11 — whether the server sent the share bucket at all. An older API does not, and then no row. */
 function carriesShares(days: DailyAdminPoint[]): boolean {
   return days.some((d) => typeof d.share_transfers_minutes === "number");
+}
+
+/** R14 J14-2 — a day's sold minutes: its top-ups less what the club gave that day. */
+const soldOn = (d: DailyAdminPoint) => d.top_ups_minutes - givenMinutes(d);
+
+/** Whole rows for `n` totals: five, four or three across, whichever leaves no orphan (else the fullest last row). */
+function wholeRows(n: number): 3 | 4 | 5 {
+  const fits = ([5, 4, 3] as const).find((c) => n % c === 0);
+  return fits ?? ([5, 4, 3] as const).reduce((best, c) => (n % c > n % best ? c : best));
 }
 
 /** A signed minutes figure for a totals card: "+2 h", "−45 min", a zero with no sign. */
@@ -204,15 +218,17 @@ function randPerMinuteToCent(zarPerMinute: number | null | undefined): string {
 function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
   const t = sumDays(days);
   const shares = carriesShares(days);
+  const given = t.given > 0;
   const strong = "font-semibold text-text-primary";
   return (
     <Section title={COPY.totals.title} description={COPY.totals.description}>
       <TotalsCard
-        // Nine or ten figures: whole rows either way (VIS F3-15 — ten in four columns orphaned two).
-        columns={shares ? 5 : 3}
+        // Nine to eleven figures: whole rows where they divide (VIS F3-15 — ten in four columns orphaned two).
+        columns={wholeRows(9 + (shares ? 1 : 0) + (given ? 1 : 0))}
         footnote={(
           <>
-            {COPY.totals.netLead} <strong className={`${strong} tabular-nums`}>{signed(t.net)}</strong> {COPY.totals.netTail}{" "}
+            {COPY.totals.netLead} <strong className={`${strong} tabular-nums`}>{signed(t.net)}</strong> {COPY.totals.netTail(given)}{" "}
+            {given ? <><strong className={strong}>{COPY.totals.given}</strong> {COPY.totals.givenNote}{" "}</> : null}
             <strong className={strong}>{COPY.totals.adjustments}</strong> {COPY.totals.adjustmentsNote}{" "}
             <strong className={strong}>{COPY.totals.reversals}</strong> {COPY.totals.reversalsNote}
             {shares ? <> <strong className={strong}>{REPORT_SHARES_COPY.clubShares}</strong>: {REPORT_SHARES_COPY.clubCaption}</> : null}
@@ -222,7 +238,8 @@ function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
         {/* Each bucket as the daily table below shows it (R6 L6-14): the sentence under the card
             ("sold − bookings + refunds − penalties …") applies the signs. Bookings was "−24 min" in
             danger red above a table saying "24 min" — subtracted twice by anyone who read both. */}
-        <Stat label={COPY.totals.sold} value={<MinutesGroups value={t.topUps} />} />
+        <Stat label={COPY.totals.sold} value={<MinutesGroups value={t.sold} />} />
+        {given ? <Stat label={COPY.totals.given} value={<MinutesGroups value={t.given} />} /> : null}
         <Stat label={COPY.totals.charges} value={<MinutesGroups value={t.charges} />} />
         <Stat label={COPY.totals.refunds} value={<NetMinutes wrap value={t.refunds} />} />
         <Stat label={COPY.totals.penalties} value={<NetMinutes wrap value={t.penalties} />} />
@@ -282,7 +299,8 @@ const D = COPY.daily;
 
 const DAY_COLUMNS: DataColumn<DailyAdminPoint>[] = [
   { key: "date", header: D.date, cell: (r) => <Cell>{prettyDay(r.date)}</Cell>, sortValue: (r) => r.date, width: 130 },
-  { key: "top_ups_minutes", header: D.sold, align: "right", cell: (r) => <Cell><Minutes value={r.top_ups_minutes} /></Cell>, sortValue: (r) => r.top_ups_minutes },
+  // R14 J14-2: paid minutes only; what the club gave is the Given column beside it, when there was any.
+  { key: "top_ups_minutes", header: D.sold, align: "right", cell: (r) => <Cell><Minutes value={soldOn(r)} /></Cell>, sortValue: soldOn },
   { key: "booking_charges_minutes", header: D.charges, align: "right", cell: (r) => <Cell><Minutes value={r.booking_charges_minutes} /></Cell>, sortValue: (r) => r.booking_charges_minutes },
   { key: "refunds_minutes", header: D.refunds, align: "right", cell: (r) => <NetMinutes value={r.refunds_minutes} />, sortValue: (r) => r.refunds_minutes },
   { key: "penalties_minutes", header: D.penalties, align: "right", cell: (r) => <NetMinutes value={r.penalties_minutes} />, sortValue: (r) => r.penalties_minutes },
@@ -305,14 +323,31 @@ const SHARES_COLUMN: DataColumn<DailyAdminPoint> = {
   sortValue: (r) => r.share_transfers_minutes ?? 0,
 };
 
-function dayColumns(shares: boolean): DataColumn<DailyAdminPoint>[] {
-  if (!shares) return DAY_COLUMNS;
-  const at = DAY_COLUMNS.findIndex((c) => c.key === "reversals_minutes") + 1;
-  return [...DAY_COLUMNS.slice(0, at), SHARES_COLUMN, ...DAY_COLUMNS.slice(at)];
+/** R14 J14-2 — what the club gave each day, after Sold — only in a period with a gift in it. */
+const GIVEN_COLUMN: DataColumn<DailyAdminPoint> = {
+  key: "given_minutes",
+  header: D.given,
+  align: "right",
+  cell: (r) => <Cell><Minutes value={givenMinutes(r)} /></Cell>,
+  sortValue: givenMinutes,
+};
+
+function dayColumns(shares: boolean, given: boolean): DataColumn<DailyAdminPoint>[] {
+  let columns = DAY_COLUMNS;
+  if (shares) {
+    const at = columns.findIndex((c) => c.key === "reversals_minutes") + 1;
+    columns = [...columns.slice(0, at), SHARES_COLUMN, ...columns.slice(at)];
+  }
+  if (given) {
+    const at = columns.findIndex((c) => c.key === "top_ups_minutes") + 1;
+    columns = [...columns.slice(0, at), GIVEN_COLUMN, ...columns.slice(at)];
+  }
+  return columns;
 }
 
 function DailyBreakdown({ days }: { days: DailyAdminPoint[] }) {
   const shares = carriesShares(days);
+  const given = days.some((d) => givenMinutes(d) > 0);
   return (
     <Section title={D.title} description={COPY.days(days.length)}>
       <DataTable
@@ -323,7 +358,7 @@ function DailyBreakdown({ days }: { days: DailyAdminPoint[] }) {
         emptyTitle={D.empty}
         maxHeight="60vh"
         wrapHeaders
-        columns={dayColumns(shares)}
+        columns={dayColumns(shares, given)}
       />
       <TableNotes>
         <p className="text-sm text-text-secondary">
