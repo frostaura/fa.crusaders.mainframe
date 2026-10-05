@@ -77,6 +77,11 @@ public static partial class WalletEndpoints
             var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
             var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties)).ToList();
             var shareBookings = await ShareBookingsAsync(query, entries, ctx, players, ct);
+            // R14 E14-7: the court and start of every booking the share rows name, readable or not —
+            // a member taken off a game still sees where their share was. Nothing else of the booking.
+            var sharePlaces = shareBookings is null ? null : await players.SharePlacesAsync(
+                [.. entries.Where(e => e.Type == LedgerEntryType.ShareTransfer && e.RelatedBookingId is not null).Select(e => e.RelatedBookingId!.Value)],
+                userId, ct);
 
             return Results.Ok(new
             {
@@ -95,6 +100,7 @@ public static partial class WalletEndpoints
                 offset = skip,
                 limit = take,
                 share_bookings = shareBookings,
+                share_places = sharePlaces,
             });
         });
 

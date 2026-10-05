@@ -90,6 +90,25 @@ public sealed class R14PlayerAsksHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal("Court 1", place.GetProperty("court_name").GetString());
         Assert.Equal(JsonValueKind.String, place.GetProperty("starts_at").ValueKind);
         Assert.False(places.ContainsKey(other));   // no share row of Sam's names it
+        // On the wire (GET /wallet?include=share_bookings): court and start only, beside the null summary.
+        var wallet = await club.Client(app, club.Sam).GetFromJsonAsync<JsonElement>("/api/v1/wallet?include=share_bookings");
+        Assert.Equal(JsonValueKind.Null, wallet.GetProperty("share_bookings").GetProperty(bookingId.ToString()).ValueKind);
+        var wire = wallet.GetProperty("share_places").GetProperty(bookingId.ToString());
+        Assert.Equal(["court_name", "starts_at"], wire.EnumerateObject().Select(p => p.Name).Order().ToArray());
+        Assert.Equal("Court 1", wire.GetProperty("court_name").GetString());
+        var plain = await club.Client(app, club.Sam).GetFromJsonAsync<JsonElement>("/api/v1/wallet");
+        Assert.Equal(JsonValueKind.Null, plain.GetProperty("share_places").ValueKind);
+
+        // Another club's member whose share row names this club's booking learns nothing of it.
+        var rival = await PlayersClub.SeedAsync(app, "r14placesx");
+        await rival.WriteAsync(app, db => db.LedgerEntries.Add(new Api.Domain.LedgerEntry
+        {
+            TenantId = rival.TenantId, UserId = rival.Sam, Type = Api.Domain.LedgerEntryType.ShareTransfer, AmountMinutes = 5,
+            ActorUserId = rival.Sam, RelatedBookingId = bookingId, ExternalReference = $"share:{Guid.NewGuid():N}:1:in",
+        }));
+        var theirs = await rival.Client(app, rival.Sam).GetFromJsonAsync<JsonElement>("/api/v1/wallet?include=share_bookings");
+        Assert.False(theirs.GetProperty("share_places").TryGetProperty(bookingId.ToString(), out _));
+
         // The summaries keep their null for a booking he is no longer on.
         var summaries = await club.InClubAsync(app, sp => sp.GetRequiredService<PlayersQuery>().ShareSummariesAsync([bookingId], club.Sam, false, default));
         Assert.Null(summaries[bookingId]);

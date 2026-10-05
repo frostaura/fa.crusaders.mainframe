@@ -35,6 +35,7 @@ Earlier: `decisions-backend-r13b.md`. Contract: lane scratch `r14-contract-BE14b
   inbox `players.game_cancelled` (not mailed) and a balance-neutral frame `reason:
   cancelled_no_refund`; the cancellation mail says "Nothing — the session had started" instead of
   promising a wallet line (`CancelledSlot.SessionStarted`).
+- **`GET /wallet?include=share_bookings` carries `share_places`** (E14-7, FE14m's ask): `{bookingId: {court_name, starts_at}}` for every booking the member has a share row on, readable or not (`share_bookings` keeps its null for an off-game booking). Court and start only — tenant-filtered, own rows only.
 - **404 detail names the viewer's own closed seat** (`own_seat_id`, J14-10) — own seat only.
 - Share receipts for removal / split / cancel say who, with court and day; share mails after a
   cancel name who cancelled (J14-8). Outage-reversal mail: one "so".
