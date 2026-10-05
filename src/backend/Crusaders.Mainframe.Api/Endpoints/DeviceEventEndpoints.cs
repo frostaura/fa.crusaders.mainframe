@@ -1781,8 +1781,7 @@ public static class DeviceEventEndpoints
         BookingResult created;
         try
         {
-            created = await bookings.CreateWalkUpAsync(
-                court.Id, userId, userId, req.Minutes, reference, ct);
+            created = await CreateWalkUpAsync(db, bookings, sale, ct);
         }
         catch
         {
@@ -1861,25 +1860,57 @@ public static class DeviceEventEndpoints
     /// <c>CheckedInAt</c> second finds the concurrency token moved under it. That is not a
     /// failure: the row was stamped, by the other attempt. Re-read it and go again, and the
     /// second pass sees a live session and is the idempotent no-op it is meant to be.
+    ///
+    /// <para>
+    /// <b>And a deadlock is retried the same way</b> (review round 16, FX16). The stamp is an UPDATE
+    /// of the booking, so PostgreSQL checks <c>ck_bookings_no_overlapping_slot</c> again for the new
+    /// row version; a twin's INSERT of the same slot, checking against this row at the same moment,
+    /// waits on it while this waits on the twin, and PostgreSQL aborts one of the two with 40P01.
+    /// The aborted save changed nothing, so going again is exactly right — it was a 500 before.
+    /// </para>
     /// </summary>
     private static async Task<ActivationResult> ActivateOnceAsync(
         MainframeDbContext db, CourtActivationService activation, ActivationTarget t, CancellationToken ct)
     {
         var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt) { DeviceId = t.DeviceId };
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            return await activation.ActivateAsync(request, ct);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            // The failed save leaves its audit row tracked as Added; forget it, or the next
-            // save on this context would insert it against a stamp this request never made.
-            foreach (var entry in db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
+            try
             {
-                entry.State = EntityState.Detached;
+                return await activation.ActivateAsync(request, ct);
             }
-            await db.Entry(t.Booking).ReloadAsync(ct);
-            return await activation.ActivateAsync(request, ct);
+            catch (Exception ex) when (attempt < SaveAttempts && (ex is DbUpdateConcurrencyException || DatabaseRetry.IsRetryableAbort(ex)))
+            {
+                await DatabaseRetry.ForgetFailedSaveAsync(db, ct);
+            }
+        }
+    }
+
+    /// <summary>How many times a walk-up's purchase, or an activation, is tried against a lost race.</summary>
+    private const int SaveAttempts = 3;
+
+    /// <summary>
+    /// The purchase, tried again when it lost a deadlock (review round 16, FX16). Identical retries in
+    /// flight together: this attempt's INSERT of the slot checks the exclusion constraint against the
+    /// winner's booking while the winner's activation UPDATEs that row, each waits on the other, and
+    /// PostgreSQL aborts this one with 40P01 — a 500 for a box whose purchase had been made. Nothing
+    /// in the aborted transaction committed, so the attempt is made again on a clean context: it
+    /// either sells, or is refused by the winner's booking and answered by the replay below.
+    /// </summary>
+    private static async Task<BookingResult> CreateWalkUpAsync(
+        MainframeDbContext db, BookingService bookings, WalkUpSale sale, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await bookings.CreateWalkUpAsync(
+                    sale.Court.Id, sale.UserId, sale.UserId, sale.Req.Minutes, sale.Reference, ct);
+            }
+            catch (Exception ex) when (attempt < SaveAttempts && DatabaseRetry.IsRetryableAbort(ex))
+            {
+                await DatabaseRetry.ForgetFailedSaveAsync(db, ct);
+            }
         }
     }
 
