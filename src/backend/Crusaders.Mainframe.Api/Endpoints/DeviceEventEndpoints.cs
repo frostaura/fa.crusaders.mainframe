@@ -331,7 +331,7 @@ public static class DeviceEventEndpoints
         // evidence.
         var uploadSettings = await services.Settings.GetAsync(ct);
         DeviceSilenceLog.NoteHeartbeat(
-            services.Db, device!, DateTimeOffset.UtcNow,
+            services.Db, device!, ClockOf(services).GetUtcNow(),
             HeartbeatCadence.OfflineAfterSeconds(uploadSettings.HeartbeatSeconds));
         await services.Db.SaveChangesAsync(ct);
 
@@ -339,8 +339,8 @@ public static class DeviceEventEndpoints
 
         // The box has no RTC, so an event carries its uptime and the batch carries the
         // box's uptime now. The difference is how long ago it happened; the server clock is
-        // the only one anybody can be held to.
-        var now = DateTimeOffset.UtcNow;
+        // the only one anybody can be held to — the injected one (R14 D14-4), as every device route reads.
+        var now = ClockOf(services).GetUtcNow();
         long acceptedThrough = 0;
         var recorded = 0;
 
@@ -467,7 +467,7 @@ public static class DeviceEventEndpoints
         // request had just delivered, which is the product saying it had not yet heard from a
         // board that was at that moment talking to it.
         DeviceSilenceLog.NoteHeartbeat(
-            services.Db, device!, DateTimeOffset.UtcNow,
+            services.Db, device!, ClockOf(services).GetUtcNow(),
             HeartbeatCadence.OfflineAfterSeconds(uploadSettings.HeartbeatSeconds));
         await services.Db.SaveChangesAsync(ct);
 
@@ -521,6 +521,9 @@ public static class DeviceEventEndpoints
         /// </summary>
         public long BootId { get; init; }
     }
+
+    /// <summary>The upload's clock: the injected one, or the system's for a fixture that predates it (R14 D14-4).</summary>
+    private static TimeProvider ClockOf(DeviceEventServices services) => services.Clock ?? TimeProvider.System;
 
     /// <summary>
     /// The event's time from uptime arithmetic: the box's uptime at upload minus its uptime
@@ -712,7 +715,7 @@ public static class DeviceEventEndpoints
     private static async Task<(Booking? Booking, Guid UserId, ActivationOutcome? Refusal)> EvidenceBookingAsync(
         Device device, DeviceEventDto e, EventFacts time, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, codes, _, _, _, _, _, _, _, _, _) = services;
+        var (db, _, codes, _, _, _, _, _, _, _, _, _, _) = services;
         var occurredAt = time.OccurredAt;
 
         // A v1 member code: the subject is the SCANNED token, re-checked with ON before it is
@@ -723,7 +726,11 @@ public static class DeviceEventEndpoints
             var v1 = await V1EvidenceAsync(device, e, time, MemberCodeUseClass.Court, "activation_event", services, ct);
             if (v1.Refusal is not null) return (null, Guid.Empty, v1.Refusal);
 
-            if (e.Court is not { } r || r < 0 || r >= device.CourtNumbers.Count) return (null, Guid.Empty, new ActivationOutcome("wrong_court", null));
+            // R14 D14-3: the code was checked and is the member's, so the refusal names them like `unresolved` below.
+            if (e.Court is not { } r || r < 0 || r >= device.CourtNumbers.Count)
+            {
+                return (null, Guid.Empty, new ActivationOutcome("wrong_court", null, SubjectUserId: v1.UserId));
+            }
             var onCourt = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == device.CourtNumbers[r], ct);
             var found = onCourt is null
                 ? null
@@ -1156,7 +1163,7 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationOutcome> ReleaseOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, _, _, bookings, _, _, _, _, _, _, _) = services;
+        var (db, _, _, _, bookings, _, _, _, _, _, _, _, _) = services;
         if (e.Court is not { } relay || relay < 0) return new ActivationOutcome("unpaired", null, ReleaseKind);
 
         var session = await db.DeviceEventReceipts.AsNoTracking()
@@ -1257,8 +1264,9 @@ public static class DeviceEventEndpoints
     /// </summary>
     private static async Task<SettleOutcome> SettleAsync(DeviceEventServices services, ActivationTarget t, CancellationToken ct)
     {
-        var (db, _, _, activation, bookings, settingsAccessor, _, _, _, _, _, _) = services;
+        var (db, _, _, activation, bookings, settingsAccessor, _, _, _, _, _, _, _) = services;
         var settings = await settingsAccessor.GetAsync(ct);
+        var at = t.OccurredAt ?? ClockOf(services).GetUtcNow();
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -1277,18 +1285,18 @@ public static class DeviceEventEndpoints
             {
                 // The system actor, as the sweep's own rows are: the evidence came from a box,
                 // and Guid.Empty is how every device-originated row already names it.
-                var provisional = LitWindowOf(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, t.DurationMs, heldMs: null);
+                var provisional = LitWindowOf(t.Booking, at, t.DurationMs, heldMs: null);
                 // Who scanned (review round 8, E8-1): the reversal stamps their own accepted seat
                 // and writes the court.activated row naming them, as an activation would.
                 var reversal = await bookings.ReverseNoShowAsync(
-                    t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, Guid.Empty, ct, provisional.End,
+                    t.Booking, at, Guid.Empty, ct, provisional.End,
                     new ReversalScan(t.UserId, t.Method));
                 if (reversal is NoShowReversalResult.Ok) return new SettleOutcome(ActivationOutcome.ReversedNoShow);
                 t = t with { Booking = await FreshAsync(db, t.Booking, ct) };
                 continue;
             }
 
-            if (t.Booking.Status == BookingStatus.Cancelled) return await CancelledOutcomeAsync(bookings, t, ct);
+            if (t.Booking.Status == BookingStatus.Cancelled) return await CancelledOutcomeAsync(bookings, t, at, ct);
 
             var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt) { DeviceId = t.DeviceId };
             try
@@ -1320,11 +1328,10 @@ public static class DeviceEventEndpoints
     /// displaced it — in which case nothing is owed and the collision is what matters.
     /// </summary>
     private static async Task<SettleOutcome> CancelledOutcomeAsync(
-        BookingService bookings, ActivationTarget t, CancellationToken ct)
+        BookingService bookings, ActivationTarget t, DateTimeOffset at, CancellationToken ct)
     {
-        var window = LitWindowOf(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, t.DurationMs, heldMs: null);
-        var lit = await bookings.ChargeLitCancelledBookingAsync(
-            t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, window.ChargeMinutes, ct);
+        var window = LitWindowOf(t.Booking, at, t.DurationMs, heldMs: null);
+        var lit = await bookings.ChargeLitCancelledBookingAsync(t.Booking, at, window.ChargeMinutes, ct);
         return lit switch
         {
             CancelledLightsResult.Displaced d => new SettleOutcome(ActivationOutcome.DisplacedCollision, d.DisplacedByBookingId),
@@ -1419,7 +1426,7 @@ public static class DeviceEventEndpoints
         DeviceEventServices services, Device device, DeviceEventDto e, EventFacts time,
         ActivationOutcome? outcome, CancellationToken ct)
     {
-        var (db, tenant, _, _, _, _, _, _, _, _, _, _) = services;
+        var (db, tenant, _, _, _, _, _, _, _, _, _, _, _) = services;
 
         var receipt = new DeviceEventReceipt
         {
@@ -1829,7 +1836,7 @@ public static class DeviceEventEndpoints
         await ok.SendConfirmationAsync!(ct);
 
         return Results.Ok(Grant(
-            ok.Booking, live.AmountMinutes, ok.BalanceAfterMinutes, replayed: false,
+            ok.Booking, live.AmountMinutes, ok.BalanceAfterMinutes, replayedAt: null,
             display: await MemberDisplay.ForAsync(db, userId, ct)));
     }
 
@@ -1931,7 +1938,7 @@ public static class DeviceEventEndpoints
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, bookings, activation, _, _, ledger, _, _, _, _) = services;
+        var (db, bookings, activation, _, _, ledger, _, _, _, clock) = services;
 
         var entry = await db.LedgerEntries.AsNoTracking()
             .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
@@ -1940,7 +1947,7 @@ public static class DeviceEventEndpoints
         var booking = await db.Bookings.FirstOrDefaultAsync(b => b.Id == entry.RelatedBookingId, ct);
         if (booking is null) return null;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.GetUtcNow();
         if (booking.Status != BookingStatus.Booked || booking.EndsAt <= now)
         {
             return Results.Conflict(new { error = "purchase_ended", booking_id = booking.Id, ended_at = booking.EndsAt });
@@ -1973,7 +1980,7 @@ public static class DeviceEventEndpoints
         // the member what they have, and a movement between the two attempts is real.
         var balance = await ledger.GetBalanceAsync(entry.UserId, ct);
         return Results.Ok(Grant(
-            booking, -entry.AmountMinutes, balance, replayed: true, now,
+            booking, -entry.AmountMinutes, balance, replayedAt: now,
             await MemberDisplay.ForAsync(db, entry.UserId, ct)));
     }
 
@@ -1990,15 +1997,16 @@ public static class DeviceEventEndpoints
     /// the court still comes on.
     /// </para>
     /// </summary>
+    /// <param name="replayedAt">The replay's instant (the injected clock, R14 D14-4); null for a fresh purchase.</param>
     private static object Grant(
-        Booking booking, int amountMinutes, int balanceAfterMinutes, bool replayed,
-        DateTimeOffset? now = null, string? display = null)
+        Booking booking, int amountMinutes, int balanceAfterMinutes, DateTimeOffset? replayedAt, string? display)
     {
         // A fresh purchase is granted what was sold; a replay what is left of it, rounded
         // up so a member is not cut off ahead of the window they paid for.
         var sold = (int)(booking.EndsAt - booking.StartsAt).TotalMinutes;
-        var granted = replayed
-            ? Math.Clamp((int)Math.Ceiling((booking.EndsAt - (now ?? DateTimeOffset.UtcNow)).TotalMinutes), 0, sold)
+        var replayed = replayedAt is not null;
+        var granted = replayedAt is { } now
+            ? Math.Clamp((int)Math.Ceiling((booking.EndsAt - now).TotalMinutes), 0, sold)
             : sold;
         return new
         {
@@ -2150,7 +2158,13 @@ public sealed record DeviceEventServices(
     /// <summary>The member-code evidence re-check and use table (member-code §7).</summary>
     MemberCodeService MemberCodes,
     /// <summary>Who plays on a booking — organiser and accepted partners. See <see cref="IBookingPlayers"/>.</summary>
-    IBookingPlayers Players);
+    IBookingPlayers Players,
+    /// <summary>
+    /// The instant an upload is timed at — liveness, the "now" every event's age is measured from,
+    /// and a settlement with no scan time of its own (R14 D14-4; <see cref="GateServices.Clock"/>).
+    /// Optional only so a fixture built before it compiles; the container always supplies it.
+    /// </summary>
+    TimeProvider? Clock = null);
 
 /// <summary>
 /// One event as the box queued it. Names mirror <c>lib/eventq</c>'s wire form. <c>court</c> is

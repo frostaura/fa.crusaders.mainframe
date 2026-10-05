@@ -58,7 +58,7 @@ public static class DeviceEndpoints
         ILoggerFactory logs,
         CancellationToken ct)
     {
-        var (db, tenant, settings, registry, codes, _, _, _, faults, _, _, _) = services;
+        var (db, tenant, settings, registry, codes, _, _, _, faults, _, _, _, clock) = services;
 
         // Validated BEFORE the MAC is resolved, so a firmware that believes in a device kind
         // this server does not have is told so whether or not its row already exists. The
@@ -82,8 +82,10 @@ public static class DeviceEndpoints
         }
 
         // Read once. The roster's relative seconds are all measured from the same instant,
-        // because the box anchors them to the moment it accepted this response.
-        var now = DateTimeOffset.UtcNow;
+        // because the box anchors them to the moment it accepted this response. The injected clock
+        // (R14 D14-4): the roster's windows and the code sync are judged at the instant every other
+        // device route decides at, not at a second one.
+        var now = clock.GetUtcNow();
         var s = await settings.GetAsync(ct);
 
         // Moves LastSeenAt AND, if this call ends a silence past the club's own threshold,
@@ -837,7 +839,9 @@ public sealed record HeartbeatServices(
     /// <summary>Who plays on a booking — organiser and accepted partners (<see cref="ParticipantBookingPlayers"/>).</summary>
     IBookingPlayers Players,
     /// <summary>Capabilities and the club's cut-over (§8).</summary>
-    MemberCodeRollout Rollout);
+    MemberCodeRollout Rollout,
+    /// <summary>The instant the beat is answered at — liveness, roster and code sync (R14 D14-4; <see cref="GateServices.Clock"/>).</summary>
+    TimeProvider Clock);
 
 /// <summary>
 /// What a court box reports about itself. Only <c>mac</c> is required — it is the board's

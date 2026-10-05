@@ -25,6 +25,8 @@ namespace Crusaders.Mainframe.Api.Services;
 /// innermost: a holder takes no other advisory lock while holding it, the sweep's only row write is
 /// the booking it is cueing, and an emitter takes it only after its own commits, holding no row
 /// locks. Nothing slow happens under it — an event is a channel write; no HTTP is ever made.
+/// R14 E14-4: a reversal's emitter that finds its session covered by a lit survivor sends nothing and
+/// stamps that one booking's cue instead — the sweep's own order (lock, then the booking's row).
 /// </para>
 ///
 /// <para>

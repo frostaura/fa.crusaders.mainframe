@@ -83,17 +83,21 @@ public static class MemberDisplay
             if (initialled.Length <= MaxLength) return initialled;
         }
 
-        return name[..MaxLength];
+        // R14 D14-5: a cut that lands on a space sent the box a trailing blank it printed.
+        return name[..MaxLength].TrimEnd();
     }
 
     /// <summary>
     /// The surname's initial: the first LETTER of the last word that has one (review round 12,
     /// D12-1). "THABO (TJ) MOKOENA" read "THABO (" — the second word's first character, a bracket.
+    /// R14 D14-5: a generational suffix is not the surname — "ROBERTA SMITHSON JR." is ROBERTA S,
+    /// not ROBERTA J, and "… DA SILVA JUNIOR" is S.
     /// </summary>
     private static char? SurnameInitial(string[] words)
     {
         for (var i = words.Length - 1; i > 0; i--)
         {
+            if (Suffixes.Contains(words[i])) continue;
             foreach (var c in words[i])
             {
                 if (char.IsAsciiLetter(c)) return c;
@@ -131,6 +135,13 @@ public static class MemberDisplay
         }
         return string.Join(' ', kept.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
+
+    /// <summary>
+    /// Generational suffixes, as they read once folded and upper-cased (JÚNIOR is JUNIOR by then).
+    /// Skipped when picking the surname's initial, never removed from a name that fits whole.
+    /// </summary>
+    private static readonly HashSet<string> Suffixes =
+        ["JR", "JR.", "SR", "SR.", "JUNIOR", "FILHO", "NETO", "II", "III", "IV"];
 
     /// <summary>Letters and marks with no ASCII decomposition, spelled the way the name is said.</summary>
     private static readonly Dictionary<char, string> Spelled = new()

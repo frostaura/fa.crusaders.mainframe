@@ -127,7 +127,8 @@ public static class DeviceActivateEndpoint
         try
         {
             result = await services.Activation.ActivateAsync(
-                new ActivationRequest(found.Court!, found.Booking!, resolved.UserId, PayerOverrideUserId: null, req.Method!, OccurredAt: null)
+                // R14 D14-4: decided at the instant the code was checked, never a second wall-clock read.
+                new ActivationRequest(found.Court!, found.Booking!, resolved.UserId, PayerOverrideUserId: null, req.Method!, OccurredAt: now)
                 {
                     DeviceId = device.Id,
                 },

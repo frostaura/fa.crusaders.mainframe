@@ -215,12 +215,7 @@ public static class DevicePayForEndpoint
         var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == req.Court && c.IsActive, ct);
         if (court is null) return new Judgement(NotBooked);
 
-        var latestStart = now.AddMinutes(BookingCodeWindow.CueMinutes(settings));
-        var booking = await db.Bookings
-            .Where(b => b.CourtId == court.Id && b.Status == BookingStatus.Booked && b.UserId != null
-                        && b.StartsAt <= latestStart && b.EndsAt > now)
-            .OrderBy(b => b.StartsAt)
-            .FirstOrDefaultAsync(ct);
+        var booking = await TargetAsync(db, court, settings, now, ct);
         if (booking is null)
         {
             var grace = now.AddMinutes(-settings.GraceWindowMinutes);
@@ -256,6 +251,32 @@ public static class DevicePayForEndpoint
         if (await services.Ledger.GetSpendableAsync(payer, ct) < amount) return new Judgement(InsufficientBalance, label);
 
         return new Judgement(null, label, amount, payer, booking, court, match, device.Id);
+    }
+
+    /// <summary>
+    /// The booking a pay-for at this court is FOR: a live, member-owned booking that has started or
+    /// whose cue window is open. Two can qualify — the session running now and the next one, when the
+    /// running one ends inside the cue window. R14 E14-6: then it is the NEXT one, the court about to
+    /// start. A member paying at the box two minutes before a slot change is paying for the game they
+    /// are about to watch begin, not for the last two minutes of the one leaving; before this the
+    /// earliest won and the payer took over a dying session nobody could light again.
+    /// </summary>
+    private static async Task<Booking?> TargetAsync(
+        MainframeDbContext db, Court court, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
+        var cue = BookingCodeWindow.CueMinutes(settings);
+        var latestStart = now.AddMinutes(cue);
+        var candidates = await db.Bookings
+            .Where(b => b.CourtId == court.Id && b.Status == BookingStatus.Booked && b.UserId != null
+                        && b.StartsAt <= latestStart && b.EndsAt > now)
+            .OrderBy(b => b.StartsAt)
+            .Take(2)
+            .ToListAsync(ct);
+        if (candidates.Count == 0) return null;
+        var first = candidates[0];
+        var next = candidates.Count > 1 ? candidates[1] : null;
+        var runningEndsInsideCue = first.StartsAt <= now && first.EndsAt <= latestStart;
+        return next is not null && next.StartsAt > now && runningEndsInsideCue ? next : first;
     }
 
     private static async Task<IResult> PayAsync(
@@ -412,7 +433,8 @@ public static class DevicePayForEndpoint
         if (booking.CheckedInAt is null && cueOpen)
         {
             var result = await services.Activation.ActivateAsync(
-                new ActivationRequest(j.Court!, booking, j.PayerUserId, j.PayerUserId, req.Method ?? "qr", OccurredAt: null)
+                // R14 D14-4: the cue gate and CheckedInAt at the instant this confirm was judged at.
+                new ActivationRequest(j.Court!, booking, j.PayerUserId, j.PayerUserId, req.Method ?? "qr", OccurredAt: now)
                 {
                     DeviceId = j.DeviceId,
                 },

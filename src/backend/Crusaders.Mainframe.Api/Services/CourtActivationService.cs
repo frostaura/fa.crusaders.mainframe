@@ -88,9 +88,17 @@ public class CourtActivationService
         _bus = bus;
         _logger = plumbing.Logger;
         _lights = plumbing.Lights;
+        _clock = plumbing.Clock ?? TimeProvider.System;
     }
 
     private readonly CourtLightStateService _lights;
+
+    /// <summary>
+    /// The instant a live scan is decided and stamped at (R14 D14-4): the DI clock every device
+    /// route checks the member code at. The wall clock here let one activation pass the code check
+    /// at one instant and the cue gate at another — <c>too_early</c> for a code that had just passed.
+    /// </summary>
+    private readonly TimeProvider _clock;
 
     /// <summary>
     /// The window in which an identification <i>finds</i> a booking, from tenant settings.
@@ -321,7 +329,7 @@ public class CourtActivationService
     public virtual async Task<ActivationResult> ActivateAsync(ActivationRequest request, CancellationToken ct)
     {
         var (court, booking, identifiedUserId, payerOverrideUserId, method, when) = request;
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.GetUtcNow();
         var occurredAt = when ?? now;
         var alreadyActive = booking.CheckedInAt is not null;
 
@@ -523,12 +531,53 @@ public class CourtActivationService
     /// upload after the slot read "duration_seconds": 2 for a 25-minute grant). Its off is
     /// <c>LightsCueWorker</c>'s attended-and-over pass, at the restored end.
     /// </remarks>
+    /// <remarks>
+    /// R14 E14-4: <b>not sent when a lit survivor already covers it.</b> A collided reversal's restored
+    /// session ends where a booking that survived on the court begins; when that survivor is lit (its
+    /// own off still to come), the reversed session's off is never said — the survivor's closes the
+    /// court (<see cref="LightsCueWorker.NextFreeAsync"/>). Its on, stamped back at the scan and arriving
+    /// after the survivor's, would then be an on with no off: a per-booking mirror held it lit for ever.
+    /// So it is decided by the same rule, under the same lock, and when skipped the booking's cue is
+    /// stamped past its reversal so the attended-and-over pass owes it no off either. Pair or nothing.
+    /// </remarks>
     public async ValueTask EmitReversedLightsOnAsync(
         Court court, Booking booking, (Guid Identified, DateTimeOffset ScannedAt) scan, string method, CancellationToken ct)
     {
         var payer = booking.PaidByUserId ?? booking.UserId ?? scan.Identified;
         // R13: under the court's cue lock, like every lights_on — the reversal committed its check-in first.
-        await EmitUnderCueLockAsync(court, LightsOnEvent(court, booking, (payer, scan.Identified), method, scan.ScannedAt), ct);
+        await using var cue = await CourtCueLock.BeginAsync(_db, _tenant.TenantId, court.Id, ct);
+        if (await LightsCueWorker.NextFreeAsync(_db, booking, ct) is null)
+        {
+            await CoveredBySurvivorAsync(booking, ct);
+        }
+        else
+        {
+            await _bus.EmitAsync(LightsOnEvent(court, booking, (payer, scan.Identified), method, scan.ScannedAt), ct);
+        }
+        await cue.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// R14 E14-4: the reversed session is announced by nobody — a lit survivor holds the court at its
+    /// end — so its cue is stamped at or after its reversal: the relit test (<c>NoShowReversedAt &gt;
+    /// LightsOffCuedAt</c>) is false and no off is owed for an on that was never said. Inside the cue
+    /// lock, on this booking's row only (the sweep's own order: lock, then row).
+    /// </summary>
+    private async Task CoveredBySurvivorAsync(Booking booking, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow();
+        booking.LightsOffCuedAt = booking.NoShowReversedAt is { } reversed && reversed > now ? reversed : now;
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another writer decided the row since the reversal committed; its decision stands, and
+            // at worst the attended-and-over pass says an off nobody announced an on for.
+            _logger.LogInformation("Reversal cue stamp for booking {BookingId} lost a concurrent write", booking.Id);
+            _db.Entry(booking).State = EntityState.Detached;
+        }
     }
 
     /// <summary>
@@ -610,4 +659,6 @@ public sealed record ActivationRequest(
 /// </summary>
 public sealed record ActivationPlumbing(
     ILogger<CourtActivationService> Logger,
-    CourtLightStateService Lights);
+    CourtLightStateService Lights,
+    /// <summary>The device routes' clock (R14 D14-4). Optional so a hand-built fixture compiles; the container supplies it.</summary>
+    TimeProvider? Clock = null);

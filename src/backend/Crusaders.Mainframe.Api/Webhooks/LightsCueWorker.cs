@@ -70,10 +70,17 @@ public sealed class LightsCueWorker : BackgroundService
         // swept as a no-show before this ran was never cued off at all. The court box's own
         // timer would eventually release it, but the backend would believe the lights were
         // still on and the event stream would never say otherwise.
+        //
+        // R14 D14-2: and a CANCELLED booking that was lit. A member scanned in (its lights_on went
+        // out) and the desk — or the member, ahead of a start they had scanned in early for — then
+        // cancelled it: the box's relay runs on to the grant's end regardless, and the event stream
+        // said the court came on and never that it went off. Its off is said like any other, at its
+        // end (the grant the box was given) through the next-free rule, under the cue lock.
         var dueOff = await db.Bookings.IgnoreQueryFilters()
             .Where(b => (b.Status == BookingStatus.Booked
                          || b.Status == BookingStatus.Completed
-                         || b.Status == BookingStatus.NoShow)
+                         || b.Status == BookingStatus.NoShow
+                         || (b.Status == BookingStatus.Cancelled && b.CheckedInAt != null))
                 && b.LightsOffCuedAt == null
                 && b.EndsAt <= now)
             .ToListAsync(ct);
@@ -88,7 +95,7 @@ public sealed class LightsCueWorker : BackgroundService
             // Read, decided, saved and SENT under the court's cue lock, so a check-in committing
             // meanwhile announces its lights_on after this off, never before it (CourtCueLock).
             await using var cue = await CourtCueLock.BeginAsync(db, b.TenantId, b.CourtId, ct);
-            var offAt = await NextFreeAsync(db, b, now, ct);
+            var offAt = await NextFreeAsync(db, b, ct);
             if (AfterOffDecidedForTests is { } hook) await hook(b);
             b.LightsOffCuedAt = now;
 
@@ -163,7 +170,7 @@ public sealed class LightsCueWorker : BackgroundService
             var relit = b.NoShowReversedAt is { } reversedAt && b.LightsOffCuedAt is { } cuedAt && reversedAt > cuedAt;
             // R13 E13-1: said at the instant the court is next free, never at this tick — and not at
             // all while another booking still holds the court (its own off closes it).
-            var offAt = relit ? await NextFreeAsync(db, b, now, ct) : null;
+            var offAt = relit ? await NextFreeAsync(db, b, ct) : null;
             if (offAt is not null) b.LightsOffCuedAt = now;
             // Saved on its own, like the lights-off rows above and for the same reason: a
             // lost concurrency race means another writer decided this booking, and its
@@ -187,35 +194,58 @@ public sealed class LightsCueWorker : BackgroundService
     /// A collided reversal's restored end is the start of the booking that survived on the court, and
     /// back-to-back slots meet the same way: an off stamped at the tick that sent it arrived after the
     /// next member's <c>lights_on</c> (they scanned in early, or the sweep ran late) and read their paid
-    /// session dark. Walking forward from the booking's end: a live booking (<c>Booked</c>,
-    /// <c>Completed</c> or <c>NoShow</c> — the statuses the off sweep closes) that holds the court at
-    /// that instant AND is checked in — its <c>lights_on</c> has gone out — and has not been cued off
-    /// yet means its own off is still to come and closes the court later by arrival and by
-    /// <c>occurred_at</c>, so this one is not sent. One already cued off moves the instant to its end;
-    /// the first instant no lit booking holds is the stamp. A booking nobody checked in on lit nothing
-    /// (the court IS dark), and a cancelled booking and a club block hold nothing. Only bookings
-    /// already started by <paramref name="now"/> are read: the walk only ever moves through holdings
-    /// that are over and cued off, so a later one cannot be in the chain.
+    /// session dark. Walking forward from the booking's end: a LIT booking that holds the court at that
+    /// instant and whose own off is still to come means this one is not sent — that off closes the
+    /// court later by arrival and by <c>occurred_at</c>. One whose off has been said moves the instant
+    /// to its end; the first instant no lit booking holds is the stamp. A booking nobody checked in on
+    /// lit nothing (the court IS dark), and a club block holds nothing.
+    /// </para>
+    /// <para>
+    /// R14. <b>A lit booking holds the court from when it was lit</b> — <c>min(StartsAt, CheckedInAt)</c>
+    /// (D14-1): a member scanned in early across a gap was read only from their start, so the previous
+    /// slot's off landed inside their lit session. <b>A cancelled booking that was lit holds it</b> too
+    /// (D14-2: its relay runs on to its end, and the sweep now says its off). <b>A relit reversal still
+    /// to be closed holds it</b> (E14-4): Booked, with its reversal after its old cue — that cue does not
+    /// close the session the reversal re-lit; the attended-and-over pass will.
     /// </para>
     /// </summary>
-    private static async Task<DateTimeOffset?> NextFreeAsync(MainframeDbContext db, Booking b, DateTimeOffset now, CancellationToken ct)
+    internal static async Task<DateTimeOffset?> NextFreeAsync(MainframeDbContext db, Booking b, CancellationToken ct)
     {
         var at = b.EndsAt;
         // Untracked: a tracked row would answer with what this tick read before the lock, not now.
-        var holders = await db.Bookings.IgnoreQueryFilters().AsNoTracking()
+        // Only LIT bookings can hold the court, and every lit one is read: a check-in is never ahead
+        // of its own cue window, so nothing lit is far in the future.
+        var lit = await db.Bookings.IgnoreQueryFilters().AsNoTracking()
             .Where(o => o.TenantId == b.TenantId && o.CourtId == b.CourtId && o.Id != b.Id
-                && (o.Status == BookingStatus.Booked || o.Status == BookingStatus.Completed || o.Status == BookingStatus.NoShow)
-                && o.EndsAt > at && o.StartsAt <= now)
-            .OrderBy(o => o.StartsAt)
+                && (o.Status == BookingStatus.Booked || o.Status == BookingStatus.Completed
+                    || o.Status == BookingStatus.NoShow || o.Status == BookingStatus.Cancelled)
+                && o.CheckedInAt != null
+                && o.EndsAt > at)
             .ToListAsync(ct);
-        foreach (var holder in holders)
+        foreach (var holder in lit.OrderBy(LitFrom))
         {
-            if (holder.StartsAt > at) break;
-            if (holder.CheckedInAt is null) continue;
-            if (holder.LightsOffCuedAt is null) return null;
+            if (LitFrom(holder) > at) break;
+            if (OffStillToCome(holder)) return null;
             if (holder.EndsAt > at) at = holder.EndsAt;
         }
         return at;
+    }
+
+    /// <summary>R14 D14-1: when a lit booking's lights came on — its scan, when that was before its start.</summary>
+    /// <remarks>Block body: an expression body holding a property pattern's braces trips lizard (memory/gotchas-build.md).</remarks>
+    private static DateTimeOffset LitFrom(Booking lit)
+    {
+        return lit.CheckedInAt is { } scan && scan < lit.StartsAt ? scan : lit.StartsAt;
+    }
+
+    /// <summary>
+    /// Whether a lit booking's own off is still to be said: never cued, or (E14-4) a reversal that is
+    /// still Booked and re-lit the court after its old cue — the attended-and-over pass owes its off.
+    /// </summary>
+    private static bool OffStillToCome(Booking lit)
+    {
+        return lit.LightsOffCuedAt is not { } cued
+            || (lit.Status == BookingStatus.Booked && lit.NoShowReversedAt is { } reversed && reversed > cued);
     }
 
     /// <summary>
