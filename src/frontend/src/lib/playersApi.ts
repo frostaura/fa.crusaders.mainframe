@@ -266,6 +266,11 @@ export type Invite = {
   share_minutes: number;
   to_pay_minutes: number;
   needs_consent: boolean;
+  /**
+   * R14 J14-9 — what the seat last said yes to. 0 with `needs_consent`: the club accepted the seat
+   * without asking, so nothing was agreed and nothing "went up". Absent (an older API): read as agreed.
+   */
+  consented_minutes?: number;
   balance_minutes: number;
   /** What the accept checks: the balance less what is held. Optional only for an older API. */
   spendable_minutes?: number;

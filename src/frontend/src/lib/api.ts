@@ -1866,7 +1866,10 @@ export type WalletReport = {
  * so the club screen and the member screen cannot mean different things by "net", and a
  * ledger type nobody bucketed still reaches the total.
  */
-export type DailyAdminPoint = { date: string; top_ups_minutes: number; booking_charges_minutes: number; refunds_minutes: number; penalties_minutes: number; adjustments_minutes: number; reversals_minutes: number; share_transfers_minutes?: number; net_movement_minutes: number; bookings: number; no_shows: number };
+export type DailyAdminPoint = { date: string; top_ups_minutes: number; booking_charges_minutes: number; refunds_minutes: number; penalties_minutes: number; adjustments_minutes: number; reversals_minutes: number; share_transfers_minutes?: number; net_movement_minutes: number; bookings: number; no_shows: number;
+  /** R14 J14-2 — the part of top_ups_minutes the club GAVE (desk package_free or a R0.00 sale); a subset. Absent from an older API. */
+  given_minutes?: number;
+};
 export type DailyMePoint = {
   date: string; top_ups_minutes: number; given_minutes?: number; spent_minutes: number; refunds_minutes: number; bookings: number; attended: number;
   minutes_on_court: number; balance_minutes: number;
