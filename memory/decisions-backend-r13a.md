@@ -1,24 +1,24 @@
 ---
 name: crusaders-mainframe-decisions-backend-r13a
-description: "Backend round 13 (lane BE13a): a relit reversal's extra off is said when the court is next free, webhook is_admin is the read role, given minutes are not sold, the Night names withdrawals and displacements."
+description: "Backend round 13 (lane BE13a): every lights_off is said when the court is next free, webhook is_admin is the read role, given minutes are not sold, the Night names withdrawals and displacements."
 type: decision
 last_verified: 2026-10-05
 ---
 
 # Live decisions — backend, review round 13 (lane BE13a)
 
-- **A relit reversal's extra `booking.lights_off` is stamped when the court is next free** (E13-1,
-  refines I12). `LightsCueWorker.NextFreeAsync` walks forward from the restored end: nobody holds
-  the court → `occurred_at` = the restored end; a live booking (Booked/Completed/NoShow, the
-  statuses the off sweep closes) holds it and is not cued off yet → NO extra off (its own off closes
-  the court, later by arrival and by `occurred_at`); a holder already over and cued off → the stamp
-  moves to its end, chained. Cancelled and AdminBlock rows hold nothing; `data.ends_at` stays the
-  restored end. *Why:* a collided reversal's restored end is the survivor's start, and an off
-  stamped at the tick arrived after the survivor's `lights_on` — the mirror read their paid session
-  dark. Stamping at the restored end alone is not enough: an early scan by the survivor still sorts
-  before it.
-- **Open, not fixed:** the ORDINARY end-of-slot sweep has the same shape for back-to-back bookings
-  when the next member scans before the previous slot ends — its off is stamped at the tick.
+- **Every `booking.lights_off` is said when the court is next free** (E13-1, then the end-of-slot
+  cue too; refines I12). `LightsCueWorker.NextFreeAsync` walks forward from the booking's end: no
+  LIT booking holds the court → `occurred_at` = that end (no longer the tick); a live booking
+  (Booked/Completed/NoShow) that is checked in — its `lights_on` already went out — and not cued off
+  yet holds it → NO off (its own off closes the court, later by arrival and by `occurred_at`); a lit
+  holder already over and cued off → the stamp moves to its end, chained. A booking nobody checked
+  in on lit nothing (the court is dark: the off is sent); cancelled and blocks hold nothing.
+  `LightsOffCuedAt` is still set either way, so nothing re-fires. *Why:* a collided reversal's
+  restored end is the survivor's start, and back-to-back slots meet the same way — an off stamped at
+  the tick arrived after the next member's early (or the late sweep's) `lights_on` and read their
+  paid session dark. Residual: a check-in committing between the sweep's read and its emit is a
+  millisecond race this does not close.
 - **`minutes.*` `actor.is_admin` is the actor's `User.IsAdmin`, read** (E13-2;
   `LedgerService.HoldsAdminAsync`, one tenant-filtered read, never for `Guid.Empty`). An admin is an
   admin on their own wallet too. *Why:* "actor ≠ wallet owner" called a member paying for a
