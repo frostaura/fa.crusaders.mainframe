@@ -148,6 +148,7 @@ AND its sign, `LedgerService.MirrorTypeOf`). Their envelope actor is the person 
 { "entry_id": "<uuid>", "user_id": "<uuid>", "entry_type": "AdminAdjustment",
   "amount_minutes": -45, "booking_id": "<uuid-or-null>", "reason": "Goodwill — lights failed" }
 ```
+`minutes.sold_at_desk` also carries `zar_received` (rand; `0` on a give) and `given` (true when the desk recorded no rand — the one "given" rule reports, the Night and the desk mail use), so a consumer can tell a give from a sale (R15 E15-5).
 
 `topup.failed` is **not** a webhook: it is an admin-notice kind (`AdminEventCatalogue.TopUpFailed`) and keeps its
 code, because admins' stored opt-outs and the outbox dedupe keys name it. Its display name is "Package purchases

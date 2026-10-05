@@ -636,6 +636,8 @@ Upcoming games become `my_share_minutes`, `my_paid_minutes` and `my_owing_minute
 
 `net_minutes = refunded − penalty − Σ partner_refunds.minutes`. The bare `ToHttpResult` answer is `{refunded_minutes, penalty_minutes}`.
 
+**A member cannot cancel a booking they have checked in to (R15 D15-5):** `409 {"error":"already_checked_in"}`. **Why:** the scan proved the court was used, a self-cancel refunds nothing, and the freed slot could be resold — the club would take the minutes twice for one lit slot. The admin cancel is not refused for a started or checked-in session, including the admin's own booking; it cancels with nothing refunded and the booker gets the `cancelled_no_refund` frame.
+
 `GET /api/v1/bookings/{id}/cancellation-quote` uses the record shape in §3.3.
 
 Bulk cancel uses `total_refunded_minutes`, `total_penalty_minutes`, and per result `refund_minutes`, `penalty_minutes` and `net_minutes`. Bulk book uses `total_charged_minutes`, and per result `amount_minutes`, `balance_before_minutes` and `balance_after_minutes`. Member bulk book adds `charged_now_minutes`.
