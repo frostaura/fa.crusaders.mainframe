@@ -6,7 +6,7 @@ import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { BOOK_SHEET, refusalReason } from "@/lib/bookingsCopy";
 import { BOOK_SHEET_GONE } from "@/lib/gridCopy";
-import { PLAYERS_REFUSAL, playersRefusal } from "@/lib/playersCopy";
+import { DETAIL_ADMIN, PLAYERS_REFUSAL, playersRefusal } from "@/lib/playersCopy";
 import type { ComboboxMember } from "@/components/ui/member-combobox";
 import type { SelectedSlot } from "./types";
 import type { MoneyRow, SlotLine } from "./SheetParts";
@@ -178,7 +178,11 @@ function useSheetMembers(isAdmin: boolean, given: ComboboxMember[] | undefined, 
     endpoints.adminMembers("Active").then(
       (rows) => {
         if (!live) return;
-        setRead(rows.map((m) => ({ id: m.user_id, name: m.full_name, photoUrl: m.photo_url, balance: m.balance_minutes })));
+        // R16 J16-3 — namesakes told apart by membership number and email, as the club's other pickers do.
+        setRead(rows.map((m) => ({
+          id: m.user_id, name: m.full_name, photoUrl: m.photo_url, balance: m.balance_minutes,
+          subtitle: DETAIL_ADMIN.memberSubtitle(m.membership_number, m.email),
+        })));
       },
       () => { if (live) setRead([]); },
     );

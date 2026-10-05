@@ -10,9 +10,13 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Textarea } from "@/components/ui/textarea";
 import { focusFirstComplaint } from "@/components/members/saleFocus";
 import { ApiError, type CancellationQuote } from "@/lib/api";
+import { ADMIN_CANCEL } from "@/lib/adminCancelCopy";
 import { ALREADY_CHECKED_IN_TEXT, cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
 import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
+import { minutesSpoken } from "@/lib/minutes";
+import { playersEndpoints, type BookingDetail } from "@/lib/playersApi";
+import { firstName } from "@/lib/playersNames";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL, refusalReason } from "@/lib/bookingsCopy";
 import { BulkResults } from "./BulkResults";
@@ -289,8 +293,47 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
       {said ? <Alert tone={said.tone} live="polite">{said.text}</Alert> : null}
       {loading || quote ? <MoneyRows rows={singleMoney(quote, waived, subject)} label={CANCEL_SHEET.totalBack} /> : null}
       <SplitNote quote={quote} waived={waived} subject={subject} />
+      <SharesStand bookingId={booking.bookingId} wanted={Boolean(quote?.checkedIn) && flow.forOthers && !flow.refused(booking)} organiser={booking.memberFirstName} />
     </>
   );
+}
+
+/**
+ * R16 J16-7 — "Owen's 15 minutes" for each partner whose paid share stands when the club cancels a
+ * session somebody checked in to: nothing is refunded, and the partners' shares stay with the
+ * organiser. The same rule as the booking page's panel: a seat paid by hand, not accepted, or that
+ * paid nothing has nothing in the app to stand.
+ */
+function standingSharesOf(detail: BookingDetail): string[] {
+  return detail.players
+    .filter((p) => p.kind === "member" && p.user_id !== detail.organiser.user_id && p.status === "accepted" && !p.settled_outside && p.paid_minutes > 0)
+    .map((p) => `${firstName(p.name)}'s ${minutesSpoken(p.paid_minutes)}`);
+}
+
+/**
+ * The booking's record, read only when the quote says somebody checked in on a club cancel — the
+ * quote names partners' refunds and there are none, so who stands is the record's to say. Null
+ * until it is read, and on a failed read: the sheet then claims nothing about the shares.
+ */
+function useStandingShares(bookingId: string, wanted: boolean): { shares: string[]; organiser: string | null } | null {
+  const [read, setRead] = useState<{ id: string; shares: string[]; organiser: string | null } | null>(null);
+  useEffect(() => {
+    if (!wanted) return undefined;
+    let live = true;
+    playersEndpoints.detail(bookingId).then(
+      (d) => { if (live) setRead({ id: bookingId, shares: standingSharesOf(d), organiser: d.organiser.name?.trim() ? firstName(d.organiser.name) : null }); },
+      () => undefined,
+    );
+    return () => { live = false; };
+  }, [bookingId, wanted]);
+  return wanted && read?.id === bookingId ? read : null;
+}
+
+function SharesStand({ bookingId, wanted, organiser }: { bookingId: string; wanted: boolean; organiser: string | null }) {
+  const read = useStandingShares(bookingId, wanted);
+  if (!read || read.shares.length === 0) return null;
+  // Polite: a standing fact about this cancel, landing a beat after the quote's own alert.
+  return <Alert tone="info" live="polite">{ADMIN_CANCEL.sharesStand(read.shares, read.organiser ?? organiser ?? ADMIN_CANCEL.nobody)}</Alert>;
 }
 
 /** F1.13 — why "Back to you" (or "Back to Thandi", R13 J13-5) is less than was paid on a split booking. */

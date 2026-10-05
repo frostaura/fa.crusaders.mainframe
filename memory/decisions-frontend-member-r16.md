@@ -30,3 +30,14 @@ collect_needs_overdraft, at_daily_limit, cancelled_share_stands, namesake fields
   V4-10 keeps no floor on the button). The spec measures the tap run, not the text box.
 - **The setup checklist offline reads kept states by `useDataOwner().who`** (X15-4).
 - **A refused reason-required admin dialog focuses the first complaint** (`players/admin/complaintFocus.ts`).
+
+## The desk's cancel sheet and Book-as picker (lane FE16s3)
+
+- **The cancel sheet says the partners' shares stand, off the booking's record** (J16-7): on a club
+  cancel (admin, not own) whose fresh quote says `checkedIn`, `CancelSheet` reads
+  `GET /bookings/{id}` and says `ADMIN_CANCEL.sharesStand` (info alert, polite). *Why the record,
+  not a prop from the panel:* the quote's `partner_refunds` is empty when nothing is refunded, and
+  the grid's and the member page's sheets (an early check-in) need the line too. Same rule as
+  `AdminCancelPanel.standingShares` (accepted member seat, not settled by hand, paid > 0) — the
+  two copies should become one helper. A failed read says nothing about the shares (never "none").
+- **Book-as rows carry `DETAIL_ADMIN.memberSubtitle`** (J16-3): "#1042 · email", searchable.
