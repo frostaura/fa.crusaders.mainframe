@@ -626,8 +626,12 @@ ordinary end-of-slot cue and the extra one after a late reversal — follows one
 - **a lit booking held the court but is already over and cued off** — the off is stamped at that
   booking's end, following back-to-back chains, so it never falls inside a paid, lit session.
 
-A booking nobody checked in on lit nothing, so it never holds the court; cancelled bookings and
-club blocks never do. `LightsOffCuedAt` is stamped either way, so nothing fires twice; `data.ends_at`
+A booking nobody checked in on lit nothing, so it never holds the court, and neither do club blocks.
+A booking holds the court from the **earlier of its start and its check-in**, so an early scan across a gap counts (R14 D14-1). A booking that was lit and then
+cancelled still holds the court until its end and gets its own off — recent ones only (2-hour lookback), so a deploy never replays history (R14 D14-2).
+A late reversal's `lights_on` is suppressed only when a booking that lit the court **at or before the scan instant** still holds it. If the
+survivor lit after the scan, the on goes out at the scan instant and the survivor's off closes the court (R15 D15-2). The pairing of ons and offs is
+per court, not per booking (webhooks.md). `LightsOffCuedAt` is stamped either way, so nothing fires twice; `data.ends_at`
 stays the booking's (restored) end. **Why:** a per-court consumer read the court dark through a
 whole paid session when an earlier booking's off arrived after the next member's `lights_on`.
 

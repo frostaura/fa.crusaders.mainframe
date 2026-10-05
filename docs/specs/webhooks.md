@@ -68,7 +68,12 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `peripheral.recovered` | The same box called in again; carries how long the outage lasted |
 | `webhook.test` | The "send test ping" button is clicked |
 
-**Ordering the lights events (R14 E14-4).** Consumers order `booking.lights_on` / `booking.lights_off` by `occurred_at`, not by arrival. An off never precedes the on it closes: an off that arrives before the same booking's on does not close that on. A reversal's `lights_on` carries the scan instant and may arrive after later events; it is sent only when its own off will also be sent, so each booking has exactly one on followed by one later off, or neither.
+**Ordering the lights events (R14 E14-4).** Consumers order `booking.lights_on` / `booking.lights_off` by `occurred_at`, not by arrival. An off never precedes the on it closes: an off that arrives before the same booking's on does not close that on. A reversal's `lights_on` carries the scan instant and may arrive after later events. **Mirror the court, not the booking (R15 E15-6, D15-4):** the lights are a per-court state, and the on/off pairing is per court, not per booking. A court is lit from an on until the next off for that court by `occurred_at`. Per booking, three shapes are normal:
+- a no-show gets an off and no on;
+- a booking followed by an already-lit session on the same court gets an on and no off of its own, because the follower's off closes the court;
+- a reversed no-show can get two offs (the sweep's, then one at the restored end).
+
+A consumer that pairs ons and offs per booking will keep courts lit forever. A reversal's `lights_on` is suppressed only when a booking that lit the court at or before the scan instant still holds it. When the survivor lit **after** the scan, the reversal's on goes out at the scan instant and the survivor's off closes the court (R15 D15-2).
 
 ## Payload shape
 All payloads are JSON, structured:
