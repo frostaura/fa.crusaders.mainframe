@@ -19,6 +19,7 @@ import {
 import { useProfile } from "@/lib/useProfile";
 import { focusHeading } from "@/lib/routeAnnouncer";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
+import { initialsOf } from "@/lib/initials";
 
 /**
  * The account menu, behind the avatar (Target IA → Shell). R16 retired the gear: every admin
@@ -253,14 +254,5 @@ function Identity({ name, known, email, photo }: { name: string; known: boolean;
  * is a phrase for the menu's text, and its letters — "YA" — are nobody's initials.
  */
 function Mark({ name }: { name: string | null }) {
-  return name === null ? <UserCircle size="100%" aria-hidden="true" /> : <>{initials(name)}</>;
-}
-
-/** "Dean Martin" → "DM"; first and last word so a middle name never crowds the circle. */
-function initials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "?";
-  const first = Array.from(words[0])[0] ?? "";
-  const last = words.length > 1 ? Array.from(words[words.length - 1])[0] ?? "" : "";
-  return (first + last).toLocaleUpperCase();
+  return name === null ? <UserCircle size="100%" aria-hidden="true" /> : <>{initialsOf(name)}</>;
 }

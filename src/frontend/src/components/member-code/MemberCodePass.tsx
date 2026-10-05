@@ -12,6 +12,7 @@ import { groupToken } from "@/lib/memberCode/token";
 import { MY_CODE, newCodeIn } from "@/lib/myCodeCopy";
 import { phoneIsOffline } from "@/lib/api";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
+import { initialsOf } from "@/lib/initials";
 
 /**
  * The member's pass with the rotating code on it (D1, R9; design-system.md → Pass card).
@@ -76,21 +77,13 @@ export type MemberCodePassProps = {
   triggerRef?: Ref<HTMLButtonElement>;
 };
 
-/** "Nomsa Khumalo" → "NK" — first and last word, as the account menu draws it. */
-function initials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "?";
-  const last = words.length > 1 ? Array.from(words[words.length - 1])[0] ?? "" : "";
-  return ((Array.from(words[0])[0] ?? "") + last).toLocaleUpperCase();
-}
-
 function MemberAvatar({ name, photoUrl }: { name: string | null; photoUrl: string | null }) {
   if (!name && !photoUrl) return null;
   return (
     <Avatar size={40}>
       {photoUrl ? <AvatarImage src={photoUrl} alt="" /> : null}
       {/* Decorative: the member's name is printed beside it on the band. */}
-      <AvatarFallback aria-hidden="true"><span>{initials(name ?? "")}</span></AvatarFallback>
+      <AvatarFallback aria-hidden="true"><span>{initialsOf(name ?? "")}</span></AvatarFallback>
     </Avatar>
   );
 }

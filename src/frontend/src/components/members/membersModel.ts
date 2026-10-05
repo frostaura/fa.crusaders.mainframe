@@ -103,14 +103,8 @@ export function listSends(rows: MemberRow[] | null, field: "groups" | "last_logi
   return (rows ?? []).some((row) => field in row);
 }
 
-/** Initials for the avatar fallback: first and last word, so a middle name never crowds. */
-export function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "?";
-  const first = Array.from(words[0])[0] ?? "";
-  const last = words.length > 1 ? Array.from(words[words.length - 1])[0] ?? "" : "";
-  return (first + last).toLocaleUpperCase();
-}
+/** Initials for the avatar fallback — R15 J15-6: the one shared rule (suffixes are not surnames). */
+export { initialsOf } from "@/lib/initials";
 
 /** The ⋯ button of the row a dialog was opened from — where focus goes back to when it closes. */
 export function rowMenuOf(userId: string): HTMLElement | null {

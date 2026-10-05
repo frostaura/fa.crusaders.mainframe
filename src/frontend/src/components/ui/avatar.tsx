@@ -1,6 +1,7 @@
 import { createContext, useContext, type ComponentProps } from "react";
 import { Avatar as AvatarPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
+import { initialsOf } from "@/lib/initials";
 
 /**
  * Avatar — Radix (the image shows only once it has loaded; until then, or if it fails, the
@@ -36,15 +37,6 @@ export function AvatarImage({ className, ...props }: ComponentProps<typeof Avata
   return (
     <AvatarPrimitive.Image data-slot="avatar-image" className={cn("aspect-square size-full object-cover", className)} {...props} />
   );
-}
-
-/** "Dean Martin" → "DM"; "cher" → "C"; blank → "?". First and last word, so a middle name never crowds. */
-function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "?";
-  const first = Array.from(words[0])[0] ?? "";
-  const last = words.length > 1 ? Array.from(words[words.length - 1])[0] ?? "" : "";
-  return (first + last).toLocaleUpperCase();
 }
 
 type AvatarFallbackProps = ComponentProps<typeof AvatarPrimitive.Fallback> & {
