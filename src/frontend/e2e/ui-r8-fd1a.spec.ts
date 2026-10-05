@@ -330,7 +330,7 @@ async function refusedSignIn(page: Page, width: number, big: boolean) {
     }
     lines.sort((a, b) => a.top - b.top);
     const textLeft = Math.min(...lines.slice(1).map((l) => l.left));
-    return { icon: icon.width, gutter: lines.length > 1 ? textLeft : null, lines: lines.length, iconRight: icon.right - box.left, firstLine: lines[0].left };
+    return { icon: icon.width, gutter: lines.length > 1 ? textLeft : null, lines: lines.length, iconRight: icon.right - box.left, firstLine: lines[0].left, iconBottom: icon.bottom, firstTop: lines[0].top };
   });
 }
 
@@ -344,7 +344,9 @@ test.describe("L8-11 / L6-16 — a callout's icon grows with its words, and its 
     expect(m.lines, "precondition: the refusal wraps").toBeGreaterThan(1);
     // Was a 72px gutter (pl-9) down every line for a 16px icon.
     expect(m.gutter!, "the lines under the first keep the icon's gutter").toBeLessThanOrEqual(32);
-    expect(m.firstLine, "the first line clears the icon").toBeGreaterThanOrEqual(m.iconRight);
+    // R15 L15-4 — under a 14rem callout the icon takes its own line, so the first line clears it by
+    // starting BELOW it (a floated icon split "Bartholomew" on the shortened first line).
+    expect(m.firstLine >= m.iconRight || m.firstTop >= m.iconBottom - 1, `the first line clears the icon ${JSON.stringify(m)}`).toBe(true);
   });
 
   test("320 at 100 %: the words still hang clear of the icon on every line", async ({ page }) => {
