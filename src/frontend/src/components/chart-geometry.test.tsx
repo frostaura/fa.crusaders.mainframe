@@ -172,14 +172,18 @@ describe("a minutes axis is as wide as its own labels", () => {
     // Guards the one drift this design can suffer: a Bar added to a chart whose width
     // calculation is not told about it. The expectation is rebuilt from the elements rather
     // than restated, so the two cannot disagree quietly.
-    const charts: [string, ReactNode, Record<string, number>[]][] = [
-      ["Daily money flow (club)", drawDailyFlow(bigNegative, P), bigNegative as unknown as Record<string, number>[]],
-      ["Daily money flow (member)", drawMyFlow(ME, P), ME as unknown as Record<string, number>[]],
-      ["Minutes sold over time", drawRevenueArea(ADMIN, P), ADMIN as unknown as Record<string, number>[]],
-      ["Wallet balance", drawMyBalance(ME, P), ME as unknown as Record<string, number>[]],
+    // The rows are the ones the chart DRAWS (its own `data`), not the fixture handed in — a chart
+    // may derive series from them (R14 J14-2: "sold" is top-ups less given).
+    const charts: [string, ReactNode][] = [
+      ["Daily money flow (club)", drawDailyFlow(bigNegative, P)],
+      ["Daily money flow (member)", drawMyFlow(ME, P)],
+      ["Minutes sold over time", drawRevenueArea(ADMIN, P)],
+      ["Wallet balance", drawMyBalance(ME, P)],
     ];
 
-    for (const [name, chart, rows] of charts) {
+    for (const [name, chart] of charts) {
+      const rows = (chart as ReactElement<{ data: Record<string, number>[] }>).props.data;
+      expect(rows.length, name).toBeGreaterThan(0);
       const series = flatten(chart)
         .filter((e) => e.type === Bar || e.type === Area || e.type === Line)
         .map((e) => e.props as { dataKey: string; stackId?: string });
