@@ -57,12 +57,21 @@ function burstKey(event: TraceEvent): string {
   // each row's amount, the balance it left and who moved it — the three facts a disputed charge
   // is settled on. A unique key per row puts every one on the rail.
   if (isMoney(event)) return `money:${event.source ?? ""}:${event.source_id ?? event.at}:${event.headline ?? ""}`;
+  // R14 (BE14b §7): one player's act on another's seat — taken off, the split changed, the game
+  // cancelled — is a story each; three in a minute folded into "3 in 1 minute" hid who and what.
+  if (PLAYER_ACTS.has(event.kind)) return `act:${event.kind}:${event.source_id ?? event.at}:${event.headline ?? ""}`;
   const family = (event.kind ?? "").split(".")[0];
   // R11 E11-4: a box's refusal names what the scan was trying to do; a lights scan, a walk-up and
   // a pay-for at one box are three stories, never "3 in 1 minute".
   const attempt = typeof event.detail?.attempt === "string" ? event.detail.attempt : "";
   return `${event.strand ?? ""}:${family}:${placeOf(event)}:${attempt}`;
 }
+
+/** R14 — the booking kinds that are one person acting on another's place in a game. */
+const PLAYER_ACTS: ReadonlySet<string> = new Set([
+  "booking.taken_off", "booking.took_player_off", "booking.split_changed", "booking.changed_split",
+  "booking.game_cancelled", "booking.cancelled_by_club",
+]);
 
 /** A row about minutes: the wallet strand, a ledger row, or any row carrying an amount. */
 function isMoney(event: TraceEvent): boolean {
