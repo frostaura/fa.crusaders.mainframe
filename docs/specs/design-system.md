@@ -130,7 +130,10 @@ squash court's tin). Never as a state colour.
   `[@container_name_(min-width:56rem)]:[…]`.
 - **Sticky offsets:** `<main>` is the scroller and sits UNDER the app bar, so sticky things use
   `top-0` / `top-6` (`layout.stickyTop` is 0), and full-height panes subtract
-  `--app-chrome-height`.
+  `--app-chrome-height` **and every bar fixed over the scroller** — `--app-bottom-bar-height` (shown at xl
+  with large text too) and a docked ContextBar's `--context-bar-height` — and scroll within themselves
+  (R14 L14-1). Names never rely on `hyphens: auto`: Chromium will not hyphenate a capitalised word,
+  so a long name gets its own line or more room instead (R14 L14-3).
 
 ## Theme
 

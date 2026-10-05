@@ -452,7 +452,7 @@ top-up or a share. Each badge is `{key, name, description, criteria}`; the API s
 | `sessions_10` | Ten up | Played 10 sessions. | 10th attended session · its check-in |
 | `sessions_50` | Regular | Played 50 sessions. | 50th · its check-in |
 | `sessions_100` | Centurion | Played 100 sessions. | 100th · its check-in |
-| `first_result` | On the record | Recorded your first match result. | 1 confirmed result · its `ConfirmedAt` |
+| `first_result` | On the record | Your first match result is on the record. (R14 J14-11: earned by recording **or** confirming, so the words are true for both) | 1 confirmed result · its `ConfirmedAt` |
 | `first_win` | First win | Won a match. | 1 confirmed result won · its `ConfirmedAt` |
 | `partners_5` | Good company | Played with 5 different members. | 5 distinct other members across attended sessions (§5.1 `partners` rule) · the check-in of the session that made 5 |
 | `early_bird` | Early bird | Played a session that started before 07:00. | a session starting before `play_early_bird_before_minute` club time · its check-in |

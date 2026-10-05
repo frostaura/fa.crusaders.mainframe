@@ -479,7 +479,11 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
    open booking on that relay, or the relay is lit — **and that is not the court their own button
    window is bound to**: a member who lit a court, bought it or rescanned on it and presses its
    button is starting to switch it OFF, exactly as before D10. (Any other court press is the
-   walk-up choice it always was.) The box asks `POST /api/v1/device/pay-for` with `confirm:false` — the **quote**,
+   walk-up choice it always was.) **Which booking:** if the running session ends inside the club's
+   cue window and the next booking's cue window is already open, the quote, the confirm and the
+   light all apply to that next booking — the one about to start — never to a session with minutes
+   left to run out; otherwise the earliest started or cue-open booking is the target (R14 E14-6).
+   The box asks `POST /api/v1/device/pay-for` with `confirm:false` — the **quote**,
    which moves no money.
 3. The glass asks (§9.3). The window re-arms; the court selection is cleared, so a duration
    press cannot turn the question into a walk-up on a court somebody is playing on (the only answer
