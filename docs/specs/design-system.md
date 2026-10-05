@@ -288,6 +288,12 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   chunk). Every other page is `React.lazy` behind the page-shaped `RouteSkeleton` — except the admin
   frame, Overview and the two doors pages, which read the shared doors store (it dedupes only in
   flight). React + the router are a vendor chunk of their own; nothing else is grouped by hand.
+- **"Offline" means the phone says so (R15 X15-3).** Copy says "You're offline" only when
+  `navigator.onLine === false`. When the phone is online but the club can't be reached, it says
+  "Can't reach the club" ("…showing what we had at 18:00"). This applies to stale notices, the My Code
+  badge, the nothing-kept page, the minutes chip and write refusals. It reverses R8, which said
+  offline whatever `onLine` said: a member on Wi-Fi with the club down was told to check a
+  connection that was fine.
 
 ## Guards (tests)
 
