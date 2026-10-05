@@ -71,13 +71,13 @@ export const ACTS: Record<AdminAct, ActSpec> = {
     landed: (_was, now) => (now?.settled_outside ? {} : null),
     done: (name, answer, organiser) => {
       const waiting = waitingReturn(answer);
-      return waiting ? DETAIL_ADMIN.settledWaiting(name, waiting.amount, organiser) : DETAIL_ADMIN.settled(name);
+      return waiting ? DETAIL_ADMIN.settledWaiting(name, waiting.amount, organiser) : DETAIL_ADMIN.settled(name, organiser);
     },
   },
   collect: {
     label: DETAIL_ADMIN.collect, title: DETAIL_ADMIN.collectTitle, body: DETAIL_ADMIN.collectBody, confirm: DETAIL_ADMIN.collectConfirm,
     alwaysOverdraft: true, mayOverdraft: true, tone: "primary",
-    call: (r) => playersEndpoints.adminCollect(r.bookingId, r.participantId, r.reason),
+    call: (r) => playersEndpoints.adminCollect(r.bookingId, r.participantId, r.reason, r.allowNegativeBalance),
     landed: (was, now) => (now && now.paid_minutes > was.paid_minutes ? { collected_minutes: now.paid_minutes - was.paid_minutes } : null),
     done: (name, answer) => DETAIL_ADMIN.collected(name, minutesSpoken(collectedOf(answer))),
   },

@@ -24,9 +24,10 @@ import { useComplaintFocus } from "./complaintFocus";
  * change log — and, where money may take someone below zero, the explicit go-ahead.
  *
  * <p>
- * <b>Collect always asks.</b> It is the one path that may take a partner below zero or collect
- * from a lapsed seat, so the box is on the dialog from the start and the call sends
- * `allowNegativeBalance` on purpose. <b>Remove and settle ask when the server does</b>: after the
+ * <b>Collect asks when the balance is short.</b> It may take a partner below zero, so when the
+ * seat says collecting would (`collect_needs_overdraft`, R16 J16-10 — or an older API that does
+ * not say) the box is on the dialog from the start; a covered balance needs no go-ahead.
+ * <b>Remove and settle — and a collect that went short since the page read it — ask when the server does</b>: after the
  * share deadline a return can take the organiser below zero, the server answers
  * `overdraft_not_authorised`, and the same box appears; ticking it resends with the flag.
  * </p>
@@ -46,7 +47,8 @@ function useActFlow(props: Props) {
   const spec = ACTS[act];
   const [reason, setReason] = useState("");
   const [authorised, setAuthorised] = useState(false);
-  const [asked, setAsked] = useState(spec.alwaysOverdraft);
+  // R16 J16-10 — collect asks for the go-ahead unless the seat says the balance covers it.
+  const [asked, setAsked] = useState(spec.alwaysOverdraft && player.collect_needs_overdraft !== false);
   const [tried, setTried] = useState(false);
   /** R16 X16-3 — confirms refused for a missing reason or go-ahead; each one moves the keyboard to it. */
   const [refused, setRefused] = useState(0);

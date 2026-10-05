@@ -55,7 +55,8 @@ export const STATUS_WORD: Record<string, string> = {
   withdrawn: "Pulled out",
   removed: "Removed",
   lapsed: "Lapsed",
-  settled_outside: "Settled by the club",
+  /** R16 J16-6 — a by-hand payment to the organiser, recorded by the club; never "settled with the club". */
+  settled_outside: "Paid by hand",
   guest: "Guest",
   open_link: "Waiting for someone",
   /** R1 F2.10 — on a cancelled game: who was on it, and an invite nobody can answer any more. */
@@ -129,7 +130,9 @@ export const PLAYERS_REFUSAL: Record<string, string> = {
   expected_share_required: "Something went wrong reading your share. Open the invite again.",
   player_previously_declined: "They already said no to this game, so it won't ask them again.",
   player_previously_removed: "That player was taken off this game, so they can't rejoin it from here.",
-  player_not_accepted: "That player hasn't said yes yet, so there's no share to settle.",
+  // R16 E16-8 — collect answers it as well as settle-outside.
+  player_not_accepted: "That player hasn't said yes yet, so there's no share to collect or settle.",
+  share_settled_outside: "That share was already paid by hand — there's nothing to collect in the app.",
   split_mode_invalid: "Choose Equal, Ratio or Amount.",
   split_weight_invalid: "Each ratio is a whole number from 0 to 100.",
   split_amount_invalid: "Each amount is a whole number of minutes, 0 or more.",
@@ -181,6 +184,12 @@ function withFigures(e: ApiError, timezone?: string): string | null {
       return `You need ${minutesSpoken(need)} and have ${minutesSpoken(have)} to spend — ${minutesSpoken(Math.max(0, need - have))} short. Buy a package and try again.`;
     }
     case "partner_cap_exceeded": return capSentence(e);
+    case "at_daily_limit": {
+      // R16 J16-11 — adding a member already at their daily limit for that club day.
+      const name = e.detail("name");
+      const who = typeof name === "string" && name.trim() !== "" ? name.trim() : "That member";
+      return `${who} has already used their court time for that day, so they can't join this game.`;
+    }
     case "withdraw_window_closed": {
       const at = e.detail("closed_at");
       return typeof at === "string"
@@ -633,7 +642,7 @@ export const DETAIL_MONEY = {
   askedAgainRow: (share: string, consented: string) => `Asked again: ${share} (said yes to ${consented})`,
   /** R1 F2.13 — nothing was ever agreed (accepted by the club): no "said yes to 0 min". */
   notAgreedRow: (share: string) => `Share of ${share} not agreed — nothing collected`,
-  settledRow: "Settled with the club",
+  settledRow: "Paid the organiser by hand",
   coversRow: "Covers the court",
   guestRow: "Guest · no share",
   lapsedRow: "Share lapsed",
@@ -877,10 +886,11 @@ export const DETAIL_ADMIN = {
   acceptConfirm: "Accept for them",
   accepted: (name: string) => `${name} is in — accepted by the club.`,
   settle: "Settled outside the app",
-  settleTitle: (name: string) => `Mark ${name}'s share as settled?`,
+  settleTitle: (name: string) => `Mark ${name}'s share as paid by hand?`,
   settleBody: "Use this when they paid by hand. Anything collected in the app goes back to them.",
-  settleConfirm: "Mark as settled",
-  settled: (name: string) => `${name}'s share is settled with the club.`,
+  settleConfirm: "Mark as paid by hand",
+  /** R16 J16-6 — who paid whom: the partner paid the ORGANISER by hand; the club only recorded it. */
+  settled: (name: string, organiser: string) => `${name} paid ${organiser} by hand — recorded.`,
   /**
    * P11 — the return is WAITING: the organiser's balance could not cover it, so no money has
    * moved yet. It goes back as soon as the organiser's balance covers it.
@@ -888,7 +898,7 @@ export const DETAIL_ADMIN = {
   removedWaiting: (name: string, amount: string | null, organiser: string) =>
     `Removed ${name}. ${returnWaiting(amount, organiser)}`,
   settledWaiting: (name: string, amount: string | null, organiser: string) =>
-    `${name}'s share is settled with the club. ${returnWaiting(amount, organiser)}`,
+    `${name} paid ${organiser} by hand — recorded. ${returnWaiting(amount, organiser)}`,
   collect: "Collect",
   collectTitle: (name: string) => `Collect ${name}'s share?`,
   collectBody: "Takes their share now, even from a lapsed seat.",

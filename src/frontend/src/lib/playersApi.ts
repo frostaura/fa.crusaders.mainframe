@@ -140,6 +140,11 @@ export type DetailPlayer = {
   returned_minutes?: number;
   needs_consent: boolean;
   settled_outside: boolean;
+  /**
+   * R16 J16-10 (BE16b, admin read) — collecting now would take this partner below zero: the go-ahead
+   * is asked only then. Null where collect does not apply; absent from an older API (asked, as before).
+   */
+  collect_needs_overdraft?: boolean | null;
   lapsed: boolean;
   checked_in_at: string | null;
   invited_at: string | null;
@@ -494,7 +499,10 @@ export const playersEndpoints = {
     api.post<SeatAnswer>(`${adminSeat(bookingId, participantId)}/accept`, { reason }),
   adminSettleOutside: (bookingId: string, participantId: string, reason: string, allowNegativeBalance = false) =>
     api.post<ReturnAnswer>(`${adminSeat(bookingId, participantId)}/settle-outside`, { reason, allowNegativeBalance }),
-  /** The only path that may take a partner below zero. `allowNegativeBalance` is sent on purpose. */
-  adminCollect: (bookingId: string, participantId: string, reason: string) =>
-    api.post<CollectAnswer>(`${adminSeat(bookingId, participantId)}/collect`, { reason, allowNegativeBalance: true }),
+  /**
+   * May take a partner below zero — only with `allowNegativeBalance`, which R16 J16-10 (BE16b)
+   * requires only when their balance is short (`collect_needs_overdraft`).
+   */
+  adminCollect: (bookingId: string, participantId: string, reason: string, allowNegativeBalance: boolean) =>
+    api.post<CollectAnswer>(`${adminSeat(bookingId, participantId)}/collect`, { reason, allowNegativeBalance }),
 };

@@ -8,7 +8,7 @@ vi.mock("@/components/players/PlayerPicker", () => ({ PlayerPicker: () => null, 
 
 /**
  * God mode on the booking page (admin): every act needs a reason and lands in the change log;
- * collect always asks for the overdraft go-ahead and sends `allowNegativeBalance`; remove and
+ * collect asks for the overdraft go-ahead (unless the seat says the balance covers it, R16 J16-10) and sends `allowNegativeBalance`; remove and
  * settle ask for it when the server answers `overdraft_not_authorised`, then resend with it.
  */
 
@@ -65,7 +65,7 @@ describe("collect", () => {
 describe("remove and settle — the overdraft asked for by the server", () => {
   it.each([
     ["remove", DETAIL_ADMIN.remove, DETAIL_ADMIN.removeConfirm, DETAIL_ADMIN.removed("Alex")],
-    ["settle-outside", DETAIL_ADMIN.settle, DETAIL_ADMIN.settleConfirm, DETAIL_ADMIN.settled("Alex")],
+    ["settle-outside", DETAIL_ADMIN.settle, DETAIL_ADMIN.settleConfirm, DETAIL_ADMIN.settled("Alex", "Sam")],
   ])("%s: overdraft_not_authorised → the god-mode confirm → resent with the flag", async (route, label, confirm, done) => {
     const stub = serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `${ADMIN_SEAT}/${route}`,
@@ -135,7 +135,7 @@ describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", 
 describe("remove and settle — a return that waits on the organiser (P11)", () => {
   it.each([
     ["remove", DETAIL_ADMIN.remove, DETAIL_ADMIN.removeConfirm, "Removed Alex. Their 16 minutes is waiting on Sam's balance and goes back as soon as it's covered."],
-    ["settle-outside", DETAIL_ADMIN.settle, DETAIL_ADMIN.settleConfirm, "Alex's share is settled with the club. Their 16 minutes is waiting on Sam's balance and goes back as soon as it's covered."],
+    ["settle-outside", DETAIL_ADMIN.settle, DETAIL_ADMIN.settleConfirm, "Alex paid Sam by hand — recorded. Their 16 minutes is waiting on Sam's balance and goes back as soon as it's covered."],
   ])("%s: return_waiting says the money has not moved yet", async (route, label, confirm, done) => {
     serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `${ADMIN_SEAT}/${route}`,
