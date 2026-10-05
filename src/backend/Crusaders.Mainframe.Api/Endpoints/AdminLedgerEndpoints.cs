@@ -206,12 +206,19 @@ public static class LedgerRowMapper
         return null;
     }
 
+    /// <summary>The name a MEMBER reads for an admin who moved their money (R14 review L3): the club, never the person.</summary>
+    public const string TheClub = "The club";
+
+    /// <param name="memberView">
+    /// The row is for the member's own wallet (R14 review L3): an administrator acting on it is "The
+    /// club", on <c>actor_name</c> and <c>actorName</c> alike. Admin surfaces keep the admin's name.
+    /// </param>
     public static LedgerRowDto Build(
         LedgerEntry e, Func<Guid, string> nameFor, Func<Guid, bool>? isAdmin = null,
-        IReadOnlyDictionary<Guid, ShareCounterparty>? counterparties = null)
+        IReadOnlyDictionary<Guid, ShareCounterparty>? counterparties = null, bool memberView = false)
     {
         var subject = nameFor(e.UserId);
-        var actor = nameFor(e.ActorUserId);
+        var actor = ActorNameOf(e, nameFor, isAdmin, memberView);
         var other = counterparties is not null && counterparties.TryGetValue(e.Id, out var found) ? found : null;
 
         // Direction: positive amount = funds flow INTO the subject's wallet; negative = OUT.
@@ -277,6 +284,18 @@ public static class LedgerRowMapper
     /// a share moving between two members — the other member is already the row's From or To —
     /// unless an administrator moved it.
     /// </summary>
+    /// <summary>The actor's name — "The club" for an administrator, on the member's own wallet (R14 review L3).</summary>
+    private static string ActorNameOf(LedgerEntry e, Func<Guid, string> nameFor, Func<Guid, bool>? isAdmin, bool memberView)
+    {
+        return memberView && IsClubHand(e, isAdmin) ? TheClub : nameFor(e.ActorUserId);
+    }
+
+    /// <summary>An administrator moved somebody else's money — the club's hand, to the member whose money it was.</summary>
+    private static bool IsClubHand(LedgerEntry e, Func<Guid, bool>? isAdmin)
+    {
+        return e.ActorUserId != Guid.Empty && e.ActorUserId != e.UserId && isAdmin?.Invoke(e.ActorUserId) == true;
+    }
+
     private static string? DoneByOf(LedgerEntry e, string actor, Func<Guid, bool>? isAdmin)
     {
         if (e.ActorUserId == Guid.Empty || e.ActorUserId == e.UserId) return null;

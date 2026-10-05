@@ -37,7 +37,15 @@ Earlier: `decisions-backend-r13b.md`. Contract: lane scratch `r14-contract-BE14b
   promising a wallet line (`CancelledSlot.SessionStarted`).
 - **`GET /wallet?include=share_bookings` carries `share_places`** (E14-7, FE14m's ask): `{bookingId: {court_name, starts_at}}` for every booking the member has a share row on, readable or not (`share_bookings` keeps its null for an off-game booking). Court and start only — tenant-filtered, own rows only.
 - **`BookingService` decides device paths at the injected `TimeProvider`** (D14-4, BE14a's ask): a walk-up's start and a reversal's `NoShowReversedAt` read `_clock`, like every device route; member-facing create/cancel still read the wall. A pinned-clock walk-up was refused 409 before.
+- **Review fixes (M1/L1/L2/L3/L5).** A plain return's cause is named only off a record: `split_changed`
+  needs a `players.split_changed` row for the seat NEWER than its last share movement (else a later
+  desk adjustment read as Olive's split); `organiser_removed` needs the `players.removed` row (a pre-R14
+  removal is `share_back`); settle-outside is `club_settled`; anything else is `share_back`, actor null.
+  `ActorOf` never defaults to the booker. `share_paid` names nobody on the frame. The member's own
+  wallet rows say "The club" for an admin actor (`LedgerRowMapper.Build(memberView)`), admin surfaces
+  keep the name. `GivenMinutes.IsGiven` (AdminTopUp, ZarPaid null or 0) is the one rule for reports,
+  the Night and the desk mail (`WalletEndpoints.DeskSaleIsGift`).
 - **404 detail names the viewer's own closed seat** (`own_seat_id`, J14-10) — own seat only.
 - Share receipts for removal / split / cancel say who, with court and day; share mails after a
   cancel name who cancelled (J14-8). Outage-reversal mail: one "so".
-- Tests: `R14ShareCausesHttpTests`, `R14NightAndCancelHttpTests` (24/24 red at HEAD 0ab1b559 first), `R14PlayerAsksHttpTests`, `R14BookingClockHttpTests` — each seen red first.
+- Tests: `R14ShareCausesHttpTests`, `R14NightAndCancelHttpTests` (24/24 red at HEAD 0ab1b559 first), `R14PlayerAsksHttpTests`, `R14BookingClockHttpTests`, `R14ReviewFixesHttpTests` — each seen red first.

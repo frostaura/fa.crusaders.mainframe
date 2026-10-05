@@ -532,7 +532,7 @@ public static partial class AdminMemberTraceAssembly
                     OthersMoney = !own,
                     SubjectName = own ? null : PersonNames.Of(row.UserId, s.Names),
                     // E8-5: a desk top-up the club took no rand for was given, not sold.
-                    NoCharge = row.Type == LedgerEntryType.AdminTopUp && row.ZarPaid == 0m,
+                    NoCharge = GivenMinutes.IsGiven(row.Type, row.ZarPaid),
                     WithdrewName = withdrew is { } w ? PersonNames.Of(w, s.Names) ?? "their partner" : null,
                 }),
                 ActorUserId: actorId,

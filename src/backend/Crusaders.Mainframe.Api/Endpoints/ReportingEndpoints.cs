@@ -518,7 +518,7 @@ public static class ReportingEndpoints
         entries.Where(IsGiven).Sum(e => e.AmountMinutes);
 
     /// <summary>One desk top-up the club took no rand for — given, never sold (J11-4, R13 J13-2).</summary>
-    private static bool IsGiven(LedgerEntry e) => e.Type == LedgerEntryType.AdminTopUp && e.ZarPaid == 0m;
+    private static bool IsGiven(LedgerEntry e) => Services.GivenMinutes.IsGiven(e.Type, e.ZarPaid);
 
     internal static object BuildWalletReport(
         List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to,

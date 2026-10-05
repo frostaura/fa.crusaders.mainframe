@@ -79,6 +79,7 @@ public static class ShareActs
     public const string OrganiserRemoved = "organiser_removed";
     public const string SplitChanged = "split_changed";
     public const string BookingCancelled = "booking_cancelled";
+    public const string ClubSettled = "club_settled";
 }
 
 /// <summary>Why the club refunded a split session, so a returned share can say so (E10-7).</summary>
@@ -411,6 +412,7 @@ public static partial class EmailTemplates
         {
             ShareActs.OrganiserRemoved => $"{m.OtherName} took you off the game — {m.CourtName}",
             ShareActs.SplitChanged => $"Your share was lowered — {m.CourtName}",
+            ShareActs.ClubSettled => $"Your share is settled outside the app — {m.CourtName}",
             ShareActs.BookingCancelled when m.CancelledBy == "club" => $"The club cancelled the game — {m.CourtName}",
             ShareActs.BookingCancelled when m.CancelledBy == "member" => $"{m.OtherName} cancelled the game — {m.CourtName}",
             _ => null,
@@ -490,6 +492,7 @@ public static partial class EmailTemplates
         {
             ShareActs.OrganiserRemoved => mine ? $"{m.OtherName} took you off the game" : $"You took {m.OtherName} off the game",
             ShareActs.SplitChanged => mine ? $"{m.OtherName} lowered your share of the court" : $"You lowered {m.OtherName}'s share of the court",
+            ShareActs.ClubSettled => mine ? "The club recorded your share as paid outside the app" : $"The club recorded {m.OtherName}'s share as paid outside the app",
             ShareActs.BookingCancelled => CancelledWhy(m, mine),
             _ => null,
         };

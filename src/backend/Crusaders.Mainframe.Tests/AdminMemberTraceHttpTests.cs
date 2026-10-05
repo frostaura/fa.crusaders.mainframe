@@ -823,7 +823,8 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
         Assert.EndsWith("amount_minutes,balance_after_minutes,source", lines[0], StringComparison.Ordinal);
         Assert.Contains(lines, l => l.Contains("Bought 1 hour 30 minutes", StringComparison.Ordinal) && l.Contains(",90,", StringComparison.Ordinal));
         Assert.Contains(lines, l => l.Contains("Paid 45 minutes", StringComparison.Ordinal) && l.Contains(",-45,", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.Contains("1 day 6 hours 15 minutes at the desk", StringComparison.Ordinal) && l.Contains(",1815,", StringComparison.Ordinal));
+        // R14 review L5: a desk top-up with no rand recorded is given, not sold.
+        Assert.Contains(lines, l => l.Contains("1 day 6 hours 15 minutes at no charge", StringComparison.Ordinal) && l.Contains(",1815,", StringComparison.Ordinal));
         Assert.DoesNotContain(".00", text, StringComparison.Ordinal);
         Assert.DoesNotContain("credit", text, StringComparison.OrdinalIgnoreCase);
 

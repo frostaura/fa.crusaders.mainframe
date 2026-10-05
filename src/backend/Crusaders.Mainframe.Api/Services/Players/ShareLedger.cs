@@ -568,7 +568,7 @@ public sealed class ShareLedger
         var removed = club is { Collected: false };
         var reason = ClubReasonOf(club);
         var attended = f.Attended;
-        var actor = ActorOf(new ActorFacts(who, booking, move, cause, f.Scanner, cancel, seat.Removal));
+        var actor = ActorOf(new ActorFacts(who, move, cause, f.Scanner, cancel, seat));
         var why = new HeadlineWhy(byClub, attended, refund, kept)
         {
             Withdrew = seat.Withdrew,
@@ -644,31 +644,34 @@ public sealed class ShareLedger
     /// <summary>The causes a receipt's mail words for itself (R14 J14-8 / X14-2); null for the rest, which carry their own flags.</summary>
     private static string? PayloadCause(string cause)
     {
-        return cause is WalletShareCauses.OrganiserRemoved or WalletShareCauses.SplitChanged or WalletShareCauses.BookingCancelled ? cause : null;
+        return cause is WalletShareCauses.OrganiserRemoved or WalletShareCauses.SplitChanged or WalletShareCauses.BookingCancelled
+            or WalletShareCauses.ClubSettled ? cause : null;
     }
 
     /// <summary>What <see cref="ActorOf"/> decides from.</summary>
     private sealed record ActorFacts(
-        ReconcileOptions Who, Booking Booking, ShareMove Move, string Cause, Guid? Scanner, BookingCancellation? Cancel, SeatRemoval? Removal);
+        ReconcileOptions Who, ShareMove Move, string Cause, Guid? Scanner, BookingCancellation? Cancel, SeatFacts Seat);
 
     /// <summary>
     /// R14 E14-2 / E14-3: the person whose act moved this share — the caller's named actor, else read
     /// off the facts: the scanner whose late check-in made it attended, whoever cancelled (the
     /// record's actor), the partner who withdrew, the organiser who took them off or changed the
     /// split. Null when the club's system did it. A return that waited for cover and posts on a
-    /// sweep is still the act that caused it, so the Night and the CSV say who.
+    /// sweep is still the act that caused it, so the Night and the CSV say who. Review L1/M1: an act
+    /// is only ever named off its record — never assumed to be the organiser's. Review L2: a partner
+    /// paying their own share is the expected case and names nobody on the frame.
     /// </summary>
     private static Guid? ActorOf(ActorFacts f)
     {
+        if (f.Cause == WalletShareCauses.SharePaid) return null;
         if (f.Who.ActorUserId != Guid.Empty) return f.Who.ActorUserId;
         return f.Cause switch
         {
             WalletShareCauses.Attended => f.Scanner,
             WalletShareCauses.BookingCancelled => f.Cancel?.ActorUserId,
             WalletShareCauses.ShareReturned => f.Move.PartnerUserId,
-            WalletShareCauses.OrganiserRemoved => f.Removal?.ActorUserId ?? f.Booking.UserId,
-            WalletShareCauses.ClubRemoved => f.Removal?.ActorUserId,
-            WalletShareCauses.SplitChanged => f.Booking.UserId,
+            WalletShareCauses.OrganiserRemoved or WalletShareCauses.ClubRemoved => f.Seat.Removal?.ActorUserId,
+            WalletShareCauses.SplitChanged => f.Seat.Split?.ActorUserId,
             _ => null,
         };
     }
@@ -723,17 +726,19 @@ public sealed class ShareLedger
     }
 
     /// <summary>
-    /// R14 X14-2: a plain return on a game still on, by what became of the seat — the partner withdrew,
-    /// the organiser took them off, or they are still on it and their share was lowered.
+    /// R14 X14-2: a plain return, by what became of the seat — and only by what the record says
+    /// (review M1/L1): the partner withdrew; the organiser took them off (the removal's record); the
+    /// club recorded the share paid outside the app; the organiser lowered it (the split's own record,
+    /// newer than any share movement on the seat). Anything else — a desk adjustment to the booking,
+    /// a removal from before the record existed — is <see cref="WalletShareCauses.ShareBack"/>.
     /// </summary>
     private static string PlainReturnCause(SeatFacts? seat)
     {
-        return seat?.Status switch
-        {
-            ParticipantStatus.Removed => WalletShareCauses.OrganiserRemoved,
-            ParticipantStatus.Invited or ParticipantStatus.Accepted => WalletShareCauses.SplitChanged,
-            _ => WalletShareCauses.ShareReturned,
-        };
+        if (seat is null) return WalletShareCauses.ShareBack;
+        if (seat.Status == ParticipantStatus.Withdrawn) return WalletShareCauses.ShareReturned;
+        if (seat.Status == ParticipantStatus.Removed) return seat.Removal is null ? WalletShareCauses.ShareBack : WalletShareCauses.OrganiserRemoved;
+        if (seat.SettledOutside) return WalletShareCauses.ClubSettled;
+        return seat.Split is null ? WalletShareCauses.ShareBack : WalletShareCauses.SplitChanged;
     }
 
     /// <param name="ownAction">
@@ -793,6 +798,9 @@ public sealed class ShareLedger
         {
             WalletShareCauses.OrganiserRemoved => mine ? $"{other} took you off {where}" : $"you took them off {where}",
             WalletShareCauses.SplitChanged => mine ? $"{other} lowered your share of {where}" : $"you lowered their share of {where}",
+            WalletShareCauses.ClubSettled => mine
+                ? $"the club recorded your share of {where} as paid outside the app"
+                : $"the club recorded their share of {where} as paid outside the app",
             WalletShareCauses.BookingCancelled => CancelClause(why.CancelledByClub, mine, other, where),
             _ => null,
         };

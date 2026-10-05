@@ -75,7 +75,8 @@ public static partial class WalletEndpoints
 
             var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
             var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
-            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties)).ToList();
+            // R14 review L3: the member's own wallet never names an admin — "The club".
+            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties, memberView: true)).ToList();
             var shareBookings = await ShareBookingsAsync(query, entries, ctx, players, ct);
             // R14 E14-7: the court and start of every booking the share rows name, readable or not —
             // a member taken off a game still sees where their share was. Nothing else of the booking.
@@ -379,6 +380,15 @@ public static partial class WalletEndpoints
         return MovementResult(posted.Entry, movement, posted.BalanceBefore, posted.BalanceAfter, user);
     }
 
+    /// <summary>
+    /// R14 J14-5 / review L5: a desk sale is a gift when it was the free package or no rand was
+    /// recorded (0 or none) — <see cref="GivenMinutes.IsGiven"/>, the reports' own rule.
+    /// </summary>
+    public static bool DeskSaleIsGift(string reasonCode, decimal? zarPaid)
+    {
+        return reasonCode == AdminCreditReasons.PackageFree || GivenMinutes.IsGiven(LedgerEntryType.AdminTopUp, zarPaid);
+    }
+
     /// <summary>The member's mail for a desk movement: a package sold, or minutes adjusted (P13 §6).</summary>
     private static async Task<Crusaders.Mainframe.Api.Email.EmailMessage> DeskMailAsync(
         DeskMovement movement, string to, AdjustmentPosted posted, AdjustServices services, CancellationToken ct)
@@ -392,7 +402,7 @@ public static partial class WalletEndpoints
             {
                 // R14 J14-5: a sale taken for R0.00 is a gift whatever the payment code said — the
                 // change record and the Night already read ZarPaid; the mail said "sold you".
-                NoCharge = movement.Kind.Code == AdminCreditReasons.PackageFree || (posted.Entry.ZarPaid ?? 0m) == 0m,
+                NoCharge = DeskSaleIsGift(movement.Kind.Code, posted.Entry.ZarPaid),
             });
         }
         // J10-3: a take-back that leaves less than the club's shortest court says so.

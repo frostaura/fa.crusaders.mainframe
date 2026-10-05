@@ -431,7 +431,8 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
     [InlineData(-5, null, false, ShareRefundCauses.NoShow, BookingStatus.NoShow, WalletShareCauses.NoShow)]
     [InlineData(-5, null, false, ShareRefundCauses.Displaced, BookingStatus.Cancelled, WalletShareCauses.Displaced)]
     [InlineData(-5, null, false, null, BookingStatus.Cancelled, WalletShareCauses.BookingCancelled)]
-    [InlineData(-5, null, false, null, BookingStatus.Booked, WalletShareCauses.ShareReturned)]
+    // R14 review M1/L1: a plain return the seat's record does not explain names no act.
+    [InlineData(-5, null, false, null, BookingStatus.Booked, WalletShareCauses.ShareBack)]
     public void Every_share_cause_is_decided_from_the_receipts_facts(
         int delta, bool? clubCollected, bool attended, string? refund, BookingStatus status, string expected)
     {

@@ -644,6 +644,15 @@ public static class WalletShareCauses
     /// <summary>R14 X14-2: the organiser lowered the partner's share while they are still on the game; the difference went back.</summary>
     public const string SplitChanged = Email.ShareActs.SplitChanged;
 
+    /// <summary>R14 review M1: the club recorded the partner's share as paid outside the app, so what they paid in the app went back.</summary>
+    public const string ClubSettled = Email.ShareActs.ClubSettled;
+
+    /// <summary>
+    /// R14 review M1/L1: a share went back and no record names an act — a desk adjustment to the
+    /// booking, a removal from before R14. Said plainly, with nobody named.
+    /// </summary>
+    public const string ShareBack = "share_back";
+
     /// <summary>The booking was cancelled, so the share went back.</summary>
     public const string BookingCancelled = Email.ShareActs.BookingCancelled;
 
@@ -691,6 +700,15 @@ public static class WalletStreamReasons
 
     /// <summary>A displaced booking reinstated: its refund taken back. Negative.</summary>
     public const string DisplacedReinstated = "displaced_reinstated";
+}
+
+/// <summary>
+/// The one definition of GIVEN minutes (R14 review L5): a desk top-up the club took no rand for —
+/// <c>ZarPaid</c> 0 or none recorded. The reports, the Night and the desk mail all read it here.
+/// </summary>
+public static class GivenMinutes
+{
+    public static bool IsGiven(LedgerEntryType type, decimal? zarPaid) => type == LedgerEntryType.AdminTopUp && (zarPaid ?? 0m) == 0m;
 }
 
 /// <summary>One ledger row of a live wallet movement: its type reason and its signed minutes (E10-1).</summary>

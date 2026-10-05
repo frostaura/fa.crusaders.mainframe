@@ -106,11 +106,12 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         string? ActorOf(JsonElement e) => e.GetProperty("actor_name").ValueKind == JsonValueKind.Null ? null : e.GetProperty("actor_name").GetString();
 
         Assert.Null(ActorOf(entries.Single(e => e.GetProperty("type").GetString() == "TopUp")));           // system float
-        Assert.Equal("Ada Admin", ActorOf(entries.Single(e => e.GetProperty("type").GetString() == "AdminAdjustment")));
+        // R14 review L3: the member's own wallet says "The club", never the admin's name.
+        Assert.Equal("The club", ActorOf(entries.Single(e => e.GetProperty("type").GetString() == "AdminAdjustment")));
         var charges = entries.Where(e => e.GetProperty("type").GetString() == "BookingCharge").ToList();
         Assert.Equal(2, charges.Count);
         Assert.Single(charges, c => ActorOf(c) is null);                                                 // their own
-        Assert.Single(charges, c => ActorOf(c) == "Ada Admin");                                            // the desk's
+        Assert.Single(charges, c => ActorOf(c) == "The club");                                             // the desk's
 
         // The admin ledger says the same.
         var ledger = (await JsonAsync(await admin.GetAsync($"/api/v1/admin/ledger?userId={club.Organiser}"))).EnumerateArray().ToList();
