@@ -15,6 +15,7 @@ import { ApiError } from "@/lib/api";
 import { clubInstant } from "@/lib/clubClock";
 import type { AdminNotice } from "@/lib/notificationsApi";
 import { RECENT_ALERTS_COPY as COPY, deliveryBadge, noticeAge } from "@/lib/notificationsCopy";
+import { usePagedFocus } from "@/lib/usePagedFocus";
 import { useTicker } from "@/lib/useTicker";
 import { cn } from "@/lib/utils";
 import type { RecentAlertsFeed } from "./useRecentAlerts";
@@ -64,6 +65,8 @@ export function RecentAlerts({ feed, shown }: {
   const firstRevealed = useRef<HTMLLIElement>(null);
   const folded = !all && shown !== undefined && feed.items.length > shown;
   const items = folded ? feed.items.slice(0, shown) : feed.items;
+  // R13 X13-1: the last older page takes its button away, so the first alert it brought takes focus.
+  const showOlder = usePagedFocus("[data-recent-alerts] > li", feed.more.run);
   const seeAll = () => {
     // Drawn first, then focused: the button goes with the fold, and focus must not fall to <body>.
     flushSync(() => setAll(true));
@@ -102,7 +105,7 @@ export function RecentAlerts({ feed, shown }: {
       ) : null}
       {feed.cursor && !folded ? (
         <div className="flex justify-center">
-          <Button variant="outline" pending={feed.more.pending} onClick={() => void feed.more.run()}>{COPY.loadMore}</Button>
+          <Button variant="outline" pending={feed.more.pending} onClick={showOlder}>{COPY.loadMore}</Button>
         </div>
       ) : null}
     </StateBlock>

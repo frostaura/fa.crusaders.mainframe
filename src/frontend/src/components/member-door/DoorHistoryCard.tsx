@@ -7,6 +7,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Info, WarningCircle } from "../ui/icons";
 import { endpoints, type MemberDoorHistoryRow } from "../../lib/api";
 import { clubClock, clubDayAndClock } from "../../lib/clubClock";
+import { usePagedFocus } from "../../lib/usePagedFocus";
 import {
   CLUB_TIME_NOTE,
   HISTORY_ANCHOR,
@@ -145,7 +146,7 @@ function HistoryRow({ group, timezone }: { group: HistoryGroup; timezone: string
   // reconcile two numbers that cannot both be right.
   const uncertain = timeIsUncertain(row);
   return (
-    <li className="flex flex-col gap-1 py-3 md:grid md:grid-cols-[auto_1fr_auto] md:items-baseline md:gap-x-4">
+    <li data-door-history-row="" className="flex flex-col gap-1 py-3 md:grid md:grid-cols-[auto_1fr_auto] md:items-baseline md:gap-x-4">
       {/* The club's day, not the viewer's. O1 — and stated once under the list, not here. */}
       <p className="text-sm font-medium tabular-nums text-text-primary">
         {uncertain && <span aria-hidden="true">~</span>}
@@ -211,6 +212,11 @@ export function DoorHistoryCard(props: { onlyWithRows?: boolean } = {}) {
       setBusy(false);
     }
   }, []);
+
+  // R13 X13-1: the last page takes "Show more" away with it, so the first row it drew takes focus
+  // (or the last row, when every row it brought collapsed into the last group — R3-31).
+  const loadOlder = useCallback(() => load(cursor), [load, cursor]);
+  const showMore = usePagedFocus("[data-door-history-row]", loadOlder);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader, the house idiom
   useEffect(() => { void load(null); }, [load]);
@@ -315,7 +321,7 @@ export function DoorHistoryCard(props: { onlyWithRows?: boolean } = {}) {
         {moreFailed && <p className="text-sm font-medium text-danger-strong">{HISTORY_MORE_FAILED}</p>}
 
         {ready && cursor && (
-          <Button variant="outline" block pending={busy} onClick={() => void load(cursor)}>
+          <Button variant="outline" block pending={busy} onClick={showMore}>
             {HISTORY_SHOW_MORE}
           </Button>
         )}

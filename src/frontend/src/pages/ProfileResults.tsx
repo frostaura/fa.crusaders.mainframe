@@ -16,6 +16,7 @@ import { useAuth } from "@/lib/useAuth";
 import { playEndpoints, type MyResultRow } from "@/lib/playApi";
 import { PLAY_REFUSAL, playRefusal, playWhen, RESULTS_PAGE, STATUS_WORD } from "@/lib/playCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { usePagedFocus } from "@/lib/usePagedFocus";
 
 /**
  * `/profile/results` — every match the member is in, newest first (§6.2, §9.5): confirmed,
@@ -49,6 +50,8 @@ function useResults() {
 export default function ProfileResultsPage() {
   const { held, reload, more } = useResults();
   const rows = held.rows;
+  // R13 X13-1: the last page takes "Show more" away, so the first result it brought takes focus.
+  const showMore = usePagedFocus("[data-results] [data-result-link]", more.run);
   return (
     // R6 F5 (R4 SPEC 3.7): `wide`, the results in columns — a 36rem column was 40 % of a 1280
     // screen and 25 % of a 1920 one. `narrow` is for single-task forms only.
@@ -78,7 +81,7 @@ export default function ProfileResultsPage() {
         </AutoGrid>
         {more.error ? <Alert tone="danger" live="assertive">{playRefusal(more.error, RESULTS_PAGE.moreAction)}</Alert> : null}
         {held.next ? (
-          <div><Button variant="outline" pending={more.pending} onClick={() => void more.run()}>{RESULTS_PAGE.more}</Button></div>
+          <div><Button variant="outline" pending={more.pending} onClick={showMore}>{RESULTS_PAGE.more}</Button></div>
         ) : null}
       </StateBlock>
     </PageShell>
@@ -92,7 +95,7 @@ function ResultRowItem({ row }: { row: MyResultRow }) {
   return (
     <li data-result-row={row.status} className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <TextLink to={`/bookings/${encodeURIComponent(row.booking_id)}`} variant="standalone">
+        <TextLink to={`/bookings/${encodeURIComponent(row.booking_id)}`} variant="standalone" data-result-link="">
           {RESULTS_PAGE.row(row.court_name, playWhen(row.starts_at))}
         </TextLink>
         <Badge tone={STATUS_TONE[row.status]}>{STATUS_WORD[row.status]}</Badge>

@@ -14,7 +14,8 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
  *
  * <p>
  * <b>The row it focuses.</b> A row that is already focusable (a link, a button or a `tabindex`) is
- * focused itself; a row whose whole face is one link (the inbox) gives that link; any other row is
+ * focused itself; a row whose whole face is one link (the inbox) or one script-focusable box (a
+ * Recent alert that opens nowhere, R13 X13-1) gives that child; any other row is
  * made programmatically focusable (`tabindex=-1`) and focused, so a list drawn by a component this
  * page does not own still never drops focus. A page that brought nothing (or failed) leaves focus
  * where it is — unless the button went away regardless, when the last row takes it.
@@ -47,13 +48,13 @@ export function usePagedFocus(rows: string, run: () => Promise<unknown>): () => 
   }, [rows, run]);
 }
 
-/** The row itself when it can take focus, else the one link that IS the row, else the row made focusable. */
+/** The row itself when it can take focus, else the one link or focusable box that IS the row, else the row made focusable. */
 function focusRow(row: HTMLElement) {
   if (row.matches("a[href], button, [tabindex]")) {
     row.focus();
     return;
   }
-  const face = row.querySelector<HTMLElement>(":scope > a[href]");
+  const face = row.querySelector<HTMLElement>(":scope > a[href], :scope > [tabindex]");
   if (face) {
     face.focus();
     return;
