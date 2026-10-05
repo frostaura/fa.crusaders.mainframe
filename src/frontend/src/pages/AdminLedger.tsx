@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { useUrlText } from "../lib/useUrlText";
@@ -176,6 +177,7 @@ export default function AdminLedgerPage() {
 function FiltersToggle({ open, onToggle, from, to, type }: { open: boolean; onToggle: () => void; from: string; to: string; type: string }) {
   const range = `${formatClubDayLabel(from) ?? "Any date"} – ${formatClubDayLabel(to) ?? "any date"}`;
   const kind = TYPE_OPTIONS.find((o) => o.value === type)?.label ?? "All types";
+  const label = `Filters · ${range} · ${kind}`;
   return (
     <Button
       variant="outline"
@@ -185,7 +187,9 @@ function FiltersToggle({ open, onToggle, from, to, type }: { open: boolean; onTo
       icon={<Funnel aria-hidden="true" />}
       className="!h-auto min-h-touch w-full justify-start whitespace-normal py-2 text-left lg:hidden"
     >
-      <span className="min-w-0 flex-1">{`Filters · ${range} · ${kind}`}</span>
+      {/* R17: "6 Sep" never splits at 200 % text — glued for paint, plain for the name. */}
+      <span aria-hidden="true" className="min-w-0 flex-1">{keepFiguresWhole(label)}</span>
+      <span className="sr-only">{label}</span>
       {open ? <CaretUp size={16} aria-hidden="true" /> : <CaretDown size={16} aria-hidden="true" />}
     </Button>
   );
