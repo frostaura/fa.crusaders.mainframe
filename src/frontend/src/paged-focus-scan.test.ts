@@ -1,38 +1,63 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * R14 X14-1 — every paging button is on `usePagedFocus`, as a source scan.
+ * R14 X14-1 — every paging control hands focus on through `usePagedFocus`, as a source scan.
  *
  * <p>
- * The last page of a "Show more" / "Show older" / "Load more" list takes its button away with it,
+ * The last page of a "Show more" / "Show older" / "Load more" list takes its control away with it,
  * and focus falls to `<body>`: the next Tab starts at the skip link and a screen reader says
- * nothing. That fault was fixed list by list four rounds running (R8 X8-4, R9 X9-2, R12 X12-2,
- * R13 X13-1) and the wallet's "Show older" still had it in R14. So the class is closed here: a
- * `<Button>` whose label is a paging label — a literal, or a copy key whose value is one — must
- * take a bare handler (no inline arrow that could skip the hook) in a file that calls
- * `usePagedFocus`, or be on the allow-list below with the reason its own focus rule is sound.
+ * nothing. Fixed list by list four rounds running (R8 X8-4, R9 X9-2, R12 X12-2, R13 X13-1), and the
+ * wallet's "Show older" still had it in R14. So the class is closed here.
+ * </p>
+ *
+ * <p>
+ * <b>What counts as a paging control:</b> any interactive JSX element — a `<Button>`, `<button>`,
+ * `<Link>`, `<a>`, `<TextLink>` or any wrapper component that takes an `onClick`, `onSelect`,
+ * `href` or `to` — whose children or attributes carry a paging label: a literal, or a constant /
+ * copy key (anywhere in `src`) whose value is one.
+ * </p>
+ *
+ * <p>
+ * <b>What passes:</b> its `onClick` is an identifier bound in the same file by
+ * `const x = usePagedFocus(…)`, or a PROP that every call site of the enclosing component (in any
+ * file) passes such an identifier, resolved the same way, a few levels deep. An inline arrow, a
+ * method on some object, a link, or an unresolved prop fails — unless the file is on the allow-list,
+ * whose every entry names the behavioural test that proves its own focus rule.
  * </p>
  */
-const ALLOWED: Readonly<Record<string, string>> = {
-  "pages/AdminLedger.tsx":
-    "appends with flushSync, then focuses the first FRESH id's details button in the table's own sort order (R9 X9-2); usePagedFocus counts rows and cannot follow a sort",
-  "pages/AdminDoorsLog.tsx":
-    "focuses the first appended row AFTER the log's sort (C4), held in state — the same sort reason",
-  "pages/AdminMembers.tsx":
-    "reveals a client-side page with flushSync and focuses the first revealed row's link (R8 X8-4) — no fetch for the hook to wait on",
-  "components/bookings/RecentGames.tsx":
-    "a disclosure, not a pager: \"Show N more\" becomes \"Show fewer\" in place (aria-expanded), so the focused button never unmounts",
-  "components/bookings/UpcomingGames.tsx":
-    "the same disclosure as RecentGames — the button stays mounted as \"Show fewer\"",
-  "components/members/MemberPicker.tsx":
-    "its onMore is AdminMembers' flushSync reveal (above), which focuses the first revealed picker row",
+const ALLOWED: Readonly<Record<string, { why: string; test: string; proves: RegExp }>> = {
+  "pages/AdminLedger.tsx": {
+    why: "appends with flushSync, then focuses the first FRESH id's details button in the table's own sort order; usePagedFocus counts rows and cannot follow a sort",
+    test: "pages/AdminLedger.test.tsx", proves: /hands focus to the first row the last page brought, never to <body>/,
+  },
+  "pages/AdminDoorsLog.tsx": {
+    why: "focuses the first appended row AFTER the log's sort (C4), held in state — the same sort reason",
+    test: "pages/AdminDoorsLog.test.tsx", proves: /never drops focus to the body when the last page exhausts the range/,
+  },
+  "components/members/MemberPicker.tsx": {
+    why: "its onMore is AdminMembers' client-side reveal (flushSync, no fetch for the hook to wait on), which focuses the first revealed picker row",
+    test: "pages/pagedFocusAllowedR14.test.tsx", proves: /members: the last Show more focuses the first member it revealed/,
+  },
+  "pages/AdminMembers.tsx": {
+    why: "the same client-side reveal as MemberPicker, on the members table",
+    test: "pages/pagedFocusAllowedR14.test.tsx", proves: /members: the last Show more focuses the first member it revealed/,
+  },
+  "components/bookings/RecentGames.tsx": {
+    why: "a disclosure, not a pager: \"Show N more\" becomes \"Show fewer\" in place (aria-expanded), so the focused button never unmounts",
+    test: "pages/pagedFocusAllowedR14.test.tsx", proves: /"recent games"[\s\S]*Show more keeps focus on the same button/,
+  },
+  "components/bookings/UpcomingGames.tsx": {
+    why: "the same disclosure as RecentGames",
+    test: "pages/pagedFocusAllowedR14.test.tsx", proves: /"upcoming games"[\s\S]*Show more keeps focus on the same button/,
+  },
 };
 
 const SRC = __dirname;
-/** A label that pages: "Show more", "Show older (3 more)", "Load older scans", "Show 25 more", … */
-const PAGING = /\b(?:Show|Load)\b[^"`\n<{}]*?(?:\$\{[^}]*\}[^"`\n<{}]*?)?\b(?:more|older)\b/;
+/** A label that pages: "Show more", "Show older (3 more)", "Load older scans", "Show 25 more", "See more", "Next page", … */
+const PAGING = /\b(?:Show|Load|See|View)\s+(?:all\s+)?(?:\$\{[^}]*\}\s+)?(?:more|older|earlier|previous|next)\b|\b(?:Next|Previous|Older|Newer)\s+page\b|\bLoad\s+next\b/i;
+const INTERACTIVE = /\b(?:onClick|onSelect|href|to)=/;
 
 function files(dir: string, keep: (name: string) => boolean): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -47,14 +72,48 @@ function codeOf(file: string): string {
   return readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 }
 
-/** Every copy key (or exported constant) whose value is a paging label. */
-function pagingKeys(): Set<string> {
-  const keys = new Set<string>();
-  for (const file of files(join(SRC, "lib"), (n) => /\.ts$/.test(n))) {
-    const pattern = /(?:^|[\s,{])(\w+)\s*(?::|=)\s*(?:\([^)]*\)\s*(?::\s*\w+\s*)?=>\s*)?(["`])([^"`\n]*)\2/gm;
-    for (const m of codeOf(file).matchAll(pattern)) if (PAGING.test(m[3])) keys.add(m[1]);
+/** Paging labels by where they live: `OBJECT.key` (a copy table) and bare constants or functions. */
+type Keys = { objects: Map<string, Set<string>>; constants: Set<string> };
+
+const VALUE = /(?:^|[\s,{])(\w+)\s*(?::|=)\s*(?:\([^)]*\)\s*(?::\s*\w+\s*)?=>\s*)?(["`])([^"`\n]*)\2/gm;
+
+/** Every copy table's paging keys, and every top-level constant whose value is a paging label, anywhere in src. */
+function pagingKeys(sources: ReadonlyMap<string, string>): Keys {
+  const keys: Keys = { objects: new Map(), constants: new Set() };
+  for (const code of sources.values()) {
+    for (const m of code.matchAll(/^export\s+const\s+(\w+)\s*(?::[^=]+)?=\s*\{/gm)) {
+      const body = braced(code, code.indexOf("{", m.index! + m[0].length - 1));
+      for (const v of body.matchAll(VALUE)) if (PAGING.test(v[3])) {
+        if (!keys.objects.has(m[1])) keys.objects.set(m[1], new Set());
+        keys.objects.get(m[1])!.add(v[1]);
+      }
+    }
+    for (const m of code.matchAll(/^(?:export\s+)?const\s+(\w+)\s*=\s*(?:\([^)]*\)\s*(?::\s*\w+\s*)?=>\s*)?(["`])([^"`\n]*)\2/gm)) {
+      if (PAGING.test(m[3])) keys.constants.add(m[1]);
+    }
   }
   return keys;
+}
+
+/** `local name → exported name` for a file's named imports (`A as B` gives B → A). */
+function importsOf(code: string): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const m of code.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from/g)) {
+    for (const part of m[1].split(",")) {
+      const [from, as] = part.replace(/\btype\s+/, "").trim().split(/\s+as\s+/);
+      if (from) names.set((as ?? from).trim(), from.trim());
+    }
+  }
+  return names;
+}
+
+/** Whether `said` (a control's attributes and children) names a paging label through a copy table or constant. */
+function namesPagingKey(said: string, code: string, keys: Keys): boolean {
+  const imports = importsOf(code);
+  const real = (name: string) => imports.get(name) ?? name;
+  const viaTable = [...said.matchAll(/\b(\w+)\.(\w+)\b/g)].some((m) => keys.objects.get(real(m[1]))?.has(m[2]));
+  const viaConstant = [...said.matchAll(/\{\s*(\w+)\s*(?:\(|\})/g)].some((m) => keys.constants.has(real(m[1])));
+  return viaTable || viaConstant;
 }
 
 /** The text between `from` (an opening brace) and its matching close. */
@@ -67,56 +126,122 @@ function braced(code: string, from: number): string {
   return code.slice(from + 1);
 }
 
-type PagingButton = { file: string; label: string; onClick: string | null };
+/** Where the JSX tag opening at `start` ends: the first `>` outside braces. */
+function tagEnd(code: string, start: number): number {
+  let depth = 0;
+  for (let end = start; end < code.length; end++) {
+    if (code[end] === "{") depth++;
+    else if (code[end] === "}") depth--;
+    else if (code[end] === ">" && depth === 0) return end;
+  }
+  return code.length;
+}
 
-/** Every `<Button>`/`<button>` in `code` whose children carry a paging label. */
-function pagingButtons(file: string, code: string, keys: Set<string>): PagingButton[] {
-  const found: PagingButton[] = [];
-  for (const open of code.matchAll(/<(Button|button)\b/g)) {
-    // The tag ends at the first `>` outside braces (an arrow's `=>` sits inside `{…}`).
-    let depth = 0;
-    let end = open.index! + open[0].length;
-    for (; end < code.length; end++) {
-      if (code[end] === "{") depth++;
-      else if (code[end] === "}") depth--;
-      else if (code[end] === ">" && depth === 0) break;
-    }
-    if (code[end - 1] === "/") continue;
-    const attrs = code.slice(open.index!, end);
-    const close = code.indexOf(`</${open[1]}>`, end);
-    const children = code.slice(end + 1, close < 0 ? end + 1 : close);
-    const viaKey = [...children.matchAll(/(?:\.|\{)\s*(\w+)\s*(?:\(|\})/g)].some((m) => keys.has(m[1]));
-    const literal = PAGING.test(children.replace(/\{[^}]*\}/g, "")) || [...children.matchAll(/["`]([^"`]*)["`]/g)].some((m) => PAGING.test(m[1]));
+/** An attribute's `{…}` expression on a tag, trimmed; null when absent. */
+function attr(tag: string, name: string): string | null {
+  const at = tag.search(new RegExp(`\\b${name}=\\{`));
+  return at < 0 ? null : braced(tag, tag.indexOf("{", at)).trim();
+}
+
+/** The component (or function) the code at `index` sits in: the last top-level declaration before it. */
+function enclosing(code: string, index: number): string | null {
+  const head = code.slice(0, index);
+  const found = [...head.matchAll(/^(?:export\s+(?:default\s+)?)?(?:function\s+(\w+)|const\s+(\w+)\s*=)/gm)].at(-1);
+  return found ? (found[1] ?? found[2]) : null;
+}
+
+type Control = { file: string; tag: string; label: string; onClick: string | null; at: number };
+
+function pagingControls(file: string, code: string, keys: Keys): Control[] {
+  const found: Control[] = [];
+  for (const open of code.matchAll(/<([A-Za-z][\w.]*)\b/g)) {
+    const end = tagEnd(code, open.index!);
+    const tag = code.slice(open.index!, end);
+    if (!INTERACTIVE.test(tag)) continue;
+    const close = code[end - 1] === "/" ? end : code.indexOf(`</${open[1]}>`, end);
+    const children = close <= end ? "" : code.slice(end + 1, close);
+    // The tag's own attributes (aria-label, label) and its children, but not a handler's body.
+    const said = tag.replace(/\bon\w+=\{/g, "") + children;
+    if (/<[A-Za-z][\w.]*\b[^>]*\b(?:onClick|href|to)=/.test(children)) continue; // an inner control is the control
+    const viaKey = namesPagingKey(said, code, keys);
+    const literal = PAGING.test(said.replace(/\{[^}]*\}/g, " ")) || [...said.matchAll(/["`]([^"`]*)["`]/g)].some((m) => PAGING.test(m[1]));
     if (!viaKey && !literal) continue;
-    const at = attrs.indexOf("onClick={");
-    found.push({ file, label: children.trim().slice(0, 60), onClick: at < 0 ? null : braced(attrs, at + "onClick=".length).trim() });
+    found.push({ file, tag: open[1], label: children.trim().slice(0, 60) || tag.slice(0, 60), onClick: attr(tag, "onClick") ?? attr(tag, "onSelect"), at: open.index! });
   }
   return found;
 }
 
-describe("paging buttons hand focus on (R14 X14-1)", () => {
-  const keys = pagingKeys();
-  const all = files(SRC, (n) => /\.tsx$/.test(n)).flatMap((full) => {
-    const code = codeOf(full);
-    return pagingButtons(relative(SRC, full).split(sep).join("/"), code, keys).map((b) => ({ ...b, code }));
+/** Whether `expr`, inside component `owner` of `file`, is a usePagedFocus handler — following props to their call sites. */
+function resolves(expr: string | null, file: string, owner: string | null, sources: ReadonlyMap<string, string>, depth = 0): boolean {
+  if (expr === null || !/^\w+$/.test(expr) || depth > 3) return false;
+  const code = sources.get(file)!;
+  if (new RegExp(`\\bconst\\s+${expr}\\s*=\\s*usePagedFocus\\(`).test(code)) return true;
+  if (owner === null) return false;
+  // A prop: every place that renders `owner` must hand it a hook handler.
+  const sites: { file: string; expr: string | null; owner: string | null }[] = [];
+  for (const [other, text] of sources) {
+    for (const m of text.matchAll(new RegExp(`<${owner}\\b`, "g"))) {
+      const tag = text.slice(m.index!, tagEnd(text, m.index!));
+      sites.push({ file: other, expr: attr(tag, expr), owner: enclosing(text, m.index!) });
+    }
+  }
+  return sites.length > 0 && sites.every((s) => resolves(s.expr, s.file, s.owner, sources, depth + 1));
+}
+
+function scan(sources: ReadonlyMap<string, string>) {
+  const keys = pagingKeys(sources);
+  const controls = [...sources].flatMap(([file, code]) => (file.endsWith(".tsx") ? pagingControls(file, code, keys) : []));
+  const offenders = controls
+    .filter((c) => !(c.file in ALLOWED))
+    .filter((c) => !resolves(c.onClick, c.file, enclosing(sources.get(c.file)!, c.at), sources))
+    .map((c) => `${c.file}: <${c.tag} onClick={${c.onClick ?? "∅"}}>${c.label}`);
+  return { keys, controls, offenders };
+}
+
+function sourcesNow(): Map<string, string> {
+  return new Map(files(SRC, (n) => /\.tsx?$/.test(n)).map((full) => [relative(SRC, full).split(sep).join("/"), codeOf(full)]));
+}
+
+describe("paging controls hand focus on (R14 X14-1)", () => {
+  const sources = sourcesNow();
+  const { keys, controls, offenders } = scan(sources);
+
+  it("finds the paging labels and controls it guards (a scan that matches nothing proves nothing)", () => {
+    expect(keys.constants).toContain("showOlderLabel");
+    expect(keys.constants).toContain("HISTORY_SHOW_MORE");
+    expect(keys.objects.get("NIGHT_TAB_COPY")).toContain("showMore");
+    expect(keys.objects.get("MEMBERS_PAGE")).toContain("showMore");
+    expect(keys.objects.get("WALLET_MINI_COPY")).toBeUndefined(); // "See activity" is a link, not a pager
+    const where = new Set(controls.map((c) => c.file));
+    for (const file of ["pages/Wallet.tsx", "components/inbox/InboxList.tsx", "pages/ProfileResults.tsx", "pages/monitoring/MemberNight.tsx", "pages/AdminLedger.tsx"]) {
+      expect(where).toContain(file);
+    }
   });
 
-  it("finds the paging labels and buttons it guards (a scan that matches nothing proves nothing)", () => {
-    for (const key of ["showMore", "loadMore", "loadOlder", "HISTORY_SHOW_MORE", "showOlderLabel"]) expect(keys).toContain(key);
-    const where = new Set(all.map((b) => b.file));
-    for (const file of ["pages/Wallet.tsx", "components/inbox/InboxList.tsx", "pages/ProfileResults.tsx", "pages/AdminLedger.tsx"]) expect(where).toContain(file);
-  });
-
-  it("every paging button takes a usePagedFocus handler, or is allow-listed with its reason", () => {
-    const offenders = all
-      .filter((b) => !(b.file in ALLOWED))
-      .filter((b) => b.onClick === null || !/^[\w.]+$/.test(b.onClick) || !/=\s*usePagedFocus\(/.test(b.code))
-      .map((b) => `${b.file}: <Button onClick={${b.onClick ?? "∅"}}>${b.label}`);
+  it("every paging control takes a usePagedFocus handler, or is allow-listed with its reason and its test", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the allow-list only names files that still have a paging button", () => {
-    const where = new Set(all.map((b) => b.file));
-    expect(Object.keys(ALLOWED).filter((file) => !where.has(file))).toEqual([]);
+  it("each allow-list entry still has a paging control, and names a test that exists and says what it proves", () => {
+    const where = new Set(controls.map((c) => c.file));
+    for (const [file, entry] of Object.entries(ALLOWED)) {
+      expect(where, file).toContain(file);
+      expect(existsSync(join(SRC, entry.test)), entry.test).toBe(true);
+      expect(readFileSync(join(SRC, entry.test), "utf8"), `${entry.test} for ${file}`).toMatch(entry.proves);
+    }
+  });
+
+  /** The regressions this scan exists for, applied to today's source in memory: each must go red. */
+  it.each([
+    ["the wallet's handler inlined at the call site", "pages/Wallet.tsx", "onOlder={showOlder}", "onOlder={() => void load(shown + PAGE_SIZE)}"],
+    ["the wallet's handler bypassing the hook, the hook call left in the file", "pages/Wallet.tsx", "onClick={onOlder}", "onClick={() => onOlder()}"],
+    ["the Night's More button handed the raw loader", "pages/monitoring/MemberNight.tsx", "onMore={showMore}", "onMore={night.loadMore}"],
+    ["the inbox's Show more on a plain fetch", "components/inbox/InboxList.tsx", "onClick={showMore}", "onClick={feed.more.run}"],
+    ["a See more link added beside a list", "pages/Wallet.tsx", "{showOlderLabel(total - shown)}", "{showOlderLabel(total - shown)}</Button><Link to=\"/wallet?page=2\">See more</Link><Button>"],
+  ])("goes red on a mutation: %s", (_name, file, from, to) => {
+    const code = sources.get(file)!;
+    expect(code, `${file} no longer contains the mutation's anchor`).toContain(from);
+    const mutated = new Map(sources).set(file, code.replace(from, to));
+    expect(scan(mutated).offenders.length).toBeGreaterThan(0);
   });
 });
