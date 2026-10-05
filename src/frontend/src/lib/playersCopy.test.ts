@@ -22,7 +22,7 @@ describe("R7 J7-9 — removing a partner says what goes back, and what it costs 
   it("the organiser's confirm names the refund and their own cost rising", () => {
     const body = DETAIL_ACTIONS.removeBodyFor("Sam", { paid: 30, share: 30 });
     expect(body).toBe(
-      "Sam comes off this game and the 30 minutes they paid goes back to them from your balance. Your cost for the court goes up by 30 minutes.",
+      "Sam comes off this game and the 30 minutes they paid go back to them from your balance. Your cost for the court goes up by 30 minutes.",
     );
     expect(body).not.toMatch(ABBREVIATED);
   });
@@ -40,7 +40,7 @@ describe("R7 J7-9 — removing a partner says what goes back, and what it costs 
   it("the club's confirm names the refund and the organiser's cost, by name", () => {
     const body = DETAIL_ADMIN.removeBodyFor({ paid: 30, share: 30, organiser: "Naledi" });
     expect(body).toBe(
-      "They come off the game and the 30 minutes they paid goes back to them from Naledi's balance. Naledi's cost for the court goes up by 30 minutes.",
+      "They come off the game and the 30 minutes they paid go back to them from Naledi's balance. Naledi's cost for the court goes up by 30 minutes.",
     );
     expect(DETAIL_ADMIN.removeBodyFor({ paid: 0, share: 30, organiser: "Naledi" })).toBe(
       "They come off the game. They haven't paid anything, so nothing goes back. Naledi's cost for the court goes up by 30 minutes.",

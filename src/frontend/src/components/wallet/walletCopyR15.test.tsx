@@ -92,7 +92,7 @@ function row(id: string, signed: number, actor: string, other: string): LedgerRo
   return {
     id, at: "2026-10-05T16:03:00Z", from: signed < 0 ? "Me Member" : other, to: signed < 0 ? other : "Me Member",
     amountMinutes: Math.abs(signed), signedAmountMinutes: signed, type: "ShareTransfer", comment: "Share of a split booking",
-    subjectUserId: ME, subjectName: "Me Member", actorUserId: actor, actorName: null, relatedBookingId: "b1",
+    subjectUserId: ME, subjectName: "Me Member", actorUserId: actor, actorName: "Someone Acting", relatedBookingId: "b1",
   };
 }
 

@@ -125,8 +125,10 @@ describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", 
     expect(screen.getByRole("button", { name: DETAIL_ADMIN.menu("Sam Naidoo") })).toBeInTheDocument();
   });
 
-  it("a collect says the most it can take them below zero", () => {
-    expect(DETAIL_ADMIN.overdraftCollect("25 minutes", "Alex Naidoo")).toBe("Take 25 minutes from Alex Naidoo even if it puts them up to 25 minutes below zero");
+  // R15 J15-11 — not "up to 25 minutes below zero": the page can't know their balance (15 put them 10 under).
+  it("a collect says what goes below zero: whatever their balance doesn't cover", () => {
+    expect(DETAIL_ADMIN.overdraftCollect("25 minutes", "Alex Naidoo"))
+      .toBe("Take 25 minutes from Alex Naidoo even if their balance doesn't cover it — whatever it doesn't cover takes them below zero");
   });
 });
 

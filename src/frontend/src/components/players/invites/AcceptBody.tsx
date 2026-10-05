@@ -233,11 +233,15 @@ function OutcomeView({ flow, headed }: { flow: AcceptFlow; headed: boolean }) {
   }
   const answer = flow.outcome?.kind === "accepted" ? flow.outcome.answer : null;
   const proven = flow.outcome?.kind === "accepted" && flow.outcome.proven === true;
+  // R15 J15-11 — what this accept paid, with the seat's total beside it when it is more.
+  const total = answer?.paid_minutes ?? 0;
+  const paidNow = flow.outcome?.kind === "accepted" ? Math.min(flow.outcome.paidNow ?? total, total) : 0;
+  const line = acceptedLine(paidNow, name, total);
   return (
     <div className="flex flex-col items-start gap-3" data-outcome="accepted">
       <Alert tone="success" className="w-full">
         {headed ? null : <span className="font-semibold">{INVITES_COPY.acceptedTitle}</span>}
-        {headed ? acceptedLine(answer?.paid_minutes ?? 0, name) : ` — ${acceptedLine(answer?.paid_minutes ?? 0, name)}`}
+        {headed ? line : ` — ${line}`}
       </Alert>
       {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.provenNote}</p> : null}
       <TextLink to={`/bookings/${answer?.booking_id ?? flow.invite.booking_id}`} variant="standalone">

@@ -32,7 +32,8 @@ export type AcceptPort = {
  * `proven` — the accept's reply was lost and the seat's own record said "accepted" (R2 F2-1): the
  * figures are the ones the member was shown, and the wallet is being re-read.
  */
-export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer; proven?: boolean } | { kind: "declined"; proven?: boolean } | null;
+/** R15 J15-11 — `paidNow`: what this accept was asked to pay (the button's figure), beside the seat's total. */
+export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer; proven?: boolean; paidNow?: number } | { kind: "declined"; proven?: boolean } | null;
 
 /** Why Accept cannot be pressed, most pressing first — or null when it can. */
 export type Blocked = "rereading" | "cap" | "short" | null;
@@ -79,7 +80,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
 
   const acceptAction = useAsyncAction((expected: number) => acceptOrProve(port, invite, expected), {
     success: (result) => {
-      setOutcome({ kind: "accepted", answer: result.answer, proven: result.proven });
+      setOutcome({ kind: "accepted", answer: result.answer, proven: result.proven, paidNow: invite.to_pay_minutes });
       void balance.refresh({ expectSelf: true });
       void port.reread();
       void refreshUnread();

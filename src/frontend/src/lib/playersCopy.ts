@@ -464,11 +464,19 @@ export const DETAIL_COPY = {
 /** What a removed seat had paid, and the share the organiser absorbs once it is gone (R7 J7-9). */
 export type RemoveMoney = { paid: number; share: number };
 
+/**
+ * R15 J15-11 — the verb agrees with the amount: "20 minutes go back", "1 minute goes back" (an
+ * amount spoken by `minutesSpoken`; "1 hour" and "1 day" are one thing too).
+ */
+function agrees(amount: string, one: string, many: string): string {
+  return /^1 (minute|hour|day)$/.test(amount) ? one : many;
+}
+
 function removeMoneySentence(lead: string, { paid, share }: RemoveMoney, who: { from: string; whose: string }): string {
   const midWhose = who.whose === "Your" ? "your" : who.whose;
   if (paid <= 0 && share <= 0) return `${lead}. Nothing was paid and ${midWhose} cost does not change.`;
   const back = paid > 0
-    ? `${lead} and the ${minutesSpoken(paid)} they paid goes back to them from ${who.from}.`
+    ? `${lead} and the ${minutesSpoken(paid)} they paid ${agrees(minutesSpoken(paid), "goes", "go")} back to them from ${who.from}.`
     : `${lead}. They haven't paid anything, so nothing goes back.`;
   return share > 0 ? `${back} ${who.whose} cost for the court goes up by ${minutesSpoken(share)}.` : back;
 }
@@ -535,7 +543,7 @@ export const CHANGE_SPLIT = {
   askedFor: (name: string, amount: string) => `${name} is asked for ${amount}.`,
   askedMore: (name: string, amount: string, consent: boolean) =>
     consent ? `${name} is asked for ${amount} more — once they say yes to it.` : `${name} is asked for ${amount} more.`,
-  goesBack: (name: string, amount: string) => `${amount} goes back to ${name}.`,
+  goesBack: (name: string, amount: string) => `${amount} ${agrees(amount, "goes", "go")} back to ${name}.`,
   youCover: (amount: string) => `You cover ${amount} in the end.`,
   noChange: "Nobody's share changes.",
 } as const;
@@ -871,11 +879,16 @@ export const DETAIL_ADMIN = {
   collectConfirm: "Collect share",
   collected: (name: string, amount: string) => `Collected ${amount} from ${name}.`,
   overdraftTitle: "This may go below zero",
-  /** R1 F2.13 — who goes below zero, by full name, and the most it can be: the whole amount taken. */
-  overdraftCollect: (amount: string, name: string) => `Take ${amount} from ${name} even if it puts them up to ${amount} below zero`,
+  /**
+   * R1 F2.13 — who goes below zero, by full name. R15 J15-11 — not "up to 25 minutes below zero":
+   * the page does not know their balance, and a member with 15 goes 10 under. What their balance
+   * does not cover is what goes below zero.
+   */
+  overdraftCollect: (amount: string, name: string) =>
+    `Take ${amount} from ${name} even if their balance doesn't cover it — whatever it doesn't cover takes them below zero`,
   /** Who goes below zero, and — when the server said — by how much: the return less what covers it. */
   overdraftReturn: (name: string, figures?: { returned: string; covered: string; short: string; partner: string }) => (figures
-    ? `Go ahead even if it takes ${name} below zero: ${figures.returned} goes back to ${figures.partner}, ${figures.covered} of it is covered, so ${name} goes up to ${figures.short} below zero`
+    ? `Go ahead even if it takes ${name} below zero: ${figures.returned} ${agrees(figures.returned, "goes", "go")} back to ${figures.partner}, ${figures.covered} of it ${agrees(figures.covered, "is", "are")} covered, so ${name} goes up to ${figures.short} below zero`
     : `Go ahead even if it takes ${name} below zero`),
   overdraftAsked: "The club's system needs your explicit go-ahead: this would take someone below zero.",
   overdraftMissing: "Tick the box to authorise it.",
@@ -1055,9 +1068,16 @@ export function playersCount(count: number): string {
   return `${count} ${count === 1 ? "player" : "players"}`;
 }
 
-/** The calm confirmation's line: "22 min paid to Sam. See you on court." */
-export function acceptedLine(paid: number, organiser: string): string {
-  return paid > 0 ? `${minutesSpoken(paid)} paid to ${organiser}. See you on court.` : "See you on court.";
+/**
+ * The calm confirmation's line: "22 min paid to Sam. See you on court." R15 J15-11 — `paid` is
+ * what THIS accept paid (the button's "Accept and pay 10 minutes"); `total`, the seat's paid in
+ * all, is said beside it when an earlier payment makes it more ("10 minutes paid to Mia — 30
+ * minutes in all"), never in its place.
+ */
+export function acceptedLine(paid: number, organiser: string, total = paid): string {
+  if (paid <= 0) return "See you on court.";
+  const inAll = total > paid ? ` — ${minutesSpoken(total)} in all` : "";
+  return `${minutesSpoken(paid)} paid to ${organiser}${inAll}. See you on court.`;
 }
 
 /** "Sam's been told." — after a decline. */

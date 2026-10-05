@@ -454,7 +454,9 @@ function PaymentStep({ flow, pkg }: { flow: Flow; pkg: ShelfPackage }) {
 function noteLine(flow: Flow): string {
   // Joined, not template literals in a ternary: lizard loses its place in those and swallows the file.
   const quoted = "“" + flow.detail.trim() + "”";
-  return flow.free ? quoted : reasonLabel(flow.code ?? "") + " — " + quoted;
+  // R15 J15-11 — no rand taken (free, or R0.00 typed) is a gift: "Cash paid at the desk" beside
+  // "Money received R0.00" said a payment nobody made. The code still goes on the ledger as typed.
+  return isGiven(flow) ? quoted : reasonLabel(flow.code ?? "") + " — " + quoted;
 }
 
 /** A package that costs the member nothing: no payment, no money received — only the note (R7 J7-10). */
