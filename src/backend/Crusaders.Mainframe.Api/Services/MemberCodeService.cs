@@ -55,9 +55,18 @@ public sealed class MemberCodeService
     private readonly SessionEpochs _sessions;
     private readonly RefreshSessions _refresh;
 
+    /// <summary>
+    /// R14 D14-4: the device routes' clock. A use's <c>UsedAt</c> is what an uploaded offline twin of
+    /// the same scan is matched against (<c>DeviceEventEndpoints.SameActTolerance</c>), and that
+    /// event is placed on this clock — a claim on the wall clock read it as a second use.
+    /// </summary>
+    private readonly TimeProvider _clock;
+
     public MemberCodeService(
-        MainframeDbContext db, ITenantContext tenant, MemberCodeMasterKey master, SessionEpochs sessions, RefreshSessions refresh)
+        MainframeDbContext db, ITenantContext tenant, MemberCodeMasterKey master, SessionEpochs sessions, RefreshSessions refresh,
+        TimeProvider clock)
     {
+        _clock = clock;
         _refresh = refresh;
         _db = db;
         _tenant = tenant;
@@ -173,7 +182,7 @@ public sealed class MemberCodeService
         if (row is null) return false;
 
         row.Generation += 1;
-        row.RotatedAt = DateTimeOffset.UtcNow;
+        row.RotatedAt = _clock.GetUtcNow();
         _db.AuditLogs.Add(new AuditLog
         {
             TenantId = _tenant.TenantId,
@@ -441,7 +450,7 @@ public sealed class MemberCodeService
         MemberCodeMatch match, string useClass, Guid? deviceId, string kind, CancellationToken ct, string? claimKey = null)
     {
         var id = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow.Storable();
+        var now = _clock.GetUtcNow().Storable();
         var key = claimKey is { Length: > MemberCodeUse.ClaimKeyMaxLength } ? claimKey[..MemberCodeUse.ClaimKeyMaxLength] : claimKey;
 
         bool inserted;

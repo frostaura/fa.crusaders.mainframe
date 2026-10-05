@@ -40,7 +40,7 @@ public static class DeviceActivateEndpoint
         [AsParameters] DeviceActivateServices services,
         CancellationToken ct)
     {
-        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, req.Mac, ct);
+        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, req.Mac, ct, services.Clock);
         if (refusal is not null) return refusal;
 
         return Results.Ok(await ActivateForDeviceAsync(device!, req, services, ct));

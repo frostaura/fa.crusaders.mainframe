@@ -4,7 +4,9 @@ using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Crusaders.Mainframe.Api.Services.Realtime;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Crusaders.Mainframe.Tests;
 
@@ -139,6 +141,92 @@ public sealed class R14DevicePathsHttpTests(PostgresFixture pg) : IClassFixture<
         var device = await c.ReadAsync(r.App, db => db.Devices.IgnoreQueryFilters().AsNoTracking().SingleAsync(d => d.MacAddress == c.BoxMac));
         Near(r.Clock.Now, device.LastSeenAt, "LastSeenAt");
         Assert.NotEqual(JsonValueKind.Undefined, body.ValueKind);
+    }
+
+    private static Task<Device> BoxAsync(Rig r) =>
+        r.Club.ReadAsync(r.App, db => db.Devices.IgnoreQueryFilters().AsNoTracking().SingleAsync(d => d.MacAddress == r.Club.BoxMac));
+
+    /// <summary>
+    /// A shut board's 403 records that it was heard (<c>ShutHeardAt</c>) and that it called
+    /// (<c>LastSeenAt</c>) — at the club's instant, on the route that resolves (activate) and the one
+    /// that registers (heartbeat). They were the wall clock's.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("activate")]
+    [InlineData("heartbeat")]
+    public async Task A_shut_board_is_heard_at_the_clubs_instant(string route)
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        var r = await RigAsync($"r14shut{route[..2]}", TimeSpan.FromMinutes(-60));
+        await using var _ = r.App;
+        var c = r.Club;
+        await c.WriteAsync(r.App, async db => (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == c.BoxMac)).Enabled = false);
+
+        var (status, _) = await SendAsync(r, route == "activate" ? c.Activate(c.Code(c.Olga, at: r.Clock.Now)) : c.Heartbeat(c.BoxMac, m1: true));
+
+        Assert.Equal(HttpStatusCode.Forbidden, status);
+        var box = await BoxAsync(r);
+        Near(r.Clock.Now, box.ShutHeardAt, "ShutHeardAt");
+        Near(r.Clock.Now, box.LastSeenAt, "LastSeenAt");
+    }
+
+    /// <summary>
+    /// The use a code's online activation claims is stamped at the club's instant — and that is what
+    /// the box's offline twin of the SAME scan is matched against (<c>SameActTolerance</c>). With the
+    /// claim on the wall clock an hour away, the twin read as a second use of the code.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_code_use_is_claimed_at_the_clubs_instant_and_its_offline_twin_is_the_same_act()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        var r = await RigAsync("r14use", TimeSpan.FromMinutes(-60));
+        await using var _ = r.App;
+        var c = r.Club;
+        await c.BookAsync(r.App, c.Olga, courtIndex: 0, startsInMinutes: -55, minutes: 60);
+        var code = c.Code(c.Olga, at: r.Clock.Now);
+
+        var (_, body) = await SendAsync(r, c.Activate(code));
+        Assert.True(body.GetProperty("activated").GetBoolean(), body.ToString());
+        var use = await c.ReadAsync(r.App, db => db.MemberCodeUses.IgnoreQueryFilters().AsNoTracking().SingleAsync(u => u.TenantId == c.TenantId));
+        Near(r.Clock.Now, use.UsedAt, "UsedAt");
+
+        var (status, _) = await SendAsync(r, c.Events(c.BoxMac, 1, "activation", 0, code, agoMs: 0));
+        Assert.Equal(HttpStatusCode.OK, status);
+        var actions = await c.ReadAsync(r.App, db => db.AuditLogs.IgnoreQueryFilters().AsNoTracking()
+            .Where(a => a.TenantId == c.TenantId && a.Action.StartsWith("device.activation")).Select(a => a.Action).ToListAsync());
+        Assert.DoesNotContain(actions, a => a.Contains("forgery") || a.Contains("code_used"));
+    }
+
+    /// <summary>The control board's live frame for a lit court is timed at the club's instant, and its countdown runs from it.</summary>
+    [SkippableFact]
+    public async Task The_control_board_frame_is_timed_on_the_clubs_clock()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        var r = await RigAsync("r14cbf", TimeSpan.FromMinutes(-60));
+        await using var _ = r.App;
+        var c = r.Club;
+        await c.BookAsync(r.App, c.Olga, courtIndex: 0, startsInMinutes: -55, minutes: 60);
+        var bus = r.App.Services.GetRequiredService<IRealtimeBus>();
+        var topic = RealtimeTopic.ControlBoard(c.TenantId);
+        var frames = bus.Subscribe(topic);
+        try
+        {
+            var (_, body) = await SendAsync(r, c.Activate(c.Code(c.Olga, at: r.Clock.Now)));
+            Assert.True(body.GetProperty("activated").GetBoolean(), body.ToString());
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            RealtimeMessage frame;
+            do frame = await frames.Reader.ReadAsync(cts.Token);
+            while (frame.Event != "court");
+            using var json = JsonDocument.Parse(frame.JsonPayload);
+            Near(r.Clock.Now, json.RootElement.GetProperty("at").GetDateTimeOffset(), "at");
+            var remaining = json.RootElement.GetProperty("lights").GetProperty("seconds_remaining").GetInt32();
+            Assert.InRange(remaining, 64 * 60, 66 * 60);
+        }
+        finally
+        {
+            bus.Unsubscribe(topic, frames);
+        }
     }
 
     // ------------------------------------------------------------------ D14-3

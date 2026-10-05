@@ -306,7 +306,7 @@ public static class DeviceEventEndpoints
         [AsParameters] DeviceEventServices services,
         CancellationToken ct)
     {
-        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, batch.Mac, ct);
+        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, batch.Mac, ct, ClockOf(services));
         if (refusal is not null)
         {
             // A board this club has not registered, on a route that does not auto-register.
@@ -1620,7 +1620,7 @@ public static class DeviceEventEndpoints
         [AsParameters] WalkUpServices services,
         CancellationToken ct)
     {
-        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, req.Mac, ct);
+        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, req.Mac, ct, services.Clock);
         if (refusal is not null) return refusal;
 
         return await WalkUpForDeviceAsync(device!, req, services, ct);

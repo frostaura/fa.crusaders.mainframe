@@ -277,16 +277,21 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "quotepin");
+        // R14 E14-6: with the 18:00 booking's cue window open at 17:59 the glass already names IT, so
+        // the club's cue window is zero here — the 17:00 booking is the only one the 17:59 quote can name.
+        await club.SetAsync(app, "activation_cue_window_minutes", 0);
         var five = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -59, minutes: 60, checkedIn: true);
-        await club.BookAsync(app, club.Sid, courtIndex: 1, startsInMinutes: 1, minutes: 60, checkedIn: true);
+        var six = await club.BookAsync(app, club.Sid, courtIndex: 1, startsInMinutes: 1, minutes: 60, checkedIn: true);
         var device = app.CreateClient();
         const string nonce = "1234123412341234";
 
         var quote = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, nonce, confirm: false));
         Assert.Equal("60", quote.Body.GetProperty("amount_label").GetString());
 
-        // The 17:00 slot ends between the two presses.
-        await club.WriteAsync(app, async db => (await db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == five.Id)).EndsAt = DateTimeOffset.UtcNow.AddSeconds(-1));
+        // The 17:00 slot ends between the two presses, and the 18:00 one begins.
+        var turn = DateTimeOffset.UtcNow.AddSeconds(-1);
+        await club.WriteAsync(app, async db => (await db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == five.Id)).EndsAt = turn);
+        await club.WriteAsync(app, async db => (await db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == six.Id)).StartsAt = turn);
 
         var confirm = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, nonce, confirm: true, label: "60"));
         Assert.False(confirm.Body.GetProperty("paid").GetBoolean());

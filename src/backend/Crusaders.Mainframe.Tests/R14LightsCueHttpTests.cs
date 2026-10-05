@@ -309,6 +309,54 @@ public sealed class R14LightsCueHttpTests(PostgresFixture pg) : IClassFixture<Po
         Assert.Empty(Of(r, "booking.lights_off", a));
     }
 
+    /// <summary>
+    /// The first deploy's backlog: a lit booking cancelled long ago whose end is past the lookback
+    /// gets no off — a stale <c>lights_off</c> hours late is noise to every consumer — and is never
+    /// even read by the sweep (it stays un-cued, filtered out by the query rather than re-decided
+    /// every tick). One whose end is inside the lookback is still cued, at its end.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(-180, false)]
+    [InlineData(-121, false)]
+    [InlineData(-110, true)]
+    public async Task Only_a_recent_lit_cancelled_booking_is_cued_off(int endFromNowMinutes, bool cued)
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var r = await RigAsync("r14cxold");
+        var end = DateTimeOffset.UtcNow.AddMinutes(endFromNowMinutes);
+        var cancelled = await SeedAsync(r, new Slot(end.AddMinutes(-15), 15, r.Club.Organiser)
+        {
+            Status = BookingStatus.Cancelled,
+            CheckedIn = end.AddMinutes(-15),
+        });
+
+        var decided = new List<Guid>();
+        var worker = new LightsCueWorker(r.App.Services, r.Bus, NullLogger<LightsCueWorker>.Instance)
+        {
+            AfterOffDecidedForTests = b =>
+            {
+                lock (decided) decided.Add(b.Id);
+                return Task.CompletedTask;
+            },
+        };
+        for (var i = 0; i < 3; i++) await worker.TickAsync(default);
+
+        var cuedAt = await PlayersClub.ReadAsync(r.App, db => db.Bookings.IgnoreQueryFilters()
+            .Where(x => x.Id == cancelled).Select(x => x.LightsOffCuedAt).SingleAsync());
+        if (cued)
+        {
+            AssertAt(Assert.Single(Of(r, "booking.lights_off", cancelled)), end);
+            Assert.Single(decided, id => id == cancelled);
+            Assert.NotNull(cuedAt);
+        }
+        else
+        {
+            Assert.Empty(Of(r, "booking.lights_off", cancelled));
+            Assert.DoesNotContain(cancelled, decided);
+            Assert.Null(cuedAt);
+        }
+    }
+
     // ------------------------------------------------------------------ E14-4
 
     /// <summary>A no-show reversed AFTER its off cue, restored to end at <paramref name="restoredEnd"/>, still Booked.</summary>

@@ -38,6 +38,14 @@ public sealed class LightsCueWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// R14 (D14-2 bounded): how long after its end a lit, cancelled booking's off is still said. The
+    /// sweep runs every fifteen seconds, so two hours only matters across an outage of the worker;
+    /// past it the off is stale noise to a webhook consumer and the box's own relay timer has long
+    /// released the court. The other statuses have no lookback: their off has always been said.
+    /// </summary>
+    internal static readonly TimeSpan CancelledLitLookback = TimeSpan.FromHours(2);
+
     /// <summary>Internal so tests drive one tick directly rather than waiting on the timer.</summary>
     internal async Task TickAsync(CancellationToken ct)
     {
@@ -75,12 +83,16 @@ public sealed class LightsCueWorker : BackgroundService
         // out) and the desk — or the member, ahead of a start they had scanned in early for — then
         // cancelled it: the box's relay runs on to the grant's end regardless, and the event stream
         // said the court came on and never that it went off. Its off is said like any other, at its
-        // end (the grant the box was given) through the next-free rule, under the cue lock.
+        // end (the grant the box was given) through the next-free rule, under the cue lock — but
+        // only while that end is recent (CancelledLitLookback): an older one is left un-cued and is
+        // never read again, so the first deploy does not say an off hours late for every lit
+        // booking ever cancelled.
+        var cancelledSince = now - CancelledLitLookback;
         var dueOff = await db.Bookings.IgnoreQueryFilters()
             .Where(b => (b.Status == BookingStatus.Booked
                          || b.Status == BookingStatus.Completed
                          || b.Status == BookingStatus.NoShow
-                         || (b.Status == BookingStatus.Cancelled && b.CheckedInAt != null))
+                         || (b.Status == BookingStatus.Cancelled && b.CheckedInAt != null && b.EndsAt > cancelledSince))
                 && b.LightsOffCuedAt == null
                 && b.EndsAt <= now)
             .ToListAsync(ct);

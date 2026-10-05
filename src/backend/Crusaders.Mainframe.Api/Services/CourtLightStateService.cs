@@ -48,8 +48,15 @@ public sealed class CourtLightStateService
     private readonly ITenantContext _tenant;
     private readonly IRealtimeBus _bus;
 
-    public CourtLightStateService(MainframeDbContext db, ITenantContext tenant, IRealtimeBus bus)
+    /// <summary>
+    /// R14 D14-4: the device routes' clock — when the belief last moved, and the instant a live
+    /// frame's countdown runs from, agree with the activation that moved it.
+    /// </summary>
+    private readonly TimeProvider _clock;
+
+    public CourtLightStateService(MainframeDbContext db, ITenantContext tenant, IRealtimeBus bus, TimeProvider clock)
     {
+        _clock = clock;
         _db = db;
         _tenant = tenant;
         _bus = bus;
@@ -250,14 +257,14 @@ public sealed class CourtLightStateService
         return evidence.Seq > row.LastEventSeq;
     }
 
-    private static void Stamp(CourtLightState row, LightEvidence evidence)
+    private void Stamp(CourtLightState row, LightEvidence evidence)
     {
         row.DeviceId = evidence.DeviceId ?? row.DeviceId;
         row.Relay = evidence.Relay ?? row.Relay;
         row.LastEventAt = evidence.At;
         row.LastEventSeq = evidence.Seq;
         row.LastEventBootId = evidence.BootId;
-        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedAt = _clock.GetUtcNow();
     }
 
     /// <summary>
@@ -321,8 +328,8 @@ public sealed class CourtLightStateService
             CourtId = courtId,
             State = LightState.Unknown,
             Cause = LightCause.Unknown,
-            LastEventAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            LastEventAt = _clock.GetUtcNow(),
+            UpdatedAt = _clock.GetUtcNow(),
         };
         _db.CourtLightStates.Add(row);
         return row;
@@ -345,7 +352,7 @@ public sealed class CourtLightStateService
     /// </summary>
     public Task PublishAsync(CourtLightState row, int courtNumber, CancellationToken ct = default)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.GetUtcNow();
         var payload = JsonSerializer.Serialize(new
         {
             court_id = row.CourtId,

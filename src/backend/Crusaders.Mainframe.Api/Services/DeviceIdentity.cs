@@ -31,15 +31,16 @@ public static class DeviceIdentity
     /// The board this request names, or the refusal to return instead. Never registers —
     /// see <see cref="ResolveOrRegisterAsync"/> for the heartbeat's version.
     /// </summary>
+    /// <param name="clock">The route's injected clock (R14 D14-4); the system clock only for a caller that has none.</param>
     public static async Task<(Device? Device, IResult? Refusal)> ResolveAsync(
-        MainframeDbContext db, string? mac, CancellationToken ct)
+        MainframeDbContext db, string? mac, CancellationToken ct, TimeProvider? clock = null)
     {
         var normalised = DeviceRegistryService.NormaliseMacAddress(mac);
         if (normalised is null) return (null, Results.BadRequest(new { error = MacRequired }));
 
         var device = await db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
         if (device is null) return (null, Results.NotFound());
-        if (!device.IsActive) return (null, await RefuseShutAsync(db, device, ct));
+        if (!device.IsActive) return (null, await RefuseShutAsync(db, device, clock, ct));
 
         return (device, null);
     }
@@ -88,9 +89,10 @@ public static class DeviceIdentity
     /// </para>
     /// </summary>
     private static async Task<IResult> RefuseShutAsync(
-        MainframeDbContext db, Device device, CancellationToken ct)
+        MainframeDbContext db, Device device, TimeProvider? clock, CancellationToken ct)
     {
-        var now = DateTimeOffset.UtcNow;
+        // R14 D14-4: the route's clock, so "heard" and "seen" agree with every other device stamp.
+        var now = (clock ?? TimeProvider.System).GetUtcNow();
 
         // FIRST 403 of this shut, not the latest: the question the console asks is "when did
         // this door learn?", and an instant that moved forward on every retry would answer
@@ -110,8 +112,9 @@ public static class DeviceIdentity
     /// A board appears on the Devices page by flashing it and switching it on, which is the
     /// entire provisioning story now.
     /// </summary>
-    /// <param name="hintedKind">
-    /// What the board says it is, honoured <b>only</b> when the MAC is unknown.
+    /// <param name="call">
+    /// The board's MAC, the club, and <see cref="DeviceCall.HintedKind"/> — what the board says it is,
+    /// honoured <b>only</b> when the MAC is unknown (bundled for the six-parameter gate, R14).
     ///
     /// <para>
     /// On a row that already exists the hint is ignored outright: the row's
@@ -124,9 +127,9 @@ public static class DeviceIdentity
     /// </para>
     /// </param>
     public static async Task<(Device? Device, IResult? Refusal)> ResolveOrRegisterAsync(
-        MainframeDbContext db, DeviceRegistryService devices, string? mac, DeviceKind hintedKind,
-        Guid tenantId, CancellationToken ct)
+        MainframeDbContext db, DeviceRegistryService devices, DeviceCall call, CancellationToken ct, TimeProvider? clock = null)
     {
+        var (mac, hintedKind, tenantId) = call;
         var normalised = DeviceRegistryService.NormaliseMacAddress(mac);
         if (normalised is null) return (null, Results.BadRequest(new { error = MacRequired }));
 
@@ -172,6 +175,9 @@ public static class DeviceIdentity
         // RefuseShutAsync. The heartbeat is the call that matters most for that: it is the one
         // a shut board goes on making on a fixed cadence, so it is the one that answers "has
         // this door heard yet" within a heartbeat rather than at the next scan.
-        return device.IsActive ? (device, null) : (null, await RefuseShutAsync(db, device, ct));
+        return device.IsActive ? (device, null) : (null, await RefuseShutAsync(db, device, clock, ct));
     }
 }
+
+/// <summary>Who is calling the heartbeat: the MAC it gave, the kind it hinted, the club whose key it used.</summary>
+public sealed record DeviceCall(string? Mac, DeviceKind HintedKind, Guid TenantId);

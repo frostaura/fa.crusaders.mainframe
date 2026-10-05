@@ -75,7 +75,7 @@ public static class DevicePayForEndpoint
 
     public static async Task<IResult> HandleAsync(PayForRequest req, [AsParameters] PayForServices services, CancellationToken ct)
     {
-        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, req.Mac, ct);
+        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, req.Mac, ct, services.Clock);
         if (refusal is not null) return refusal;
         return await DecideAsync(device!, req, services, ct);
     }
