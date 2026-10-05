@@ -53,7 +53,8 @@ Guests are in the split with share 0 and are not a head in an equal split. **The
 partners are rounded down to whole minutes, and the organiser — who chose to split — keeps the
 remainder, so the shares always sum to the price: a 32-minute game split equally three ways is 10
 and 10 for the partners and 12 for the organiser. Nothing holds a fraction of a minute. Adding a player re-splits an `equal`/`ratio` booking (every
-share goes down); removing, declining or withdrawing does NOT re-split — the organiser absorbs the
+share goes down — and what each paying partner had paid over their new share goes back as the
+ADDER's act, §6 R16); removing, declining or withdrawing does NOT re-split — the organiser absorbs the
 freed share until they re-split themselves, and their own seat's `share_minutes` says so: it is
 recomputed as `P − Σ live partners` in one statement after the seat change commits (review round 4,
 M4-6).
@@ -302,9 +303,13 @@ organiser receives as shares are **held**:
   `404 invite_not_found`, so a participant id seen in a detail view is no way round a rotated link.
 - **Raising a share needs re-consent.** A re-split that raises a partner above their consent
   collects nothing; the seat reads `needs_consent: true`, the partner is mailed, and their next
-  accept collects the difference. **Lowering refunds** at once, and lowers the consent with it, so a
+  accept collects the difference. **One rule decides it everywhere** (R16 J16-1,
+  `PlayerNotices.NeedsConsent`): an accepted seat, NOT settled outside the app, whose share is above
+  its consent — the same answer on the booking detail, the invite view, `GET /me/invites/{pid}` and
+  the split's answer. A share the club settled by hand never asks. **Lowering refunds** at once, and lowers the consent with it, so a
   later raise is a new question rather than a debit they agreed to about a different figure.
 - An **admin's accept on a member's behalf records no consent** — the reconcile collects nothing.
+  It is on the record all the same (R16 E16-1, §6).
 - **Withdraw**: an accepted partner may pull out only outside the club's late-cancel window
   (`penalty_window_minutes` before the start — the same line the organiser's own cancellation is
   held to); inside it, `409 withdraw_window_closed`.
@@ -321,6 +326,13 @@ organiser receives as shares are **held**:
   they accept (`409 partner_cap_exceeded` with the cap's figures) and when they later book for
   themselves. Asked only for a game still ahead, and only on the first yes. Peak hours and group
   windows bind the organiser only.
+- **Nor is a member at their cap added (R16 J16-11).** The organiser's add and the desk's add of a
+  member who already holds their daily cap on that club day are refused `409 at_daily_limit
+  {user_id, name}` — the same rule (`BookingRules.PartnerCapRefusalAsync`) their accept would meet,
+  so the invite could never be taken and an equal split would have gone down for nothing. Nothing is
+  added or re-split. Asked only for a game that has not started. A booking made WITH such a player
+  (`POST /bookings`, `/bookings/bulk`) is still booked; its answer carries `players: null,
+  players_error: "at_daily_limit"`.
 - **At the court**: an accepted partner with an active membership finds the booking through
   `CourtActivationService.FindForUserAsync` (QR / code), `CandidatesAsync` + `PlayersOfAsync`
   (PIN, biometric). Their scan checks the booking in and stamps their OWN seat's `CheckedInAt`; it
@@ -356,11 +368,18 @@ organiser receives as shares are **held**:
 - **Member invites by mail** link to `/invites/{participantId}` (signed in) — never a token, because
   a token written into an outbox payload would be a credential stored in clear.
 - **Directory (D13)** — opted-in (`findable`), active members only, never the caller, id + name +
-  photo only, a query of at least 2 characters (a LIKE wildcard is a literal), and a per-member
+  photo plus what tells two namesakes apart from the caller's own history (R16 J16-3, below) —
+  never an email, phone or membership number — a query of at least 2 characters (a LIKE wildcard is a literal), and a per-member
   budget of `directory_searches_per_minute`.
 - **Recent partners** are derived (accepted seats on the same bookings in the last
   `recent_partner_days` that have started and were checked in at the box — a game still ahead is
   not "played with"), never stored; **favourites** are private to the member who starred them.
+- **The picker tiebreak (R16 J16-3).** Directory, favourites and recent-partner rows carry
+  `played_with_you` (games the caller and that member both played — each the booker or an accepted
+  seat — on a booking the box checked in, that has started and is not cancelled; all time; 0 when
+  never), `last_played_with_you_at` (the latest such game's start, or null) and `member_since`
+  (`yyyy-MM-dd`, the earliest membership's creation date, or null). `PlayersQuery.PlayedWithAsync`;
+  nothing private.
 - **The inbox** (`member_notifications`) and member mail share the R23 outbox, generalised with an
   `Audience` (admins · member) and a `RecipientUserId`. Each notice is staged in the same save as
   its event — the inbox line and the outbox row together. Non-urgent kinds wait for the end of
@@ -390,8 +409,8 @@ organiser receives as shares are **held**:
 | `players.reminder` | an unanswered / unpaid partner (club cadence, or the organiser's nudge) | yes | no |
 | `players.lapsed` | the partner and the organiser | yes | no |
 | `players.game_cancelled` | every live partner | accepted partners only; an unanswered invitee gets the inbox line (M4-5) | yes |
-| `players.game_changed` | a removed partner, or one whose share moved | yes | no |
-| `players.response` | the organiser (accepted / declined / withdrew) | inbox only | — |
+| `players.game_changed` | a removed partner, or one whose share moved; both players when the club records a share as paid by hand (R16 J16-6) | yes — except the organiser's settled-by-hand line, inbox only | no |
+| `players.response` | the organiser (accepted / declined / withdrew; the club accepted for a partner — R16 E16-1) | inbox only | — |
 | `players.return_waiting` | the partner and the organiser, once, when a return starts waiting (§3) | yes | no |
 
 Since review round 13:
@@ -412,7 +431,8 @@ Since review round 13:
 - **The "club put you in X's game" mail promises only what holds.** The share moves when the
   member accepts it, or when the club collects it (J13-7).
 - **Every share move names who caused it (R14).** The share cause says which act moved it:
-  `share_returned` is only "the partner withdrew"; `organiser_removed` (the organiser took them
+  `share_returned` is only "the partner withdrew"; `player_added` (a player joined and an
+  `equal`/`ratio` split went down — R16); `organiser_removed` (the organiser took them
   off); `split_changed` (the organiser lowered their share while they stay on the game); an admin's
   removal stays `club_removed`; the club recording a share as paid outside the app is `club_settled`;
   a return that no record explains (a desk adjustment to the booking, a removal from before R14) is
@@ -451,6 +471,13 @@ Since review round 13:
     Share rows state the direction, the other person and the cause, read off the record; the ledger still stores no cause. `players.game_cancelled` is saved before its share rows.
   - **A split change on a settled seat.** For a share the club settled outside the app, a split change moves nothing in the app and asks for no consent.
   - **The partner's word on a started session.** When the club cancels a session that had started, the partner is told their share stands.
+- **Every seat act is on the record and in every voice (R16).**
+  - **An add's share move is the adder's (J16-2).** When an add lowers an `equal`/`ratio` split, each partner whose share moved gets a `players.split_changed` audit row in the add's own save, details `{share_minutes, previous_share_minutes, because: "player_added", joined, by_club}` (`joined` names who joined: "Jo Partner", "Jo Partner and Kim"). The reconcile after the add runs with the adder — the organiser, or the admin — as ledger actor, the organiser's own receipt born read. The share cause is `player_added` (`WalletShareCauses.PlayerAdded`) on the frame, the wallet row, the inbox, the mail, the Night and the CSV: "Jo Partner joined Court 1, Mon 5 Oct, 18:00, so the split went down". The frame's `actor_name` names the organiser when they added; it is null when the club did ("the club"). The reconciles after an accept, a decline or a club accept-on-behalf carry NO actor: a waiting return of another seat retried there would otherwise be put down to them.
+  - **Who changed a share (J16-1).** Booking-detail seat rows, `GET /me/invites/{pid}` and the invite rows carry `share_changed_by: "organiser" | "club" | null` and `share_changed_by_name` (the organiser's name; null for the club), off the seat's newest `players.split_changed` record (`ShareChanger`); null/null when nothing has changed it since the invite. A split change on a settled seat tells the partner the organiser changed the split and that, paid by hand, nothing moves in the app.
+  - **Accept-on-behalf (E16-1).** Writes `players.accepted_by_club` (subject the partner, actor the admin, organiser in the details) in the act's own save. The Night reads `booking.accepted_for_them` (the partner), `booking.club_accepted_player` (the organiser) and `booking.accepted_for_player` (the admin). The organiser's inbox gains a `players.response` line: "The club accepted Sam Partner's place in your game — Court 1, Thu 8 Oct, 08:00".
+  - **Settle-outside tells both (J16-6).** `players.game_changed` (payload `SettledByHand`) to the partner (mailed: "The club recorded that you paid Olive Organiser by hand for Court 1, Thu 8 Oct, 08:00 — nothing moves in the app") and to the organiser (inbox only: "The club recorded that Sam Partner paid you by hand for …"), deduped per act — the desk may record one seat twice. A later cancellation tells a settled partner "you paid Olive Organiser by hand, so that is between you and Olive Organiser", never that anything comes back.
+  - **A started session the club cancelled (J16-7).** Besides the inbox line, each accepted partner not settled by hand gets a balance-neutral wallet frame `reason: "cancelled_share_stands"` (`delta_minutes` 0, `parts: []`, the booking, `cancelled_by: "club"`). The booker keeps `cancelled_no_refund`.
+  - **Share lines name the court and the day (E16-4)** — the withdrawal, no-show and club-refund receipts too — and a club removal its cause on both sides ("the club took you off …" / "the club took them off …"). The organiser's collect mail is titled as the club's (E16-5).
 
 ## 7. Endpoints
 
@@ -460,11 +487,11 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 
 | Route | Body → answer |
 | --- | --- |
-| `POST /api/v1/bookings` | + optional `players: [{userId?, guestName?, link?, seat?, weight?, amount?}]`, `splitMode`, `organiserWeight`. `amount` is a whole number of minutes. Validated in full (against the price) BEFORE booking. → `{booking_id, balance_after_minutes, players: {booking_id, participants: [{participant_id, seat, user_id, guest_name, status, share_minutes, invite_token, invite_path}]}, players_error}` |
+| `POST /api/v1/bookings` | + optional `players: [{userId?, guestName?, link?, seat?, weight?, amount?}]`, `splitMode`, `organiserWeight`. `amount` is a whole number of minutes. Validated in full (against the price) BEFORE booking. → `{booking_id, balance_after_minutes, players: {booking_id, participants: [{participant_id, seat, user_id, guest_name, status, share_minutes, invite_token, invite_path}]}, players_error}` — `players_error` is the add's refusal code when the booking stood but the seats could not be added, e.g. `at_daily_limit` (§5) |
 | `POST /api/v1/bookings/bulk` | + the same `players`/`splitMode`/`organiserWeight`, applied to every newly booked item → adds `players: [{booking_id, players, players_error}]`. The payload's shape is checked price-free, then the split against EVERY item's price, before anything is booked: any failure books nothing |
 | `POST /api/v1/players/split-preview` | `{priceMinutes, splitMode, organiserWeight, players}` → `{price_minutes, shares: [{seat, team, share_minutes, weight}]}` — pure, for the live totals bar |
-| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_minutes, weight, consented_minutes, paid_minutes, target_minutes, unpaid_minutes, returned_minutes, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_minutes, organiser_owed_minutes, shares_received_minutes, organiser_net_minutes, unpaid_minutes, share_deadline, is_split, refunded_minutes, penalty_minutes, paid_by {user_id, name, photo_url}|null, paid_by_minutes} (`paid_by` names whoever took the charge over at the box — D10 — and `paid_by_minutes` what they paid; the organiser's `organiser_owed_minutes` is then what the organiser's OWN rows net to, nothing once refunded — review round 6, E6-2) (`unpaid_minutes` counts every live partner seat still owing, an unclaimed open link seat at its full share until the seat closes or the game is off — review round 1, B4; `returned_minutes` is, on a cancelled game, what the cancellation sent back and, elsewhere, every return so far — review round 4, M4-4), attendance {checked_in_at, players_checked_in} (a booking with no seats counts its organiser from `checked_in_at` — E6-7), refunded_for_outage (a no-show refunded in full because no box on its court was reachable; the status stays `no_show`, the admin is not to read it as one — E6-6), cancelled_by `member|club|null`, cancel_cause `displaced|null` and cancel_reason (the admin's own words on a club cancel; null otherwise) — read from the cancellation's audit row, never from `Booking.CancellationReason`; all three null unless cancelled, and the page says "The club cancelled this game." + "Reason: …", the displacement sentence, or who cancelled (R13 C13-1, J13-6), permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}, timezone` (the club's IANA zone, top level — see below). 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
-| `POST /api/v1/bookings/{id}/players` | organiser: `{players, splitMode?, organiserWeight?}` → as the create's `players`; `409 player_previously_declined` / `player_previously_removed {user_id}`, `409 player_invite_limit {limit, invites_made}` |
+| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_minutes, weight, consented_minutes, paid_minutes, target_minutes, unpaid_minutes, returned_minutes, needs_consent, share_changed_by, share_changed_by_name, collect_needs_overdraft, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_minutes, organiser_owed_minutes, shares_received_minutes, organiser_net_minutes, unpaid_minutes, share_deadline, is_split, refunded_minutes, penalty_minutes, paid_by {user_id, name, photo_url}|null, paid_by_minutes} (`paid_by` names whoever took the charge over at the box — D10 — and `paid_by_minutes` what they paid; the organiser's `organiser_owed_minutes` is then what the organiser's OWN rows net to, nothing once refunded — review round 6, E6-2) (`unpaid_minutes` counts every live partner seat still owing, an unclaimed open link seat at its full share until the seat closes or the game is off — review round 1, B4; `returned_minutes` is, on a cancelled game, what the cancellation sent back and, elsewhere, every return so far — review round 4, M4-4), attendance {checked_in_at, players_checked_in} (a booking with no seats counts its organiser from `checked_in_at` — E6-7), refunded_for_outage (a no-show refunded in full because no box on its court was reachable; the status stays `no_show`, the admin is not to read it as one — E6-6), cancelled_by `member|club|null`, cancel_cause `displaced|null` and cancel_reason (the admin's own words on a club cancel; null otherwise) — read from the cancellation's audit row, never from `Booking.CancellationReason`; all three null unless cancelled, and the page says "The club cancelled this game." + "Reason: …", the displacement sentence, or who cancelled (R13 C13-1, J13-6), permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}, timezone` (the club's IANA zone, top level — see below). 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
+| `POST /api/v1/bookings/{id}/players` | organiser: `{players, splitMode?, organiserWeight?}` → as the create's `players`; `409 player_previously_declined` / `player_previously_removed {user_id}`, `409 player_invite_limit {limit, invites_made}`, `409 at_daily_limit {user_id, name}` (§5) |
 | `DELETE /api/v1/bookings/{id}/players/{pid}` | organiser → `{participant_id, status}` |
 | `POST /api/v1/bookings/{id}/players/{pid}/nudge` | organiser → `{participant_id, nudges_left}`; `429 nudge_limit {limit, retry_after}`; `409 nothing_to_nudge` |
 | `POST /api/v1/bookings/{id}/players/{pid}/link` | organiser → `{participant_id, invite_token, invite_path}` (rotates) |
@@ -472,22 +499,22 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `POST /api/v1/bookings/{id}/players/{pid}/accept` | partner: `{expectedShareMinutes}` → `{participant_id, booking_id, status, share_minutes, consented_minutes, paid_minutes, balance_minutes, spendable_minutes, held_minutes}`; `400 expected_share_required`, `409 share_changed {share_minutes}`, `402 insufficient_balance`, `409 partner_cap_exceeded {cap: slots\|minutes, …}`, `409 invite_closed`, `409 already_in_booking`, `409 player_previously_removed`, `403 membership_inactive`; `404 invite_not_found` for an unclaimed link seat (claim it by its link) |
 | `POST …/{pid}/decline` · `POST …/{pid}/withdraw` | partner → `{participant_id, status}`; withdraw `409 withdraw_window_closed {closed_at}` |
 | `GET /api/v1/me/invites` | → `{items: [invite], count, timezone}` — the Invites tab and badge; each `invite` also carries `timezone` |
-| `GET /api/v1/me/invites/{participantId}` | → the caller's OWN seat in any status: `{participant_id, booking_id, status, lapsed, settled_outside, booking_status, court_name, starts_at, ends_at, organiser_name, share_minutes, timezone}`; 404 for anybody else's seat (review round 1, for F2's deep links) |
+| `GET /api/v1/me/invites/{participantId}` | → the caller's OWN seat in any status: `{participant_id, booking_id, status, needs_consent, share_changed_by, share_changed_by_name, lapsed, settled_outside, booking_status, court_name, starts_at, ends_at, organiser_name, share_minutes, timezone}`; 404 for anybody else's seat (review round 1, for F2's deep links) |
 | `GET /api/v1/invites/{token}/preview` | **anonymous** — `{organiser_first_name, court_name, starts_at, ends_at, share_minutes, timezone}` and nothing else; `404 invite_not_found` for an unknown or other club's token, an answered seat, a game that is not `Booked`, or a closed share window. The token is the credential; global per-address limiter (review round 1, F2) |
 | `GET /api/v1/invites/{token}` | → `invite`; 404 `invite_not_found`, 409 `invite_closed`, 409 `already_in_booking`, 409 `player_previously_removed` |
 | `POST /api/v1/invites/{token}/accept` · `…/decline` | as the seat routes (accept takes `{expectedShareMinutes}`) |
-| `GET /api/v1/me/partners/recent` | → `{items: [{user_id, name, photo_url, last_played_at, games}]}` — only games that have started AND the box checked in (review round 1, B11) |
+| `GET /api/v1/me/partners/recent` | → `{items: [{user_id, name, photo_url, last_played_at, games, played_with_you, last_played_with_you_at, member_since}]}` (the last three: §6's picker tiebreak, R16 J16-3) — only games that have started AND the box checked in (review round 1, B11) |
 | `GET /api/v1/me/bookings/upcoming` | → `{timezone, items: [{booking_id, court_name, starts_at, ends_at, role: organiser\|partner, status, players [{name, photo_url, status}], my_share_minutes, needs_action}]}` — every `Booked` game whose end is ahead where the caller is organiser or on an ACCEPTED partner seat, soonest first, at most 50 (review round 1, B2). `my_share_minutes`: a partner's own share; the organiser's is the price less the live partners' shares. `needs_action`: a partner asked for more than they consented to, or still owing on an open seat. The schedule marks an accepted partner's game `isMine: true` with `role: "partner"` (`"organiser"` on the booker's own; null otherwise). |
 | `GET /api/v1/me/bookings/recent` | → `{timezone, items: [ …the upcoming item…, result_status: none\|pending\|confirmed\|disputed, can_record }]}` — every `Booked`/`Completed`/`NoShow` game that ENDED within `result_record_days` (7) where the caller is the organiser or holds an accepted partner seat, newest first, at most 50 (review round 2, C3). `result_status` is the live result (a pending one past its deadline reads `confirmed`); `can_record` is play.md §3.1's test with no live result. The upcoming list does not carry the two fields. |
 | *(notice)* `players.club_seat` | review round 1, B8: the club added the member to a game (`Accepted: false`, links the invite; keyed `invited:club:` so the invite loop's collapse applies) or put them in it (admin add with `accepted`, or accept-on-behalf; links the booking; nothing collected until they accept their share). Mailed. A club collect's receipts say the club collected it and, below zero, where the partner's balance stands; a received share's receipt says it is held and until when (B12). |
-| `GET /api/v1/me/partners/favourites` · `PUT`/`DELETE /api/v1/me/partners/favourites/{userId}` | → `{items: [{user_id, name, photo_url}]}` / `{user_id, favourite}` |
-| `GET /api/v1/members/directory?q=` | → `{items: [{user_id, name, photo_url}]}`; `400 query_too_short`, `429 directory_rate_limited {retry_after_seconds}` |
+| `GET /api/v1/me/partners/favourites` · `PUT`/`DELETE /api/v1/me/partners/favourites/{userId}` | → `{items: [{user_id, name, photo_url, played_with_you, last_played_with_you_at, member_since}]}` / `{user_id, favourite}` |
+| `GET /api/v1/members/directory?q=` | → `{items: [{user_id, name, photo_url, played_with_you, last_played_with_you_at, member_since}]}`; `400 query_too_short`, `429 directory_rate_limited {retry_after_seconds}` |
 | `GET /api/v1/me/notifications?cursor&limit` | → `{items: [{id, kind, headline, link, booking_id, created_at, read_at}], unread_count, next_cursor, timezone}` |
 | `GET /api/v1/me/notifications/unread-count` | → `{unread_count}` |
 | `POST /api/v1/me/notifications/{id}/read` · `POST …/read-all` | → `{id, read}` / `{marked}` |
 | `GET/PUT /api/v1/me/preferences` | + `share_results` (D13, stored only); `findable_in_directory` and `show_on_leaderboards` accepted as aliases of `findable` and `show_in_leaderboards` |
 
-`invite` = `{participant_id, booking_id, status, seat, team, open_link, court_name, starts_at, ends_at, organiser {user_id, name, photo_url}, players, share_minutes, to_pay_minutes, needs_consent, balance_minutes, spendable_minutes, held_minutes, balance_after_minutes, short_by_minutes, share_deadline, cap, timezone}` — `balance_minutes` is the viewer's raw balance and `balance_after_minutes` that less `to_pay_minutes`; `short_by_minutes` is measured against `spendable_minutes` (§3a), which is what the accept checks; `share_deadline` is the booking's frozen deadline (§3); `cap` is null, or the partner-cap figures when accepting would break the partner's own daily cap.
+`invite` = `{participant_id, booking_id, status, seat, team, open_link, court_name, starts_at, ends_at, organiser {user_id, name, photo_url}, players, share_minutes, to_pay_minutes, needs_consent, share_changed_by, share_changed_by_name, settled_outside, consented_minutes, balance_minutes, spendable_minutes, held_minutes, balance_after_minutes, short_by_minutes, share_deadline, cap, timezone}` — `balance_minutes` is the viewer's raw balance and `balance_after_minutes` that less `to_pay_minutes`; `short_by_minutes` is measured against `spendable_minutes` (§3a), which is what the accept checks; `share_deadline` is the booking's frozen deadline (§3); `cap` is null, or the partner-cap figures when accepting would break the partner's own daily cap.
 
 **Every member payload that is a cold entry point carries the club's zone** as a top-level `timezone` (as does `GET /api/v1/me/profile`, read at every app start). A member opens a booking or an invite straight from a mail, on a phone that may be in another zone; the client learns the zone from any top-level `timezone` and, until it has, writes court times in the phone's zone. A stored zone the platform cannot read is reported as `UTC`, the zone the times were actually computed in.
 
@@ -503,11 +530,11 @@ their `balance_minutes` is raw and their `overdraws` is on spendable.
 
 | Route | Body → answer |
 | --- | --- |
-| `POST /api/v1/admin/bookings/{id}/players` | `{userId? \| guestName?, accepted?, reason?}` — neither: an open link seat. `accepted` places a member without their consent (collects nothing). → as the organiser's add |
+| `POST /api/v1/admin/bookings/{id}/players` | `{userId? \| guestName?, accepted?, reason?}` — neither: an open link seat. `accepted` places a member without their consent (collects nothing). → as the organiser's add, including `409 at_daily_limit {user_id, name}` (§5) |
 | `POST /api/v1/admin/bookings/{id}/players/{pid}/remove` | `{reason, allowNegativeBalance?}` → `{participant_id, status, return_waiting, return_minutes}` — `return_waiting` is true (with `return_minutes`, the amount due back) when the hand-back passed the coverage check but a spend raced it and the reconcile left it waiting (§3); `return_minutes` is null otherwise. `allowNegativeBalance: true` is required whenever the hand-back is not covered by the organiser's coverage (§3), whatever the deadline: `400 overdraft_not_authorised {return_minutes, covered_minutes}` |
-| `POST …/{pid}/accept` | `{reason}` — accept on behalf; records no consent |
+| `POST …/{pid}/accept` | `{reason}` — accept on behalf; records no consent; writes `players.accepted_by_club` and tells the partner and the organiser (§6, R16 E16-1) |
 | `POST …/{pid}/settle-outside` | `{reason, allowNegativeBalance?}` → as remove, with `return_waiting` / `return_minutes` — paid by hand; anything collected in-app goes back. Accepted seats only: `409 player_not_accepted`. `allowNegativeBalance: true` is required whenever the hand-back is not covered, as for remove |
-| `POST …/{pid}/collect` | `{reason, allowNegativeBalance: true}` — the only path that may take a partner below zero, or collect from a lapsed seat → `{participant_id, collected_minutes, balance_after_minutes}`; `400 overdraft_not_authorised`, `409 nothing_to_collect`, `409 conflict_retry`. The consent, the change-log line (the figure actually posted) and the pair are one transaction under the partner's lock |
+| `POST …/{pid}/collect` | `{reason, allowNegativeBalance?}` — the only path that may take a partner below zero, or collect from a lapsed seat → `{participant_id, collected_minutes, balance_after_minutes}`. `allowNegativeBalance: true` is needed only when the partner's spendable minutes (§3a) do not cover what would be collected (R16 J16-10) — decided again under the partner's lock — else `400 overdraft_not_authorised {collect_minutes, balance_minutes}` (`balance_minutes` is the spendable figure) and nothing is written; a covered share collects without it. The admin booking detail's seat row says which in advance: `collect_needs_overdraft` true / false, null where collect does not apply (organiser, guest, not accepted, settled outside, nothing unpaid, a game not booked or completed). `409 player_not_accepted` on a seat nobody accepted, `409 share_settled_outside` on one the club recorded as paid by hand (R16 E16-8), `409 nothing_to_collect`, `409 conflict_retry`. The consent, the change-log line (the figure actually posted) and the pair are one transaction under the partner's lock |
 
 Change-log actions: `booking.player_added`, `booking.player_removed`,
 `booking.player_accepted_on_behalf`, `booking.share_settled_outside`, `booking.share_collected`
@@ -540,7 +567,7 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 | Held minutes, spendable | `Services/Players/ShareHolds.cs`, `Services/LedgerService.cs` — `GetHeldAsync`, `GetSpendableAsync` |
 | The one writer of `ShareTransfer` | `Services/Players/ShareLedger.cs` |
 | After settlement / the minute sweep | `Services/Players/ShareHook.cs`, `ShareSweep.cs`, `Workers/ShareWorker.cs`; the marker staged with the money: `Persistence/MainframeDbContext.ShareStaging.cs` |
-| Partner cap (D12) | `Services/BookingRules.cs` — `PartnerCapRefusalAsync`, `HeldAsync` |
+| Partner cap (D12) | `Services/BookingRules.cs` — `PartnerCapRefusalAsync`, `HeldAsync`; on adds, `PlayersService.DailyLimitRefusalAsync` (R16) |
 | Partner at the court / door | `Services/CourtActivationService.cs`, `Services/GateAccess.cs`, `Endpoints/PinEndpoints.cs`, `Biometric/BiometricService.cs` |
 | Member notices | `Services/Players/MemberNotices.cs`, `MemberEventCatalogue.cs`, `Email/EmailTemplatesPlayers.cs`, `Services/AdminNotificationDispatcher.cs` |
 | Reads | `Services/Players/PlayersQuery.cs`; routes `Endpoints/PlayersEndpoints.cs`, `Endpoints/MemberNotificationEndpoints.cs` |
@@ -548,4 +575,5 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 Pinning tests: `SplitCalculatorTests`, `ShareRulesTests`, `PlayerSettingsTests`, `PlayersHttpTests`,
 `PlayersAccessHttpTests`, `PlayersReviewHttpTests` (the adversarial review's findings, one test each),
 `PlayersRefuteHttpTests` … `PlayersRefute8HttpTests` (the refuter's rounds on those fixes),
-`PlayersPropertyHttpTests` (the seeded property search).
+`PlayersPropertyHttpTests` (the seeded property search), and per review round the `R13…`/`R15…`/`R16…`
+HTTP suites (R16: `R16SeatActsHttpTests`, `R16WordsHttpTests`, `R16NightBadgesPickerHttpTests`).

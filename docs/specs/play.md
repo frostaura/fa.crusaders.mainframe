@@ -40,6 +40,12 @@ beyond a result on a booking they both played. `show_in_leaderboards` and `share
   awards nothing until the court starts: the check-in's recompute marker is staged for the start
   (`PlayRecomputeDueAt = max(now, StartsAt)`), and the badge is dated then. The scan is evidence
   the member came, not the instant they played ("First court" at 06:24 for a 06:30 court).
+  A session counts for stats and the streak from then, but **earns a badge only once it has ended**
+  (§5.6, R16 E16-9).
+
+  **Partners who walked in behind the scanner count** (rule 2) — the founder's default since
+  review round 2. Round 16 considered limiting play to members who scanned themselves and did not
+  change it; it stands until the founder says otherwise (§14 Q4).
 - **Session** — one attended booking, from one member's point of view.
 - **Played minutes** of an attended booking — `max(0, min(EndsAt, CancelledAt ?? EndsAt) − StartsAt)`
   in whole minutes, from the row as it stands (a released tail has already truncated `EndsAt`).
@@ -464,6 +470,21 @@ top-up or a share. Each badge is `{key, name, description, criteria}`; the API s
 Ordering sessions uses `(CheckedInAt of the member's evidence, BookingId)` — the seat's own
 `CheckedInAt` when set, else the booking's — so the Nth session is deterministic.
 
+**Badges are earned when a session ENDS, never for one the club cancelled (R16 E16-9).** The badge
+rules read only sessions that have ended and were not cancelled
+(`AttendedSession.EarnsBadgesAt(now)`: no `CancelledAt`, and `EndsAt` — or the cancellation that
+stopped it — at or before now; `PlayRecord.BadgeInputs`). Stats, the streak and the ring are
+unchanged: a session cancelled after check-in (S4) is still attended (§1) and still counted there.
+It earns no badge itself and is not one of the sessions the session-count, `partners_5`,
+`early_bird` and `night_owl` rules count; a streak badge still reads the whole streak walk, but is
+awarded only when a finished, uncancelled session lies in the week the streak reached its mark.
+*Why:* badges are never taken back (§3.3), and once a session has started only the club can cancel
+it — awarding at the start handed out "First court" and "Night owl" for a session the club then
+cancelled half way, kept for good. The qualifying instant (`AwardedAt`) is still the check-in in
+the table above; only the moment of award moves to the end. A locked badge's `progress` (§6.2) is
+not filtered — it counts every attended session, so it may read ahead of the award while a
+session is still on court, or after the club cancelled one. The marker that makes the award happen at the end is §7.3's re-arm.
+
 ## 6. HTTP API
 
 Conventions as P11 (`players-and-splits.md` §7): **request bodies camelCase, answers snake_case**
@@ -632,7 +653,10 @@ Idempotent and safe to run concurrently for one member:
   decided).
 - **Drain the marker**: bookings with `PlayRecomputeDueAt ≤ now`, up to 500; evaluate every member
   who is or was a player, has a seat, or is in a result's lineup on it; clear the marker only if
-  it is not newer than this pass's start (the guarded clear P11 uses). A failure pushes the
+  it is not newer than this pass's start (the guarded clear P11 uses) — **except that a booking
+  still on court** (checked in, not cancelled, `EndsAt` after the pass's start) has its marker
+  re-armed to `EndsAt` rather than cleared, so the members are evaluated again when it ends, which
+  is when its badges are earned (§5.6, R16 E16-9). A failure pushes the
   marker 5 minutes ahead and logs once — a poisoned booking costs a line every five minutes, not
   every minute.
 - **Catch-up / retro-award**: members with any attendance whose profile is missing or has
@@ -927,3 +951,6 @@ migration), then frontend; then the headed walk.
 3. **Should an admin see a member's match record (W–L) on the member's page?** *Default: yes —
    counts only, on the Overview card, not logged as a view.* Useful when a dispute lands; partners,
    opponents and badges stay the member's alone. The alternative is to show attendance figures only.
+4. **Does a partner who walked in behind the scanner count as having played** (stats, streak,
+   badges)? *Default: yes* — §1 rule 2, one scan lights the court for everybody on it. Raised again
+   in review round 16 ("only players who scanned"); not changed, pending the founder's word.
