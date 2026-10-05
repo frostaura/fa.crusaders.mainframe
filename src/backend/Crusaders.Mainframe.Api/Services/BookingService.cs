@@ -964,7 +964,8 @@ public sealed class BookingService
             Type: "booking.created",
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
             OccurredAt: DateTimeOffset.UtcNow,
-            ActorUserId: actorId, ActorIsAdmin: actorId != userId,
+            // R13 (E13-2's rule, here): the actor's own role, never "acting for somebody else".
+            ActorUserId: actorId, ActorIsAdmin: await HoldsAdminAsync(actorId, ct),
             SubjectUserId: userId,
             Data: new()
             {
@@ -1579,8 +1580,10 @@ public sealed class BookingService
 
         var now = DateTimeOffset.UtcNow;
         var payerUserId = booking.PaidByUserId ?? booking.UserId.Value;
+        // R13 E13-5 (C13-2): the reversal and the shares that follow it reach each wallet as ONE frame.
+        await using var frames = WalletFrameScope.Open(_outbox.Holds, _ledger, _tenant.TenantId, booking.Id);
 
-        var legs = await SettledLegsAsync(booking, payerUserId, actorUserId, ct);
+        var legs = await SettledLegsAsync(booking, payerUserId, actorUserId, ct, await ScannerNameAsync(scan, payerUserId, ct));
         var tail = await DisplacementAsync(booking, actorUserId, now, provisionalLitEnd, ct);
         // R12 C2: the reversal's own legs name whose scan reversed it (the frame's checked_in_by_name).
         var postings = legs.Postings.Select(p => p with { CheckedInBy = scan?.UserId }).Concat(tail.Postings).ToList();
@@ -1629,11 +1632,33 @@ public sealed class BookingService
 
         await NotifyNoShowReversedAsync(booking, legs.RefundBack, legs.PenaltyBack, attendedAt, ct, scan);
         foreach (var other in tail.Displaced) await NotifyDisplacedAsync(other, booking, ct);
+        await SharesFollowAsync(booking.Id);
         return new NoShowReversalResult.Ok(legs.RefundBack, legs.PenaltyBack)
         {
             DisplacedBookingIds = tail.Displaced.Select(b => b.Id).ToList(),
             ManuallyCompensated = legs.Compensation.Count > 0,
         };
+    }
+
+    /// <summary>
+    /// Whether this person holds the admin role in this club now — the webhook's <c>actor.is_admin</c>.
+    /// <c>actorId != userId</c> named every member booking for a friend an administrator and every
+    /// admin booking their own court a member (R13, the shape E13-2 removed from the ledger mirror).
+    /// </summary>
+    private async Task<bool> HoldsAdminAsync(Guid actorId, CancellationToken ct) =>
+        actorId != Guid.Empty && await _db.Users.AsNoTracking().AnyAsync(u => u.Id == actorId && u.IsAdmin, ct);
+
+    /// <summary>
+    /// R13 E13-5: the shares follow the reversal INSIDE its wallet-frame hold, so the organiser's
+    /// wallet hears "reversed, and the partner's share taken again" once rather than twice. The
+    /// caller's own hook after the batch (the device route) then finds nothing left to move. A host
+    /// without the hook (the unit suites' containers) leaves it to that caller, as before.
+    /// </summary>
+    private async Task SharesFollowAsync(Guid bookingId)
+    {
+        using var scope = _scopes.CreateScope();
+        if (scope.ServiceProvider.GetService<ShareHook>() is not { } shares) return;
+        await shares.AfterSettlementAsync(_tenant.TenantId, _tenant.TenantSlug, [bookingId], CancellationToken.None);
     }
 
     /// <summary>
@@ -1691,7 +1716,9 @@ public sealed class BookingService
     /// compensation to <i>this</i> payer.
     /// </para>
     /// </summary>
-    private async Task<SettledLegs> SettledLegsAsync(Booking booking, Guid payerUserId, Guid actorUserId, CancellationToken ct)
+    /// <param name="scannerName">R13 E13-3: who checked in, when it was not the payer — the refund leg's line names them.</param>
+    private async Task<SettledLegs> SettledLegsAsync(
+        Booking booking, Guid payerUserId, Guid actorUserId, CancellationToken ct, string? scannerName = null)
     {
         // What the sweep actually posted. The sweep is the only producer that posts these
         // two types as the system actor, and a reversal already on the ledger nets to zero
@@ -1725,7 +1752,7 @@ public sealed class BookingService
                 AmountMinutes: -refundBack,
                 ActorUserId: actorUserId,
                 RelatedBookingId: booking.Id,
-                Reason: RefundReversalReason(booking, takenBack > 0),
+                Reason: RefundReversalReason(booking, takenBack > 0, scannerName),
                 ExternalReference: NoShowReversalReference(booking.Id, "refund"))
             { StreamReason = ReversalStreamReason(booking) });
         }
@@ -1760,12 +1787,26 @@ public sealed class BookingService
     /// its reversal does not either (review round 9, E9-2): "No-show refund reversed" told a
     /// member who was never marked absent that they had been.
     /// </summary>
-    private static string RefundReversalReason(Booking booking, bool netOfDesk)
+    /// <remarks>
+    /// Review round 13, E13-3: "the member was checked in after all" is said only when the member was
+    /// — the payer's own scan, or nobody named. A partner's scan names the partner ("— Sam Partner
+    /// checked in after all"), on the admin ledger, the webhook and the payer's wallet alike.
+    /// </remarks>
+    private static string RefundReversalReason(Booking booking, bool netOfDesk, string? scannerName)
     {
-        var line = booking.OutageRefundedAt is not null
-            ? "Outage refund reversed — the member was checked in after all"
-            : "No-show refund reversed — attendance recorded after the sweep";
+        var line = booking.OutageRefundedAt is null
+            ? "No-show refund reversed — attendance recorded after the sweep"
+            : string.IsNullOrWhiteSpace(scannerName)
+                ? "Outage refund reversed — the member was checked in after all"
+                : $"Outage refund reversed — {scannerName.Trim()} checked in after all";
         return netOfDesk ? line + ", net of the desk's own adjustment" : line;
+    }
+
+    /// <summary>R13 E13-3: the scanner's name when somebody other than the payer checked in; null otherwise.</summary>
+    private async Task<string?> ScannerNameAsync(ReversalScan? scan, Guid payerUserId, CancellationToken ct)
+    {
+        if (scan is null || scan.UserId == payerUserId) return null;
+        return await _db.Memberships.AsNoTracking().Where(m => m.UserId == scan.UserId).Select(m => m.FullName).FirstOrDefaultAsync(ct);
     }
 
     /// <summary>

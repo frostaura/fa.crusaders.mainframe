@@ -3,6 +3,7 @@ using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using Crusaders.Mainframe.Api.Services.Realtime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 
@@ -454,23 +455,52 @@ public sealed class NoShowWorker : BackgroundService
                 : await DeviceOutageIndex.BuildAsync(
                     db, lookbackFloor, HeartbeatCadence.OfflineAfterSeconds(tSettings.HeartbeatSeconds), ct);
 
-            foreach (var b in dueNoShow)
+            // R13 E13-5 (C13-2): each booking's settlement and the shares that follow it reach each
+            // wallet as ONE frame — held from before the sweep's own commit until after the hook.
+            var frames = dueNoShow.Select(b => WalletFrameScope.Open(scope.ServiceProvider.GetService<WalletFrameHolds>(), ledger, tenant.Id, b.Id)).ToList();
+            try
             {
-                await SweepOneAsync(new Sweep(db, ledger, email, tenant, tSettings, now) { Outages = outages }, b, ct);
+                await SettleDueAsync(new Sweep(db, ledger, email, tenant, tSettings, now) { Outages = outages }, dueNoShow, ct);
             }
-
-            // The postings above already saved each booking's status. This catches anything
-            // else the loop left tracked — nothing today, but a save that silently does
-            // nothing is cheaper than one somebody forgets to add later.
-            if (dueNoShow.Count > 0) await db.SaveChangesAsync(ct);
-
-            // D11: a no-show's penalty is shared pro rata by the partners who accepted; the
-            // refund of the rest follows the organiser's. After the sweep's own commits, in a
-            // scope of its own — see ShareHook.
-            if (dueNoShow.Count > 0 && _services.GetService<ShareHook>() is { } shares)
+            finally
             {
-                await shares.AfterSettlementAsync(tenant.Id, tenant.Slug, dueNoShow.Select(b => (Guid?)b.Id), ct);
+                foreach (var held in frames) await ReleaseAsync(held);
             }
+        }
+    }
+
+    /// <summary>One club's due bookings settled, then their shares followed — inside the caller's frame holds.</summary>
+    private async Task SettleDueAsync(Sweep sweep, List<Booking> dueNoShow, CancellationToken ct)
+    {
+        foreach (var b in dueNoShow)
+        {
+            await SweepOneAsync(sweep, b, ct);
+        }
+
+        // The postings above already saved each booking's status. This catches anything
+        // else the loop left tracked — nothing today, but a save that silently does
+        // nothing is cheaper than one somebody forgets to add later.
+        if (dueNoShow.Count > 0) await sweep.Db.SaveChangesAsync(ct);
+
+        // D11: a no-show's penalty is shared pro rata by the partners who accepted; the
+        // refund of the rest follows the organiser's. After the sweep's own commits, in a
+        // scope of its own — see ShareHook.
+        if (dueNoShow.Count > 0 && _services.GetService<ShareHook>() is { } shares)
+        {
+            await shares.AfterSettlementAsync(sweep.Tenant.Id, sweep.Tenant.Slug, dueNoShow.Select(b => (Guid?)b.Id), ct);
+        }
+    }
+
+    /// <summary>Sends what a hold kept. The money has committed; a channel that fails is logged, never the sweep's failure.</summary>
+    private async Task ReleaseAsync(WalletFrameScope held)
+    {
+        try
+        {
+            await held.DisposeAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "A held wallet frame could not be sent after the no-show sweep");
         }
     }
 }

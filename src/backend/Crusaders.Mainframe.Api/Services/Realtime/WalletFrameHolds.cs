@@ -17,6 +17,12 @@ public sealed record WalletFrame(
     public Guid? CheckedInBy { get; init; }
 
     /// <summary>
+    /// R13 J13-4 (C13-7): the one booking every row behind this frame names, or null — so the frame can
+    /// name the court to a member who can no longer open the booking. Never on the wire itself.
+    /// </summary>
+    public Guid? BookingId { get; init; }
+
+    /// <summary>
     /// This frame and a later one for the same member as ONE: the first frame's reason is the
     /// primary one, the delta is the net, and the parts are every row in order.
     /// </summary>
@@ -30,6 +36,7 @@ public sealed record WalletFrame(
             MoneyIn = MoneyIn || later.MoneyIn,
             CancelledBy = CancelledBy ?? later.CancelledBy,
             CheckedInBy = CheckedInBy ?? later.CheckedInBy,
+            BookingId = BookingId == later.BookingId ? BookingId : null,
         };
     }
 }
@@ -118,7 +125,8 @@ public sealed class WalletFrameHolds
 /// <summary>
 /// One action's hold, closed by disposal: everything held is sent through the caller's
 /// <see cref="LedgerService"/>, money having already committed — so it sends even when the action
-/// threw after its first commit.
+/// threw after its first commit. Opened by the desk, member and bulk cancels (R12 C1), and by the
+/// no-show sweep and a late check-in's reversal around their share follow-up (R13 E13-5).
 /// </summary>
 public sealed class WalletFrameScope : IAsyncDisposable
 {
@@ -136,8 +144,15 @@ public sealed class WalletFrameScope : IAsyncDisposable
     public static WalletFrameScope Open(IServiceProvider services, Guid tenantId, Guid bookingId)
     {
         var holds = services.GetService<WalletFrameHolds>();
-        return new WalletFrameScope(holds, holds?.Begin(tenantId, bookingId), services.GetRequiredService<LedgerService>(), (tenantId, bookingId));
+        return Open(holds, services.GetRequiredService<LedgerService>(), tenantId, bookingId);
     }
+
+    /// <summary>
+    /// The same hold for a caller that already holds its ledger and the registry — a service rather
+    /// than an endpoint: the no-show sweep and a late check-in's reversal (R13 E13-5).
+    /// </summary>
+    public static WalletFrameScope Open(WalletFrameHolds? holds, LedgerService ledger, Guid tenantId, Guid bookingId) =>
+        new(holds, holds?.Begin(tenantId, bookingId), ledger, (tenantId, bookingId));
 
     public async ValueTask DisposeAsync()
     {

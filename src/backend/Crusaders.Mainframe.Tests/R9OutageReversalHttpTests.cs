@@ -197,15 +197,16 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         var r = await SweptAsync("r10outstream", dark: true);
         await using var owned = r.App;
 
-        // The share then returned to Sam is its own frame (share_transfer) and is not this one.
-        var refund = Assert.Single(r.BalanceFrames(), f => f.GetProperty("reason").GetString() != "share_transfer");
+        // R13 E13-5 (C13-2): the share then returned to Sam is a part of the same, single frame.
+        var refund = Assert.Single(r.BalanceFrames());
         Assert.Equal(WalletStreamReasons.OutageRefund, refund.GetProperty("reason").GetString());
-        Assert.Equal(32, refund.GetProperty("delta_minutes").GetInt32());
-        Assert.Equal(32, Assert.Single(refund.GetProperty("parts").EnumerateArray()).GetProperty("delta_minutes").GetInt32());
+        Assert.Equal(16, refund.GetProperty("delta_minutes").GetInt32());
+        Assert.Equal([32, -16], refund.GetProperty("parts").EnumerateArray().Select(p => p.GetProperty("delta_minutes").GetInt32()));
 
         await ReverseAsync(r);
         var reversed = Assert.Single(r.BalanceFrames(), f => f.GetProperty("reason").GetString() == WalletStreamReasons.OutageRefundReversed);
-        Assert.Equal(-32, reversed.GetProperty("delta_minutes").GetInt32());
+        Assert.Equal(-16, reversed.GetProperty("delta_minutes").GetInt32());
+        Assert.Equal(-32, reversed.GetProperty("parts")[0].GetProperty("delta_minutes").GetInt32());
     }
 
     /// <summary>
@@ -220,10 +221,12 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         var r = await SweptAsync("r10nsstream", dark: false);
         await using var owned = r.App;
 
-        var settled = Assert.Single(r.BalanceFrames(), f => f.GetProperty("reason").GetString() != "share_transfer");
+        // R13 E13-5 (C13-2): one frame, the share going back to Sam its third part.
+        var settled = Assert.Single(r.BalanceFrames());
         Assert.Equal(WalletStreamReasons.NoShowSettled, settled.GetProperty("reason").GetString());
         var parts = settled.GetProperty("parts").EnumerateArray().ToList();
-        Assert.Equal(2, parts.Count);
+        Assert.Equal(3, parts.Count);
+        Assert.Equal("share_transfer", parts[2].GetProperty("reason").GetString());
         Assert.Equal("cancellation_refund", parts[0].GetProperty("reason").GetString());
         Assert.Equal(32, parts[0].GetProperty("delta_minutes").GetInt32());
         Assert.Equal("penalty", parts[1].GetProperty("reason").GetString());
@@ -330,9 +333,16 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
 
     // ---- Review round 11: the share's cause on the live wallet, and the no-show's kept part ----
 
-    /// <summary>The organiser's share frame — the one whose reason is <c>share_transfer</c>.</summary>
+    /// <summary>
+    /// The organiser's frame carrying the share's move — since R13 E13-5 (C13-2) the settlement's own
+    /// frame, the share one of its <c>parts</c>.
+    /// </summary>
     private static JsonElement ShareFrame(IEnumerable<JsonElement> frames) =>
-        Assert.Single(frames, f => f.GetProperty("reason").GetString() == "share_transfer");
+        Assert.Single(frames, f => f.GetProperty("parts").EnumerateArray().Any(p => p.GetProperty("reason").GetString() == "share_transfer"));
+
+    /// <summary>The share part's signed minutes on <see cref="ShareFrame"/>'s frame.</summary>
+    private static int SharePart(JsonElement frame) =>
+        frame.GetProperty("parts").EnumerateArray().Single(p => p.GetProperty("reason").GetString() == "share_transfer").GetProperty("delta_minutes").GetInt32();
 
     /// <summary>
     /// R11 E11-1: the frame for a share the club's outage refund sent back said only
@@ -349,12 +359,12 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         var returned = ShareFrame(r.BalanceFrames());
         Assert.Equal(WalletShareCauses.OutageRefund, returned.GetProperty("share_cause").GetString());
         Assert.Equal(JsonValueKind.Null, returned.GetProperty("share_kept_minutes").ValueKind);
-        Assert.Equal(-16, returned.GetProperty("delta_minutes").GetInt32());
+        Assert.Equal(-16, SharePart(returned));
 
         await ReverseAsync(r);
         var again = ShareFrame(r.BalanceFrames());
         Assert.Equal(WalletShareCauses.Attended, again.GetProperty("share_cause").GetString());
-        Assert.Equal(16, again.GetProperty("delta_minutes").GetInt32());
+        Assert.Equal(16, SharePart(again));
     }
 
     /// <summary>
@@ -371,7 +381,7 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
 
         var frame = ShareFrame(r.BalanceFrames());
         Assert.Equal(WalletShareCauses.NoShow, frame.GetProperty("share_cause").GetString());
-        var returned = -frame.GetProperty("delta_minutes").GetInt32();
+        var returned = -SharePart(frame);
         var kept = frame.GetProperty("share_kept_minutes").GetInt32();
         Assert.True(kept > 0, "a no-show penalty leaves part of the share behind");
         Assert.Equal(16, returned + kept);
