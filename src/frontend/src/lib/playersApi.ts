@@ -238,7 +238,19 @@ export type MySeat = {
   organiser_name: string | null;
   share_minutes: number;
   timezone: string;
+  /** R15 J15-1 (BE15b) — the club, not the organiser, put this member on the game. Absent: an older API. */
+  added_by_club?: boolean;
+  /** R15 J15-1 (BE15b) — on a removed seat: whose act it was. Null / absent: not removed, no record, or an older API. */
+  removed_by?: SeatRemovedBy | null;
 };
+
+/** R15 J15-1 — who took a member off a game: the club (an admin) or the organiser. */
+export type SeatRemovedBy = "club" | "organiser";
+
+/** R15 J15-1 — a removal's actor as the wire says it; anything else (or nothing) is unknown. */
+export function removedByOf(raw: unknown): SeatRemovedBy | null {
+  return raw === "club" || raw === "organiser" ? raw : null;
+}
 
 /**
  * One invite, as the accept sheet reads it — also the answer to opening a link.
@@ -283,6 +295,8 @@ export type Invite = {
   cap: PartnerCap | null;
   /** The club's IANA zone — the link view is opened cold from a mail. Absent from an older API. */
   timezone?: string;
+  /** R15 J15-1 (BE15b) — the club put this member on the game, not the organiser. Absent: an older API (read as the organiser). */
+  added_by_club?: boolean;
 };
 
 /**
