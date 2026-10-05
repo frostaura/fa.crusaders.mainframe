@@ -632,7 +632,7 @@ Bulk cancel uses `total_refunded_minutes`, `total_penalty_minutes`, and per resu
 
 | Route | Keys |
 |---|---|
-| `GET /api/v1/admin/reports/revenue` | `gross_topups_zar`, `reversals_zar`, `net_zar` (unchanged, rand); `gross_topups_minutes`, `reversals_minutes`, `net_minutes`; **new** `zar_per_minute_sold` = `net_zar ÷ net_minutes`, decimal rounded down to 4 dp, `null` when `net_minutes ≤ 0` |
+| `GET /api/v1/admin/reports/revenue` | `gross_topups_zar`, `reversals_zar`, `net_zar` (unchanged, rand); `gross_topups_minutes`, `reversals_minutes`, `net_minutes`; **new** `zar_per_minute_sold` = `net_zar ÷ net_minutes`, decimal rounded down to 4 dp, `null` when `net_minutes ≤ 0`; since R13 the minutes figures count paid packages only and **new** `given_minutes` carries free ones (reporting.md) |
 | `GET /api/v1/admin/reports/utilisation` | `revenue_credits` → **`kept_minutes`** (charged minus refunded, net of penalties kept); `quoted_credits` → **`sold_minutes`** (Σ `AmountChargedMinutes`) |
 | `GET /api/v1/admin/reports/daily`, `/reports/me/daily` | every `*_credits` → `*_minutes` (§3.2) |
 | `GET /api/v1/reports/me/wallet` | `top_ups_minutes`, `spent_minutes`, `refunds_minutes`, `penalties_minutes`, `adjustments_minutes`, `reversals_minutes`, `share_transfers_minutes`, `net_court_spend_minutes`, `net_movement_minutes`. `minutes_on_court` is unchanged. |

@@ -614,6 +614,25 @@ more `booking.lights_off`, at the restored end (`ends_at` = the restored end), a
 lit courts otherwise saw a `lights_on` with no `lights_off` after it (review round 12, E12-3;
 `LightsCueWorker.CompleteAttendedAsync`).
 
+**When the court is next free (review round 13, E13-1).** Every `booking.lights_off` — the
+ordinary end-of-slot cue and the extra one after a late reversal — follows one rule
+(`LightsCueWorker.NextFreeAsync`). Starting from the booking's end:
+
+- **another booking holds the court and is lit** (checked in, so its `lights_on` has gone out)
+  **and still running** — no `lights_off` is sent for the earlier booking; the holder's own off
+  closes the court later, by arrival order and by `occurred_at`;
+- **no lit booking holds the court** — the off is sent with `occurred_at` = the booking's end,
+  never the instant the sweep happened to run;
+- **a lit booking held the court but is already over and cued off** — the off is stamped at that
+  booking's end, following back-to-back chains, so it never falls inside a paid, lit session.
+
+A booking nobody checked in on lit nothing, so it never holds the court; cancelled bookings and
+club blocks never do. `LightsOffCuedAt` is stamped either way, so nothing fires twice; `data.ends_at`
+stays the booking's (restored) end. **Why:** a per-court consumer read the court dark through a
+whole paid session when an earlier booking's off arrived after the next member's `lights_on`.
+A check-in that commits in the milliseconds between the sweep's read and its send can still
+precede the off; that window is recorded in `memory/decisions-backend-r13a.md`.
+
 ---
 
 ## 4. The lit window, in order
