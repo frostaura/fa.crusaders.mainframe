@@ -26,4 +26,7 @@ export const CONNECTION_COPY = {
   /** Follows `rateLimitedSentence(…)`. */
   busyBody: "You're still signed in, and nothing is wrong with your connection — we'll ask again by ourselves.",
   retry: "Try again now",
+  /** R14 X14-3 — the phone itself says it has no connection: the member's signal, not the club. */
+  offlineTitle: "You're offline",
+  offlineBody: "This page needs a connection — what it shows isn't kept on this phone. You're still signed in, and it loads by itself once you're back online.",
 } as const;

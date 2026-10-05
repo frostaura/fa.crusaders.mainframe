@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Clock, WifiSlash } from "@/components/ui/icons";
@@ -61,9 +61,16 @@ export function BootSplash() {
  */
 export function ConnectionLost({ onRetry, cause }: { onRetry: () => void | Promise<void>; cause?: unknown }) {
   const retry = useAsyncAction(async () => { await onRetry(); });
+  const phoneOffline = useOffline();
   // V-10 — a 429 is the club ANSWERING, busy; saying "can't reach" blamed a connection that was fine.
   const busy = cause instanceof ApiError && cause.status === 429;
   const wait = busy ? Number(cause.detail("retry_after_seconds")) || null : null;
+  // R14 X14-3 — the phone says it has no connection at all: that is the member's signal, not the
+  // club, so it is said as offline. `onLine` true proves nothing (Wi-Fi without internet), so only
+  // false switches it; `auth.tsx` re-checks by itself on the browser's `online` event.
+  const offline = phoneOffline && !busy;
+  const title = busy ? CONNECTION_COPY.busyTitle : offline ? CONNECTION_COPY.offlineTitle : CONNECTION_COPY.unreachableTitle;
+  const body = busy ? `${rateLimitedSentence(wait)} ${CONNECTION_COPY.busyBody}` : offline ? CONNECTION_COPY.offlineBody : CONNECTION_COPY.unreachableBody;
   return (
     <PageShell width="narrow">
       <Card>
@@ -71,12 +78,8 @@ export function ConnectionLost({ onRetry, cause }: { onRetry: () => void | Promi
           {busy
             ? <Clock size={40} weight="duotone" aria-hidden="true" className="text-text-muted" />
             : <WifiSlash size={40} weight="duotone" aria-hidden="true" className="text-text-muted" />}
-          <h1 data-route-heading="" className={typography({ variant: "h2" })}>
-            {busy ? CONNECTION_COPY.busyTitle : CONNECTION_COPY.unreachableTitle}
-          </h1>
-          <p className="text-sm text-text-secondary">
-            {busy ? `${rateLimitedSentence(wait)} ${CONNECTION_COPY.busyBody}` : CONNECTION_COPY.unreachableBody}
-          </p>
+          <h1 data-route-heading="" className={typography({ variant: "h2" })}>{title}</h1>
+          <p className="text-sm text-text-secondary">{body}</p>
           <Button className="mt-1" pending={retry.pending} onClick={() => { void retry.run(); }}>
             {CONNECTION_COPY.retry}
           </Button>
@@ -84,6 +87,16 @@ export function ConnectionLost({ onRetry, cause }: { onRetry: () => void | Promi
       </Card>
     </PageShell>
   );
+}
+
+/** `navigator.onLine === false`, followed through the browser's online/offline events. */
+function subscribeOnline(fn: () => void) {
+  window.addEventListener("online", fn);
+  window.addEventListener("offline", fn);
+  return () => { window.removeEventListener("online", fn); window.removeEventListener("offline", fn); };
+}
+function useOffline(): boolean {
+  return useSyncExternalStore(subscribeOnline, () => navigator.onLine === false, () => false);
 }
 
 /** What a lazily loaded route shows while its code arrives: the page's shape, never "Loading…". */
