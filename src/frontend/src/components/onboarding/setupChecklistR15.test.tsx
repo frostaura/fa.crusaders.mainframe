@@ -27,7 +27,24 @@ function online(wallet: object) {
   ]);
 }
 
+/**
+ * R16 X15-4 — the club unreachable means EVERY read fails, `/whoami` included, so the session is
+ * "offline" and nothing has re-confirmed who this is. The R15 fixture still answered `/whoami`,
+ * which kept the session "authenticated" and hid the bug: offline, the kept states were read under
+ * a null user and the card fell back to "0 of 4".
+ */
 function clubUnreachable() {
+  signIn({ isAdmin: false });
+  stubFetch([
+    unreachable("/api/v1/whoami"),
+    unreachable("/api/v1/me/profile"),
+    unreachable("/api/v1/wallet"),
+    unreachable("/api/v1/me/webauthn/credentials"),
+  ]);
+}
+
+/** The session and profile answer; both checklist reads fail. */
+function readsFailing() {
   const whoami = signIn({ isAdmin: false });
   stubFetch([
     { path: "/api/v1/whoami", body: whoami },
@@ -75,10 +92,31 @@ describe("the setup checklist keeps its last known states (R15 X15-4)", () => {
   });
 
   it("never read on this phone: offline still says it couldn't check", async () => {
+    // The profile was read here once, but neither checklist read ever answered on this phone.
+    readsFailing();
+    const first = show();
+    await screen.findByRole("region", { name: CHECKLIST.title });
+    first.unmount();
+    vi.unstubAllGlobals();
+
     clubUnreachable();
     show();
     const card = await screen.findByRole("region", { name: CHECKLIST.title });
     const row = await within(card).findByRole("link", { name: new RegExp(CHECKLIST.items.passkey.label) });
     expect(row).toHaveTextContent(CHECKLIST.unknown);
+  });
+
+  it("the club answers who you are but not the reads: the kept states still stand", async () => {
+    online({ balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 50 });
+    const first = show();
+    await within(await screen.findByRole("region", { name: CHECKLIST.title })).findByText(CHECKLIST.progress(1, 4));
+    first.unmount();
+    vi.unstubAllGlobals();
+
+    readsFailing();
+    show();
+    const again = await screen.findByRole("region", { name: CHECKLIST.title });
+    await within(again).findByText(CHECKLIST.progress(1, 4));
+    expect(within(again).queryByText(CHECKLIST.unknown)).toBeNull();
   });
 });

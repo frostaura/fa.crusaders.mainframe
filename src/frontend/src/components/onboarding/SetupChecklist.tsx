@@ -12,6 +12,7 @@ import { CHECKLIST, GET_STARTED_PATH } from "@/lib/onboardingCopy";
 import {
   CHECKLIST_WALLET_PAGE, checklistProgress, deriveChecklist, type ChecklistItem, type ChecklistItemId,
 } from "@/lib/setupChecklist";
+import { useDataOwner } from "@/lib/offline/useCachedRead";
 import { cn } from "@/lib/utils";
 import { useOnboarding, useProfileOrNull } from "./useOnboarding";
 
@@ -103,7 +104,11 @@ export function SetupChecklist() {
   const loading = reads.passkeys === undefined || reads.wallet === undefined;
   const installed = install.standalone || install.installedNow || onboarding.local.installed === true;
   const read = useMemo(() => deriveChecklist({ ...reads, installed }), [reads, installed]);
-  const who = onboarding.userId;
+  // R16 X15-4 — whose kept states these are: the confirmed member, or offline / unreachable the
+  // member this phone last confirmed (the same owner every kept read on an offline page uses).
+  // Keyed by the confirmed session alone, an offline phone read nobody's and fell to "0 of 4".
+  const owner = useDataOwner();
+  const who = onboarding.userId ?? owner.who;
   useEffect(() => { if (!loading) writeKept(who, read); }, [loading, read, who]);
 
   if (!active || hidden) return null;
