@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
+import { focusFirstComplaint } from "@/components/members/saleFocus";
 import { LIFT_HOLD_SHEET } from "@/lib/bookingsCopy";
 
 /** The hold an admin pressed Lift on: its id, where it is ("Court 1 at 17:00") and its name. */
@@ -43,9 +44,14 @@ export function LiftHoldSheet({ hold, open, onOpenChange, onLift, onCloseAutoFoc
 function LiftHoldBody({ hold, onClose, onLift }: { hold: HoldToLift; onClose: () => void; onLift: LiftHoldSheetProps["onLift"] }) {
   const [reason, setReason] = useState("");
   const [tried, setTried] = useState(false);
+  // R16 X16-3 — a refused Lift takes the keyboard to the reason, which carries its complaint.
+  const [refusals, setRefusals] = useState(0);
+  useEffect(() => {
+    if (refusals > 0) focusFirstComplaint("[data-sheet='lift-hold']");
+  }, [refusals]);
   const missing = tried && reason.trim() === "";
   const confirm = () => {
-    if (reason.trim() === "") { setTried(true); return; }
+    if (reason.trim() === "") { setTried(true); setRefusals((n) => n + 1); return; }
     onClose();
     onLift(hold.blockId, reason.trim());
   };

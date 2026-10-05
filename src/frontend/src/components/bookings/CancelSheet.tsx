@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert } from "@/components/Alert";
 import { useToast } from "@/components/toastContext";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
+import { focusFirstComplaint } from "@/components/members/saleFocus";
 import { ApiError, type CancellationQuote } from "@/lib/api";
 import { ALREADY_CHECKED_IN_TEXT, cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
 import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
@@ -104,6 +105,12 @@ function useCancelFlow(props: FlowProps) {
   const [waive, setWaive] = useState(false);
   const [reason, setReason] = useState("");
   const [reasonShown, setReasonShown] = useState(false);
+  // R16 X16-3 — each refused press takes the keyboard to the field that says why (the Sell sheet's
+  // rule): after the commit that marks it invalid, so it lands on a field carrying its complaint.
+  const [refusals, setRefusals] = useState(0);
+  useEffect(() => {
+    if (refusals > 0) focusFirstComplaint("[data-sheet='cancel']");
+  }, [refusals]);
   const [run, setRun] = useState<CancelRun | null>(null);
   const [key] = useState(newCancelKey);
   const push = useOptionalPush();
@@ -156,6 +163,7 @@ function useCancelFlow(props: FlowProps) {
     if (sendable.length === 0) return;
     if (reasonNeeded && reason.trim() === "") {
       setReasonShown(true);
+      setRefusals((n) => n + 1);
       return;
     }
     // Told at once, not in an effect: a press on the × a frame later is refused too.
