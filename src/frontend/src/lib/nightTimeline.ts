@@ -71,6 +71,13 @@ function burstKey(event: TraceEvent): string {
 const PLAYER_ACTS: ReadonlySet<string> = new Set([
   "booking.taken_off", "booking.took_player_off", "booking.split_changed", "booking.changed_split",
   "booking.game_cancelled", "booking.cancelled_by_club",
+  // R15 (BE15b) — the club's seat acts, from each side (partner · organiser · admin), and the game's
+  // no-show and its reversal on a partner's Night: each a story of its own.
+  "booking.club_took_player_off",
+  "booking.share_settled_outside", "booking.partner_share_settled_outside", "booking.settled_share_outside",
+  "booking.share_collected", "booking.partner_share_collected", "booking.collected_share",
+  "booking.added_to_game", "booking.club_added_player", "booking.added_player",
+  "booking.game_no_show", "booking.game_no_show_reversed",
 ]);
 
 /** A row about minutes: the wallet strand, a ledger row, or any row carrying an amount. */
