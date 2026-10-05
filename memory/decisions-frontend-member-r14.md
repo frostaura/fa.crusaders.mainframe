@@ -41,5 +41,10 @@ Tests: `walletMovementR14.test.tsx`, `paged-focus-scan.test.ts`, `routeLazy.test
   Bookings did not really "escape" — only after an earlier open had initialised its lazy.
 - **The reviewer's 15.1 s / 6.4 s `/my-code` opens**: not reproduced; most likely `POST
   /me/code/enrol`'s `auth` limiter (10/min) — the harness opened /my-code ~50 times per viewport.
-- **Owed by backend**: a removed member's wallet group has no court/day — `share_bookings[id]` is
-  null by design; asked for an additive `share_places` (scratchpad ask, R14).
+- **A gone game's share line is placed, still unlinked** (E14-7): `share_places` fills a null
+  summary as a `gone` place-only `ShareBooking`; `LedgerTable.isGone` reads `gone` as well as null.
+- **A 404 detail reads its own seat** (J14-10): `useBookingDetail.ownSeatId` from the 404's
+  `own_seat_id`; `NotOnGame` gets `?seat=` or that. Null reads no seat.
+- **A player's acts on a booking never fold into a Night burst** (BE14b §7): `PLAYER_ACTS` in
+  `nightTimeline` key each alone, like money. The Night has no kind→icon map — it renders the
+  server's headline — so new kinds need no label here.
