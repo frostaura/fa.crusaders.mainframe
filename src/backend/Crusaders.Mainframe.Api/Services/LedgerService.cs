@@ -141,7 +141,7 @@ public sealed class LedgerService
         // penalty animate the badge once, by their net.
         foreach (var group in postings.GroupBy(p => p.UserId))
         {
-            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group), [.. group], postings);
+            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, [.. group], postings);
         }
 
         foreach (var entry in entries) await MirrorAsync(entry, ct);
@@ -175,13 +175,13 @@ public sealed class LedgerService
     public const string SetAsideReason = "share_set_aside";
 
     private Task PublishBalanceAsync(
-        Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<LedgerPosting>? rows = null,
+        Guid userId, int deltaMinutes, string reason, CancellationToken ct, IReadOnlyList<LedgerPosting>? rows = null,
         IReadOnlyList<LedgerPosting>? unitOfWork = null)
     {
         // E10-1: each row's {reason, minutes}; R11 E11-1: why a share among them moved; R13 X13-2:
         // on a share row, the member on its other leg (read off the same unit of work).
         var frame = new WalletFrame(
-            deltaMinutes, reason, rows is null ? [] : PartsOf(rows, unitOfWork ?? rows), rows?.Select(p => p.Share).FirstOrDefault(w => w is not null), moneyIn)
+            deltaMinutes, reason, rows is null ? [] : PartsOf(rows, unitOfWork ?? rows), rows?.Select(p => p.Share).FirstOrDefault(w => w is not null), rows is not null && MoneyIn(rows))
         {
             // R13 J13-4: the booking the movement is about, so the frame can name its court.
             BookingId = BookingOf(rows),
@@ -226,11 +226,7 @@ public sealed class LedgerService
         var held = await GetHeldAsync(userId, token);
         // R13 X13-2 / J13-4 (C13-7): the partners a share row moved to or from, and the booking's court and start.
         var counterparts = await NamesAsync([.. frame.Parts.Select(p => p.CounterpartyUserId)], token);
-        var game = frame.BookingId is { } bookingId
-            ? await _db.Bookings.AsNoTracking().Where(b => b.Id == bookingId)
-                .Select(b => new { b.StartsAt, Court = _db.Courts.Where(c => c.Id == b.CourtId).Select(c => c.Name).FirstOrDefault() })
-                .FirstOrDefaultAsync(token)
-            : null;
+        var game = await GameOfAsync(frame.BookingId, token);
         // R12 E12-2 (C2): the scanner is named only when it was somebody else.
         var checkedInBy = frame.CheckedInBy is { } scanner && scanner != userId
             ? await _db.Memberships.AsNoTracking().Where(m => m.UserId == scanner).Select(m => m.FullName).FirstOrDefaultAsync(token)
@@ -259,7 +255,7 @@ public sealed class LedgerService
             {
                 reason = p.Reason,
                 delta_minutes = p.DeltaMinutes,
-                counterparty_name = p.CounterpartyUserId is { } other ? counterparts.GetValueOrDefault(other) : null,
+                counterparty_name = NameOf(counterparts, p.CounterpartyUserId),
             }).ToList(),
             // R13 J13-4: the court and start of the one booking every row names; null when none or several.
             court_name = game?.Court,
@@ -277,6 +273,20 @@ public sealed class LedgerService
         // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
         if (retry is not null) await retry.AfterMinutesArriveAsync(tenantId, slug, [userId], token);
     }
+
+    /// <summary>R13 J13-4 (C13-7): the court and start of the booking a frame is about; null when it names none.</summary>
+    private async Task<(string? Court, DateTimeOffset StartsAt)?> GameOfAsync(Guid? bookingId, CancellationToken ct)
+    {
+        if (bookingId is null) return null;
+        var game = await _db.Bookings.AsNoTracking().Where(b => b.Id == bookingId)
+            .Select(b => new { b.StartsAt, Court = _db.Courts.Where(c => c.Id == b.CourtId).Select(c => c.Name).FirstOrDefault() })
+            .FirstOrDefaultAsync(ct);
+        return game is null ? null : (game.Court, game.StartsAt);
+    }
+
+    /// <summary>R13 X13-2 (C13-7): the other member on a share row, by name; null on every other part.</summary>
+    private static string? NameOf(IReadOnlyDictionary<Guid, string> names, Guid? userId) =>
+        userId.HasValue ? names.GetValueOrDefault(userId.Value) : null;
 
     /// <summary>The named SSE event the wallet stream carries alongside its legacy unnamed frame.</summary>
     public const string BalanceEvent = "balance";
@@ -304,8 +314,11 @@ public sealed class LedgerService
     /// E10-1: each row of the movement for the frame's <c>parts</c> — its type reason and its
     /// signed minutes — so a refund-and-penalty pair can be said as both, not as their net.
     /// </summary>
-    internal static IReadOnlyList<BalancePart> PartsOf(IEnumerable<LedgerPosting> postings, IReadOnlyList<LedgerPosting>? unitOfWork = null) =>
-        [.. postings.Select(p => new BalancePart(ReasonFor(p.Type), p.AmountMinutes) { CounterpartyUserId = CounterpartyOf(p, unitOfWork) })];
+    internal static IReadOnlyList<BalancePart> PartsOf(IEnumerable<LedgerPosting> postings, IReadOnlyList<LedgerPosting>? unitOfWork = null)
+    {
+        // Block body: lizard reads an object initialiser's `{` in an expression body as the end of the function (see below).
+        return [.. postings.Select(p => new BalancePart(ReasonFor(p.Type), p.AmountMinutes) { CounterpartyUserId = CounterpartyOf(p, unitOfWork) })];
+    }
 
     /// <summary>
     /// R13 X13-2: on a share leg, the member on the pair's other leg — the leg posted beside it under
@@ -519,7 +532,7 @@ public sealed class LedgerService
         await _db.SaveChangesAsync(ct);
 
         // Queued for after the commit, not published here — D2-B07 and RealtimeOutbox.
-        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor([posting]), ct, MoneyIn([posting]), [posting]);
+        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor([posting]), ct, [posting]);
         await MirrorAsync(entry, ct);
 
         return entry;
