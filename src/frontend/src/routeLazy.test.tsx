@@ -1,8 +1,7 @@
 import { Suspense, createElement, lazy } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { routeLazy } from "./App";
-import { arrivedChunk, noteChunk, routeChunks } from "./routeChunks";
+import { arrivedChunk, noteChunk, routeChunks, routeLazy } from "./routeChunks";
 
 /**
  * R14 PERF — the first Wallet tap of a session showed the route skeleton for 310–318 ms although the

@@ -1,4 +1,5 @@
-import { useSyncExternalStore, type ComponentType } from "react";
+import { lazy, useSyncExternalStore, type ComponentType } from "react";
+import { loadChunk } from "./lib/chunkLoad";
 import { whenApiQuiet } from "./lib/api";
 import { prefetchMyInvites } from "./lib/earlyInvites";
 import { prefetchRouteData } from "./lib/offline/memberReads";
@@ -276,3 +277,18 @@ export function subscribeNavigationPending(listener: () => void): () => void {
 export function useNavigationPending(): boolean {
   return useSyncExternalStore(subscribeNavigationPending, isNavigationPending, () => false);
 }
+
+/**
+ * R14 PERF — a member tab page (`routeChunks`): once its module has arrived by ANY path (the tab
+ * bar's idle prefetch, a link's intent, an earlier open), React.lazy is answered by a thenable that
+ * resolves synchronously, so the page mounts in the tap's commit. A plain `lazy` re-imported the
+ * prefetched module and suspended once on the promise; the shown skeleton is then held ≥ 300 ms
+ * (React's fallback throttle) — the first Wallet tap of a session measured 310–318 ms of skeleton
+ * on a 7 ms open. Not yet arrived: the ordinary `loadChunk` path and its skeleton.
+ */
+export const routeLazy = (name: ChunkName) =>
+  lazy(() => {
+    const ready = arrivedChunk(name);
+    if (ready) return { then: (resolve: (m: { default: ComponentType }) => void) => resolve(ready) } as Promise<{ default: ComponentType }>;
+    return loadChunk(routeChunks[name]);
+  });

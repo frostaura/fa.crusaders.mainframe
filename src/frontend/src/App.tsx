@@ -17,7 +17,7 @@ import { RouteAnnouncer } from "./components/RouteAnnouncer";
 import { RouteSkeleton } from "./components/shell/SessionScreens";
 import { RequireAuth } from "./components/shell/RequireAuth";
 import { loadChunk } from "./lib/chunkLoad";
-import { arrivedChunk, loadAdminFrame, routeChunks, type ChunkName } from "./routeChunks";
+import { loadAdminFrame, routeLazy } from "./routeChunks";
 import { NavPrefetch } from "./components/shell/NavPrefetch";
 
 /**
@@ -74,21 +74,6 @@ const named = <K extends string>(load: () => Promise<Record<K, ComponentType>>, 
       arrived.set(load, m as Record<string, ComponentType>);
       return { default: m[name] };
     });
-  });
-
-/**
- * R14 PERF — a member tab page (`routeChunks`): once its module has arrived by ANY path (the tab
- * bar's idle prefetch, a link's intent, an earlier open), React.lazy is answered by a thenable that
- * resolves synchronously, so the page mounts in the tap's commit. A plain `lazy` re-imported the
- * prefetched module and suspended once on the promise; the shown skeleton is then held ≥ 300 ms
- * (React's fallback throttle) — the first Wallet tap of a session measured 310–318 ms of skeleton
- * on a 7 ms open. Not yet arrived: the ordinary `loadChunk` path and its skeleton.
- */
-export const routeLazy = (name: ChunkName) =>
-  reactLazy(() => {
-    const ready = arrivedChunk(name);
-    if (ready) return { then: (resolve: (m: { default: ComponentType }) => void) => resolve(ready) } as Promise<{ default: ComponentType }>;
-    return loadChunk(routeChunks[name]);
   });
 
 const AdminLayout = named(loadAdminFrame, "AdminLayout");
