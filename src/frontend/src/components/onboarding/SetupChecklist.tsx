@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { IconButton } from "@/components/ui/icon-button";
@@ -10,7 +10,7 @@ import { endpoints, type WalletResponse, type WebAuthnCredentialRow } from "@/li
 import { useInstallState } from "@/lib/installPrompt";
 import { CHECKLIST, GET_STARTED_PATH } from "@/lib/onboardingCopy";
 import {
-  CHECKLIST_WALLET_PAGE, checklistProgress, deriveChecklist, type ChecklistItem,
+  CHECKLIST_WALLET_PAGE, checklistProgress, deriveChecklist, type ChecklistItem, type ChecklistItemId,
 } from "@/lib/setupChecklist";
 import { cn } from "@/lib/utils";
 import { useOnboarding, useProfileOrNull } from "./useOnboarding";
@@ -51,6 +51,48 @@ function useChecklistReads(enabled: boolean): Reads {
   return reads;
 }
 
+/**
+ * R15 X15-4 — the last states this device read, per member. Offline (or with the club
+ * unreachable) both reads fail, and the card went from "1 of 4 done" to "0 of 4" with three
+ * rows of "Couldn't check just now" — telling a member who added a passkey yesterday that they
+ * had not. A failed read now shows the state last read on this phone; "Couldn't check" is left
+ * for an item this phone has never read. Per member because the desk tablet is shared.
+ */
+const CHECKLIST_KEPT_KEY = "crusaders.setup-checklist.kept";
+type Kept = Partial<Record<ChecklistItemId, "done" | "todo">>;
+
+function keptStore(): Storage | null {
+  try { return window.localStorage ?? null; } catch { return null; }
+}
+
+function readKept(userId: string | null): Kept {
+  if (!userId) return {};
+  try {
+    const all: unknown = JSON.parse(keptStore()?.getItem(CHECKLIST_KEPT_KEY) ?? "{}");
+    const mine = all && typeof all === "object" ? (all as Record<string, unknown>)[userId] : null;
+    return mine && typeof mine === "object" ? (mine as Kept) : {};
+  } catch { return {}; }
+}
+
+function writeKept(userId: string | null, items: ChecklistItem[]) {
+  if (!userId) return;
+  const known: Kept = {};
+  for (const item of items) if (item.state !== "unknown") known[item.id] = item.state;
+  try {
+    const raw: unknown = JSON.parse(keptStore()?.getItem(CHECKLIST_KEPT_KEY) ?? "{}");
+    const all = raw && typeof raw === "object" ? (raw as Record<string, Kept>) : {};
+    keptStore()?.setItem(CHECKLIST_KEPT_KEY, JSON.stringify({ ...all, [userId]: { ...(all[userId] ?? {}), ...known } }));
+  } catch { /* the kept states are a convenience; the reads are the record */ }
+}
+
+/** A failed read's item takes the state last read on this phone, where there is one. */
+function withKept(items: ChecklistItem[], kept: Kept): ChecklistItem[] {
+  return items.map((item) => {
+    const last = kept[item.id];
+    return item.state === "unknown" && last ? { ...item, state: last } : item;
+  });
+}
+
 export function SetupChecklist() {
   const profile = useProfileOrNull();
   const onboarding = useOnboarding();
@@ -58,13 +100,14 @@ export function SetupChecklist() {
   const active = (profile?.status ?? "").toLowerCase() === "active";
   const hidden = onboarding.local.checklistHidden === true;
   const reads = useChecklistReads(active && !hidden);
+  const loading = reads.passkeys === undefined || reads.wallet === undefined;
+  const installed = install.standalone || install.installedNow || onboarding.local.installed === true;
+  const read = useMemo(() => deriveChecklist({ ...reads, installed }), [reads, installed]);
+  const who = onboarding.userId;
+  useEffect(() => { if (!loading) writeKept(who, read); }, [loading, read, who]);
 
   if (!active || hidden) return null;
-  const loading = reads.passkeys === undefined || reads.wallet === undefined;
-  const items = deriveChecklist({
-    ...reads,
-    installed: install.standalone || install.installedNow || onboarding.local.installed === true,
-  });
+  const items = loading ? read : withKept(read, readKept(who));
   const progress = checklistProgress(items);
   if (!loading && progress.allDone) return null;
 

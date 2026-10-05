@@ -75,6 +75,8 @@ function wizardAt(entry = "/get-started") {
 beforeEach(() => {
   resetOnboardingStore();
   window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+  // R15 X15-4 — the checklist keeps its last read states per member on this phone.
+  window.localStorage.removeItem("crusaders.setup-checklist.kept");
   window.sessionStorage.clear();
 });
 
