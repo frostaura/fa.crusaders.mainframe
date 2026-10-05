@@ -15,7 +15,7 @@ public static class AuthEndpoints
     {
         // Rate-limited as a group. Login and reset are password oracles; register is a
         // membership-number oracle; every one of them is anonymous by necessity.
-        var g = app.MapGroup("/api/v1/auth").RequireRateLimiting(RateLimitPolicies.Auth);
+        var g = app.MapGroup("/api/v1/auth").RequireRateLimiting(RateLimitPolicies.Auth).RefuseUnstorableText();
 
         g.MapPost("/register", async (RegisterRequest req, AuthService auth, CancellationToken ct) =>
         {
@@ -249,6 +249,9 @@ public static class AuthEndpoints
 /// </summary>
 internal static class RegistrationRules
 {
+    /// <summary><c>users.email</c> is <c>varchar(320)</c>; <c>memberships.membership_number</c> <c>varchar(64)</c>.</summary>
+    internal const int MaxEmailLength = 320, MaxMembershipNumberLength = 64;
+
     internal static IResult? Refusal(RegisterRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password)
@@ -258,6 +261,13 @@ internal static class RegistrationRules
         }
 
         if (req.Password.Length < 8) return Results.BadRequest(new { error = "password_too_short" });
+
+        // R16 D16-1: the two columns that answered 500 for a value past their size.
+        if (req.Email.Trim().Length > MaxEmailLength) return Results.BadRequest(new { error = "email_too_long", max_length = MaxEmailLength });
+        if (req.MembershipNumber.Trim().Length > MaxMembershipNumberLength)
+        {
+            return Results.BadRequest(new { error = "membership_number_too_long", max_length = MaxMembershipNumberLength });
+        }
 
         if (!PersonNames.IsAcceptable(req.FullName.Trim()))
         {

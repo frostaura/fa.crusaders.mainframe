@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,7 +29,7 @@ public static class AdminDeviceEndpoints
 {
     public static IEndpointRouteBuilder MapAdminDeviceEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/v1/admin/devices").RequireAuthorization(p => p.RequireRole("admin"));
+        var g = app.MapGroup("/api/v1/admin/devices").RequireAuthorization(p => p.RequireRole("admin")).RefuseUnstorableText();
 
         // Declared before the "/{id:guid}" routes for readability only — the guid
         // constraint already stops "api-key" matching them.

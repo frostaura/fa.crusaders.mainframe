@@ -52,11 +52,15 @@ public static partial class DeviceBody
     /// </summary>
     public const int MaxBytes = 256 * 1024;
 
-    /// <summary>The fault's detail when invalid UTF-8 was replaced and the body was otherwise read.</summary>
-    public const string ReplacedDetail = "invalid UTF-8 read as U+FFFD";
+    /// <summary>
+    /// The fault's detail when some characters could not be read and were replaced, and the rest of
+    /// the body was read and acted on (invalid UTF-8, or a NUL — R16 D16-1). R16 D16-5: plain words,
+    /// distinct from <see cref="NotJsonDetail"/>; the console keys its explanation on the two.
+    /// </summary>
+    public const string ReplacedDetail = "some characters could not be read and were replaced; the rest was read and used";
 
-    /// <summary>The fault's detail when the body could not be read as JSON at all.</summary>
-    public const string NotJsonDetail = "body is not JSON";
+    /// <summary>The fault's detail when the body could not be read at all, so nothing in it was used.</summary>
+    public const string NotJsonDetail = "the message could not be read at all, so nothing in it was used";
 
     /// <summary>Reads a device body as <typeparamref name="T"/> — see the class comment.</summary>
     public static async ValueTask<T> ReadAsync<T>(HttpContext ctx) where T : class
@@ -66,6 +70,9 @@ public static partial class DeviceBody
 
         var replaced = !System.Text.Unicode.Utf8.IsValid(bytes);
         if (replaced) bytes = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(bytes));
+        // R16 D16-1: a NUL (the JSON escape \u0000) is a character no text column can hold — a version
+        // or a capability carrying one answered 500. Read like a garbled byte: U+FFFD, and the fault.
+        if (ReplaceNulEscapes(bytes)) replaced = true;
 
         T? value;
         try
@@ -82,6 +89,33 @@ public static partial class DeviceBody
         if (replaced) await FileAsync(ctx, bytes, ReplacedDetail);
         return value;
     }
+
+    /// <summary>
+    /// Rewrites every JSON escape <c>\u0000</c> in place as <c>\uFFFD</c> (same length), and answers
+    /// whether there was one. Escapes are read in pairs, so an escaped backslash followed by
+    /// <c>u0000</c> — the six characters of text, not a NUL — is left alone.
+    /// </summary>
+    internal static bool ReplaceNulEscapes(byte[] bytes)
+    {
+        var found = false;
+        for (var i = 0; i < bytes.Length - 1; i++)
+        {
+            if (bytes[i] != (byte)'\\') continue;
+            if (bytes[i + 1] == (byte)'u' && i + 5 < bytes.Length && IsNulDigits(bytes, i + 2))
+            {
+                bytes[i + 2] = (byte)'F';
+                bytes[i + 3] = (byte)'F';
+                bytes[i + 4] = (byte)'F';
+                bytes[i + 5] = (byte)'D';
+                found = true;
+            }
+            i++; // the escaped character is never the start of another escape
+        }
+        return found;
+    }
+
+    private static bool IsNulDigits(byte[] bytes, int at) =>
+        bytes[at] == '0' && bytes[at + 1] == '0' && bytes[at + 2] == '0' && bytes[at + 3] == '0';
 
     /// <summary>The body's bytes, or null when it is larger than <see cref="MaxBytes"/>.</summary>
     private static async Task<byte[]?> ReadBytesAsync(HttpContext ctx)
@@ -135,7 +169,7 @@ public static partial class DeviceBody
     }
 
     [GeneratedRegex("\"mac\"\\s*:\\s*\"([0-9A-Fa-f:\\-. ]{12,17})\"")]
-    private static partial Regex MacField();
+    internal static partial Regex MacField();
 }
 
 /// <summary>

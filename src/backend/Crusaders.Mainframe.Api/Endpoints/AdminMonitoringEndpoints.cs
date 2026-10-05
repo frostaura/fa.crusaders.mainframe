@@ -307,7 +307,7 @@ public static class AdminMonitoringEndpoints
 
             // The sentence beside the machine value: a club filtering a spreadsheet wants the
             // stable one and a club reading it wants the words.
-            DeviceErrorCodes.HeadlineOf(row.Code),
+            DeviceErrorCodes.HeadlineOf(row.Code, row.Detail),
             row.Detail ?? "",
             row.Court?.ToString(invariant) ?? "",
             row.Count.ToString(invariant),

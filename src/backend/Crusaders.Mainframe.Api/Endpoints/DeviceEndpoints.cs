@@ -114,8 +114,7 @@ public static class DeviceEndpoints
         MemberCodeRollout.NoteCapabilities(device!, req.Caps, now);
 
         device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
-        if (req.EffectiveRunningVersion is { } running) device.RunningVersion = running;
-        if (!string.IsNullOrWhiteSpace(req.MegaVersion)) device.MegaVersion = req.MegaVersion.Trim();
+        NoteVersions(faults, device, req);
 
         await db.SaveChangesAsync(ct);
 
@@ -165,6 +164,35 @@ public static class DeviceEndpoints
         }
 
         return Results.Ok(await CourtBoxBodyAsync(services, device, req, s, now, ct));
+    }
+
+    /// <summary>The widest version string a board's row keeps (<c>running_version</c>, <c>mega_version</c>: <c>varchar(32)</c>).</summary>
+    public const int VersionMaxLength = 32;
+
+    /// <summary>The fault's detail for a version too long to keep (R16 D16-1).</summary>
+    public const string VersionTooLongDetail = "it reported a version longer than 32 characters, which was not kept";
+
+    /// <summary>
+    /// The two versions onto the row — R16 D16-1. A version past the column's 32 characters answered
+    /// the whole heartbeat 500, and a box that cannot heartbeat has no roster: a diagnostic field must
+    /// not take a court out of service (the reason <see cref="HeartbeatRequest.NoPush"/> binds wide).
+    /// So an over-long one is NOT kept — the row keeps what it had, rather than a cut string that reads
+    /// like a real version — and the club's error log says so, against the board.
+    /// </summary>
+    private static void NoteVersions(DeviceFaultSink faults, Device device, HeartbeatRequest req)
+    {
+        var tooLong = false;
+        if (req.EffectiveRunningVersion is { } running)
+        {
+            if (running.Length <= VersionMaxLength) device.RunningVersion = running;
+            else tooLong = true;
+        }
+        if (req.MegaVersion?.Trim() is { Length: > 0 } mega)
+        {
+            if (mega.Length <= VersionMaxLength) device.MegaVersion = mega;
+            else tooLong = true;
+        }
+        if (tooLong) faults.MalformedBody("heartbeat", VersionTooLongDetail, device);
     }
 
     /// <summary>

@@ -267,7 +267,7 @@ public sealed class DeviceErrorService
             device_id = row.DeviceId,
             code = row.Code,
             severity = SeverityWire(row.Severity),
-            headline = DeviceErrorCodes.HeadlineOf(row.Code),
+            headline = DeviceErrorCodes.HeadlineOf(row.Code, row.Detail),
             count = row.Count,
             first_seen_at = row.FirstSeenAt,
             last_seen_at = row.LastSeenAt,

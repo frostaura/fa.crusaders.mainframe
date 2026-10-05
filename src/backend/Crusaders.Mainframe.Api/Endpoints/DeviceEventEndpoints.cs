@@ -537,7 +537,9 @@ public static class DeviceEventEndpoints
     /// </summary>
     private static EventFacts TimeOf(DeviceEventBatch batch, DeviceEventDto e, DateTimeOffset now)
     {
-        var claimed = now.AddMilliseconds(-(double)(batch.UptimeMs - e.UptimeMs));
+        // R16 D16-1: saturating, so an uptime nothing bounds (2^53 ms behind its batch) is a clamped
+        // time — the event kept, the desk told — never a 500 that pins the board's queue.
+        var claimed = DeviceTime.Add(now, -DeviceTime.Ago(batch.UptimeMs, e.UptimeMs));
         return claimed > now || now - claimed > MaxEventAge
             ? new EventFacts(now, claimed)
             : new EventFacts(claimed, null);
@@ -1178,7 +1180,7 @@ public static class DeviceEventEndpoints
             .FirstOrDefaultAsync(ct);
         if (session is null) return new ActivationOutcome("unpaired", null, ReleaseKind);
 
-        var impliedEnd = session.OccurredAt.AddMilliseconds(e.DurationMs);
+        var impliedEnd = DeviceTime.Add(session.OccurredAt, e.DurationMs);
         if ((impliedEnd - occurredAt).Duration() > ReleasePairingTolerance)
         {
             return new ActivationOutcome("unpaired", session.BookingId, ReleaseKind);
@@ -1379,10 +1381,10 @@ public static class DeviceEventEndpoints
         var soldEnd = BookingService.OriginalEndsAt(booking);
         var start = scannedAt > booking.StartsAt ? scannedAt : booking.StartsAt;
 
-        var end = grantMs > 0 ? scannedAt.AddMilliseconds(grantMs) : soldEnd;
+        var end = grantMs > 0 ? DeviceTime.Add(scannedAt, grantMs) : soldEnd;
         if (heldMs is > 0 and { } held)
         {
-            var measured = scannedAt.AddMilliseconds(held);
+            var measured = DeviceTime.Add(scannedAt, held);
             if (measured < end) end = measured;
         }
         if (end > soldEnd) end = soldEnd;

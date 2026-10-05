@@ -175,6 +175,25 @@ public static class DeviceErrorCodes
     /// the raw string — never a guess at what it might have meant.
     /// </para>
     /// </summary>
+    public static string HeadlineOf(string code, string? detail)
+    {
+        // R16 D16-5: malformed_body is filed for a message that could not be read at all (dropped) AND
+        // for one read anyway — a few characters replaced, or a version too long to keep — whose rest
+        // WAS used. "Could not read" is false for the second, so its headline follows the detail.
+        if (code == MalformedBody && detail is { } d)
+        {
+            if (d.EndsWith(Endpoints.DeviceBody.ReplacedDetail, StringComparison.Ordinal)) return MalformedBodyReadAnywayHeadline;
+            if (d.EndsWith(Endpoints.DeviceEndpoints.VersionTooLongDetail, StringComparison.Ordinal)) return MalformedBodyVersionHeadline;
+        }
+        return HeadlineOf(code);
+    }
+
+    /// <summary>R16 D16-5: the headline of a <see cref="MalformedBody"/> row whose message was read with some characters replaced.</summary>
+    public const string MalformedBodyReadAnywayHeadline = "A board sent a message with a few unreadable characters, and the rest was used";
+
+    /// <summary>R16 D16-5: the headline of a <see cref="MalformedBody"/> row for a version too long to keep.</summary>
+    public const string MalformedBodyVersionHeadline = "A board reported a version too long to keep, and the rest of its check-in was used";
+
     public static string HeadlineOf(string code)
     {
         return code switch

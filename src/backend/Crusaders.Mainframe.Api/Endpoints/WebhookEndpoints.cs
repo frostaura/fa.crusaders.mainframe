@@ -14,7 +14,7 @@ public static class WebhookEndpoints
 {
     public static IEndpointRouteBuilder MapWebhookEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/v1/webhooks").RequireAuthorization();
+        var g = app.MapGroup("/api/v1/webhooks").RequireAuthorization().RefuseUnstorableText();
 
         g.MapGet("/", async (HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
         {
@@ -33,6 +33,7 @@ public static class WebhookEndpoints
             // This is the fast, legible refusal; the boundary is at the socket, in
             // WebhookSender.PostAsync, because a name that resolves publicly today can
             // resolve to the relay controller tomorrow.
+            if (TooLong(req) is { } tooLong) return tooLong;
             var validation = ValidateUrl(req.UrlTemplate, guard, honourAllowList: false);
             if (validation is not null) return Results.BadRequest(new { error = validation });
 
@@ -62,7 +63,7 @@ public static class WebhookEndpoints
         });
 
         // Admin: tenant-wide endpoints
-        var admin = app.MapGroup("/api/v1/admin/webhooks").RequireAuthorization(p => p.RequireRole("admin"));
+        var admin = app.MapGroup("/api/v1/admin/webhooks").RequireAuthorization(p => p.RequireRole("admin")).RefuseUnstorableText();
 
         admin.MapGet("/", async (MainframeDbContext db, CancellationToken ct) =>
         {
@@ -72,6 +73,7 @@ public static class WebhookEndpoints
 
         admin.MapPost("/", async (CreateWebhookRequest req, HttpContext ctx, MainframeDbContext db, ITenantContext tenant, IOutboundAddressGuard guard, AdminChangeRecorder recorder, CancellationToken ct) =>
         {
+            if (TooLong(req) is { } tooLong) return tooLong;
             var validation = ValidateUrl(req.UrlTemplate, guard);
             if (validation is not null) return Results.BadRequest(new { error = validation });
             var endpoint = new WebhookEndpoint
@@ -196,6 +198,28 @@ public static class WebhookEndpoints
             last_failure_at = w.LastFailureAt,
             secret = includeSecret ? w.Secret : null,
         };
+    }
+
+    /// <summary>The longest stored URL template, event filter and description (the columns' own sizes).</summary>
+    public const int MaxUrlLength = 2048, MaxEventFilterLength = 1024, MaxDescriptionLength = 255;
+
+    /// <summary>
+    /// R16 D16-1: a field longer than its column is refused by name, with its limit — it reached
+    /// the database and answered 500. (A NUL in any of them is refused by the group's
+    /// <see cref="StorableText.RefuseUnstorableText{TBuilder}"/> before this runs.)
+    /// </summary>
+    internal static IResult? TooLong(CreateWebhookRequest req)
+    {
+        if (req.UrlTemplate?.Length > MaxUrlLength) return Refused("url_too_long", MaxUrlLength);
+        if (req.EventFilter?.Length > MaxEventFilterLength) return Refused("event_filter_too_long", MaxEventFilterLength);
+        if (req.Description?.Length > MaxDescriptionLength) return Refused("description_too_long", MaxDescriptionLength);
+        return null;
+    }
+
+    /// <remarks>Block body: an expression body holding an object initialiser's braces trips lizard.</remarks>
+    private static IResult Refused(string code, int max)
+    {
+        return Results.BadRequest(new { error = code, max_length = max });
     }
 
     /// <summary>

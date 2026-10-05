@@ -52,7 +52,10 @@ public sealed class UtcInstantConverter : JsonConverter<DateTimeOffset>
 /// <item>any other route: <c>400 {"error":"invalid_body"}</c> when the body could not be read, and
 /// <c>400 {"error":"bad_request"}</c> for any other binding failure (a route or query value);</item>
 /// <item>a size or media-type refusal keeps its own status (<c>413 body_too_large</c>,
-/// <c>415 unsupported_media_type</c>).</item>
+/// <c>415 unsupported_media_type</c>);</item>
+/// <item>R16 D16-1: a value PostgreSQL refused as unstorable (SQLSTATE 22001 too long, 22021 a NUL)
+/// is the same 400 — <c>malformed_body</c> on a device route, <c>invalid_body</c> elsewhere
+/// (<see cref="StorableText"/>).</item>
 /// </list>
 /// </summary>
 public static class InternalErrors
@@ -108,6 +111,14 @@ public static class InternalErrors
 
         // A JsonException a handler let escape while reading the body it was sent (ReadFromJsonAsync).
         if (error is JsonException && CarriesBody(request))
+        {
+            return (StatusCodes.Status400BadRequest, device ? Services.DeviceErrorCodes.MalformedBody : InvalidBody);
+        }
+
+        // R16 D16-1: a value PostgreSQL cannot store — longer than its column, or carrying a NUL — is
+        // the caller's, never the server's. The named routes refuse it up front (StorableText); this is
+        // the net under every other one, so no request can turn an unstorable string into a 500.
+        if (StorableText.IsUnstorable(error))
         {
             return (StatusCodes.Status400BadRequest, device ? Services.DeviceErrorCodes.MalformedBody : InvalidBody);
         }

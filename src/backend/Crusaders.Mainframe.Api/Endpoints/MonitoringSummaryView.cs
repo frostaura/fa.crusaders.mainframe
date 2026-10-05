@@ -114,7 +114,7 @@ public static class MonitoringErrorRow
 
             // The sentence, composed server-side from the code. This audience is club members
             // and volunteer admins, and `relay_cmd_dropped` is not a sentence.
-            headline = DeviceErrorCodes.HeadlineOf(row.Code),
+            headline = DeviceErrorCodes.HeadlineOf(row.Code, row.Detail),
         };
     }
 }

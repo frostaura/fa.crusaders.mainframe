@@ -322,13 +322,11 @@ builder.Services.AddRateLimiter(options =>
         });
     });
 
-    static string DeviceKey(HttpContext ctx)
-    {
-        // By club when the device scheme recognised the key, else by client address —
-        // which is what an unauthenticated flood at this surface gets.
-        var tenantId = ctx.User.DeviceTenantId();
-        return tenantId is { } id ? $"tenant:{id:N}" : $"ip:{ClientKey(ctx)}";
-    }
+    // R16: by BOARD when the device scheme recognised the key and the body named a MAC, else by
+    // club, else by client address — which is what an unauthenticated flood at this surface gets.
+    // One club bucket let a single board refused 403 (bridge 2.2.5 re-posting every pass) spend
+    // the whole club's minute and 429 every other box and the door gate. See DeviceRateKey.
+    static string DeviceKey(HttpContext ctx) => DeviceRateKey.Of(ctx, ClientKey(ctx));
 
     options.AddPolicy(RateLimitPolicies.Device, ctx =>
         RateLimitPartition.GetFixedWindowLimiter(DeviceKey(ctx), _ => new FixedWindowRateLimiterOptions
@@ -678,6 +676,8 @@ app.UseCors();
 // the rate-limiting section above for why that is cheap. The forwarded-headers rewrite
 // comes first of all: every later decision about "who is calling" reads what it wrote.
 app.UseAuthentication();
+// The device limiter's per-board key is read out of the body, so ahead of the limiter (R16).
+app.UseDeviceRateKey();
 app.UseRateLimiter();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthorization();
