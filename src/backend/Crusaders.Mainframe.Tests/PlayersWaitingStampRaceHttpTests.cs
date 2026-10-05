@@ -152,7 +152,8 @@ public sealed class PlayersWaitingStampRaceHttpTests(PostgresFixture pg) : IClas
         var accept = await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{x}/players/{seat}/accept", new { expectedShareMinutes = share });
         Assert.True(accept.IsSuccessStatusCode, await accept.Content.ReadAsStringAsync());
         await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == x).CheckedInAt = DateTimeOffset.UtcNow);
-        Assert.True((await club.Client(f, club.Organiser).PostAsJsonAsync($"/api/v1/bookings/{x}/cancel", new { })).IsSuccessStatusCode);
+        // R15 D15-5: a member may not cancel once checked in — the S4 cancel is the desk's now (same money: (0, 0), shares owed).
+        Assert.True((await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/bookings/{x}/cancel", new { reason = "Court flooded" })).IsSuccessStatusCode);
         await club.CreditAsync(f, club.Organiser, -share);
         Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Organiser));
         return (x, seat);

@@ -257,7 +257,9 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             if (s4)
             {
                 await _club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == id).CheckedInAt = DateTimeOffset.UtcNow);
-                Assert.True((await Organiser.PostAsJsonAsync($"/api/v1/bookings/{id}/cancel", new { })).IsSuccessStatusCode);
+                // R15 D15-5: a member may not cancel once checked in — the S4 cancel is the desk's now (same money: (0, 0), shares owed).
+                var cancel = await Admin.PostAsJsonAsync($"/api/v1/admin/bookings/{id}/cancel", new { reason = "property step" });
+                Assert.True(cancel.IsSuccessStatusCode, await cancel.Content.ReadAsStringAsync());
             }
             // Some played games are OLD (round 8): 10–40 days ago, deadline long passed, so the
             // minute sweep's window no longer reaches them — a return waiting on one is retried by
@@ -442,15 +444,28 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             return $"spend {price} (spendable {m.Spendable}) -> {(int)response.StatusCode}";
         }
 
-        /// <summary>A live game is checked into and cancelled: it becomes S4 mid-run.</summary>
+        /// <summary>
+        /// A live game is checked into and cancelled: it becomes S4 mid-run.
+        ///
+        /// <para>
+        /// R15 D15-5: the cancel is the desk's — a member may not cancel once checked in. Only a game
+        /// whose start is still ahead, exactly the games the organiser's cancel used to reach: a
+        /// started one was refused <c>already_started</c> before and stays checked in and uncancelled,
+        /// as before (the desk would cancel it, which would widen what S4 covers, not keep it).
+        /// </para>
+        /// </summary>
         private async Task<string> CheckInAndCancelAsync(Game game)
         {
+            var started = false;
             await _club.WriteAsync(f, db =>
             {
                 var b = db.Bookings.IgnoreQueryFilters().First(x => x.Id == game.Id);
                 if (b.Status == BookingStatus.Booked) b.CheckedInAt = DateTimeOffset.UtcNow;
+                started = b.StartsAt <= DateTimeOffset.UtcNow;
             });
-            return await Status("check-in + cancel", Organiser.PostAsJsonAsync($"/api/v1/bookings/{game.Id}/cancel", new { }));
+            return started
+                ? await Status("check-in + cancel (started: refused)", Organiser.PostAsJsonAsync($"/api/v1/bookings/{game.Id}/cancel", new { }))
+                : await Status("check-in + desk cancel", Admin.PostAsJsonAsync($"/api/v1/admin/bookings/{game.Id}/cancel", new { reason = "property step" }));
         }
 
         /// <summary>The organiser lowers one live partner's share by 4, naming every live seat's figure.</summary>
