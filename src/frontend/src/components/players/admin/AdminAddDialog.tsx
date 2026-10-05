@@ -17,6 +17,7 @@ import { DETAIL_ADMIN, PLAYERS_UNSURE, playersRefusal } from "@/lib/playersCopy"
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useRead } from "@/lib/useRead";
 import { addOrProve } from "../detail/detailReadBack";
+import { useComplaintFocus } from "./complaintFocus";
 
 /**
  * The admin adding a player as the club: a member — invited, or placed as in without their
@@ -60,6 +61,7 @@ function useAddFlow({ detail, onAdded, onStale }: Props) {
   const [kind, setKind] = useState<Kind>("member");
   const [form, setForm] = useState<Form>({ userId: null, guest: "", accepted: false, reason: "" });
   const [tried, setTried] = useState(false);
+  const [refused, setRefused] = useState(0);
   const loadMembers = useCallback(() => endpoints.adminMembers("Active"), []);
   const [members] = useRead("active-members", loadMembers);
   const onBooking = new Set(detail.players.map((p) => p.user_id).filter(Boolean));
@@ -78,7 +80,10 @@ function useAddFlow({ detail, onAdded, onStale }: Props) {
   const confirm = () => {
     setTried(true);
     if (problemOf(kind, form) === null) void add.run();
+    else setRefused((n) => n + 1);
   };
+  // R16 X16-3 — a refused add takes the keyboard to the first complaint.
+  useComplaintFocus(refused, "[data-dialog='admin-add']");
   const patch = (next: Partial<Form>) => setForm((prev) => ({ ...prev, ...next }));
   return { kind, setKind, form, patch, members, list, add, problem, confirm };
 }

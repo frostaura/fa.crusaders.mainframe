@@ -17,6 +17,7 @@ import { seatWriteOrProve } from "../detail/detailReadBack";
 import type { Notice } from "../detail/useOrganiserHands";
 import { useMenuReturnFocus } from "../../members/useMenuReturnFocus";
 import { ACTS, overdraftSentence } from "./adminActs";
+import { useComplaintFocus } from "./complaintFocus";
 
 /**
  * One god-mode act on one seat, with its reason — required, because every one lands in the
@@ -47,6 +48,8 @@ function useActFlow(props: Props) {
   const [authorised, setAuthorised] = useState(false);
   const [asked, setAsked] = useState(spec.alwaysOverdraft);
   const [tried, setTried] = useState(false);
+  /** R16 X16-3 — confirms refused for a missing reason or go-ahead; each one moves the keyboard to it. */
+  const [refused, setRefused] = useState(0);
   /** The server's `overdraft_not_authorised`, kept: its figures name the shortfall while the resend runs. */
   const [lastRefusal, setLastRefusal] = useState<unknown>(null);
   const name = seatName(player, detail.players);
@@ -72,9 +75,13 @@ function useActFlow(props: Props) {
   const authMissing = tried && asked && !authorised;
   const confirm = () => {
     setTried(true);
-    if (reason.trim() === "" || (asked && !authorised)) return;
+    if (reason.trim() === "" || (asked && !authorised)) {
+      setRefused((n) => n + 1);
+      return;
+    }
     void run.run();
   };
+  useComplaintFocus(refused, `[data-dialog='admin-${act}']`);
   return { spec, name, reason, setReason, authorised, setAuthorised, asked, reasonMissing, authMissing, run, confirm, lastRefusal };
 }
 
@@ -160,6 +167,7 @@ function ReasonField({ flow }: { flow: Flow }) {
 function Overdraft(props: Props & { flow: Flow }) {
   const { flow, detail, player, act } = props;
   const id = useId();
+  const missingId = useId();
   const sentence = overdraftSentence(act, player, detail, flow.lastRefusal);
   return (
     <div data-god-mode="" className="flex flex-col gap-3 rounded-xl border border-warning-strong/30 bg-warning-soft p-4 text-warning-strong">
@@ -171,10 +179,13 @@ function Overdraft(props: Props & { flow: Flow }) {
         </span>
       </p>
       <label htmlFor={id} className="flex min-h-touch items-start gap-3 rounded-lg bg-bg-surface p-3 text-sm text-text-primary">
-        <Checkbox id={id} checked={flow.authorised} onCheckedChange={(v) => flow.setAuthorised(v === true)} className="mt-0.5" />
+        <Checkbox
+          id={id} checked={flow.authorised} onCheckedChange={(v) => flow.setAuthorised(v === true)} className="mt-0.5"
+          aria-invalid={flow.authMissing || undefined} aria-describedby={flow.authMissing ? missingId : undefined}
+        />
         <span className="font-semibold">{sentence}</span>
       </label>
-      {flow.authMissing ? <p className="text-sm font-semibold">{DETAIL_ADMIN.overdraftMissing}</p> : null}
+      {flow.authMissing ? <p id={missingId} className="text-sm font-semibold">{DETAIL_ADMIN.overdraftMissing}</p> : null}
     </div>
   );
 }
