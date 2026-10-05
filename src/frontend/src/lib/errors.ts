@@ -43,6 +43,16 @@ const CROSS_CUTTING: Record<string, string> = {
 };
 
 /**
+ * R16 BE16c — `503 { error: "conflict_retry" }` (with Retry-After): the club's database picked this
+ * request to give way to another change landing on the same row at the same instant, and the
+ * server's own retries ran out. Not down, not a deployment fault, not the member's connection —
+ * asking again a second later is exactly right. A screen's own `codes` still win (the players
+ * screens word their 409 of the same name).
+ */
+export const CONFLICT_RETRY_CAUSE =
+  "someone else was changing the same thing at that exact moment. Try again in a second.";
+
+/**
  * Puts what the member was trying to do in front of why it failed.
  *
  * <p>
@@ -127,6 +137,7 @@ export function describeFailure(err: unknown, opts: DescribeOptions = {}): strin
   const code = errorCode(err);
   if (code && opts.codes?.[code]) return opts.codes[code];
   if (code && CROSS_CUTTING[code]) return CROSS_CUTTING[code];
+  if (code === "conflict_retry") return lead(opts.action, CONFLICT_RETRY_CAUSE);
 
   const byStatus = describeStatus(err, opts.action);
   if (byStatus) return byStatus;
@@ -148,5 +159,7 @@ export function describeFailure(err: unknown, opts: DescribeOptions = {}): strin
 export function isDeploymentFault(err: unknown): boolean {
   const code = errorCode(err);
   if (code === "tenant_not_found" || code === "tenant_unresolved") return true;
+  // A lost race is the one 5xx a retry is MADE for (R16 BE16c).
+  if (code === "conflict_retry") return false;
   return err instanceof ApiError && err.status >= 500;
 }

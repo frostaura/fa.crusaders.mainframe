@@ -102,6 +102,17 @@ const SERVER_DOWN_TEXT: Record<BookingAction, string> = {
 };
 
 /**
+ * R16 BE16c — `503 conflict_retry`: the club DID answer, to say another change to the same court
+ * landed at the same instant and this one gave way. Still no claim about what happened (F1.1) — a
+ * batch may have landed some items before the one that gave way — so it says where to look. The
+ * sheets re-read the day first; this is for a caller that cannot look.
+ */
+export const CONFLICT_RETRY_TEXT: Record<BookingAction, string> = {
+  book: "Someone else was changing that court at the same moment. Check the schedule, and try again if your booking isn't on it.",
+  cancel: "Someone else was changing that booking at the same moment. Check the schedule, and try again if the booking is still there.",
+};
+
+/**
  * An unanswered write, after the sheet re-read the day and looked (see `lib/bookingOutcome`).
  * `checked` — the schedule showed it had not landed; unchecked — even the look failed.
  */
@@ -313,6 +324,11 @@ export type BookingErrorContext = {
   forName?: string | null;
 };
 
+/** A 5xx: a lost race the club answered (R16 BE16c), or the club not answering at all. */
+function serverSentence(e: ApiError, action: BookingAction): string {
+  return e.code === "conflict_retry" ? CONFLICT_RETRY_TEXT[action] : SERVER_DOWN_TEXT[action];
+}
+
 /**
  * @param fallback what to say when the server gave nothing recognisable — phrase it as
  * something the member can do, never as "an error occurred".
@@ -329,7 +345,7 @@ export function describeBookingError(e: unknown, fallback: string, context: Book
   // Both mean the same thing to the person holding the phone.
   if (e.status === 401 || e.code === "tenant_unresolved") return SESSION_LOST_TEXT;
   if (e.status === 429) return describeRateLimited(e, action);
-  if (e.status >= 500) return SERVER_DOWN_TEXT[action];
+  if (e.status >= 500) return serverSentence(e, action);
 
   const withFigures = e.code !== null ? FIGURED[e.code] : undefined;
   if (withFigures) return withFigures(e, context);
