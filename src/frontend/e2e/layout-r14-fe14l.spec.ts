@@ -366,6 +366,25 @@ test.describe("L14-3 review — a long-name card's badges wrap in a row, not a c
   }
 });
 
+test.describe("L14-3 review — every member card keeps its border; the table's last row has no rule", () => {
+  for (const theme of ["light", "dark"] as const) {
+    for (const width of [390, 1280]) {
+      test(`${theme} at ${width} px`, async ({ page, isMobile }) => {
+        test.skip(isMobile !== width < 768, "each width on its own project");
+        await page.addInitScript((t) => window.localStorage.setItem("crusaders:theme", t), theme);
+        await open(page, "/admin/members", { width, height: 900 }, SURFACES.members.routes(), 16);
+        await expect(page.locator("[data-member-row]")).toHaveCount(3, { timeout: 30_000 });
+        const borders = await page.locator("[data-member-row]").evaluateAll((rows) => rows.map((r) => {
+          const cs = getComputedStyle(r);
+          return [cs.borderTopWidth, cs.borderRightWidth, cs.borderBottomWidth, cs.borderLeftWidth].join(" ");
+        }));
+        if (width < 768) expect(borders, "a card lost its border").toEqual(borders.map(() => "1px 1px 1px 1px"));
+        else expect(borders.at(-1), "the table's last row drew a rule").toBe("0px 0px 0px 0px");
+      });
+    }
+  }
+});
+
 /**
  * The surface, the screen, the root font — and, at 320 / 200 %, the reviewer's own 17-letter case,
  * which must stay WHOLE there: the narrow row steps its type and inset down so that it can.

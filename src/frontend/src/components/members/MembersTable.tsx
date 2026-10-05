@@ -108,6 +108,10 @@ const ROW = cn(
   // in the who column's leftover (R14 review: 148px, lopsided, ⋯ floating mid-height).
   "[@container(min-width:20rem)_and_(max-width:47.99rem)]:data-[long-name]:grid-cols-[auto_minmax(0,1fr)_auto]",
   "hover:border-control",
+  // TableBody's `[&_tr:last-child]:border-0` (0,2,1) is the TABLE's bottom rule; on a card it took
+  // the last card's whole border (R14 review). A card keeps its 1px — width only, so the colour
+  // (and hover:border-control) is the card's. The table (48rem) keeps the primitive's rule.
+  "[@container(max-width:47.99rem)]:!border",
   "[@container(min-width:48rem)]:table-row [@container(min-width:48rem)]:rounded-none",
   "[@container(min-width:48rem)]:border-0 [@container(min-width:48rem)]:p-0 [@container(min-width:48rem)]:shadow-none",
 );
