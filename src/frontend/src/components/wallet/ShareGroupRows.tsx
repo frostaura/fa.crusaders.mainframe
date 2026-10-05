@@ -157,7 +157,8 @@ function GroupComment({ head }: { head: Head }) {
         data-share-toggle=""
         className={cn(
           // scroll-mt-14: clear of the sticky column heads when Tab brings it into view (R5 X5-2).
-          "no-lift -mx-1 inline-flex scroll-mt-14 items-start gap-2 rounded-md px-1 text-left font-semibold text-text-primary",
+          // min-h-touch (R16 X16-5): the button's own box is a 44px target, not only the row it stretches over.
+          "no-lift -mx-1 inline-flex min-h-touch scroll-mt-14 items-start gap-2 rounded-md px-1 text-left font-semibold text-text-primary",
           // Stretched over the line (its row is `relative`); the booking link sits above it.
           "after:absolute after:inset-0 after:content-['']",
           "transition-colors duration-fast ease-standard hover:text-accent-strong motion-reduce:transition-none",
