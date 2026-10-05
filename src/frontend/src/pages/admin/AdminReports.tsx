@@ -1,7 +1,7 @@
 import {
   endpoints, type DailyAdminPoint, type RevenueReport, type UtilisationRow,
 } from "../../lib/api";
-import { formatMoney } from "../../lib/utils";
+import { formatMinutes, formatMoney } from "../../lib/utils";
 import { AutoGrid } from "../../components/ui/auto-grid";
 import { Minutes } from "../../components/Minutes";
 import { CLUB_REPORT_COPY as COPY, randPerHour } from "../../lib/reportsCopy";
@@ -132,7 +132,7 @@ function clubSlides({ days, utilisation, noShows }: ClubReport): CarouselSlide[]
 function Sales({ revenue }: { revenue: RevenueReport }) {
   return (
     <Section title={COPY.sales.title} description={COPY.sales.description}>
-      <TotalsCard columns={4} footnote={COPY.sales.footnote}>
+      <TotalsCard columns={4} footnote={<SalesFootnote given={revenue.given_minutes} />}>
         <Stat label={COPY.sales.receivedGross} value={formatMoney(revenue.gross_topups_zar)} />
         <Stat label={COPY.sales.receivedReversed} value={formatMoney(-revenue.reversals_zar)} />
         <Stat label={COPY.sales.receivedNet} value={formatMoney(revenue.net_zar)} />
@@ -144,6 +144,12 @@ function Sales({ revenue }: { revenue: RevenueReport }) {
       </TotalsCard>
     </Section>
   );
+}
+
+/** The sales footnote, and the minutes the club gave apart from it when there were any (R13 J13-2). */
+function SalesFootnote({ given }: { given: number | undefined }) {
+  if (!given || given <= 0) return <>{COPY.sales.footnote}</>;
+  return <>{COPY.sales.footnote} <span>{COPY.sales.givenNote(formatMinutes(given))}</span></>;
 }
 
 /**

@@ -40,6 +40,8 @@ export const CLUB_REPORT_COPY = {
     footnote: "Rand is what members paid — through PayFast and at the desk. Minutes are what those packages "
       + "added to their wallets. A reversal is a payment clawed back after the fact. The price per hour is the "
       + "net rand over the net minutes sold, so a group discount or a bigger package lowers it.",
+    /** R13 J13-2 — free packages the desk gave are not sales: said apart, never counted as sold. */
+    givenNote: (minutes: string) => `The club also gave ${minutes} in free packages — not counted as sold.`,
   },
   totals: {
     title: "Club minutes — totals",

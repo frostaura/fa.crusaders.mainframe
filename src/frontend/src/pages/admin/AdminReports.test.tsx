@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import AdminReportsPage from "./AdminReports";
 import { renderPage, signIn, signOut, stubFetch } from "../../test/harness";
+import { CLUB_REPORT_COPY } from "../../lib/reportsCopy";
 
 /**
  * Review round 7 (lane FC2): every standalone minutes figure on the club's Reports carries its
@@ -41,5 +42,32 @@ describe("Club reports — figures a screen reader hears in words (R7)", () => {
     // A no-break space inside each group, an ordinary space between groups.
     expect(shown.some((el) => el.textContent === "10\u00A0d 20\u00A0h 30\u00A0min")).toBe(true);
     expect(screen.getAllByText("10 days 20 hours 30 minutes").length).toBeGreaterThan(0);
+  });
+});
+
+describe("Club reports — minutes the club gave are never sold (R13 J13-2)", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  function withGiven(given: number | undefined) {
+    return routes().map((r) => r.path === "/api/v1/admin/reports/revenue"
+      ? { ...r, body: { from: "", to: "", gross_topups_zar: 120, reversals_zar: 0, net_zar: 120, gross_topups_minutes: 60, reversals_minutes: 0, net_minutes: 60, zar_per_minute_sold: 2, ...(given === undefined ? {} : { given_minutes: given }) } }
+      : r);
+  }
+
+  it("says how many minutes were given, apart from the minutes sold", async () => {
+    stubFetch(withGiven(60));
+    renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
+    const sales = within(await screen.findByRole("region", { name: CLUB_REPORT_COPY.sales.title }));
+    expect(sales.getByText(CLUB_REPORT_COPY.sales.givenNote("1 h"))).toBeInTheDocument();
+  });
+
+  it("says nothing about gifts when none were given, or the server is older", async () => {
+    for (const given of [0, undefined]) {
+      stubFetch(withGiven(given));
+      const { unmount } = renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
+      await screen.findByRole("region", { name: CLUB_REPORT_COPY.sales.title });
+      expect(screen.queryByText(/given/i)).not.toBeInTheDocument();
+      unmount(); vi.unstubAllGlobals();
+    }
   });
 });

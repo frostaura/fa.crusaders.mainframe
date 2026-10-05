@@ -1886,6 +1886,8 @@ export type RevenueReport = {
   net_minutes: number;
   /** P13 §3.15 — `net_zar ÷ net_minutes`, rounded down to 4 dp; null when `net_minutes ≤ 0`. */
   zar_per_minute_sold?: number | null;
+  /** R13 J13-2 — minutes the desk gave in free packages (R0): not in the sold figures. Absent on an older server. */
+  given_minutes?: number;
 };
 
 // --- doors: member ---------------------------------------------------------------
