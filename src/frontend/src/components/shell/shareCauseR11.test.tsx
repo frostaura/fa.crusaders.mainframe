@@ -39,8 +39,9 @@ describe("R11 E11-1 — the share sentence says the cause", () => {
       .toBe("15 minutes taken again for your share of Court 4 — the session was attended");
   });
   it("the plain sentence (no booking to name) carries the cause too", () => {
+    // R13 J13-4 — a partner's returned share says it was theirs (it was "A share … moved").
     expect(shareMovementPlain(15, "booking_cancelled", undefined))
-      .toBe("A share of a split booking moved 15 minutes into your wallet — the booking was cancelled.");
+      .toBe("15 minutes of your share of a split booking came back — the booking was cancelled.");
     expect(shareMovementPlain(15, undefined, undefined)).toBe("A share of a split booking moved 15 minutes into your wallet.");
   });
   it("an unknown cause falls back to today's words", () => {

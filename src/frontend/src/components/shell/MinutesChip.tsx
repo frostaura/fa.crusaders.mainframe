@@ -113,7 +113,8 @@ function useClubMovementToast() {
     const say = sayAs(delta.amount, delta.parts);
     if (delta.reason === "share_transfer") {
       // R11 E11-1 — said with the frame's cause, named or plain.
-      const plainShare = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy);
+      // R13 X13-3 / J13-4 — who cancelled, and the frame's own court for a booking no longer readable.
+      const plainShare = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy, { cancelledBy: delta.cancelledBy });
       namedShareMovement(delta.amount, me, delta).then((named) => say(named ?? plainShare), () => say(plainShare));
     } else if (awaitsShares(delta)) {
       const timer = window.setTimeout(() => {

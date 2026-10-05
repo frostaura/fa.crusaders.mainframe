@@ -81,8 +81,11 @@ export type BalanceDelta = {
   checkedInBy?: string;
 };
 
-/** R10 E10-1 — one row of a live movement: its ledger type's reason and its signed whole minutes. */
-export type BalancePart = { reason: string; delta_minutes: number };
+/**
+ * R10 E10-1 — one row of a live movement: its ledger type's reason and its signed whole minutes.
+ * R13 X13-2 — a `share_transfer` row may name the other member on it (`counterparty_name`).
+ */
+export type BalancePart = { reason: string; delta_minutes: number; counterparty_name?: string | null };
 
 /** The frame's `parts`, kept only where every entry has the documented shape. */
 export function balanceParts(raw: unknown): BalancePart[] | undefined {

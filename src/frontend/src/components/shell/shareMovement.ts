@@ -16,7 +16,8 @@ import { summariseBooking } from "@/components/wallet/useShareBookings";
  * </p>
  */
 export async function namedShareMovement(
-  amount: number, me: string | null, cause?: { shareCause?: string; shareKeptMinutes?: number; checkedInBy?: string },
+  amount: number, me: string | null,
+  cause?: { shareCause?: string; shareKeptMinutes?: number; checkedInBy?: string; cancelledBy?: "club" | "member" },
 ): Promise<string | null> {
   const wallet = await endpoints.wallet(5, 0);
   const row = wallet.entries.find((e) =>
@@ -33,5 +34,7 @@ export async function namedShareMovement(
   // R11 E11-1 — the frame's cause, said as the inbox says it.
   return shareRowSentence({
     side, signed: row.signedAmountMinutes, place: booking, other, cause: cause?.shareCause, kept: cause?.shareKeptMinutes, by: cause?.checkedInBy,
+    // R13 X13-3 — a partner told the club cancelled, when it did.
+    cancelledBy: cause?.cancelledBy,
   });
 }

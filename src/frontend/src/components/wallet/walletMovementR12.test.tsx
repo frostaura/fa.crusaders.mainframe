@@ -66,7 +66,7 @@ describe("R12 X12-1 — one toast for a cancelled shared booking", () => {
     expect(said).toHaveLength(1);
     expect(said[0]).toContain("The club cancelled your booking");
     expect(said[0]).toContain("30 minutes came back");
-    expect(said[0]).toContain("15 minutes went back to your partners");
+    expect(said[0]).toContain("15 minutes went back to your partner for their share,");
     expect(said[0]).toContain("so 15 minutes came back to your wallet");
   }, 15_000);
 
@@ -81,7 +81,7 @@ describe("R12 X12-1 — one toast for a cancelled shared booking", () => {
     const said = toasts();
     expect(said).toHaveLength(1);
     expect(said[0]).toContain("30 minutes came back");
-    expect(said[0]).toContain("15 minutes went back to your partners");
+    expect(said[0]).toContain("15 minutes went back to your partner for their share,");
     expect(said[0]).toContain("so 15 minutes came back to your wallet");
   }, 15_000);
 
