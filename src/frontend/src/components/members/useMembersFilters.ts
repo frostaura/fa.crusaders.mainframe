@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { statusFilterFrom, type StatusFilter } from "@/lib/membersCopy";
+import { useUrlText } from "@/lib/useUrlText";
 
 type Filters = { status: StatusFilter; query: string };
 
@@ -24,6 +25,9 @@ function search({ status, query }: Filters): string {
  *   carries no filter, so the list keeps the last one in state: filtering the pane there narrows
  *   the pane without dragging the record's URL along, and `listHref` is the way back to the list
  *   exactly as it was left.</li>
+ *   <li><b>The search field owns what was typed</b> (R15 L15-2): `?q=` is written once typing pauses
+ *   (`useUrlText`), and the list filters on the typed text at once. Writing the URL per key lost
+ *   keys typed before the router committed — "bartholomew" came out "brtholomew".</li>
  * </ul>
  */
 export function useMembersFilters(onList: boolean) {
@@ -32,15 +36,28 @@ export function useMembersFilters(onList: boolean) {
   const urlQuery = params.get("q") ?? "";
   const [kept, setKept] = useState<Filters>({ status: urlStatus, query: urlQuery });
 
+  const writeQuery = useCallback((value: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set("q", value); else next.delete("q");
+      return next;
+    }, { replace: true });
+  }, [setParams]);
+  const [typed, setTyped] = useUrlText(urlQuery, writeQuery);
+
   // While the list is showing, what it shows is what a record opened from it should keep —
   // adjusted during render (React's "state from a changed prop"), not in an effect a frame late.
-  if (onList && (kept.status !== urlStatus || kept.query !== urlQuery)) setKept({ status: urlStatus, query: urlQuery });
+  if (onList && (kept.status !== urlStatus || kept.query !== typed)) setKept({ status: urlStatus, query: typed });
 
-  const current: Filters = onList ? { status: urlStatus, query: urlQuery } : kept;
+  const current: Filters = onList ? { status: urlStatus, query: typed } : kept;
 
   const set = useCallback((key: "status" | "q", value: string | null) => {
     if (!onList) {
       setKept((prev) => (key === "q" ? { ...prev, query: value ?? "" } : { ...prev, status: statusFilterFrom(value) }));
+      return;
+    }
+    if (key === "q") {
+      setTyped(value ?? "");
       return;
     }
     setParams((prev) => {
@@ -48,7 +65,7 @@ export function useMembersFilters(onList: boolean) {
       if (value) next.set(key, value); else next.delete(key);
       return next;
     }, { replace: true });
-  }, [onList, setParams]);
+  }, [onList, setParams, setTyped]);
 
   const clear = useCallback(() => {
     if (onList) setParams(new URLSearchParams(), { replace: true });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams } from "react-router-dom";
+import { useUrlText } from "../lib/useUrlText";
 import { endpoints, type LedgerRow } from "../lib/api";
 import { describeFailure } from "../lib/errors";
 import {
@@ -60,8 +61,10 @@ const TYPE_OPTIONS: FilterOption[] = [
  *
  * <p>
  * So the query string is the single source of truth here rather than a copy of it kept in
- * sync: there is no `useState` for a filter, the inputs read the URL and write the URL, and
- * <code>replace</code> keeps a debounced keystroke out of the history stack. The dates are
+ * sync: the inputs read the URL and write the URL, and <code>replace</code> keeps a keystroke out
+ * of the history stack. The one exception is the name search's TEXT (R15 L15-2): the field owns
+ * what was typed and writes `?q=` once typing pauses (`useUrlText`) — written per key, a key
+ * landing before the router committed the last write was lost ("bartholomew" → "brtholomew"). The dates are
  * written on arrival too — a bookmark saying "the last 30 days" resolves to a different
  * period next week, which is not what sharing a report means.
  * </p>
@@ -76,13 +79,15 @@ export default function AdminLedgerPage() {
 
   const { from, to, type, userQuery, userId } = filtersOf(params);
   const setFilter = (key: string, value: string) => setParams((prev) => withFilter(prev, key, value), { replace: true });
+  const [typed, setTyped] = useUrlText(userQuery, (value) => setFilter("q", value));
+  const onFilter = (key: string, value: string) => (key === "q" ? setTyped(value) : setFilter(key, value));
 
   usePinnedRange(params, setParams, from, to);
 
   const read = useLedgerRead({ from, to, type, userId });
   const { rows, loading, loadError, readAt, load } = read;
 
-  const filtered = useMemo(() => byName(rows, userQuery), [rows, userQuery]);
+  const filtered = useMemo(() => byName(rows, typed), [rows, typed]);
 
   return (
     <PageShell width="full">
@@ -101,12 +106,12 @@ export default function AdminLedgerPage() {
       <ContextBar position="top" label="Filters and totals" stickyMax={0.25}>
         <div className="flex min-w-0 flex-[3_1_36rem] flex-col gap-2">
           <FiltersToggle open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} from={from} to={to} type={type} />
-          <LedgerFilterBar from={from} to={to} type={type} query={userQuery} onChange={setFilter} className={filtersOpen ? "flex" : "hidden lg:flex"} />
+          <LedgerFilterBar from={from} to={to} type={type} query={typed} onChange={onFilter} className={filtersOpen ? "flex" : "hidden lg:flex"} />
         </div>
         {/* As many columns as fit a 9rem figure (R3 X-4): two fixed columns at 200% text on a
             phone were narrower than "+68473.00", and the page scrolled sideways. */}
         <AutoGrid min="stat" max={4} gap="md" aria-busy={loading || undefined} className="min-w-0 flex-[2_1_30rem] text-sm">
-          <LedgerTotals totals={shownTotals(read.totals, filtered, userQuery, read.next)} loading={loading} searching={userQuery.trim() !== ""} />
+          <LedgerTotals totals={shownTotals(read.totals, filtered, typed, read.next)} loading={loading} searching={typed.trim() !== ""} />
           {type === "" || type === "ShareTransfer" ? <p className="col-span-full text-xs text-text-muted">{LEDGER_COPY.sharesNote}</p> : null}
         </AutoGrid>
       </ContextBar>
