@@ -209,12 +209,26 @@ async function warmApi(page: import("@playwright/test").Page, whoami: Record<str
   });
 }
 
+/**
+ * The phone has no network — as the PAGE sees it too. Chromium's offline emulation sets
+ * `navigator.onLine` false only on the document already open: the next document (a reload, a
+ * cold start served by the worker) reads `true` (measured R15), so the app took a phone with no
+ * signal for one that could not reach the club. A real phone with no signal says `false`.
+ */
+async function phoneOffline(page: import("@playwright/test").Page, context: import("@playwright/test").BrowserContext) {
+  await context.setOffline(true);
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "onLine", { configurable: true, get: () => false });
+  });
+}
+
 /** Registers the built worker and waits until it is the one answering this page's fetches. */
 async function takeControl(page: import("@playwright/test").Page) {
-  await page.waitForFunction(async () => {
-    const registration = await navigator.serviceWorker.getRegistration();
-    return !!registration && !!navigator.serviceWorker.controller;
-  }, undefined, { timeout: 20_000 });
+  // `ready` resolves once a registration has an ACTIVE worker (activating or activated); the wait
+  // below is SYNC, because an async predicate returns a Promise — truthy on the first poll, so it
+  // never waited at all (R15 X15-1; the R14 offline flake). Activated is when the worker answers.
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await page.waitForFunction(() => navigator.serviceWorker.controller?.state === "activated", undefined, { timeout: 20_000 });
 }
 
 /**
@@ -293,7 +307,7 @@ async function warmThenGoOffline(page: import("@playwright/test").Page, context:
   // Interception goes FIRST, so that nothing below can be answered by the harness. From
   // here the only things that can answer are the worker's caches and this browser profile.
   await page.unroute("**/api/**");
-  await context.setOffline(true);
+  await phoneOffline(page, context);
 }
 
 test("a production build registers its worker and serves the shell with no signal at all", async ({ page, context }) => {
@@ -438,7 +452,7 @@ async function warmMemberPages(page: import("@playwright/test").Page, context: i
     .toMatch(/games.*inbox.*schedule.*wallet/);
   if (!offline) return;
   await page.unroute("**/api/**");
-  await context.setOffline(true);
+  await phoneOffline(page, context);
 }
 
 test("offline: Bookings, Wallet and Inbox open from the phone, said as offline; booking needs a connection", async ({ page, context }) => {

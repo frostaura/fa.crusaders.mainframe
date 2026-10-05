@@ -179,7 +179,13 @@ export type SwSandbox = {
   dispatchMessage(data: unknown): Promise<FakeMessageEvent>;
   /** Runs the worker's `install` handler to completion (precache included). */
   install(): Promise<void>;
+  /** Runs `activate` to completion — which no longer includes the desk's chunks (R15 X15-2). */
   activate(): Promise<void>;
+  /**
+   * Waits for every message the worker posted ITSELF (`registration.active.postMessage`) to be
+   * handled, its `waitUntil` work included — the post-activation precache (R15 X15-2).
+   */
+  background(): Promise<void>;
   claimed: () => boolean;
 };
 
@@ -199,6 +205,8 @@ export function loadServiceWorker(routes: Record<string, () => Response | Promis
   const networkCalls: SwRequest[] = [];
   const networkInits: (RequestInit | undefined)[] = [];
   let claimed = false;
+  /** Messages the worker posted itself, dispatched on a later task as the browser does. */
+  const selfPosted: Promise<unknown>[] = [];
 
   const fetchImpl = async (input: SwRequest | string, init?: RequestInit): Promise<Response> => {
     // The worker's own install fetches pass a bare path (`fetch("/index.html", …)`).
@@ -217,6 +225,14 @@ export function loadServiceWorker(routes: Record<string, () => Response | Promis
     location: new URL(ORIGIN),
     skipWaiting: async () => undefined,
     clients: { claim: async () => { claimed = true; } },
+    registration: {
+      active: {
+        postMessage: (data: unknown) => {
+          selfPosted.push(new Promise((posted) => globalThis.setTimeout(posted, 0))
+            .then(() => dispatch("message", new FakeMessageEvent(data))));
+        },
+      },
+    },
   };
 
   const context = vm.createContext({
@@ -260,6 +276,7 @@ export function loadServiceWorker(routes: Record<string, () => Response | Promis
     dispatchMessage: (data) => dispatch("message", new FakeMessageEvent(data)),
     install: async () => { await dispatch("install", new FakeExtendableEvent()); },
     activate: async () => { await dispatch("activate", new FakeExtendableEvent()); },
+    background: async () => { while (selfPosted.length > 0) await selfPosted.shift(); },
     claimed: () => claimed,
   };
 }

@@ -300,17 +300,46 @@ self.addEventListener("install", (event) => {
   })());
 });
 
+/**
+ * The rest of the build — the desk's chunks — fetched once this worker is in control, and THEN the
+ * last build's assets removed. Once per worker lifetime (`restRun` is single-flight), and never
+ * inside `activate` (R15 X15-2).
+ *
+ * WHY NOT IN ACTIVATE: a worker is "activating" until activate's `waitUntil` settles, and the
+ * browser HOLDS every fetch from a page it controls — navigations included — until then. With the
+ * ~40 desk chunks fetched two at a time inside it, a reload during activation waited 2.3 s at
+ * 100 ms per request and 6.9 s at 300 ms, and `NAV_WAIT_MS` cannot help: the fetch event is not
+ * even dispatched. So activate claims the pages and returns; this runs in a message event's own
+ * `waitUntil` (the worker posts itself the message from activate, so no page code is involved),
+ * and again behind the first navigation of a later lifetime when an earlier one was cut short.
+ */
+const FINISH_INSTALL = "FINISH_INSTALL";
+let restRun = null;
+function finishInstall() {
+  if (!restRun) {
+    restRun = (async () => {
+      // The desk's chunks, taking any file the last build already had from its cache (P4-3)…
+      await precacheRest();
+      // …and then the last build's assets go too: this build's cache now holds everything it names.
+      await purgeOwnedCaches(OWNED);
+    })().catch(() => {
+      restRun = null;
+    });
+  }
+  return restRun;
+}
+
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     // Removes every earlier build's shell AND `crusaders-api-v1`, the cache the leaking version
-    // filled with member data on every device it ever ran on — at once.
+    // filled with member data on every device it ever ran on — at once. The earlier build's
+    // ASSETS stay until `finishInstall` has taken what it can from them.
     const earlierAssets = (await caches.keys()).filter((n) => n.startsWith(ASSET_PREFIX) && n !== ASSET_CACHE);
     await purgeOwnedCaches([...OWNED, ...earlierAssets]);
     await self.clients.claim();
-    // The desk's chunks, taking any file the last build already had from its cache (P4-3)…
-    await precacheRest();
-    // …and then the last build's assets go too: this build's cache now holds everything it names.
-    await purgeOwnedCaches(OWNED);
+    // Outside this event's lifetime: the message's own `waitUntil` keeps the worker alive for it.
+    const worker = self.registration && self.registration.active;
+    if (worker && typeof worker.postMessage === "function") worker.postMessage({ type: FINISH_INSTALL });
   })());
 });
 
@@ -326,6 +355,10 @@ self.addEventListener("activate", (event) => {
  * member's, so neither is the next person's to be protected from.
  */
 self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === FINISH_INSTALL) {
+    event.waitUntil(finishInstall());
+    return;
+  }
   if (event.data && event.data.type === "CLEAR_CACHES") {
     event.waitUntil((async () => {
       const names = await caches.keys();
@@ -421,6 +454,9 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return;
 
   if (request.mode === "navigate") {
+    // A lifetime that was cut short before `finishInstall` ended picks it up here, beside the
+    // answer and never in front of it (it is a no-op once it has run in this lifetime).
+    event.waitUntil(finishInstall());
     event.respondWith(networkFirstShell(event));
     return;
   }

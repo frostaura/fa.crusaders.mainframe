@@ -176,6 +176,7 @@ describe("a session ending takes the caches with it — all but the shell (M5-1)
     });
     await sw.install();
     await sw.activate();
+    await sw.background();
     await signedOut;
     expect(sw.caches.storedUrls().filter((u) => u.includes("/assets/Admin"))).toHaveLength(12);
   });
@@ -195,6 +196,7 @@ describe("a session ending takes the caches with it — all but the shell (M5-1)
     });
     await sw.install();
     await sw.activate();
+    await sw.background();
     expect(sw.caches.storedUrls().filter((u) => u.includes("/assets/Admin"))).toEqual([]);
   });
 
@@ -368,6 +370,7 @@ describe("install precaches every chunk the build lists", () => {
     await sw.install();
     expect(sw.caches.storedUrls()).not.toContain(`${ORIGIN}/assets/AdminLedger-FFFF.js`);
     await sw.activate();
+    await sw.background();
     const order = sw.networkCalls.map((r) => new URL(r.url, ORIGIN).pathname).filter((p) => p.startsWith("/assets/"));
     const lastMember = Math.max(...["/assets/index-AAAA.js", "/assets/Schedule-DDDD.js", "/assets/Wallet-CCCC.js"].map((p) => order.indexOf(p)));
     const firstDesk = Math.min(...["/assets/AdminLedger-FFFF.js", "/assets/AdminMembers-GGGG.js"].map((p) => order.indexOf(p)));
@@ -422,6 +425,7 @@ describe("a new build replaces the last one", () => {
     }, { build: "aaaaaaaaaaaa" });
     await a.install();
     await a.activate();
+    await a.background();
     expect(await a.caches.keys()).toEqual(expect.arrayContaining(["crusaders-assets-aaaaaaaaaaaa", "crusaders-shell-aaaaaaaaaaaa"]));
 
     // The next build's worker, on the same device (the same CacheStorage).
@@ -432,6 +436,7 @@ describe("a new build replaces the last one", () => {
     for (const [name, store] of a.caches.stores) b.caches.stores.set(name, store);
     await b.install();
     await b.activate();
+    await b.background();
 
     expect((await b.caches.keys()).sort()).toEqual(["crusaders-assets-bbbbbbbbbbbb", "crusaders-shell-bbbbbbbbbbbb"]);
     const stored = b.caches.storedUrls();
@@ -475,3 +480,83 @@ describe("a new build replaces the last one", () => {
   });
 });
 
+
+/**
+ * R15 X15-2 — activation never waits on the desk's chunks.
+ *
+ * <p>
+ * A worker is "activating" until activate's `waitUntil` settles, and the browser holds every fetch
+ * of a page it controls until then — a reload during activation waited 2.3 s at 100 ms per request
+ * and 6.9 s at 300 ms while ~40 desk chunks were fetched two at a time inside it. Activate now
+ * claims and returns; the rest runs in the worker's own message to itself, then the purge.
+ * </p>
+ */
+describe("activate ends at the claim; the rest of the build follows it (R15 X15-2)", () => {
+  const INDEX = '<script type="module" src="/assets/index-AAAA.js"></script>';
+  const LIST = () => new Response(JSON.stringify({
+    assets: ["/assets/index-AAAA.js", "/assets/Wallet-CCCC.js", "/assets/AdminLedger-FFFF.js", "/assets/AdminMembers-GGGG.js"],
+    first: ["/assets/Wallet-CCCC.js"],
+  }), { status: 200 });
+
+  it("settles activate before a single desk chunk has answered", async () => {
+    const never = () => new Promise<Response>(() => undefined);
+    const sw = loadServiceWorker({
+      "/index.html": () => new Response(INDEX, { status: 200 }),
+      "/precache.json": LIST,
+      "/assets/AdminLedger-FFFF.js": never,
+      "/assets/AdminMembers-GGGG.js": never,
+    }, { build: "bbbbbbbbbbbb" });
+    await sw.install();
+    const outcome = await Promise.race([
+      sw.activate().then(() => "settled"),
+      new Promise((held) => setTimeout(() => held("held"), 500)),
+    ]);
+    expect(outcome).toBe("settled");
+    expect(sw.claimed()).toBe(true);
+  });
+
+  it("fetches the desk's chunks in its own message, and only then drops the last build's assets", async () => {
+    const sw = loadServiceWorker({ "/index.html": () => new Response(INDEX, { status: 200 }), "/precache.json": LIST }, { build: "bbbbbbbbbbbb" });
+    const earlier = await sw.caches.open("crusaders-assets-aaaaaaaaaaaa");
+    await earlier.put(`${ORIGIN}/assets/AdminLedger-FFFF.js`, new Response("same bytes", { status: 200 }));
+    await sw.caches.open("crusaders-shell-aaaaaaaaaaaa");
+    await sw.install();
+    await sw.activate();
+
+    // Activated: the earlier shell is gone at once, its assets are still there to be taken from.
+    expect(await sw.caches.keys()).not.toContain("crusaders-shell-aaaaaaaaaaaa");
+    expect(await sw.caches.keys()).toContain("crusaders-assets-aaaaaaaaaaaa");
+    expect(sw.caches.storedUrls()).not.toContain(`${ORIGIN}/assets/AdminMembers-GGGG.js`);
+
+    await sw.background();
+    expect((await sw.caches.keys()).sort()).toEqual(["crusaders-assets-bbbbbbbbbbbb", "crusaders-shell-bbbbbbbbbbbb"]);
+    const assets = await sw.caches.open("crusaders-assets-bbbbbbbbbbbb");
+    expect(await (await assets.match(`${ORIGIN}/assets/AdminLedger-FFFF.js`))!.text(), "taken from the last build").toBe("same bytes");
+    expect(await assets.match(`${ORIGIN}/assets/AdminMembers-GGGG.js`)).toBeDefined();
+    expect(sw.networkCalls.map((r) => new URL(r.url, ORIGIN).pathname)).not.toContain("/assets/AdminLedger-FFFF.js");
+  });
+
+  it("a lifetime cut short before the rest was fetched finishes it behind the next navigation", async () => {
+    // A worker the browser stopped after activate: this lifetime never saw the message.
+    const sw = loadServiceWorker({ "/index.html": () => new Response(INDEX, { status: 200 }), "/precache.json": LIST }, { build: "bbbbbbbbbbbb" });
+    await sw.install();
+    expect(sw.caches.storedUrls()).not.toContain(`${ORIGIN}/assets/AdminMembers-GGGG.js`);
+    const nav = await sw.dispatchFetch(swRequest("/bookings", { mode: "navigate" }));
+    expect(nav.responded).toBe(true);
+    expect(sw.caches.storedUrls()).toContain(`${ORIGIN}/assets/AdminMembers-GGGG.js`);
+  });
+
+  it("fetches each desk chunk once however many events ask (single flight per lifetime)", async () => {
+    const sw = loadServiceWorker({ "/index.html": () => new Response(INDEX, { status: 200 }), "/precache.json": LIST }, { build: "bbbbbbbbbbbb" });
+    await sw.install();
+    await sw.activate();
+    await Promise.all([
+      sw.background(),
+      sw.dispatchFetch(swRequest("/wallet", { mode: "navigate" })),
+      sw.dispatchFetch(swRequest("/bookings", { mode: "navigate" })),
+    ]);
+    const asked = sw.networkCalls.map((r) => new URL(r.url, ORIGIN).pathname);
+    expect(asked.filter((p) => p === "/assets/AdminMembers-GGGG.js")).toHaveLength(1);
+    expect(asked.filter((p) => p === "/precache.json")).toHaveLength(2); // install, and the one rest run
+  });
+});

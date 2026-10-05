@@ -99,10 +99,11 @@ async function signedInAtMyCode(page: Page) {
 }
 
 async function workerInControl(page: Page) {
-  await page.waitForFunction(async () => {
-    const registration = await navigator.serviceWorker.getRegistration();
-    return !!registration && !!navigator.serviceWorker.controller;
-  }, undefined, { timeout: 20_000 });
+  // `ready` resolves once a registration has an ACTIVE worker (activating or activated); the wait
+  // below is SYNC, because an async predicate returns a Promise — truthy on the first poll, so it
+  // never waited at all (R15 X15-1; the R14 offline flake). Activated is when the worker answers.
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await page.waitForFunction(() => navigator.serviceWorker.controller?.state === "activated", undefined, { timeout: 20_000 });
 }
 
 async function cachedUrls(page: Page): Promise<string[]> {
@@ -115,9 +116,21 @@ async function cachedUrls(page: Page): Promise<string[]> {
   });
 }
 
+async function everyChunkCached(page: Page) {
+  await expect.poll(async () => {
+    const cached = await cachedUrls(page);
+    return chunks.filter((c) => !cached.includes(c));
+  }, { message: "chunks the worker did not precache", timeout: 20_000 }).toEqual([]);
+}
+
 async function offline(page: Page, context: BrowserContext) {
   await page.unroute("**/api/**");
   await context.setOffline(true);
+  // Chromium's emulation leaves `navigator.onLine` true on the next document (R15); a phone with
+  // no signal says false.
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "onLine", { configurable: true, get: () => false });
+  });
 }
 
 /** The in-app link — the tab bar on a phone, the top bar on a desktop. */
@@ -127,11 +140,9 @@ test.describe("with the service worker", () => {
   test("install caches every chunk the build lists, and a never-opened page opens with no signal", async ({ page, context }) => {
     await signedInAtMyCode(page);
     await workerInControl(page);
-    // Install finishes before the worker takes control, so the list should already be complete.
-    await expect.poll(async () => {
-      const cached = await cachedUrls(page);
-      return chunks.filter((c) => !cached.includes(c));
-    }, { message: "chunks the worker did not precache" }).toEqual([]);
+    // A member's pages are cached at install; the desk's follow activation in the worker's own
+    // message (R15 X15-2), so the list completes shortly after the worker is in control.
+    await everyChunkCached(page);
 
     await offline(page, context);
     await navTo(page, "Wallet");
@@ -144,7 +155,8 @@ test.describe("with the service worker", () => {
   test("a chunk that is somehow not on the phone gets the offline boundary with Retry, not a crash", async ({ page, context }) => {
     await signedInAtMyCode(page);
     await workerInControl(page);
-    await expect.poll(async () => (await cachedUrls(page)).some((u) => /^\/assets\/Wallet-[^/]+\.js$/.test(u))).toBe(true);
+    // The post-activation precache must have finished, or it could put the chunk back (X15-2).
+    await everyChunkCached(page);
     // A worker from before `precache.json` existed: the Wallet chunk was never cached.
     await page.evaluate(async () => {
       for (const name of await caches.keys()) {
