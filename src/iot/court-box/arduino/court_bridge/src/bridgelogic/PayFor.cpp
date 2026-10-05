@@ -176,7 +176,10 @@ PayForAnswer onPayForQuote(uint16_t status, const char* body, size_t len, int16_
 
 PayForAnswer onPayForConfirm(uint16_t status, const char* body, size_t len, const char* quotedLabel) {
   if (undecidedStatus(status)) {
-    return answer(PayForKind::Undecided, status == 0U ? ScreenId::NoConnection : ScreenId::SeeTheDesk);
+    // A 429 or a 5xx is BUSY / PRESS AGAIN (review round 17, D17-4): the quote
+    // and its nonce stay armed and the court press retries this payment. It
+    // read SEE THE DESK, which sent a member away from a retry that works.
+    return answer(PayForKind::Undecided, status == 0U ? ScreenId::NoConnection : ScreenId::Busy);
   }
   if (status != 200U) {
     return answer(PayForKind::Refused, ScreenId::SeeTheDesk);

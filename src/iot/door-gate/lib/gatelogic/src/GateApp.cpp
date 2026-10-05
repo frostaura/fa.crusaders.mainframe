@@ -107,6 +107,7 @@ void GateApp::pass() {
   const uint32_t now = clock_.nowMs();
   uptime_.tick(now);
   watchdog_.kick();
+  forgetElapsedWindows(now);
 
   // THE LINK FIRST, because it is the input every step below is decided
   // against. Read after the scanner, `linkUp_` was a whole pass out of date,
@@ -187,6 +188,41 @@ void GateApp::pass() {
   // The lamp last, so what it shows is the state every step above just left it
   // in.
   pumpLed();
+}
+
+namespace {
+
+/// Disarms `window` once it has ended. Disarmed reads exactly as elapsed does —
+/// remaining() is 0 either way — so this changes no decision; it only stops an
+/// ended window AGEING.
+void forgetIfElapsed(tb::Deadline& window, uint32_t nowMs) {
+  if (window.isArmed() && window.remaining(nowMs) == 0U) {
+    window.disarm();
+  }
+}
+
+} // namespace
+
+void GateApp::forgetElapsedWindows(uint32_t nowMs) {
+  // EVERY "MAY I YET?" WINDOW, ON EVERY PASS, WHATEVER THE LINK IS DOING
+  // (review round 17, D17-2). A Deadline armed more than 2^31 ms ago reads as
+  // PENDING again, and each of these was looked at only by the step it gates —
+  // which does not run while the radio is down, the breaker is open, or nobody
+  // is at the door. Measured in the suite, after a quiet spell past 24.8 days:
+  // the event drain's backoff and the heartbeat's floor kept a board whose link
+  // had come back silent, so its roster never refilled; the `/gate` call floor
+  // refused the first member back `too_fast`; the unreadable-line window met a
+  // holed line with silence — each for up to 24.8 MORE days. Disarmed here
+  // within one pass of ending, none of them can age. `eventBackoffMs_` is kept,
+  // so the next refusal still doubles from where the last one left off.
+  //
+  // NOT `heartbeatAt_`: its expired() means "due", disarmed means "never", and
+  // the link-up edge re-arms it to "now" (pumpLink), which is its own cure.
+  forgetIfElapsed(firstCallAt_, nowMs);
+  forgetIfElapsed(scanCallFloorAt_, nowMs);
+  forgetIfElapsed(unreadableAt_, nowMs);
+  forgetIfElapsed(heartbeatFloorAt_, nowMs);
+  forgetIfElapsed(eventsAt_, nowMs);
 }
 
 void GateApp::pumpFaults() {

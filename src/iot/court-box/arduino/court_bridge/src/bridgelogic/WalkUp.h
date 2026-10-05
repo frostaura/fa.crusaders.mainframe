@@ -147,7 +147,8 @@ struct WalkUpResult {
 ///                reading the time out of the body's `opens_at`; TOO LONG /
 ///                TRY LESS TIME when it says `minutes_out_of_range`.
 ///   0          → NO CONNECTION (undecided)
-///   5xx / 429  → SEE THE DESK (undecided)
+///   5xx / 429  → BUSY / PRESS AGAIN (undecided): the nonce and the scan are
+///                kept, so the same press retries the same purchase (R17 D17-4)
 ///   other      → SEE THE DESK (decided)
 ///
 /// The two 400s are there because SEE THE DESK was a lie in both of them. A club

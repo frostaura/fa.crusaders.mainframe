@@ -132,7 +132,11 @@ PayForAnswer onPayForQuote(uint16_t status, const char* body, size_t len, int16_
 
 /// Interprets the answer to a CONFIRM.
 ///
-///   0, 429, 5xx, or a 200 that cannot be read -> Undecided (retry = same nonce)
+///   0, 429, 5xx, or a 200 that cannot be read -> Undecided (retry = same nonce):
+///                                                 0 paints NO CONNECTION, 429 and
+///                                                 5xx BUSY / PRESS AGAIN (R17
+///                                                 D17-4), an unreadable 200 SEE
+///                                                 THE DESK
 ///   200 paid:true                              -> Paid, granted_seconds if any
 ///   200 paid:false                             -> Refused, by reason
 ///   any other status                           -> Refused, SEE THE DESK

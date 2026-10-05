@@ -1709,12 +1709,17 @@ void applyButtonMap(const char* body, size_t len) {
 /// pass: a disabled box answered 403 in milliseconds spent the club's whole
 /// device budget and pushed every other box into 429 (review round 16, D16-2).
 void drainEvents(uint32_t nowMs) {
-  if (!gWifiUp || gBreaker.open(nowMs)) {
-    // The breaker: with the host unreachable this used to cost a 4 s connect
-    // timeout on EVERY loop pass, in front of every scan, for as long as the
-    // queue was non-empty — which after the first scan is always.
-    return;
-  }
+  // The breaker: with the host unreachable this used to cost a 4 s connect
+  // timeout on EVERY loop pass, in front of every scan, for as long as the
+  // queue was non-empty — which after the first scan is always. Offline, the
+  // drain posts nothing.
+  //
+  // BUT IT IS STILL CALLED. This returned here, before the drain, and that
+  // meant its pace was never observed while offline: a backoff window armed by
+  // a refusal just before an outage of more than 2^31 ms read as pending again
+  // afterwards and stalled the drain for up to 24.8 more days (review round
+  // 17, D17-2). The verdict goes in as `online`; the pace is observed anyway.
+  const bool online = gWifiUp && !gBreaker.open(nowMs);
 
   // THIS BOOT'S ID, not the literal 0 that stood here with a comment saying the
   // fix was owed. 0 omits the field and gives the server the old (device, seq)
@@ -1724,10 +1729,10 @@ void drainEvents(uint32_t nowMs) {
   source.mac = gMacHex;
   source.bootId = gBootId;
   source.uptimeMs = gUptime.value();
-  static_cast<void>(bridgelogic::pumpEventDrain(
-      gQueue, gDrainPace, source, gClock, [](const char* body, char* response, size_t cap) -> uint16_t {
-        return callApi("/api/v1/device/events", body, response, cap);
-      }));
+  const auto post = [](const char* body, char* response, size_t cap) -> uint16_t {
+    return callApi("/api/v1/device/events", body, response, cap);
+  };
+  static_cast<void>(bridgelogic::pumpEventDrain(gQueue, gDrainPace, source, online, gClock, post));
 }
 
 /// Re-energises the courts a power dip took out, EXACTLY ONCE.

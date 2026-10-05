@@ -74,7 +74,8 @@ class DrainPace {
 public:
   /// True when the drain may post now. Disarms an elapsed window so a deadline
   /// left armed across the 24.8-day half of the uint32 range cannot read as
-  /// pending again.
+  /// pending again — which holds only if this is asked at least once every
+  /// 2^31 ms, so pumpEventDrain asks it on EVERY pass, offline ones included.
   bool ready(uint32_t nowMs);
 
   /// Records one settled post. `queueMoved` is whether the ring got SHORTER —
@@ -101,12 +102,26 @@ struct DrainSource {
 /// the call and returns its HTTP status (0 for none). Returns true when a post
 /// was made.
 ///
-/// The caller checks the link and the breaker; this checks the pace and the
-/// queue, renders the head, posts it, applies the answer and settles the pace.
+/// `online` is the caller's verdict on the link and the breaker — the radio is
+/// up AND the breaker is closed. It is a parameter rather than a check the
+/// caller makes before calling, because the pace must be observed on every
+/// pass, offline ones included (D17-2). This observes the pace, then checks
+/// `online` and the queue, renders the head, posts it, applies the answer and
+/// settles the pace. Offline, it never posts.
 template <typename Queue, typename Post>
-bool pumpEventDrain(Queue& queue, DrainPace& pace, const DrainSource& source, hal::IClock& clock,
+bool pumpEventDrain(Queue& queue, DrainPace& pace, const DrainSource& source, bool online, hal::IClock& clock,
                     Post&& post) {
-  if (!pace.ready(clock.nowMs()) || queue.empty()) {
+  // THE PACE IS OBSERVED ON EVERY PASS, ONLINE OR NOT, and before the link
+  // guard rather than after it (review round 17, D17-2). `ready()` is the only
+  // thing that disarms an elapsed window, and a Deadline armed more than 2^31 ms
+  // ago reads as PENDING again. main.cpp used to return before this call while
+  // the radio was down or the breaker open, so a refusal just before a long
+  // outage left its window armed through it — and once the outage passed 24.8
+  // days the box came back to a healthy server and posted nothing for up to as
+  // long again. Observed every pass, an elapsed window is disarmed within one
+  // pass of ending, whatever the link is doing.
+  const bool paced = pace.ready(clock.nowMs());
+  if (!online || !paced || queue.empty()) {
     return false;
   }
 

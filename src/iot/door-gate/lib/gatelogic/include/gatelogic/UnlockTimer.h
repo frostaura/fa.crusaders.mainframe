@@ -160,7 +160,19 @@ public:
   /// so the caller can write the relay and record nothing twice — and says
   /// WHICH bound ended it, because the two earn different dark times.
   Close tick(uint32_t nowMs) {
-    if (!released_ || !until_.expired(nowMs)) {
+    if (!released_) {
+      // THE DWELL IS SPENT HERE, ON THE PASS IT ENDS (review round 17, D17-2).
+      // Left armed, a dwell from the last close of a door nobody used for
+      // 2^31 ms — a club shut for a month — read as PENDING again, and every
+      // member who came back was refused `relocking` for up to 24.8 more days.
+      // The loop calls this on every pass, so an elapsed dwell is disarmed
+      // within one pass of ending; a running one is untouched.
+      if (relockUntil_.isArmed() && relockUntil_.remaining(nowMs) == 0U) {
+        relockUntil_.disarm();
+      }
+      return Close::None;
+    }
+    if (!until_.expired(nowMs)) {
       return Close::None;
     }
     // THE CAP ENDED IT when this window has run for the whole cap. Computed
@@ -197,8 +209,10 @@ private:
   uint32_t capRelockMs_;
   tb::Deadline until_;
   /// When the lock may next be energised. Armed by every close, disarmed by the
-  /// open that follows it. A Deadline rather than a sentinel instant for the
-  /// reason the whole of timebase exists: every uint32_t is a legal millis().
+  /// open that follows it — or by the first tick() after it ends, whichever
+  /// comes first, so it cannot age past 2^31 ms and read as pending again. A
+  /// Deadline rather than a sentinel instant for the reason the whole of
+  /// timebase exists: every uint32_t is a legal millis().
   tb::Deadline relockUntil_;
   /// When THIS release window began. A separate field rather than "the deadline
   /// minus the duration", because the duration changes on every re-arm and the

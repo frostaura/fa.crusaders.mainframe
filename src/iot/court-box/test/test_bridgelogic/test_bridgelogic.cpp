@@ -598,8 +598,15 @@ void test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided
       // member before it refused.
       {409U, "{\"error\":\"activation_refused\"}", "COULD NOT START", true, true},
       {0U, "", "NO CONNECTION", false, false},
-      {503U, "", "SEE THE DESK", false, false},
-      {429U, "", "SEE THE DESK", false, false},
+      // R17 D17-4. A 429 or a 5xx decided nothing, and the nonce is kept, so the
+      // same press is answered with the first purchase or makes it now. It read
+      // SEE THE DESK, which sent a member away from a retry that works.
+      {503U, "", "BUSY", false, false},
+      {503U, "{\"error\":\"conflict_retry\"}", "BUSY", false, false},
+      {500U, "", "BUSY", false, false},
+      {502U, "<html>bad gateway</html>", "BUSY", false, false},
+      {429U, "", "BUSY", false, false},
+      {429U, "{\"error\":\"rate_limited\"}", "BUSY", false, false},
   };
   for (const Case& c : cases) {
     const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(c.status, c.body, len(c.body), 0U, 30U);
@@ -614,6 +621,19 @@ void test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided
   const char ended[] = "{\"error\":\"purchase_ended\",\"booking_id\":\"b1\"}";
   TEST_ASSERT_EQUAL_STRING("SCAN TO START",
                            bridgelogic::onWalkUpResponse(409U, ended, len(ended), 0U, 30U).outcome.line2);
+
+  // A busy server's second line is the instruction: the same press retries the
+  // same purchase, with the same nonce. A 429 or a 5xx never forgets the scan.
+  const uint16_t busy[] = {429U, 500U, 502U, 503U};
+  for (const uint16_t status : busy) {
+    const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(status, "", 0U, 1U, 45U);
+    TEST_ASSERT_EQUAL_STRING("PRESS AGAIN", r.outcome.line2);
+    TEST_ASSERT_FALSE(r.forgetsScan);
+    TEST_ASSERT_FALSE(r.decided);
+  }
+  // A decided status this build has no words for is still the desk's.
+  TEST_ASSERT_EQUAL_STRING("SEE THE DESK",
+                           bridgelogic::onWalkUpResponse(418U, "", 0U, 0U, 30U).outcome.line1);
 
   // The second lines of the two 400s, which are the half that tells the member what
   // to do instead of standing there.
@@ -3102,6 +3122,9 @@ const ScreenContract kContract[] = {
     {bridgelogic::ScreenId::PayForWorking, "MOMENT", false, false},
     {bridgelogic::ScreenId::CheckingCode, "MOMENT", false, false},
     {bridgelogic::ScreenId::CodeUsed, "USED", false, false},
+    // R17 D17-4. A busy server on the pay-for confirm: the court cells, because
+    // pressing the court again is the retry.
+    {bridgelogic::ScreenId::Busy, "BUSY", true, false},
 };
 
 constexpr size_t kContractCount = sizeof(kContract) / sizeof(kContract[0]);

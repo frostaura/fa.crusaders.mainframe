@@ -6230,6 +6230,187 @@ void test_app_a_refused_heartbeat_is_reported_as_well_as_its_status() {
   TEST_ASSERT_EQUAL_UINT32(1U, timedOut);
 }
 
+// ---------------------------------------------------------------------------
+// R17 D17-2 — a window must not outlive a quiet spell longer than 2^31 ms
+// ---------------------------------------------------------------------------
+
+/// The quiet spells every scenario below is run across. A day and just under
+/// 2^31 ms are the controls that passed before the fix; 2^31 ms plus a day and
+/// 0xF0000000 ms are the two that a stale Deadline read as PENDING — for up to
+/// another 24.8 days.
+constexpr uint32_t kDayMs = 86400000UL;
+constexpr uint32_t kQuietSpells[] = {kDayMs, 0x7FFFFFFFUL - 1000UL, 0x80000000UL + kDayMs, 0xF0000000UL};
+
+/// The loop keeps passing through a quiet spell, a minute of clock at a time —
+/// 2^31 ms of ten-millisecond passes is two hundred million of them, and what
+/// matters is that the passes HAPPEN, as they do on the board.
+void passThrough(Rig& rig, uint32_t ms) {
+  const uint32_t start = rig.clock.value();
+  while (tb::since(rig.clock.value(), start) < ms) {
+    rig.app.pass();
+    const uint32_t gone = tb::since(rig.clock.value(), start);
+    if (gone < ms) {
+      rig.clock.advance(ms - gone < 60000UL ? ms - gone : 60000UL);
+    }
+  }
+}
+
+/// The dwell after a close is a window like any other: a door nobody used for
+/// 25 days refused EVERY scan as `relocking` for up to 24.8 more, because the
+/// dwell armed by its last close read as pending again. tick() runs every pass,
+/// so it spends an elapsed dwell there.
+void test_unlock_a_dwell_from_weeks_ago_never_refuses_the_next_member() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    for (const uint32_t quiet : kQuietSpells) {
+      gatelogic::UnlockTimer timer = boardTimer();
+      const uint32_t base = kBases[b];
+      TEST_ASSERT_TRUE(timer.request(base, 3000U) == gatelogic::UnlockTimer::Grant::Opened);
+      TEST_ASSERT_TRUE(timer.tick(base + 3000U) == gatelogic::UnlockTimer::Close::WindowEnded);
+      TEST_ASSERT_TRUE(timer.relocking(base + 3000U)); // the dwell is real
+
+      // The loop's ticks through the quiet spell, a minute apart.
+      for (uint32_t t = 60000UL; t < quiet; t += 60000UL) {
+        TEST_ASSERT_TRUE(timer.tick(base + 3000U + t) == gatelogic::UnlockTimer::Close::None);
+      }
+      const uint32_t back = base + 3000U + quiet;
+      TEST_ASSERT_TRUE(timer.tick(back) == gatelogic::UnlockTimer::Close::None);
+      TEST_ASSERT_FALSE_MESSAGE(timer.relocking(back), "a dwell from weeks ago refused the next member");
+      TEST_ASSERT_EQUAL_UINT32(0U, timer.relockingForMs(back));
+      TEST_ASSERT_TRUE(timer.request(back, 3000U) == gatelogic::UnlockTimer::Grant::Opened);
+    }
+  }
+}
+
+/// And the dwell still holds while it is running: observing it every pass must
+/// not shorten it.
+void test_unlock_a_running_dwell_is_still_honoured_by_a_ticking_loop() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    gatelogic::UnlockTimer timer = boardTimer();
+    const uint32_t base = kBases[b];
+    TEST_ASSERT_TRUE(timer.request(base, 3000U) == gatelogic::UnlockTimer::Grant::Opened);
+    TEST_ASSERT_TRUE(timer.tick(base + 3000U) == gatelogic::UnlockTimer::Close::WindowEnded);
+    for (uint32_t t = 1U; t < kMinRelockMs; t += 10U) {
+      static_cast<void>(timer.tick(base + 3000U + t));
+      TEST_ASSERT_TRUE(timer.relocking(base + 3000U + t));
+    }
+    TEST_ASSERT_TRUE(timer.request(base + 3000U + kMinRelockMs - 1U, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Relocking);
+    static_cast<void>(timer.tick(base + 3000U + kMinRelockMs));
+    TEST_ASSERT_TRUE(timer.request(base + 3000U + kMinRelockMs, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Opened);
+  }
+}
+
+/// THE EVENT DRAIN AND THE HEARTBEAT, ACROSS A LONG OUTAGE. A refusal just
+/// before the radio went away armed the drain's backoff, and the last heartbeat
+/// armed its floor; neither was looked at again until the link came back, so
+/// after more than 2^31 ms both read as pending and the board came back to a
+/// healthy server and said nothing — no heartbeat, so the roster stayed empty
+/// and the door admitted nobody offline, and no events.
+void test_app_a_window_armed_before_a_long_outage_is_spent_when_the_link_returns() {
+  const uint32_t bases[] = {kBaseMid, kBaseWrapSoon};
+  for (const uint32_t base : bases) {
+    for (const uint32_t quiet : kQuietSpells) {
+      Rig rig(base);
+      rig.boot(true);
+      queueOfflineEvents(rig, 2U);
+      rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+      rig.http.onPath(gatelogic::kPathEvents, 429U, "", 0U);
+      rig.link.set(true);
+      rig.runFor(gatelogic::kMinHeartbeatSpacingMs + 1000U);
+      TEST_ASSERT_TRUE(rig.http.callsTo(gatelogic::kPathEvents) >= 1U);    // refused: the backoff is armed
+      TEST_ASSERT_TRUE(rig.http.callsTo(gatelogic::kPathHeartbeat) >= 1U); // and the floor
+
+      rig.link.set(false);
+      passThrough(rig, quiet);
+
+      rig.http.forget();
+      rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+      rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+      rig.link.set(true);
+      rig.runFor(5000U);
+      TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathHeartbeat) >= 1U,
+                               "the heartbeat stalled after a long outage");
+      TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathEvents) >= 1U,
+                               "the event drain stalled after a long outage");
+    }
+  }
+}
+
+/// THE BOOT HOLD-BACK, ACROSS A LONG OUTAGE. A board the watchdog reset holds
+/// its first call back; if its radio then found no AP for more than 2^31 ms the
+/// hold read as pending again once it did, and the board stayed silent.
+void test_app_a_boot_hold_back_does_not_outlive_a_long_outage() {
+  for (const uint32_t quiet : kQuietSpells) {
+    Rig rig(kBaseMid);
+    rig.watchdogResetRun = 3U;
+    rig.rewire();
+    rig.bootRaw(false);
+    TEST_ASSERT_TRUE(rig.app.firstCallHeldBackMs() > 0U);
+    passThrough(rig, quiet);
+
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    rig.link.set(true);
+    rig.runFor(5000U);
+    TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathHeartbeat) >= 1U,
+                             "the boot hold-back outlived a long outage");
+  }
+}
+
+/// THE DOOR ITSELF, AFTER A LONG QUIET SPELL WITH THE LINK UP — a club shut for
+/// a month. The last member's scan armed the `/gate` call floor and their
+/// close armed the relock dwell, and a holed line armed the unreadable-feedback
+/// window; all three read as pending again after 2^31 ms, so the first member
+/// back was refused `relocking` or `too_fast` and an unreadable line was met
+/// with silence.
+void test_app_a_door_nobody_used_for_weeks_still_asks_about_the_next_member() {
+  const uint32_t bases[] = {kBaseMid, kBaseWrapSoon};
+  for (const uint32_t base : bases) {
+    for (const uint32_t quiet : kQuietSpells) {
+      Rig rig(base);
+      rig.boot(true);
+      rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+      rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+      rig.forceHeartbeat();
+
+      // The last evening before the club shut: a holed line, then a member.
+      rig.scanner.feed("A\x01"
+                       "B\n");
+      rig.tick();
+      rig.tick();
+      rig.runFor(gatelogic::kScanDebounceMs);
+      rig.scanner.feed("MEMBERTOKEN1\n");
+      rig.tick();
+      rig.tick();
+      TEST_ASSERT_TRUE(rig.lock.released());
+      rig.runFor(30000U); // the door closes and its dwell is armed
+      TEST_ASSERT_FALSE(rig.lock.released());
+
+      passThrough(rig, quiet);
+
+      rig.log.forget();
+      rig.http.forget();
+      rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+      rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+      rig.scanner.feed("A\x01"
+                       "B\n");
+      rig.tick();
+      rig.tick();
+      TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.total(), "an unreadable line was met with silence");
+      rig.runFor(gatelogic::kScanDebounceMs);
+
+      rig.scanner.feed("MEMBERTOKEN1\n");
+      rig.tick();
+      rig.tick();
+      TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, rig.http.callsTo(gatelogic::kPathGate),
+                                       "the first member back was never asked about");
+      TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the first member back was refused");
+      TEST_ASSERT_EQUAL_STRING("ok", rig.log.last().reason);
+    }
+  }
+}
+
 } // namespace
 
 void setUp() {
@@ -6392,6 +6573,12 @@ int main(int, char**) {
   RUN_TEST(test_app_the_heartbeat_settings_reach_the_fault_log);
   RUN_TEST(test_app_a_clamped_unlock_seconds_reaches_the_ring);
   RUN_TEST(test_app_a_refused_heartbeat_is_reported_as_well_as_its_status);
+
+  RUN_TEST(test_unlock_a_dwell_from_weeks_ago_never_refuses_the_next_member);
+  RUN_TEST(test_unlock_a_running_dwell_is_still_honoured_by_a_ticking_loop);
+  RUN_TEST(test_app_a_window_armed_before_a_long_outage_is_spent_when_the_link_returns);
+  RUN_TEST(test_app_a_door_nobody_used_for_weeks_still_asks_about_the_next_member);
+  RUN_TEST(test_app_a_boot_hold_back_does_not_outlive_a_long_outage);
 
   return UNITY_END();
 }

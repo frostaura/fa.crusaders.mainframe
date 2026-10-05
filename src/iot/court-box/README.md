@@ -142,7 +142,12 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.6 and Mega 2.0.0**: 2.2.6
+`platformio.ini`. The current images are **bridge 2.2.7 and Mega 2.0.0**: 2.2.7
+keeps the event drain's pace through an outage — a backoff window armed just
+before the link or the API went away can no longer read as pending again after
+24.8 days — and shows BUSY / PRESS AGAIN for a 429 or 5xx on a walk-up or
+pay-for confirm, keeping the scan and the nonce so the same press retries the
+same purchase; 2.2.6
 paces the event drain — a refused upload waits 15 s, doubling to 5 min, instead
 of being re-posted on every pass, and a 404 keeps the event; 2.2.5
 escapes the scanned token in the activate, walk-up and pay-for bodies and writes

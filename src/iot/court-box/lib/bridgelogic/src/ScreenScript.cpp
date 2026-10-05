@@ -363,6 +363,20 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
       {"SCAN WHEN READY", RowArg::None, ""}},
      kRevertSeconds,
      kShowFlagCountdown},
+
+    // --- review round 17 (D17-4) --------------------------------------------
+    // A 429 or a 5xx on the pay-for confirm: nothing was decided, the quote and
+    // its nonce stay armed for the CHOICE window — which is why this holds for
+    // that window and counts it down — and the court press retries the same
+    // payment. Rows 0-1 are the walk-up's two lines for the same answer
+    // (WalkUp.cpp), so a 1602 reads them whole. Row 2 is the nonce's promise.
+    {ScreenId::Busy,
+     {{"BUSY", RowArg::None, ""},
+      {"PRESS AGAIN", RowArg::None, ""},
+      {"Never charged twice", RowArg::None, ""},
+      {"", RowArg::CourtCells, ""}},
+     kChoiceSeconds,
+     kShowFlagCountdown},
 };
 
 /// kScreenSpecs is indexed by the ScreenId value, so a row in the wrong place

@@ -127,6 +127,8 @@ const char* screenName(bridgelogic::ScreenId id) {
     return "SlotEnded";
   case bridgelogic::ScreenId::SeeTheDesk:
     return "SeeTheDesk";
+  case bridgelogic::ScreenId::Busy:
+    return "Busy";
   case bridgelogic::ScreenId::NoConnection:
     return "NoConnection";
   case bridgelogic::ScreenId::ChooseTime:
@@ -854,10 +856,19 @@ void test_pay_for_confirm_that_got_no_decision_keeps_the_nonce(void) {
   TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Undecided, bridgelogic::onPayForConfirm(0U, "", 0U, "50").kind);
   TEST_ASSERT_EQUAL(bridgelogic::ScreenId::NoConnection,
                     bridgelogic::onPayForConfirm(0U, "", 0U, "50").screen);
-  TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Undecided,
-                    bridgelogic::onPayForConfirm(503U, "", 0U, "50").kind);
-  TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Undecided,
-                    bridgelogic::onPayForConfirm(429U, "", 0U, "50").kind);
+  // R17 D17-4. A busy server decided nothing: BUSY / PRESS AGAIN, never SEE THE
+  // DESK — the quote and its nonce stay armed and the court press retries the
+  // SAME payment.
+  const uint16_t busy[] = {429U, 500U, 502U, 503U};
+  for (const uint16_t status : busy) {
+    const bridgelogic::PayForAnswer b = bridgelogic::onPayForConfirm(status, "", 0U, "50");
+    TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Undecided, b.kind);
+    TEST_ASSERT_EQUAL(bridgelogic::ScreenId::Busy, b.screen);
+    TEST_ASSERT_FALSE(b.spendsScan);
+  }
+  const char retry[] = "{\"error\":\"conflict_retry\"}";
+  TEST_ASSERT_EQUAL(bridgelogic::ScreenId::Busy,
+                    bridgelogic::onPayForConfirm(503U, retry, strlen(retry), "50").screen);
   // A 200 nobody can read MAY have paid: undecided, so a retry is the same nonce.
   TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Undecided,
                     bridgelogic::onPayForConfirm(200U, "{\"paid\":tr", 10U, "50").kind);

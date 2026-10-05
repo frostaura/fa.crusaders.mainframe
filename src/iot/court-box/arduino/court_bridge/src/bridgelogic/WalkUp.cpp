@@ -127,6 +127,15 @@ court::Outcome byStatus(uint16_t status) {
   if (status == 0U) {
     return lines("NO CONNECTION", "SCAN TO START");
   }
+  if (status == 429U || status >= 500U) {
+    // BUSY, NOT THE DESK (review round 17, D17-4). A rate limiter or a server
+    // fault decided nothing: the nonce is kept and the scan with it (both are
+    // `undecided` below), so the member's own press again is answered with the
+    // first purchase, or makes it now — never a second one. SEE THE DESK sent
+    // them away from a retry that works. A 503 `conflict_retry` lands here too:
+    // a status at or past 500 is never read for an `error` (refusal()).
+    return lines("BUSY", "PRESS AGAIN");
+  }
   return lines("SEE THE DESK", "SCAN TO START");
 }
 

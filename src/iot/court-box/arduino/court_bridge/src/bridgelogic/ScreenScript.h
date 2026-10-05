@@ -218,9 +218,17 @@ enum class ScreenId : uint8_t {
   /// it — one situation, one screen — where pay-for used to say CODE NOT KNOWN
   /// about a code the server knew perfectly well.
   CodeUsed,
+
+  // --- review round 17 (D17-4). APPENDED, for the same reason. --------------
+
+  /// A pay-for confirm answered 429 or 5xx: the server was too busy to decide,
+  /// the quote and its nonce are still armed, and pressing the court again
+  /// asks whether THIS payment happened — never for a second one. It read SEE
+  /// THE DESK, which sent a member away from a retry that works.
+  Busy,
 };
 
-inline constexpr uint8_t kScreenCount = 32U;
+inline constexpr uint8_t kScreenCount = 33U;
 
 /// What the glass shows while `/activate` is asked about a scan.
 inline constexpr ScreenId kActivateWaitScreen = ScreenId::CheckingCode;

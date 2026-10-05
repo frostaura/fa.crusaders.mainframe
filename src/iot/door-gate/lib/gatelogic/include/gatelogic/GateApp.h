@@ -394,6 +394,11 @@ private:
   /// and asked again inside `pumpEvents` because the pass moves on between the
   /// two and a fresh clock is the rule everywhere here.
   bool eventDrainReady(uint32_t nowMs) const;
+  /// Disarms every gating window that has ended — the drain's backoff, the
+  /// heartbeat's floor, the boot hold-back, the `/gate` call floor and the
+  /// unreadable-line window — so none can age past 2^31 ms and read as pending
+  /// again. Called first thing on every pass. Review round 17, D17-2.
+  void forgetElapsedWindows(uint32_t nowMs);
 
   void pumpHeartbeat();
   void adoptHeartbeat(const HttpOutcome& outcome);
