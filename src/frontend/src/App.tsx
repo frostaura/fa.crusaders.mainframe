@@ -17,7 +17,7 @@ import { RouteAnnouncer } from "./components/RouteAnnouncer";
 import { RouteSkeleton } from "./components/shell/SessionScreens";
 import { RequireAuth } from "./components/shell/RequireAuth";
 import { loadChunk } from "./lib/chunkLoad";
-import { loadAdminFrame, routeChunks } from "./routeChunks";
+import { arrivedChunk, loadAdminFrame, routeChunks, type ChunkName } from "./routeChunks";
 import { NavPrefetch } from "./components/shell/NavPrefetch";
 
 /**
@@ -76,6 +76,21 @@ const named = <K extends string>(load: () => Promise<Record<K, ComponentType>>, 
     });
   });
 
+/**
+ * R14 PERF — a member tab page (`routeChunks`): once its module has arrived by ANY path (the tab
+ * bar's idle prefetch, a link's intent, an earlier open), React.lazy is answered by a thenable that
+ * resolves synchronously, so the page mounts in the tap's commit. A plain `lazy` re-imported the
+ * prefetched module and suspended once on the promise; the shown skeleton is then held ≥ 300 ms
+ * (React's fallback throttle) — the first Wallet tap of a session measured 310–318 ms of skeleton
+ * on a 7 ms open. Not yet arrived: the ordinary `loadChunk` path and its skeleton.
+ */
+export const routeLazy = (name: ChunkName) =>
+  reactLazy(() => {
+    const ready = arrivedChunk(name);
+    if (ready) return { then: (resolve: (m: { default: ComponentType }) => void) => resolve(ready) } as Promise<{ default: ComponentType }>;
+    return loadChunk(routeChunks[name]);
+  });
+
 const AdminLayout = named(loadAdminFrame, "AdminLayout");
 const AdminHomePage = named(loadAdminFrame, "AdminHomePage");
 const AdminDoorsPage = named(loadAdminFrame, "AdminDoorsPage");
@@ -87,20 +102,20 @@ const ForgotPasswordPage = lazy(() => import("./pages/ForgotPassword"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPassword"));
 const WelcomePage = lazy(() => import("./pages/Welcome"));
 const ChangePasswordPage = lazy(() => import("./pages/ChangePassword"));
-const SchedulePage = lazy(routeChunks.schedule);
-const WalletPage = lazy(routeChunks.wallet);
+const SchedulePage = routeLazy("schedule");
+const WalletPage = routeLazy("wallet");
 const BuyMinutesPage = lazy(() => import("./pages/TopUp"));
 const BuyMinutesStatusPage = lazy(() => import("./pages/TopUpStatus"));
 const AdminPackagesPage = lazy(() => import("./pages/admin/AdminPackages"));
-const ProfilePage = lazy(routeChunks.profile);
+const ProfilePage = routeLazy("profile");
 const ProfileResultsPage = lazy(() => import("./pages/ProfileResults"));
 const HowItWorksPage = lazy(() => import("./pages/HowItWorks"));
 const GetStartedPage = lazy(() => import("./pages/GetStarted"));
-const BookingDetailPage = lazy(routeChunks.bookingDetail);
-const InvitesPage = lazy(routeChunks.invites);
+const BookingDetailPage = routeLazy("bookingDetail");
+const InvitesPage = routeLazy("invites");
 const InviteLinkPage = lazy(() => import("./pages/InviteLink"));
 const InviteDeepLinkPage = lazy(() => import("./pages/InviteDeepLink"));
-const InboxPage = lazy(routeChunks.inbox);
+const InboxPage = routeLazy("inbox");
 
 const AdminMembersPage = lazy(() => import("./pages/AdminMembers"));
 const MemberDetailLayout = lazy(() => import("./pages/admin/member"));

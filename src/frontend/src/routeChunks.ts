@@ -21,7 +21,7 @@ import { prefetchRouteData } from "./lib/offline/memberReads";
  * one), and neither runs offline or when the phone asks to save data.
  * </p>
  */
-type ChunkName = "schedule" | "wallet" | "profile" | "bookingDetail" | "invites" | "inbox";
+export type ChunkName = "schedule" | "wallet" | "profile" | "bookingDetail" | "invites" | "inbox";
 
 export const routeChunks: Record<ChunkName, () => Promise<{ default: ComponentType }>> = {
   schedule: () => noteChunk("schedule", import("./pages/Schedule")),
@@ -230,8 +230,21 @@ export function noteChunk<T>(name: ChunkName, load: Promise<T>): Promise<T> {
   const settle = () => {
     if (pendingPath !== null && chunkFor(pendingPath) === name) setPending(null);
   };
-  load.then(() => { loaded.add(name); settle(); }, settle);
+  load.then((module) => { loaded.add(name); arrivedModules.set(name, module as RouteModule); settle(); }, settle);
   return load;
+}
+
+type RouteModule = { default: ComponentType };
+const arrivedModules = new Map<ChunkName, RouteModule>();
+
+/**
+ * R14 PERF — the page's module, once ANY caller's fetch of it has arrived (a prefetch, an intent,
+ * an earlier open), else undefined. `App.tsx`'s route `lazy` answers React synchronously with it,
+ * so a prefetched page mounts in the tap's own commit instead of suspending once behind its
+ * skeleton (React then holds a shown fallback ≥ 300 ms: the first Wallet tap measured 310–318 ms).
+ */
+export function arrivedChunk(name: ChunkName): RouteModule | undefined {
+  return arrivedModules.get(name);
 }
 
 /** A link to `pathname` was followed: pending while its page's code has not arrived. */
