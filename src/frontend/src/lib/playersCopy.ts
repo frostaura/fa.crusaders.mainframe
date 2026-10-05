@@ -1012,7 +1012,6 @@ export const INVITES_COPY = {
   linkCancelledBack: (amount: string) => `This game was cancelled — your ${amount} is back on your balance.`,
   linkCancelledNothing: "This game was cancelled — nothing was taken from you for it.",
   fateGoneTitle: "You're no longer on this game",
-  fateGoneBody: "You declined it, pulled out or were taken off it — or its invite lapsed. Your bookings have the latest.",
   /** R1 F2.5 — an invite link opened and not yet answered (a short balance, a sign-in between), resurfaced. */
   pendingFrom: "From a link you opened",
   pendingNote: PENDING_INVITE_NOTE.join,

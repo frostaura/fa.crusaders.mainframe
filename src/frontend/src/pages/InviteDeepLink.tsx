@@ -8,6 +8,7 @@ import { useInviteSnapshot } from "@/components/players/invites/useInviteSnapsho
 import { useAuth } from "@/lib/useAuth";
 import { playersEndpoints } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
+import { goneSeatWords } from "@/components/players/detail/goneSeatWords";
 
 /**
  * `/invites/:participantId` — the invite mail's link (never a token: a token in an outbox row
@@ -56,7 +57,6 @@ function DeepLinkFor({ participantId }: { participantId: string }) {
 const FATE_WORDS = {
   in: { title: INVITES_COPY.fateInTitle, sentence: INVITES_COPY.fateInBody },
   cancelled: { title: INVITES_COPY.fateCancelledTitle, sentence: INVITES_COPY.fateCancelledBody },
-  gone: { title: INVITES_COPY.fateGoneTitle, sentence: INVITES_COPY.fateGoneBody },
 } as const;
 
 function Fate({ fate }: { fate: InviteFate }) {
@@ -64,7 +64,12 @@ function Fate({ fate }: { fate: InviteFate }) {
   if (fate.kind === "unknown") {
     return <InviteGone title={INVITES_COPY.deepLinkGone} sentence={INVITES_COPY.deepLinkGoneHint} otherAccount />;
   }
+  if (fate.kind === "gone") {
+    // R16 J15-1 — which way it left the game, from the seat's own status and `removed_by`. Off the
+    // game, the booking is a 404 to them: no link to it, only the ways back.
+    const said = goneSeatWords(fate.seat);
+    return <InviteGone title={said.title} sentence={said.body} bookingId={null} />;
+  }
   const words = FATE_WORDS[fate.kind];
-  // Off the game, the booking is a 404 to them: no link to it, only the ways back.
-  return <InviteGone title={words.title} sentence={words.sentence} bookingId={fate.kind === "gone" ? null : fate.bookingId} />;
+  return <InviteGone title={words.title} sentence={words.sentence} bookingId={fate.bookingId} />;
 }

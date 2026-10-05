@@ -21,14 +21,15 @@ export type InviteFate =
   | { kind: "unknown" }
   | { kind: "in"; bookingId: string }
   | { kind: "cancelled"; bookingId: string }
-  | { kind: "gone"; bookingId: string };
+  /** R16 J15-1 — with the seat itself, so the page can say which way it left the game. */
+  | { kind: "gone"; bookingId: string; seat: MySeat };
 
 /** What the seat's own record says became of it. */
 export function fateOf(seat: MySeat): InviteFate {
   const bookingId = seat.booking_id;
   if (seat.booking_status === "cancelled") return { kind: "cancelled", bookingId };
   if (seat.status === "accepted" && !seat.lapsed) return { kind: "in", bookingId };
-  return { kind: "gone", bookingId };
+  return { kind: "gone", bookingId, seat };
 }
 
 async function readFate(participantId: string): Promise<InviteFate> {

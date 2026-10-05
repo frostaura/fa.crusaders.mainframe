@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import InviteDeepLinkPage from "../../../pages/InviteDeepLink";
 import { renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../../../test/harness";
-import { INVITES_COPY, acceptLabel, askedAgainLine, invitedLine, signedInAsLine } from "../../../lib/playersCopy";
+import { DETAIL_GONE, INVITES_COPY, acceptLabel, askedAgainLine, invitedLine, playersWhen, signedInAsLine } from "../../../lib/playersCopy";
 import LoginPage from "../../../pages/Login";
 import { tokenStore } from "../../../lib/api";
 import { LOGIN } from "../../../lib/authCopy";
@@ -157,9 +157,12 @@ describe("R1 F2.7 / F2.8 — the mail's link after the invite moved on (asked of
     expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
   });
 
-  it.each(["declined", "withdrawn", "removed", "lapsed"])("off the game (%s): says so, with no link to a page they cannot open", async (status) => {
+  it.each([
+    ["declined", INVITES_COPY.fateGoneTitle], ["withdrawn", INVITES_COPY.fateGoneTitle],
+    ["removed", DETAIL_GONE.removedTitle], ["lapsed", INVITES_COPY.fateGoneTitle],
+  ])("off the game (%s): says so, with no link to a page they cannot open", async (status, title) => {
     openDeepLink([LIST, seat(status, "booked")]);
-    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateGoneTitle })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: title })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: INVITES_COPY.seeBooking })).toBeNull();
     expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
   });
@@ -167,6 +170,57 @@ describe("R1 F2.7 / F2.8 — the mail's link after the invite moved on (asked of
   it("an accepted seat that lapsed is off the game, not in it", async () => {
     openDeepLink([LIST, seat("accepted", "booked", { lapsed: true })]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateGoneTitle })).toBeInTheDocument();
+  });
+});
+
+/**
+ * R16 J15-1 (carried) — the mail's link for a seat that is off the game said one sentence for
+ * every way off it ("You declined it, pulled out or were taken off it — or its invite lapsed"),
+ * ignoring the seat's own status and, for a removal, whose act it was (`removed_by`). It now says
+ * what happened, as the booking page's own "not on this game" does — the club's act as the club's.
+ */
+describe("R16 J15-1 — the mail's link says which way the seat left the game", () => {
+  const LIST = { path: "/api/v1/me/invites", body: { items: [], count: 0 } };
+  const STARTS = "2026-10-01T08:00:00Z";
+  const GAME = DETAIL_GONE.game("Court 1", playersWhen(STARTS));
+  const seat = (status: string, extra: Record<string, unknown> = {}): StubRoute => ({
+    path: `/api/v1/me/invites/${SEAT}`,
+    body: {
+      participant_id: SEAT, booking_id: BOOKING, status, lapsed: false, settled_outside: false, booking_status: "booked",
+      court_name: "Court 1", starts_at: STARTS, ends_at: "2026-10-01T08:45:00Z",
+      organiser_name: "Sam Petersen", share_minutes: 25, timezone: "Africa/Johannesburg", ...extra,
+    },
+  });
+
+  it.each([
+    ["the club", { removed_by: "club" }, DETAIL_GONE.removedBody("Sam Petersen", GAME, "club")],
+    ["the organiser", { removed_by: "organiser" }, DETAIL_GONE.removedBody("Sam Petersen", GAME, "organiser")],
+    ["nobody on record", { removed_by: null }, DETAIL_GONE.removedBody("Sam Petersen", GAME, null)],
+  ])("removed by %s: 'You were taken off this game', said as that act", async (_who, extra, body) => {
+    openDeepLink([LIST, seat("removed", extra)]);
+    expect(await screen.findByRole("heading", { level: 1, name: DETAIL_GONE.removedTitle })).toBeInTheDocument();
+    expect(screen.getByText(body)).toBeInTheDocument();
+    expect(screen.queryByText(/pulled out or were taken off/)).toBeNull();
+  });
+
+  it("removed by the club never names the organiser as acting", async () => {
+    openDeepLink([LIST, seat("removed", { removed_by: "club" })]);
+    const said = await screen.findByText(/took you off/);
+    expect(said.textContent).toMatch(/^The club took you off Court 1/);
+    expect(said.textContent).not.toMatch(/Sam/);
+  });
+
+  it.each([
+    ["declined", {}, DETAIL_GONE.declinedBody(GAME)],
+    ["withdrawn", {}, DETAIL_GONE.withdrawnBody(GAME)],
+    ["lapsed", {}, DETAIL_GONE.lapsedBody(GAME)],
+    ["accepted", { lapsed: true }, DETAIL_GONE.lapsedBody(GAME)],
+    ["invited", { lapsed: true }, DETAIL_GONE.lapsedBody(GAME)],
+  ])("%s: says that, not the generic sentence", async (status, extra, body) => {
+    openDeepLink([LIST, seat(status, extra)]);
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateGoneTitle })).toBeInTheDocument();
+    expect(screen.getByText(body)).toBeInTheDocument();
+    expect(screen.queryByText(/pulled out or were taken off/)).toBeNull();
   });
 });
 
