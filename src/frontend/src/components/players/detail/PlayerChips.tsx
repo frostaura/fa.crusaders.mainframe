@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_COPY } from "@/lib/playersCopy";
 import { formerPlayers, isCancelled, positions, seatName, statusTone, statusWord, type SeatPosition } from "./detailModel";
+import { DETAIL_COLUMN_GAP } from "./detailLayout";
 
 /**
  * The four seats, two a side: a photo, a first name and a status WORD on every chip (never colour
@@ -27,7 +28,7 @@ export function PlayerChips({ detail, actions }: Props) {
       {/* R8 L8-3 — `grid-cols-1`, not an implicit column: that one is floored at its longest word and
           pushed the page 15px sideways at 320 / 200 % (gotchas-frontend-layout). R14 L14-2 — two
           columns only while there are two teams to put in them. */}
-      <div className={cn("grid grid-cols-1 gap-4", !lone && "sm:grid-cols-2")}>
+      <div className={cn("grid grid-cols-1 gap-y-4", DETAIL_COLUMN_GAP, !lone && "sm:grid-cols-2")}>
         {teams.map((t) => (
           <Team key={t.label} label={t.label} seats={t.seats} lone={lone} mine={mine} actions={actions} cancelled={cancelled} players={detail.players} />
         ))}

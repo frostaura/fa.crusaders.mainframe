@@ -140,7 +140,7 @@ describe("Buy minutes — the checkout", () => {
   it("cannot continue before a package is chosen", async () => {
     const stub = show([{ path: SHELF, body: minutesShelf() }]);
     await card("5 hours");
-    const button = screen.getByRole("button", { name: BUY_COPY.pickOne });
+    const button = screen.getByRole("button", { name: BUY_COPY.pickShort });
     fireEvent.click(button);
     expect(stub.calls.some((c) => c.method === "POST" && c.path === PURCHASE)).toBe(false);
   });

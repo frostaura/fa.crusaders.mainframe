@@ -110,8 +110,10 @@ function summaryDocked(pkg: ShelfPackage | null, buy: Purchase, notice: ReactNod
   return (
     <>
       {pkg && isFreeHere(pkg) ? <Alert tone="warning">{BUY_SAID.priceZero}</Alert> : notice}
-      <Button block size="lg" pending={buy.pending} disabled={!pkg || isFreeHere(pkg)} onClick={() => { if (pkg && !isFreeHere(pkg)) void buy.run(pkg); }}>
-        {pkg ? `${BUY_COPY.cta} · ${formatMoney(pkg.price_zar)}` : BUY_COPY.pickOne}
+      {/* R15 L15-8 — nothing picked: a short label at the default size. "Pick a package to see what
+          you pay." in a large button was four lines (~300px) of a 320 / 200 % screen's bottom bar. */}
+      <Button block size={pkg ? "lg" : "md"} pending={buy.pending} disabled={!pkg || isFreeHere(pkg)} onClick={() => { if (pkg && !isFreeHere(pkg)) void buy.run(pkg); }}>
+        {pkg ? `${BUY_COPY.cta} · ${formatMoney(pkg.price_zar)}` : BUY_COPY.pickShort}
       </Button>
     </>
   );

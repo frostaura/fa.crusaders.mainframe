@@ -111,6 +111,8 @@ export const BUY_COPY = {
   discountBadge: (pct: string) => `${pct} off`,
   summaryLabel: "Your purchase",
   pickOne: "Pick a package to see what you pay.",
+  /** R15 L15-8 — the phone's docked button before a package is picked: one short line at 320 / 200 %. */
+  pickShort: "Pick a package",
   youGet: "You get",
   listPrice: "Price",
   discountLine: (pct: string, group: string) => `${group} discount (${pct})`,

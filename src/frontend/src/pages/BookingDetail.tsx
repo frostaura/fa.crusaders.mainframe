@@ -43,6 +43,7 @@ import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
 import { vouchesForResult } from "@/lib/bookingLink";
 import { bookedByClub } from "@/components/bookings/bookedByClub";
+import { DETAIL_GAP } from "@/components/players/detail/detailLayout";
 
 /**
  * `/bookings/:bookingId` — the booking's own page (P11, D11–D13): the four seats and who is on
@@ -218,14 +219,14 @@ function DetailBody({ read, say, earlyResult, bookingId, seatId }: BodyProps) {
  * DOM order is the phone's in every layout, so Tab order is reading order. Written whole.
  */
 const LAYOUT = [
-  "flex flex-col gap-8",
+  `flex flex-col ${DETAIL_GAP}`,
   "@[56rem]/page:grid @[56rem]/page:grid-cols-2 @[56rem]/page:items-start",
   "@[72rem]/page:grid-cols-[minmax(0,1fr)_22rem]",
 ].join(" ");
 const PLAYERS = "@[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-1 @[72rem]/page:row-start-1";
 const MONEY = "min-w-0 @[72rem]/page:sticky @[72rem]/page:top-6 @[72rem]/page:col-start-2 @[72rem]/page:row-span-2 @[72rem]/page:row-start-1";
 const COURT = [
-  "flex min-w-0 flex-col gap-8 @[72rem]/page:col-start-1 @[72rem]/page:row-start-2 @[72rem]/page:grid @[72rem]/page:grid-cols-2 @[72rem]/page:items-start",
+  `flex min-w-0 flex-col ${DETAIL_GAP} @[72rem]/page:col-start-1 @[72rem]/page:row-start-2 @[72rem]/page:grid @[72rem]/page:grid-cols-2 @[72rem]/page:items-start`,
   "@[100rem]/page:grid-cols-[repeat(auto-fit,minmax(20rem,1fr))]",
 ].join(" ");
 const CANCEL = "min-w-0 @[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-2 @[72rem]/page:row-start-3";

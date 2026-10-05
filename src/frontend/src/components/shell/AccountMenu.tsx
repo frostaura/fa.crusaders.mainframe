@@ -116,7 +116,9 @@ export function AccountMenu() {
         data-account-menu=""
         className="no-lift inline-flex size-touch shrink-0 items-center justify-center rounded-full border border-transparent hover:bg-bg-muted data-[state=open]:bg-bg-muted"
       >
-        <Avatar size={32}>
+        {/* R15 L15-6 — the avatar is rem-sized and the button is a px touch target: at 200 % the
+            64px circle overflowed the 44px button and the app bar. It never outgrows its button. */}
+        <Avatar size={32} className="max-h-full max-w-full">
           {profile?.photo_url ? <AvatarImage src={profile.photo_url} alt="" /> : null}
           <AvatarFallback aria-hidden="true"><Mark name={profile ? name : null} /></AvatarFallback>
         </Avatar>
