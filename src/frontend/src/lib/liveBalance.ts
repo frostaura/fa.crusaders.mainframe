@@ -211,7 +211,11 @@ export type BalanceTransport = {
    * A rejection with `stop: true` is policy, not a blip: nothing retries it.
    */
   open(args: {
-    onFrame: (frame: BalanceFrame) => void;
+    /**
+     * R15 X15-6 — `origin: "unnamed"` is the legacy `data:` frame (and every stream's opening
+     * snapshot): it carries a balance, never a movement. Absent = a named `balance` event.
+     */
+    onFrame: (frame: BalanceFrame, origin?: "unnamed") => void;
     /** Nothing has arrived for the silence window. The stream is open and is not delivering. */
     onSilence: () => void;
     onError: () => void;
@@ -307,21 +311,22 @@ export function sseTransport(): BalanceTransport {
         silenceTimer = setTimeout(onSilence, STREAM_SILENCE_MS);
       };
 
-      const take = (raw: string) => {
+      const take = (raw: string, origin?: "unnamed") => {
         heardFrom();
         try {
           const msg = JSON.parse(raw) as BalanceFrame;
           if (typeof msg.balance_minutes === "number") {
             // A read already on its way may predate this movement: never join it (api `readWallet`).
             noteWalletMoved();
-            onFrame(msg);
+            onFrame(msg, origin);
           }
         } catch { /* malformed payloads are ignored */ }
       };
 
       heardFrom();
       es.onopen = heardFrom;
-      es.onmessage = (e) => take(e.data);
+      // R15 X15-6: the unnamed frame is the opening snapshot or the legacy twin of a named one.
+      es.onmessage = (e) => take(e.data, "unnamed");
       es.addEventListener("balance", (e) => take((e as MessageEvent).data));
       // The keep-alive carries no balance; all it proves is that the stream is still ours.
       es.addEventListener("ping", heardFrom);
@@ -446,11 +451,16 @@ export function useLiveBalance({
     return () => setMoneyRequestListener(null);
   }, []);
 
-  const record = useCallback((minutes: number, frame?: BalanceFrame) => {
+  const record = useCallback((minutes: number, frame?: BalanceFrame, quiet = false) => {
     const before = previous.current;
     previous.current = minutes;
     setBalance(minutes);
     setLastConfirmedAt(Date.now());
+    // R15 X15-6 / E15-2 / J15-3 — an unnamed frame (the stream's opening snapshot, or the legacy
+    // twin the server publishes beside every named one, ~1 ms apart in either order) moves the
+    // figure and never raises a movement. Its reasonless diff was the second toast. It leaves
+    // `expectSelf` alone: that flag belongs to the read or the named frame that follows.
+    if (quiet) return;
     const amount = frame?.delta_minutes ?? (before === null ? 0 : minutes - before);
     // A first read is not a movement: `null -> 400` is the first time the member has been
     // told, not money arriving. Neither is a re-read that confirms what we already had.
@@ -606,12 +616,15 @@ export function useLiveBalance({
       if (cancelled || parked) return;
       try {
         const opened = await wire.open({
-          onFrame: (frame) => {
+          onFrame: (frame, origin) => {
             failures = 0;
             backoffMs = policy.backoffInitialMs;
             setState("live");
-            setHeldFigures(heldFrom(frame));
-            record(frame.balance_minutes, frame);
+            // The legacy unnamed twin carries the balance alone: it must not wipe a held part the
+            // named frame (or the opening snapshot, which carries them) stated.
+            const bare = origin === "unnamed" && frame.held_minutes === undefined;
+            setHeldFigures((h) => (bare && h ? { ...h, spendable: frame.balance_minutes - h.held - h.owedBack } : heldFrom(frame)));
+            record(frame.balance_minutes, frame, origin === "unnamed");
           },
           onNotification: (count) => setUnreadCount(Math.max(0, count)),
           onSilence: () => {
