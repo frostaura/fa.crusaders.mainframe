@@ -301,3 +301,32 @@ test.describe("L16-5 — a card in the Bookings rail's strip is never wider than
     });
   }
 });
+
+/**
+ * L16-3's sweep: every member and admin route at 320 / 200 % with every read but who-am-I held, so
+ * each page sits on its loading state. `FE16S_SWEEP=1` runs it (it is the slow half); the named
+ * cases above are the ones that run every time.
+ */
+const SWEEP = ["/my-code", "/bookings", "/bookings/invites", `/bookings/${BOOKING}`, "/inbox", "/wallet", "/wallet/buy", "/wallet/activity",
+  "/profile", "/profile/results", "/admin", "/admin/members", `/admin/members/${ME}`, `/admin/members/${ME}/wallet`,
+  `/admin/members/${ME}/bookings`, `/admin/members/${ME}/doors`, `/admin/members/${ME}/night`, "/admin/groups", "/admin/packages",
+  "/admin/results", "/admin/transactions", "/admin/reports", "/admin/monitoring", "/admin/monitoring/doors", "/admin/monitoring/devices",
+  "/admin/monitoring/faults", "/admin/monitoring/changes", "/admin/schedules", "/admin/courts", "/admin/settings", "/admin/webhooks"];
+
+test.describe("L16-3 sweep — every route's loading state at 320 / 200 %", () => {
+  test.skip(!process.env.FE16S_SWEEP, "FE16S_SWEEP=1 runs the sweep");
+  for (const path of SWEEP) {
+    test(path, async ({ page }) => {
+      await open(page, path, { width: 320, root: 32, admin: true, hang: /^\/api\/v1\/(?!whoami$|me\/profile$|wallet$|me\/notifications\/unread-count$|me\/invites$|me\/door$|me\/play\/celebrations$|admin\/monitoring\/summary$|admin\/play\/results\/disputed\/count$)/ });
+      await page.waitForTimeout(1500);
+      const m = await page.evaluate(() => {
+        const main = document.getElementById("main-content") ?? document.querySelector("main")!;
+        const past = [...document.querySelectorAll("main [data-slot='skeleton']")]
+          .filter((el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+          .map((el) => `${el.parentElement?.className.slice(0, 50)} > ${el.className.slice(0, 40)}`);
+        return { doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, main: main.scrollWidth - main.clientWidth, past };
+      });
+      expect(m, "sideways while loading").toEqual({ doc: 0, main: 0, past: [] });
+    });
+  }
+});
