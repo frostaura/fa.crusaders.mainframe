@@ -130,7 +130,7 @@ describe("R13 J13-4 — a member taken off a game is told their share came back"
     await wait(600);
     const said = toasts();
     expect(said).toHaveLength(1);
-    expect(said[0]).toBe("10 minutes of your share of a split booking came back — the club took you off the game.");
+    expect(said[0]).toBe("The club took you off the game — 10 minutes came back.");
     expect(said[0]).not.toMatch(/^A share of a split booking moved/);
   }, 15_000);
 });
@@ -184,7 +184,7 @@ describe("R13 C13-7 — the wire's names and court", () => {
       court_name: "Court 1", booking_starts_at: "2030-10-08T16:00:00+00:00",
     });
     await wait(600);
-    expect(toasts()).toEqual(["10 minutes of your share of Court 1 · Tue 8 Oct came back — the club took you off the game."]);
+    expect(toasts()).toEqual(["The club took you off Court 1 · Tue 8 Oct — 10 minutes came back."]);
   }, 15_000);
 
   it("X13-2: the cancel frame as sent — null name on the refund row, names on the share rows", async () => {
@@ -202,7 +202,7 @@ describe("R13 C13-7 — the wire's names and court", () => {
     });
     await wait(400);
     expect(toasts()).toEqual([
-      "The club cancelled your booking: 32 minutes came back, 7 minutes went back to Sam and 7 minutes to Alex for their shares, so 18 minutes came back to your wallet.",
+      "The club cancelled your booking on Court 1 · Tue 8 Oct: 32 minutes came back, 7 minutes went back to Sam and 7 minutes to Alex for their shares, so 18 minutes came back to your wallet.",
     ]);
   }, 15_000);
 });

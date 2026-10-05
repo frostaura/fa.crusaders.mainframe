@@ -93,7 +93,7 @@ function useClubMovementToast() {
     if (delta.source !== "club") return;
     const sayAs = (amount: number, parts: BalancePart[] | undefined) => (text: string) =>
       toast.push({ tone: toneOf(amount, parts), text, durationMs: MONEY_TOAST_MS });
-    const who = { cancelledBy: delta.cancelledBy, checkedInBy: delta.checkedInBy };
+    const who = { cancelledBy: delta.cancelledBy, checkedInBy: delta.checkedInBy, place: delta.place };
     const held = pending.current;
     if (held && delta.reason === "share_transfer") {
       // R12 X12-1 — the refund's share rows, an older server's second frame: one sentence, the net.
@@ -101,7 +101,7 @@ function useClubMovementToast() {
       pending.current = null;
       const parts = [...partsOf(held.delta), { reason: "share_transfer", delta_minutes: delta.amount }];
       const amount = held.delta.amount + delta.amount;
-      const heldWho = { cancelledBy: held.delta.cancelledBy, checkedInBy: held.delta.checkedInBy };
+      const heldWho = { cancelledBy: held.delta.cancelledBy, checkedInBy: held.delta.checkedInBy, place: held.delta.place };
       sayAs(amount, parts)(movementSentence(amount, "cancellation_refund", parts, heldWho));
       return;
     }
@@ -114,7 +114,11 @@ function useClubMovementToast() {
     if (delta.reason === "share_transfer") {
       // R11 E11-1 — said with the frame's cause, named or plain.
       // R13 X13-3 / J13-4 — who cancelled, and the frame's own court for a booking no longer readable.
-      const plainShare = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy, { cancelledBy: delta.cancelledBy, place: delta.place });
+      // R14 X14-2 — who acted (`actor_name`) and the other member on the share row.
+      const other = delta.parts?.find((p) => p.reason === "share_transfer")?.counterparty_name ?? null;
+      const plainShare = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy, {
+        cancelledBy: delta.cancelledBy, place: delta.place, actor: delta.actorName, other,
+      });
       namedShareMovement(delta.amount, me, delta).then((named) => say(named ?? plainShare), () => say(plainShare));
     } else if (awaitsShares(delta)) {
       const timer = window.setTimeout(() => {

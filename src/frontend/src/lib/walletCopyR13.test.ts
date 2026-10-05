@@ -60,11 +60,11 @@ describe("R13 X13-3 — the partner is told the club cancelled", () => {
 describe("R13 J13-4 — a member taken off a game is told their share came back", () => {
   it("club_removed, no booking readable: 'your share … came back — the club took you off the game'", () => {
     expect(shareMovementPlain(10, "club_removed", undefined))
-      .toBe("10 minutes of your share of a split booking came back — the club took you off the game.");
+      .toBe("The club took you off the game — 10 minutes came back.");
   });
   it("club_removed with the court from the frame", () => {
     expect(shareMovementPlain(10, "club_removed", undefined, undefined, { place: { courtName: "Court 1", startsAt: "2026-10-05T10:00:00Z" } }))
-      .toBe("10 minutes of your share of Court 1 · Mon 5 Oct came back — the club took you off the game.");
+      .toBe("The club took you off Court 1 · Mon 5 Oct — 10 minutes came back.");
   });
   it("an organiser paid a share is unchanged; no cause is unchanged", () => {
     expect(shareMovementPlain(10, "share_paid", undefined)).toBe("A share of a split booking moved 10 minutes into your wallet.");

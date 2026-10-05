@@ -162,7 +162,7 @@ export function minutesLeftSentence(amount: number, entryType: LedgerEntryType |
 export function movementSentence(amount: number, reason: string | undefined, parts?: readonly MovementPart[], who: MovementWho = {}): string {
   const minutes = minutesSpoken(Math.abs(amount));
   const up = amount > 0;
-  const said: Said = { minutes, up, split: splitParts(parts), by: who.checkedInBy };
+  const said: Said = { minutes, up, split: splitParts(parts), by: who.checkedInBy, where: sharePlace(who.place), whereAt: placeAt(who.place) };
   const caused = reason ? causedSentence(reason, said, parts, who) : null;
   if (caused) return caused;
   // `mixed` without its rows, and anything unknown: true whoever caused it.
@@ -173,7 +173,14 @@ export function movementSentence(amount: number, reason: string | undefined, par
 /** A cancellation said once (C1), a settlement with its partners' shares (C13-2), or a precise cause; null for none. */
 function causedSentence(reason: string, said: Said, parts: readonly MovementPart[] | undefined, who: MovementWho): string | null {
   const club = who.cancelledBy === "club";
-  if (reason === "cancellation_refund" && (club || (parts?.length ?? 0) > 1)) return cancelSentence(said, parts, club);
+  const rows = parts ?? [];
+  // R14 E14-7 — a cancel the frame places ("on Court 3 · Mon 5 Oct") is said with its place.
+  if (reason === "cancellation_refund" && (club || rows.length > 1 || said.where)) return cancelSentence(said, parts, club);
+  // R14 J14-4 — a late cancel of a split booking comes as `mixed`: its partners' shares went back
+  // to them, they are not the penalty ("11 minutes went on a charge" for a 4-minute penalty).
+  if (reason === "mixed" && rows.some((p) => p.delta_minutes > 0) && rows.some((p) => p.reason === "share_transfer" && p.delta_minutes < 0)) {
+    return cancelSentence(said, parts, club);
+  }
   const precise = PRECISE_MOVEMENT[reason];
   return settledWithShares(reason, said, parts ?? []) ?? (precise ? precise(said) : null);
 }
@@ -197,7 +204,11 @@ const BY_REASON: Record<string, readonly [Say, Say]> = {
 };
 
 /** R12 contracts C1 / C2 — who cancelled, and who checked in (absent: this member, or not said). */
-export type MovementWho = { cancelledBy?: "club" | "member"; checkedInBy?: string };
+export type MovementWho = {
+  cancelledBy?: "club" | "member"; checkedInBy?: string;
+  /** R14 E14-7 — the booking the frame names (`court_name` + `booking_starts_at`): "on Court 3 · Mon 5 Oct". */
+  place?: SharePlace;
+};
 
 /**
  * R12 X12-1 — a cancellation said once, whoever's rows it moved: the refund, the partners' shares
@@ -212,7 +223,8 @@ export type MovementWho = { cancelledBy?: "club" | "member"; checkedInBy?: strin
  * </p>
  */
 function cancelSentence(s: Said, parts: readonly MovementPart[] | undefined, club: boolean): string {
-  const lead = club ? "The club cancelled your booking" : "Your booking was cancelled";
+  const on = s.where ? ` on ${s.where}` : "";
+  const lead = club ? `The club cancelled your booking${on}` : `Your booking${on} was cancelled`;
   const rows = parts ?? [];
   const back = rows.filter((p) => p.delta_minutes > 0).reduce((n, p) => n + p.delta_minutes, 0);
   const shareRows = rows.filter((p) => p.delta_minutes < 0 && p.reason === "share_transfer");
@@ -324,7 +336,11 @@ function splitParts(parts: readonly MovementPart[] | undefined): Split {
 }
 
 /** `by` (R12 E12-2, contract C2): the member whose scan reversed a no-show or an outage refund. */
-type Said = { minutes: string; up: boolean; split: Split; by?: string };
+type Said = {
+  minutes: string; up: boolean; split: Split; by?: string;
+  /** R14 E14-7 — "Court 3 · Mon 5 Oct", and with the time ("Court 3 · Mon 5 Oct, 18:00"); null when unplaced. */
+  where: string | null; whereAt: string | null;
+};
 
 /** "Dan Splitter checked in, so …" or this member's own "… — you were checked in after all". */
 function reversedLead(s: Said, what: string, own: string): string {
@@ -358,7 +374,10 @@ const PRECISE_MOVEMENT: Record<string, (s: Said) => string> = {
     ? `${s.minutes} came back from a court you paid for at the box.`
     : `${s.minutes} went on another member's court, paid at the box.`,
   displaced_refund: (s) => s.up
-    ? `A booking was refunded — its court was already in use by an earlier game: ${s.minutes} back in your wallet.`
+    // R14 E14-7 — which booking: the court and the time.
+    ? s.whereAt
+      ? `Your booking on ${s.whereAt} was refunded — the court was already in use by an earlier game: ${s.minutes} back in your wallet.`
+      : `A booking was refunded — its court was already in use by an earlier game: ${s.minutes} back in your wallet.`
     : `${s.minutes} of a refund were taken back.`,
   // A refund and a charge in one move (a cancellation inside the penalty window, say): both, then the net.
   mixed: (s) => s.split
@@ -461,6 +480,12 @@ export function sharePlace(place: SharePlace, timezone?: string): string | null 
   return `${court} · ${gameDay(place.startsAt, timezone)}`;
 }
 
+/** "Court 3 · Mon 5 Oct, 18:00" — a place with its time (a displacement says which game). */
+function placeAt(place: SharePlace, timezone?: string): string | null {
+  if (!place) return null;
+  return `${place.courtName?.trim() || "Court"} · ${playersWhen(place.startsAt, timezone)}`;
+}
+
 function courtOf(place: SharePlace): string {
   return place?.courtName?.trim() || "a split booking";
 }
@@ -511,6 +536,8 @@ export type ShareRowInput = {
   by?: string | null;
   /** R13 X13-3 — with `booking_cancelled`: the frame's `cancelled_by` ("club": the club cancelled it). */
   cancelledBy?: "club" | "member";
+  /** R14 (BE14b §2) — the frame's `actor_name`: the player whose act moved the share, when not this member. */
+  actor?: string | null;
 };
 
 /**
@@ -528,6 +555,11 @@ export function shareRowSentence(input: ShareRowInput): string {
   const amount = minutesSpoken(Math.abs(input.signed));
   const court = courtOf(input.place);
   const who = input.other ? firstName(input.other) : null;
+  const acted = input.cause ? actedShareSentence({
+    side: input.side, signed: input.signed, cause: input.cause, cancelledBy: input.cancelledBy,
+    actor: input.actor ? firstName(input.actor) : null, other: who, where: sharePlace(input.place),
+  }) : null;
+  if (acted) return acted;
   const clause = shareCauseClause(input, who);
   if (input.cause === "attended" && input.side === "partner" && input.signed < 0) {
     return `${amount} taken again for your share of ${court}${clause}`;
@@ -538,6 +570,52 @@ export function shareRowSentence(input: ShareRowInput): string {
   }
   if (input.signed >= 0) return `${who ?? "A partner"} paid you ${amount} for their share of ${court}${clause}`;
   return `${amount} went back to ${who ?? "a partner"} from their share of ${court}${clause}`;
+}
+
+type Acted = {
+  side: "organiser" | "partner"; signed: number; cause: string; cancelledBy?: "club" | "member";
+  /** First names: who acted (the frame's `actor_name`), and the other person on the share. */
+  actor: string | null; other: string | null;
+  /** "Court 3 · Mon 5 Oct", or null when the booking cannot be placed. */
+  where: string | null;
+};
+
+/**
+ * R14 X14-2 / E14-1 (BE14b contract) — a share that went back because somebody ACTED, said as the
+ * act, by name: "Omar took you off Court 3 · Mon 5 Oct — 7 minutes came back"; "Otto changed the
+ * split on …"; "Sam withdrew from … — 7 minutes went back to them"; a member cancel "Omar cancelled
+ * … — 7 minutes of your share came back". `share_returned` is only ever a withdrawal now; the
+ * organiser's removal and a lowered split are their own causes. Null: not one of these.
+ */
+function actedShareSentence(a: Acted): string | null {
+  if (a.side === "partner" && a.signed > 0) return partnerActed(a, minutesSpoken(a.signed), a.where ?? "the game");
+  if (a.side === "organiser" && a.signed < 0) return organiserActed(a, minutesSpoken(-a.signed), a.where ?? "the game");
+  return null;
+}
+
+/** The partner's side: their share came back, and who did what to make it. */
+function partnerActed(a: Acted, minutes: string, where: string): string | null {
+  const by = a.actor ?? a.other ?? "The organiser";
+  const said: Record<string, () => string | null> = {
+    organiser_removed: () => `${by} took you off ${where} — ${minutes} came back`,
+    split_changed: () => `${by} changed the split on ${a.where ?? "your game"} — ${minutes} came back`,
+    share_returned: () => `You withdrew from ${where} — ${minutes} came back`,
+    club_removed: () => `The club took you off ${where} — ${minutes} came back`,
+    booking_cancelled: () => (a.cancelledBy === "member" && a.actor ? `${a.actor} cancelled ${where} — ${minutes} of your share came back` : null),
+  };
+  return said[a.cause]?.() ?? null;
+}
+
+/** The organiser's side: a partner's share went back to them. */
+function organiserActed(a: Acted, minutes: string, where: string): string | null {
+  const partner = a.other ?? a.actor;
+  const said: Record<string, () => string> = {
+    share_returned: () => `${a.actor ?? partner ?? "A partner"} withdrew from ${where} — ${minutes} went back to them`,
+    organiser_removed: () => `You took ${partner ?? "a partner"} off ${where} — ${minutes} went back to them`,
+    split_changed: () => `You changed the split on ${a.where ?? "your game"} — ${minutes} went back to ${partner ?? "your partner"}`,
+    club_removed: () => `The club took ${partner ?? "a partner"} off ${where} — ${minutes} went back to them`,
+  };
+  return said[a.cause]?.() ?? null;
 }
 
 /** Why a share moved, as a trailing clause (" — the booking was cancelled"); "" for none or unknown. */
@@ -576,13 +654,17 @@ function shareCauseClause(input: ShareRowInput, who: string | null): string {
  */
 export function shareMovementPlain(
   amount: number, cause: string | undefined, kept: number | undefined, by?: string,
-  more: { cancelledBy?: "club" | "member"; place?: SharePlace } = {},
+  more: { cancelledBy?: "club" | "member"; place?: SharePlace; actor?: string; other?: string | null } = {},
 ): string {
-  // R12 X12-3 — a withdrawal said plainly, with nobody to name: the share went back to them.
-  if (cause === "share_returned" && amount < 0) return `${minutesSpoken(-amount)} went back to a partner who withdrew from the game.`;
   // A collection (paid, collected, taken again) leaves the PARTNER; a return comes back to them.
   const collected = cause === "share_paid" || cause === "club_collected" || cause === "attended";
   const side = (collected ? amount < 0 : amount > 0) ? "partner" : "organiser";
+  // R14 X14-2 — a removal, a split change, a withdrawal or a member's cancel: said as the act.
+  const acted = cause ? actedShareSentence({
+    side, signed: amount, cause, cancelledBy: more.cancelledBy, actor: more.actor ? firstName(more.actor) : null,
+    other: more.other ? firstName(more.other) : null, where: sharePlace(more.place),
+  }) : null;
+  if (acted) return `${acted}.`;
   const row = { side, signed: amount, place: more.place ?? null, other: null, cause, kept, by, cancelledBy: more.cancelledBy } as const;
   if (cause && side === "partner" && amount > 0) {
     // R13 J13-4 (C13-7) — the court and the day from the frame: "of your share of Court 1 · Tue 8 Oct".

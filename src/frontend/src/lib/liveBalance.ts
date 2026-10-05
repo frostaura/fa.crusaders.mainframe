@@ -81,6 +81,12 @@ export type BalanceDelta = {
   checkedInBy?: string;
   /** R13 C13-7 — the booking the frame's rows name (court + start), for a member who can no longer read it. */
   place?: { courtName: string | null; startsAt: string };
+  /**
+   * R14 (BE14b contract §2) — on a share frame: the player whose act moved it (the organiser who
+   * took this member off, changed the split or cancelled; the partner who withdrew or paid). Absent
+   * when it was this member, the club or an admin — the club is never named by its admin.
+   */
+  actorName?: string;
 };
 
 /**
@@ -105,10 +111,13 @@ function shareCauseOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "shar
 }
 
 /** R12 contracts C1 / C2 — who cancelled, and who checked in, kept only when well-shaped. */
-function whoOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "cancelledBy" | "checkedInBy"> {
+function whoOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "cancelledBy" | "checkedInBy" | "actorName"> {
   const by = frame?.cancelled_by;
   const name = typeof frame?.checked_in_by_name === "string" ? frame.checked_in_by_name.trim() : "";
-  return { ...(by === "club" || by === "member" ? { cancelledBy: by } : {}), ...(name ? { checkedInBy: name } : {}) };
+  const actor = typeof frame?.actor_name === "string" ? frame.actor_name.trim() : "";
+  return {
+    ...(by === "club" || by === "member" ? { cancelledBy: by } : {}), ...(name ? { checkedInBy: name } : {}), ...(actor ? { actorName: actor } : {}),
+  };
 }
 
 /** R13 C13-7 — the frame's own booking (`court_name`, `booking_starts_at`), kept only when the start is a string. */
@@ -138,6 +147,8 @@ export type BalanceFrame = {
   court_name?: string | null;
   /** R13 C13-7 — that booking's start (ISO); null when the rows name none. */
   booking_starts_at?: string | null;
+  /** R14 (BE14b §2) — on a share frame: the player whose act moved it, when not this member, the club or an admin. */
+  actor_name?: string | null;
   /**
    * D11 (§3a): shares an organiser received, HELD for their partners' possible returns until
    * `held_until` (the earliest share deadline among them). Part of the balance, not spendable.
