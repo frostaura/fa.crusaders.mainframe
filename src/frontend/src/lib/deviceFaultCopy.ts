@@ -147,7 +147,7 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
     doThis: "If you have just plugged in a new board, this is it announcing itself and it will appear on Boards. If not, somebody has the club's key.",
   },
   malformed_body: {
-    means: "A board sent something the club's system could not read at all.",
+    means: "A board sent a message the club's system could not read at all, so it was dropped. Whatever the board was saying did not reach the records.",
     doThis: "Almost always a firmware that is out of step with the server. Note the board and tell whoever runs the system.",
   },
   clock_clamped: {
@@ -221,6 +221,7 @@ export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "de
   /** True when nothing in the closed table matched — the page shows the raw code alongside. */
   unrecognised: boolean;
 } {
+  if (row.code === "malformed_body" && garbledButRead(row.detail)) return { ...GARBLED_BUT_READ, unrecognised: false };
   const known = EXPLANATIONS[row.code];
   const headline = (row.headline ?? "").trim();
   const title = headline
@@ -233,6 +234,51 @@ export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "de
     doThis: `Pass the code "${row.code}" to whoever looks after the boards. Nothing on this page can interpret it.`,
     unrecognised: true,
   };
+}
+
+/**
+ * R16 D16-5 — `malformed_body` is filed for two different things (the server's `DeviceBody`): a body
+ * that is not JSON at all, which is DROPPED, and one with invalid UTF-8, which the server reads
+ * leniently (each bad sequence replaced) and ACTS ON. The second is told apart only by the detail,
+ * so it gets its own title here: the server's headline is one per code, and "could not read" is
+ * false for a message that was read.
+ */
+const GARBLED_DETAIL = "invalid UTF-8 read as U+FFFD";
+
+function garbledButRead(detail: string | null | undefined): boolean {
+  return (detail ?? "").trim().endsWith(GARBLED_DETAIL);
+}
+
+const GARBLED_BUT_READ = {
+  title: "A board sent some garbled characters",
+  means: "A board sent a message with a few garbled characters in it. The club's system read the rest and acted on it — a scan that came through garbled is refused at the court as a code nobody holds.",
+  doThis: "Nothing, if it happened once. If it keeps happening, that board or its scanner cable is sending bad characters — note the board and tell whoever runs the system.",
+};
+
+/** What the board was sending, by the route it sent it to (the last part of `/api/v1/device/…`). */
+const DEVICE_ROUTE: Record<string, string> = {
+  activate: "a scan asking for the lights",
+  events: "its upload of scans and switches",
+  "pay-for": "a pay-for at the box",
+  walkup: "a walk-up at the box",
+  heartbeat: "its regular check-in",
+  gate: "a scan at a door",
+};
+
+/** What became of it, by the server's detail. */
+const BODY_FAULT: Record<string, string> = {
+  [GARBLED_DETAIL]: "some characters in it were garbled, and the rest was read",
+  "body is not JSON": "it could not be read at all",
+  "body too large": "it was far too large to be a board's message, so it could not be read",
+  malformed: "it could not be read",
+};
+
+/** "activate: body is not JSON" → "What the board was sending: a scan asking for the lights — it could not be read at all." */
+function bodyFaultLine(text: string): string | null {
+  const parts = /^([a-z-]+): (.+)$/.exec(text);
+  const how = parts ? BODY_FAULT[parts[2]] : undefined;
+  if (!parts || !how) return null;
+  return `What the board was sending: ${DEVICE_ROUTE[parts[1]] ?? "a message"} — ${how}.`;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -331,6 +377,8 @@ export function faultDetail(detail: string | null | undefined, timezone: string 
   const text = (detail ?? "").trim();
   const reason = REFUSAL_REASON[text];
   if (reason) return reason;
+  const body = bodyFaultLine(text);
+  if (body) return body;
   // An unknown bare code still reads as words rather than as an identifier.
   if (/^[a-z]+(?:_[a-z]+)+$/.test(text)) return `Reason given: ${text.replace(/_/g, " ")}.`;
   const relays = /^served (\d+) relay\(s\), the box reported (\d+)$/.exec(text);
