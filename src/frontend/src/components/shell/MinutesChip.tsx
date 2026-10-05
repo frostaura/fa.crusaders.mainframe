@@ -9,6 +9,7 @@ import type { BalanceDelta, BalancePart, LiveState } from "@/lib/liveBalance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn } from "@/lib/utils";
+import { clubRowTime } from "@/lib/clubClock";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
 import { movementSentence } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/useAuth";
@@ -233,10 +234,18 @@ function noFigureLabel(none: NoFigure): string {
   return `${plain}. ${phoneIsOffline() ? OFFLINE_COPY.staleTitle : OFFLINE_COPY.unreachableTitle}.`;
 }
 
-/** "Last known at 18:04 — …": a kept figure says it is one. */
+/**
+ * "Last known at 18:04, not yet confirmed by the club" — a kept figure says it is one, in its
+ * accessible name as well as its title (R16 X16-4: the name read like the current balance). The
+ * time is the club's 24-hour clock in the club's zone (the phone's own zone only until the club
+ * has said one), with the day when it was not today's.
+ */
+function keptSuffix(at: number | null): string {
+  return `${at === null ? "Last known" : `Last known at ${clubRowTime(at, Date.now())}`}, not yet confirmed by the club`;
+}
+
 function keptTitle(at: number | null, rest: string): string {
-  const time = at === null ? null : new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `${time ? `Last known at ${time}` : "Last known"}, not yet confirmed by the club — ${rest}`;
+  return `${keptSuffix(at)} — ${rest}`;
 }
 
 export function MinutesChip() {
@@ -271,7 +280,7 @@ export function MinutesChip() {
         data-minutes-chip=""
         data-zero-entice={entice.breathing || undefined}
         data-live-state={state}
-        aria-label={none ? noFigureLabel(none) : chipLabel(balance, loading, state, figures)}
+        aria-label={none ? noFigureLabel(none) : kept ? `${chipLabel(balance, loading, state, figures)} ${keptSuffix(kept.at)}.` : chipLabel(balance, loading, state, figures)}
         title={none ? noFigureLabel(none) : kept ? keptTitle(kept.at, chipTitle(state, loading, balance, figures)) : chipTitle(state, loading, balance, figures)}
         className={cn(
           // A 44px floor in PIXELS at every pointer (it sits beside the 44px account button, and
