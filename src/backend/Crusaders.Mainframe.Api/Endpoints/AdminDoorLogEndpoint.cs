@@ -223,6 +223,8 @@ public static class AdminDoorLogEndpoint
                 key = id.ToString(),
                 name = DoorRowDoor.StoredName(details),
                 gate_key = DoorRowDoor.StoredKey(details),
+                // R13 L13-1: the board's own code, so an unnamed gate reads "Unnamed scanner (gate-…)", never its id.
+                device_code = DoorRowDoor.StoredCode(details),
             });
         }
         return removed;

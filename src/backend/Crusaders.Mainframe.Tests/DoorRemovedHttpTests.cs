@@ -152,6 +152,29 @@ public sealed class DoorRemovedHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
+    /// R13 L13-1: a removed door carries the board's own code, so a picker can say "Unnamed scanner
+    /// (gate-…)" for a gate nobody named, the way the export does, and never its id.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_removed_door_carries_the_code_on_its_board()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "rmdoor13");
+        var gone = Guid.NewGuid();
+        await club.WriteRowAsync(
+            factory, gone, DeviceGateEndpoint.OpenedAction, DateTimeOffset.UtcNow.AddMinutes(-2),
+            reason: GateAccess.Ok, deviceCode: "gate-a86745");
+        await club.DeleteRecordAsync(factory, gone, "gate-a86745", DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(LogPath);
+
+        var offered = body.GetProperty("removed_doors").EnumerateArray().Single();
+        Assert.Equal("gate-a86745", offered.GetProperty("device_code").GetString());
+    }
+
+    /// <summary>
     /// A board whose row is still there is not a removed door, however many delete rows the
     /// trail happens to carry — the state of the club NOW decides, not the history.
     /// </summary>

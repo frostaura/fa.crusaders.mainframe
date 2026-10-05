@@ -2932,7 +2932,8 @@ export type DoorLogEntry = DeviceActivityEntry & {
  * a deleted board has no `id` to filter by, and A2's ruling is that its history stays
  * reachable rather than becoming a database query.
  */
-export type RemovedDoor = { key: string; name?: string | null; gate_key?: string | null };
+/** R13 L13-1 — `device_code` is the board's own code, so an unnamed gate is "Unnamed scanner (gate-…)". */
+export type RemovedDoor = { key: string; name?: string | null; gate_key?: string | null; device_code?: string | null };
 
 export type DoorLogPage = {
   items: DoorLogEntry[];
