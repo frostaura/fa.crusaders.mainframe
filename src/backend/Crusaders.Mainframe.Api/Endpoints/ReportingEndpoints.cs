@@ -50,7 +50,10 @@ public static class ReportingEndpoints
         {
             var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
             var rows = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
-            var funding = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type)).ToList();
+            // R13 J13-2: minutes the club GAVE (a desk package_free, or one recorded at R0.00) were
+            // never sold. Counted in, one free package beside one paid one halved the rand per
+            // hour sold. They are their own figure; sold + given is every funding row's minutes.
+            var funding = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type) && !IsGiven(r)).ToList();
             var reversed = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).ToList();
 
             // Rand comes from ZarPaid; minutes come from AmountMinutes. They are not
@@ -72,6 +75,7 @@ public static class ReportingEndpoints
                 gross_topups_minutes = funding.Sum(r => r.AmountMinutes),
                 reversals_minutes = reversed.Sum(r => r.AmountMinutes),
                 net_minutes = netMinutes,
+                given_minutes = GivenMinutes(rows),
                 zar_per_minute_sold = ZarPerMinuteSold(netZar, netMinutes),
             });
         });
@@ -507,7 +511,10 @@ public static class ReportingEndpoints
     /// free package "Bought"; this is the figure that lets it say "Given by the club".
     /// </summary>
     internal static int GivenMinutes(IEnumerable<LedgerEntry> entries) =>
-        entries.Where(e => e.Type == LedgerEntryType.AdminTopUp && e.ZarPaid == 0m).Sum(e => e.AmountMinutes);
+        entries.Where(IsGiven).Sum(e => e.AmountMinutes);
+
+    /// <summary>One desk top-up the club took no rand for — given, never sold (J11-4, R13 J13-2).</summary>
+    private static bool IsGiven(LedgerEntry e) => e.Type == LedgerEntryType.AdminTopUp && e.ZarPaid == 0m;
 
     internal static object BuildWalletReport(
         List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to,
