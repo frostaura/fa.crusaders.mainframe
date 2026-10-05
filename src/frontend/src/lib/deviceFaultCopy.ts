@@ -1,5 +1,5 @@
 import type { DeviceErrorRow, DeviceErrorSeverity } from "./adminApi";
-import { clubDayAndClock } from "./clubClock";
+import { clubClock, clubShortDate } from "./clubClock";
 
 /**
  * What a fault MEANS, and what somebody should do about it — in words a volunteer can act on.
@@ -151,7 +151,7 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
     doThis: "Almost always a firmware that is out of step with the server. Note the board and tell whoever runs the system.",
   },
   clock_clamped: {
-    means: "A board's clock was wrong, so the club's system used its own time for that event instead. The record is a few minutes out.",
+    means: "A board gave an event a time that cannot be right — later than now, or more than 30 days ago — so the club's system recorded it when it arrived instead. If the board had been offline, it really happened earlier than its record shows.",
     doThis: "Normal after a power cut. If it keeps happening, that board is losing its clock and the times in its history cannot be trusted to the minute.",
   },
   event_rejected: {
@@ -404,6 +404,40 @@ const REFUSAL_REASON: Record<string, string> = {
 
 const ISO_INSTANT = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})\b/g;
 
+/** The year of an instant in the club's own calendar. */
+function clubYear(at: string | number, timezone: string | undefined): string {
+  return clubShortDate(at, timezone, { weekday: false, year: true }).split(" ").pop() ?? "";
+}
+
+/**
+ * R17 D17-3 — "Tue 6 Oct, 12:10", and "Sun 5 Mar 2028, 12:00" when the year is not this one: a fault
+ * detail can carry a board's wrong idea of the date, and a date with no year read as this year's.
+ */
+function faultInstant(iso: string, timezone: string | undefined): string {
+  const year = clubYear(iso, timezone) !== clubYear(Date.now(), timezone);
+  return `${clubShortDate(iso, timezone, { year })}, ${clubClock(iso, timezone)}`;
+}
+
+/**
+ * R17 D17-3 — a `clock_clamped` detail. The server writes `claimed <instant>`, or for a claim past what
+ * the calendar holds `DeviceTime.BeyondStorableDetail` / `BeforeStorableDetail`; a row filed before it
+ * did carries the saturated instant itself (`9999-12-31T23:59:59.9999999+00:00`, which the club's zone
+ * pushed into year 10000 and printed as "Sat 1 Jan, 01:59"). Null for any other detail.
+ */
+const SATURATED_CLAIM: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^(?:a time beyond what can be stored|9999-12-31T23:59:59)/, "a time beyond what can be stored"],
+  [/^(?:a time too long ago to be stored|0001-01-01T00:00:00)/, "a time too long ago to be stored"],
+];
+
+function claimedLine(text: string, timezone: string | undefined): string | null {
+  const claimed = /^claimed (.+)$/.exec(text)?.[1];
+  if (!claimed) return null;
+  const saturated = SATURATED_CLAIM.find(([shape]) => shape.test(claimed))?.[1];
+  const instant = /^\d{4}-\d{2}-\d{2}T/.test(claimed) && !Number.isNaN(Date.parse(claimed));
+  const when = saturated ?? (instant ? faultInstant(claimed, timezone) : null);
+  return when ? `The board gave it ${when}, so it was recorded at the time it arrived instead.` : null;
+}
+
 /**
  * A fault's detail in words (F3.7): "served 4 relay(s), the box reported 0" said as a sentence,
  * and any UTC instant the server wrote into it shown in the club's own time.
@@ -412,7 +446,7 @@ export function faultDetail(detail: string | null | undefined, timezone: string 
   const text = (detail ?? "").trim();
   const reason = REFUSAL_REASON[text];
   if (reason) return reason;
-  const body = bodyFaultLine(text);
+  const body = bodyFaultLine(text) ?? claimedLine(text, timezone);
   if (body) return body;
   // An unknown bare code still reads as words rather than as an identifier.
   if (/^[a-z]+(?:_[a-z]+)+$/.test(text)) return `Reason given: ${text.replace(/_/g, " ")}.`;
@@ -424,6 +458,6 @@ export function faultDetail(detail: string | null | undefined, timezone: string 
     return `The club's system expected ${courts} to be lit; the box reported ${reported === 0 ? "none" : reported}.`;
   }
   return text
-    .replace(ISO_INSTANT, (iso) => clubDayAndClock(iso, timezone))
+    .replace(ISO_INSTANT, (iso) => faultInstant(iso, timezone))
     .replace(/\b(\d+) relay\(s\)/g, (_m, n: string) => (n === "1" ? "1 relay" : `${n} relays`));
 }
