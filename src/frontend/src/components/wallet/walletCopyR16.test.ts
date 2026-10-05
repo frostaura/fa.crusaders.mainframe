@@ -90,3 +90,20 @@ describe("R16 E16-4 — the pay-for payer's toast says whose booking, not whose 
       .toBe(`30 minutes went on another member's booking on ${AT}, paid at the box.`);
   });
 });
+
+describe("R16 E16-3 — the club's cancel of a started session names who checked in", () => {
+  it("someone else checked in", () => {
+    expect(movementSentence(0, "cancelled_no_refund", [], { ...where, cancelledBy: "club", checkedInBy: "Pat Player" }))
+      .toBe(`The club cancelled your session on ${AT} — Pat Player had already checked in, so nothing was refunded.`);
+  });
+
+  it("nobody named (the member themself, or an older server): as before", () => {
+    expect(movementSentence(0, "cancelled_no_refund", [], { ...where, cancelledBy: "club" }))
+      .toBe(`The club cancelled your session on ${AT} — it had started, so nothing was refunded.`);
+  });
+
+  it("the partner's side: who checked in, and the share stands", () => {
+    expect(movementSentence(0, "cancelled_share_stands", [], { ...where, cancelledBy: "club", checkedInBy: "Pat Player" }))
+      .toBe(`The club cancelled ${AT} — Pat Player had already checked in, so your share stands.`);
+  });
+});

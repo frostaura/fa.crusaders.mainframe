@@ -203,6 +203,11 @@ function noShowReversedLead(s: Said): string {
   return s.by ? `${s.by} checked in on ${s.whereAt}, so the no-show was reversed` : `The no-show on ${s.whereAt} was reversed — you were checked in after all`;
 }
 
+/** R16 E16-3 — "Pat had already checked in" when the frame names them; "it had started" when not. */
+function startedBecause(s: Said): string {
+  return s.by ? `${s.by} had already checked in` : "it had started";
+}
+
 /** R16 J16-4 — "Your booking on Court 2 · Mon 5 Oct, 18:30: " before a placed sentence; nothing unplaced. */
 function onBooking(s: Said): string {
   return s.whereAt ? `Your booking on ${s.whereAt}: ` : "";
@@ -248,9 +253,10 @@ const PRECISE_MOVEMENT: Record<string, (s: Said) => string> = {
     ? `${onBooking(s)}${s.split.back} came back and ${s.split.charged} went on a charge, ${net(s)}.`
     : s.up ? `Your wallet went up by ${s.minutes}.` : `${s.minutes} left your wallet.`,
   // R14 (BE14b §5) — the club cancelled a session that had started: nothing moved, said with where and when.
-  cancelled_no_refund: (s) => `The club cancelled your session${s.whereAt ? ` on ${s.whereAt}` : ""} — it had started, so nothing was refunded.`,
+  // R16 E16-3 — the frame's checked_in_by_name names who had checked in (absent: this member, or not said).
+  cancelled_no_refund: (s) => `The club cancelled your session${s.whereAt ? ` on ${s.whereAt}` : ""} — ${startedBecause(s)}, so nothing was refunded.`,
   // R16 J16-7 — the partner's side of it: nothing moved, and their share stands.
-  cancelled_share_stands: (s) => `The club cancelled ${s.whereAt ?? "your game"} — it had started, so your share stands.`,
+  cancelled_share_stands: (s) => `The club cancelled ${s.whereAt ?? "your game"} — ${startedBecause(s)}, so your share stands.`,
   // R16 J16-4 — which booking, where the frame says.
   displaced_reinstated: (s) => s.up
     ? `${s.whereAt ? `Your booking on ${s.whereAt}` : "A booking"} was reinstated: ${s.minutes} back in your wallet.`
