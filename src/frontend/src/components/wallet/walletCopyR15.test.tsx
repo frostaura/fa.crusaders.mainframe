@@ -105,6 +105,14 @@ describe("R15 J15-7 / E15-9 — share lines name the other member", () => {
     expect(screen.queryByText(/the organiser for your share/)).toBeNull();
   });
 
+  it("the row's counterparty_name is preferred to its To column", async () => {
+    stubFetch([]);
+    const r = { ...row("s1", -7, ME, "Olivia's desk alias"), counterparty_name: "Olivia Organiser" };
+    renderPage(<LedgerTable rows={[r]} label="Wallet ledger" groupShares shareBookings={shareBookingsFrom({ b1: null })} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Your share/ }));
+    expect(await screen.findByText("7 minutes moved to Olivia for your share of a split booking")).toBeInTheDocument();
+  });
+
   it("a club collection (an admin acted): 'Tess paid you', never 'A partner paid you'", async () => {
     stubFetch([]);
     const booking = {

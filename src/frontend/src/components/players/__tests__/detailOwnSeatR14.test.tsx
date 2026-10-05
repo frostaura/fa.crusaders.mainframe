@@ -42,7 +42,8 @@ describe("R14 J14-10 — the 404's own_seat_id says what became of the member's 
     });
     renderAt(`/bookings/${BOOKING}`);
     expect(await screen.findByText(DETAIL_GONE.removedTitle)).toBeInTheDocument();
-    expect(screen.getByText(/^Olga took you off Court 4, /)).toBeInTheDocument();
+    // R15 J15-1 — no removed_by on the wire: the removal names nobody, never the organiser.
+    expect(screen.getByText(/^You were taken off Court 4, /)).toBeInTheDocument();
     expect(screen.queryByText(DETAIL_COPY.notFoundTitle)).toBeNull();
   });
 

@@ -43,7 +43,11 @@ Tests: `liveBalanceR15`, `unreachableR15`, `setupChecklistR15`, `detailCancelR15
   balance doesn't cover" (the page cannot know it); a R0.00 desk give names no payment method.
   Cancelled Money panel names the partners whose shares went back, singular for one (J14-7).
 - **The club's acts are the club's** (J15-1): `removed_by` (seat read, else the 404) → "The club
-  took you off …"; `added_by_club` → "The club added you to Owen's game". Absent = old words.
+  took you off …" / "Olga took you off …"; null or absent names nobody ("You were taken off …"),
+  never the organiser. `added_by_club` → "The club added you to Owen's game".
+- **A share line's other person is the row's `counterparty_name` first** (C5, typed on `LedgerRow`),
+  then its To / From. **BE15b's twelve new Night booking kinds are `PLAYER_ACTS`** (never folded);
+  the Night has no kind→icon map, so a new kind needs only that.
 - **Layout** (measured, Chromium): header avatar capped `max-h-full max-w-full` in its px button
   (L15-6); booking page one gap token `detailLayout.ts` — the teams grid takes the page's column
   gap (L15-7, was 8px off); `/wallet/buy` docked button before a pick: "Pick a package", size md (L15-8).

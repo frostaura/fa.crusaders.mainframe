@@ -59,6 +59,16 @@ describe("R15 J15-1 — a removal is said as its actor's act", () => {
     expect(await screen.findByText(/^Olga took you off Court 4, /)).toBeInTheDocument();
   });
 
+  it("removed_by null (no record, or a removal before R14): names nobody — never the organiser", async () => {
+    serve({
+      detail: { path: DETAIL_PATH, respond: () => refuse(404, { error: "booking_not_found", own_seat_id: PID.alex, removed_by: null }) },
+      extra: [{ path: `/api/v1/me/invites/${PID.alex}`, body: seatOf({ removed_by: null }) }],
+    });
+    renderAt(`/bookings/${BOOKING}`);
+    expect(await screen.findByText(/^You were taken off Court 4, /)).toBeInTheDocument();
+    expect(screen.queryByText(/Olga took you off/)).toBeNull();
+  });
+
   it("the words", () => {
     expect(DETAIL_GONE.removedBody("Olga", "Court 4, Wed 30 Sep, 18:00", "club"))
       .toBe("The club took you off Court 4, Wed 30 Sep, 18:00. Anything you'd paid for it is refunded — your wallet shows it.");

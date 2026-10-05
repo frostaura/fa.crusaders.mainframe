@@ -228,7 +228,8 @@ describe("M5-8 — a member taken off the game is told so, not 'Booking not foun
     });
     renderAt(`/bookings/${BOOKING}?seat=${PID.alex}`);
     expect(await screen.findByText(DETAIL_GONE.removedTitle)).toBeInTheDocument();
-    expect(screen.getByText(/^Olga took you off Court 4, /)).toBeInTheDocument();
+    // R15 J15-1 — no removed_by on the wire: the removal names nobody, never the organiser.
+    expect(screen.getByText(/^You were taken off Court 4, /)).toBeInTheDocument();
     expect(screen.queryByText(DETAIL_COPY.notFoundTitle)).toBeNull();
     expect(screen.getByRole("link", { name: DETAIL_GONE.wallet })).toHaveAttribute("href", "/wallet");
   });

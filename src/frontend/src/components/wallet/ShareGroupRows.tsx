@@ -50,9 +50,12 @@ function otherParty(row: LedgerRow, side: ShareSide, booking: ShareBooking | nul
   return fromBooking ?? rowCounterparty(row);
 }
 
+/** The row's `counterparty_name` (C5, sent on every share row with an owned twin), else its To / From. */
 function rowCounterparty(row: LedgerRow): string | null {
-  const name = (row.signedAmountMinutes < 0 ? row.to : row.from)?.trim() ?? "";
-  return name === "" || /^the club$/i.test(name) ? null : name;
+  const said = [row.counterparty_name, row.signedAmountMinutes < 0 ? row.to : row.from]
+    .map((n) => n?.trim() ?? "")
+    .find((n) => n !== "" && !/^the club$/i.test(n));
+  return said ?? null;
 }
 
 /**

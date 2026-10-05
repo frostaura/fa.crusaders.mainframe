@@ -710,9 +710,15 @@ function sharesPaid(who: string | null, partners: readonly string[]): string {
  */
 export const DETAIL_GONE = {
   removedTitle: "You were taken off this game",
-  /** R15 J15-1 — `by: "club"`: an admin's removal is the club's act, never the organiser's. */
-  removedBody: (organiser: string, game: string, by: "club" | "organiser" | null = null) =>
-    `${by === "club" ? "The club" : organiser} took you off ${game}. Anything you'd paid for it is refunded — your wallet shows it.`,
+  /**
+   * R15 J15-1 — said as its actor's act: "club" is the club's, "organiser" names the organiser;
+   * null (no record — a removal before R14 — or an older API) names nobody, never the organiser.
+   */
+  removedBody: (organiser: string, game: string, by: "club" | "organiser" | null = null) => {
+    const refunded = "Anything you'd paid for it is refunded — your wallet shows it.";
+    if (by === null) return `You were taken off ${game}. ${refunded}`;
+    return `${by === "club" ? "The club" : organiser} took you off ${game}. ${refunded}`;
+  },
   leftTitle: "You're no longer on this game",
   declinedBody: (game: string) => `You declined ${game}.`,
   withdrawnBody: (game: string) => `You pulled out of ${game}. Anything you'd paid for it is refunded — your wallet shows it.`,
