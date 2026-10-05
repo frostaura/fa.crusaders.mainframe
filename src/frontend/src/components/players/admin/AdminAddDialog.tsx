@@ -67,7 +67,8 @@ function useAddFlow({ detail, onAdded, onStale }: Props) {
   const onBooking = new Set(detail.players.map((p) => p.user_id).filter(Boolean));
   const list = (members.data ?? [])
     .filter((m) => !onBooking.has(m.user_id))
-    .map((m) => ({ id: m.user_id, name: m.full_name, photoUrl: m.photo_url }));
+    // R16 J16-3 — namesakes read apart: the membership number and email under each name (admin only).
+    .map((m) => ({ id: m.user_id, name: m.full_name, photoUrl: m.photo_url, subtitle: DETAIL_ADMIN.memberSubtitle(m.membership_number, m.email) }));
   // R3 lost-reply audit — a lost reply is looked for on the booking: a new seat for this pick.
   const add = useAsyncAction(
     () => addOrProve(detail, pickOf(kind, form), () => playersEndpoints.adminAdd(detail.booking_id, bodyOf(kind, form))),

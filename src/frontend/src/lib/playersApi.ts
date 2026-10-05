@@ -40,7 +40,17 @@ export type BookingStatusWord = "booked" | "cancelled" | "no_show" | "completed"
 export const MAX_SEATS = 4;
 
 /** A member as another member may see them: id, name, photo. Nothing else, ever. */
-export type PublicMember = { user_id: string; name: string; photo_url: string | null };
+export type PublicMember = {
+  user_id: string; name: string; photo_url: string | null;
+  /**
+   * R16 J16-3 (BE16b) — what tells two namesakes apart, and all a member may be told: games the
+   * caller and this member both played, the latest one's start, and when they joined (YYYY-MM-DD).
+   * On the directory and favourites (recent: `member_since`). Absent from an older API.
+   */
+  played_with_you?: number;
+  last_played_with_you_at?: string | null;
+  member_since?: string | null;
+};
 
 /* ─────────────────────────────── requests ─────────────────────────────── */
 

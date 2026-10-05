@@ -293,6 +293,13 @@ export const PICKER = {
   recentEmptyHint: "Players you've been on a court with in the last few months show up here.",
   played: (games: number) => (games === 1 ? "Played once" : `Played ${games} times`),
   lastPlayed: (when: string) => `last on ${when}`,
+  /**
+   * R16 J16-3 — what tells two namesakes apart in the member's picker: only what the club may tell
+   * a member (BE16b) — the games you played together, else when they joined. Never an email,
+   * phone or membership number.
+   */
+  playedWithYou: (games: number) => (games === 1 ? "Played with you once" : `Played with you ${games} times`),
+  memberSince: (monthYear: string) => `Member since ${monthYear}`,
   searchLabel: "Search members",
   searchPlaceholder: "Their name",
   searchHint: "Type at least two letters of their name.",
@@ -846,6 +853,8 @@ export const DETAIL_ADMIN = {
   memberLabel: "Member to add",
   memberPlaceholder: "Choose a member",
   memberMissing: "Choose a member.",
+  /** R16 J16-3 — under each name in the club's combobox, so two members of one name read apart. */
+  memberSubtitle: (number: string, email: string) => [number ? `#${number}` : "", email].filter(Boolean).join(" · "),
   membersFailed: "Couldn't read the members list.",
   guestLabel: "Guest's name",
   guestMissing: "Give the guest a name.",

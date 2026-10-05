@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { IconButton } from "@/components/ui/icon-button";
@@ -10,6 +11,7 @@ import { PICKER, PLAYERS_UNSURE } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { cn } from "@/lib/utils";
 import type { Favourites } from "./usePickerReads";
+import { namesakeDetail } from "./namesake";
 
 /**
  * One member in a picker list: the pick (photo, name, a line under it) and, beside it, the star.
@@ -27,13 +29,18 @@ export type MemberRowProps = {
 };
 
 export function MemberRow(props: MemberRowProps) {
-  const { member, detail, added, favourites, onPick } = props;
+  const { member, added, favourites, onPick } = props;
+  // R16 J16-3 — a row without a line of its own says what tells namesakes apart; the line is the
+  // button's description, so it is heard as well as seen.
+  const detail = props.detail ?? namesakeDetail(member);
+  const detailId = useId();
   return (
     <li className="flex items-center gap-1" data-member-row={member.user_id}>
       <button
         type="button"
         aria-label={added ? `${member.name}, ${PICKER.added}` : PICKER.add(member.name)}
         aria-disabled={added || undefined}
+        aria-describedby={detail ? detailId : undefined}
         onClick={added ? undefined : () => onPick(member)}
         className={cn(
           "flex min-h-touch min-w-0 flex-1 items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-left",
@@ -47,7 +54,7 @@ export function MemberRow(props: MemberRowProps) {
         </Avatar>
         <span className="grid min-w-0 flex-1 gap-0.5">
           <span className="truncate text-sm font-semibold text-text-primary">{member.name}</span>
-          {detail ? <span className="truncate text-xs text-text-secondary">{detail}</span> : null}
+          {detail ? <span id={detailId} className="break-words text-xs text-text-secondary">{detail}</span> : null}
         </span>
         {added ? <Badge tone="neutral">{PICKER.added}</Badge> : <Plus size={16} aria-hidden="true" className="shrink-0 text-accent-strong" />}
       </button>
