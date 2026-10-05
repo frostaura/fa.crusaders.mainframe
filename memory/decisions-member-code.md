@@ -53,7 +53,7 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   pay-for forgets the scan ONLY for `code_used`/`not_recognised`** (2.2.4, D9-1, in bridgelogic's
   `WalkUpResult::forgetsScan`) — never on `recognised`, false for every refusal made before the
   token resolves (TOO LONG lost the scan); `code_used` reads `CODE USED` at pay-for too (D9-2).
-- **Versions: bridge 2.2.4, Mega 2.0.0 (never reflashed), door 1.1.0.** The bridge unflags
+- **Versions: bridge 2.2.5 (R15 D15-1, see [`decisions-firmware-r15.md`](decisions-firmware-r15.md)), Mega 2.0.0 (never reflashed), door 1.1.0.** The bridge unflags
   `[common]`'s MINOR/PATCH by its own tokens; the Devices page showing these confirms a flash.
 - **Owed, and nobody but Dean can do the first:** flash the ESP8266 bridge and each door ESP32
   (spec §8.1; the Mega is not touched); the PWA lane (enrol, WebCrypto, My Code). The backend
