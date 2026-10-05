@@ -630,8 +630,22 @@ A booking nobody checked in on lit nothing, so it never holds the court; cancell
 club blocks never do. `LightsOffCuedAt` is stamped either way, so nothing fires twice; `data.ends_at`
 stays the booking's (restored) end. **Why:** a per-court consumer read the court dark through a
 whole paid session when an earlier booking's off arrived after the next member's `lights_on`.
-A check-in that commits in the milliseconds between the sweep's read and its send can still
-precede the off; that window is recorded in `memory/decisions-backend-r13a.md`.
+
+**One court's cues are serialised (R13).** `CourtCueLock` is a transaction-scoped Postgres
+advisory lock on (tenant, court). It uses the two-int key space, so it never collides with the
+single-bigint locks (payer, seat, device, admin role). The lights-off sweep holds it from reading
+the court to sending the off. Every `booking.lights_on` is sent under it after its check-in has
+committed: online activation, walk-up, pay-for and kiosk (`ActivateAsync`), and the upload
+reversal (`EmitReversedLightsOnAsync`), both via `EmitUnderCueLockAsync`. Whichever side comes
+second sees the other, so a check-in can never announce its `lights_on` before an off that was
+decided without it.
+
+The lock is innermost: nothing takes another lock under it, and no HTTP call runs under it. The
+off is sent before the sweep's commit. A commit that fails after a successful save therefore
+re-sends the same off on the next tick, and consumers must treat the off as idempotent.
+Code: `Webhooks/LightsCueWorker.cs` (`NextFreeAsync`, `CompleteAttendedAsync`),
+`Services/CourtCueLock.cs`, `Services/CourtActivationService.cs`. Tests:
+`R13LightsCueCollisionTests`, `R13LightsCueRaceHttpTests`.
 
 ---
 
