@@ -78,6 +78,8 @@ const PLAYER_ACTS: ReadonlySet<string> = new Set([
   "booking.share_collected", "booking.partner_share_collected", "booking.collected_share",
   "booking.added_to_game", "booking.club_added_player", "booking.added_player",
   "booking.game_no_show", "booking.game_no_show_reversed",
+  // R16 E16-1 (BE16b) — the club accepted a seat on someone's behalf: partner · organiser · admin.
+  "booking.accepted_for_them", "booking.club_accepted_player", "booking.accepted_for_player",
 ]);
 
 /** A row about minutes: the wallet strand, a ledger row, or any row carrying an amount. */
