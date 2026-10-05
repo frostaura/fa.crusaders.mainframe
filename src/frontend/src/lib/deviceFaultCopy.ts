@@ -221,7 +221,16 @@ export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "de
   /** True when nothing in the closed table matched — the page shows the raw code alongside. */
   unrecognised: boolean;
 } {
-  if (row.code === "malformed_body" && garbledButRead(row.detail)) return { ...GARBLED_BUT_READ, unrecognised: false };
+  if (row.code === "malformed_body") {
+    const said = bodyFaultOf(row.detail);
+    const kind = said ? READ_ANYWAY[said.kind] : undefined;
+    if (said && kind) {
+      // The server's headline follows the detail (`DeviceErrorCodes.HeadlineOf(code, detail)`), so it
+      // is the title — except on a row filed before it did, whose headline is the dropped one.
+      const headline = said.legacy ? "" : (row.headline ?? "").trim();
+      return { title: headline || kind.title, means: kind.means, doThis: kind.doThis, unrecognised: false };
+    }
+  }
   const known = EXPLANATIONS[row.code];
   const headline = (row.headline ?? "").trim();
   const title = headline
@@ -237,22 +246,57 @@ export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "de
 }
 
 /**
- * R16 D16-5 — `malformed_body` is filed for two different things (the server's `DeviceBody`): a body
- * that is not JSON at all, which is DROPPED, and one with invalid UTF-8, which the server reads
- * leniently (each bad sequence replaced) and ACTS ON. The second is told apart only by the detail,
- * so it gets its own title here: the server's headline is one per code, and "could not read" is
- * false for a message that was read.
+ * R16 D16-5 — `malformed_body` is filed for three different things, and the server's detail says
+ * which, as "<route>: <detail>" (`DeviceFaultSink.MalformedBody`). The details below are the
+ * server's constants verbatim — `DeviceBody.ReplacedDetail`, `DeviceBody.NotJsonDetail`,
+ * `DeviceEndpoints.VersionTooLongDetail` — and `deviceFaultCopy.r16.test.ts` holds a copy of each:
+ *
+ * - some characters replaced: read leniently and ACTED ON;
+ * - a heartbeat version too long to keep: not kept, the rest of the check-in used;
+ * - not readable at all, or far too large: DROPPED.
+ *
+ * Since BE16a the server's headline is variant-aware, so this file no longer overrides the title for
+ * a read-anyway row; it supplies the body (`means`/`doThis`), and a title only for a row with no
+ * headline or one filed before the server's plain words (`legacy`), whose headline is the dropped one.
  */
-const GARBLED_DETAIL = "invalid UTF-8 read as U+FFFD";
+type BodyFaultKind = "replaced" | "version" | "dropped";
 
-function garbledButRead(detail: string | null | undefined): boolean {
-  return (detail ?? "").trim().endsWith(GARBLED_DETAIL);
+const REPLACED_DETAIL = "some characters could not be read and were replaced; the rest was read and used";
+const NOT_JSON_DETAIL = "the message could not be read at all, so nothing in it was used";
+const VERSION_DETAIL = "it reported a version longer than 32 characters, which was not kept";
+
+/** What became of the message, by the server's detail: its kind and the words for it. */
+const BODY_FAULT: Record<string, { kind: BodyFaultKind; how: string; legacy?: true }> = {
+  [REPLACED_DETAIL]: { kind: "replaced", how: "some characters in it could not be read and were replaced; the rest was read and used" },
+  [VERSION_DETAIL]: { kind: "version", how: "it reported a version too long to keep, so the board's record keeps the one it had" },
+  [NOT_JSON_DETAIL]: { kind: "dropped", how: "it could not be read at all, so nothing in it was used" },
+  "body too large": { kind: "dropped", how: "it was far too large to be a board's message, so it could not be read" },
+  // Filed before the server's details were words (d151a964); such rows stay in the history.
+  "invalid UTF-8 read as U+FFFD": { kind: "replaced", how: "some characters in it could not be read and were replaced; the rest was read and used", legacy: true },
+  "body is not JSON": { kind: "dropped", how: "it could not be read at all, so nothing in it was used" },
+  malformed: { kind: "dropped", how: "it could not be read" },
+};
+
+/** "activate: <detail>" → the route and what became of the message; null for any other detail. */
+function bodyFaultOf(detail: string | null | undefined): { route: string; kind: BodyFaultKind; how: string; legacy: boolean } | null {
+  const parts = /^([a-z-]+): (.+)$/.exec((detail ?? "").trim());
+  const known = parts ? BODY_FAULT[parts[2]] : undefined;
+  if (!parts || !known) return null;
+  return { route: parts[1], kind: known.kind, how: known.how, legacy: known.legacy === true };
 }
 
-const GARBLED_BUT_READ = {
-  title: "A board sent some garbled characters",
-  means: "A board sent a message with a few garbled characters in it. The club's system read the rest and acted on it — a scan that came through garbled is refused at the court as a code nobody holds.",
-  doThis: "Nothing, if it happened once. If it keeps happening, that board or its scanner cable is sending bad characters — note the board and tell whoever runs the system.",
+/** The two kinds whose message WAS used; a dropped one is the closed table's `malformed_body`. */
+const READ_ANYWAY: Partial<Record<BodyFaultKind, { title: string; means: string; doThis: string }>> = {
+  replaced: {
+    title: "A board sent a few unreadable characters, and the rest was used",
+    means: "A board sent a message with a few characters the club's system could not read. It read the rest and acted on it — a scan that came through garbled is refused at the court as a code nobody holds.",
+    doThis: "Nothing, if it happened once. If it keeps happening, that board or its scanner cable is sending bad characters — note the board and tell whoever runs the system.",
+  },
+  version: {
+    title: "A board reported a version too long to keep",
+    means: "A board's check-in named a software version too long for the club's records, so its record kept the one it had. The rest of the check-in was used and the board carries on as normal.",
+    doThis: "Nothing at the court. The version shown for this board on Boards may be out of date — tell whoever looks after the boards, because its software is reporting itself wrongly.",
+  },
 };
 
 /** What the board was sending, by the route it sent it to (the last part of `/api/v1/device/…`). */
@@ -265,20 +309,11 @@ const DEVICE_ROUTE: Record<string, string> = {
   gate: "a scan at a door",
 };
 
-/** What became of it, by the server's detail. */
-const BODY_FAULT: Record<string, string> = {
-  [GARBLED_DETAIL]: "some characters in it were garbled, and the rest was read",
-  "body is not JSON": "it could not be read at all",
-  "body too large": "it was far too large to be a board's message, so it could not be read",
-  malformed: "it could not be read",
-};
-
-/** "activate: body is not JSON" → "What the board was sending: a scan asking for the lights — it could not be read at all." */
+/** "activate: <detail>" → "What the board was sending: a scan asking for the lights — it could not be read at all, …." */
 function bodyFaultLine(text: string): string | null {
-  const parts = /^([a-z-]+): (.+)$/.exec(text);
-  const how = parts ? BODY_FAULT[parts[2]] : undefined;
-  if (!parts || !how) return null;
-  return `What the board was sending: ${DEVICE_ROUTE[parts[1]] ?? "a message"} — ${how}.`;
+  const said = bodyFaultOf(text);
+  if (!said) return null;
+  return `What the board was sending: ${DEVICE_ROUTE[said.route] ?? "a message"} — ${said.how}.`;
 }
 
 // ---------------------------------------------------------------------------------------
