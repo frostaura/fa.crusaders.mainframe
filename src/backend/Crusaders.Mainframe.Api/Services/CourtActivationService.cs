@@ -454,7 +454,14 @@ public class CourtActivationService
         // attendance record. The remaining failure direction — charged, then a crash before
         // this save — leaves the booking looking like a no-show, which the sweep refunds.
         // That is the safe way round.
-        await _db.SaveChangesAsync(ct);
+        //
+        // R16 BE16c: run again when PostgreSQL aborts it. Stamping CheckedInAt UPDATEs the booking,
+        // so ck_bookings_no_overlapping_slot is checked again for the new row version; a booking
+        // INSERTed over the same court-time at that moment waits on this row while this waits on
+        // it, and PostgreSQL aborts one with 40P01 — a 500 at /activate, /events, the walk-up, the
+        // pay-for, the kiosk. The charge above has already committed and is idempotent; this save
+        // is one unit, rolled back whole, so going again stamps, audits and lights exactly once.
+        await DatabaseRetry.SaveAsync(_db, ct);
 
         // AFTER the commit, never before it. A court that flashes "on" on a wall screen and
         // then silently reverts because the transaction rolled back is worse than one that is
@@ -491,7 +498,7 @@ public class CourtActivationService
     /// <summary>A repeat scan of a live session still records THIS player's arrival, once.</summary>
     private async Task RecordRepeatArrivalAsync(Guid bookingId, Guid userId, DateTimeOffset at, CancellationToken ct)
     {
-        if (await StampPlayerArrivalAsync(bookingId, userId, at, ct)) await _db.SaveChangesAsync(ct);
+        if (await StampPlayerArrivalAsync(bookingId, userId, at, ct)) await DatabaseRetry.SaveAsync(_db, ct);
     }
 
     /// <summary>

@@ -619,22 +619,24 @@ public sealed class BookingService
             // it would move nothing and burn the reference the real posting would need. The
             // slot is still released, because a booking left standing on the court is the
             // other half of the defect and costs money whatever the court is priced at.
+            //
+            // R16 BE16c: one save either way, run again on a PostgreSQL abort (DatabaseRetry).
             if (booking.AmountChargedMinutes > 0)
             {
                 // Carries the status change with it: LedgerService.PostAsync saves through
                 // this tracked context, so the released slot and the money back are one write.
-                await PostOnClockAsync(new LedgerPosting(
+                await DatabaseRetry.RunAsync(_db, () => PostOnClockAsync(new LedgerPosting(
                     UserId: payerUserId,
                     Type: LedgerEntryType.LightsPurchase,
                     AmountMinutes: booking.AmountChargedMinutes,
                     ActorUserId: booking.ActorUserId,
                     RelatedBookingId: booking.Id,
                     Reason: $"Walk-up refused at {court.Name}",
-                    ExternalReference: externalReference), ct);
+                    ExternalReference: externalReference), ct), ct);
             }
             else
             {
-                await _db.SaveChangesAsync(ct);
+                await DatabaseRetry.SaveAsync(_db, ct);
             }
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -756,6 +758,94 @@ public sealed class BookingService
         var userId = booking.UserId!.Value;
         var actorId = booking.ActorUserId;
 
+        // R16 BE16c: the locked unit — lock, re-check, charge, audit, commit — is run again when
+        // PostgreSQL aborts it with a deadlock (40P01) or a serialization failure (40001). The
+        // booking's INSERT is checked by ck_bookings_no_overlapping_slot, and when an overlapping row
+        // is being UPDATEd at that moment (a check-in, an extension, a pay-for) each transaction can
+        // wait on the other; PostgreSQL then aborts one, and that was a 500 for a member or a desk
+        // whose booking could simply be made. The whole unit rolled back with the lock, so the retry
+        // can never charge twice: it re-reads the balance and the rules and decides again.
+        var charged = await DatabaseRetry.RunAsync(_db, () => ChargeUnderLockAsync(spec, ct), ct);
+        if (charged.Refusal is { } refused) return refused;
+        var balance = charged.Balance;
+
+        var startsAtLocal = TimeZoneInfo
+            .ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone))
+            // Invariant, as StartsAtLocalAsync and the PDF receipt already are: this string
+            // is the "Starts" line of a booking confirmation, and on the club's own en-ZA host
+            // the day and month names came out in a different language from the receipt
+            // attached to the same email.
+            .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
+        // The figures are fixed here; the message is composed and sent in the background (see
+        // MailConfirmationAsync) so neither the receipt nor SMTP latency holds the response.
+        // Minutes, not rand — the template printed a rand sign over both of these. The penalty
+        // policy travels with them for the same reason: it was hardcoded "15 minutes / 30%" and
+        // went on saying so after an admin moved the club.
+        // IsWalkUp travels with them because it decides what the mail may promise. A walk-up
+        // starts the instant it is bought and the same request lights the court, so the shared
+        // template's "cancelling early costs 30%" told a member already under the lights they
+        // would get 70% back; S4 returns nothing once a session has started, and the server's
+        // own cancellation quote for these bookings answers refundMinutes 0.
+        var details = new Email.BookingConfirmationDetails(
+            court.Name, startsAtLocal, spec.DurationLabel,
+            spec.TotalCost, balance,
+            settings.PenaltyWindowMinutes, settings.PenaltyPct,
+            IsWalkUp: spec.IsWalkUp,
+            // R19: an admin may now overdraw their OWN wallet, and "the club made this booking
+            // for you" is false when you made it yourself.
+            MadeByClub: actorId != userId);
+
+        Task SendConfirmationAsync(CancellationToken _) => MailConfirmationAsync(booking, userId, details);
+
+        // Sent here unless the caller asked to hold it. A walk-up holds it because the court
+        // is not lit yet and the mail it would send says otherwise; see
+        // BookingResult.Ok.SendConfirmationAsync.
+        if (!spec.DeferConfirmation) await SendConfirmationAsync(ct);
+
+        await _bus.EmitAsync(new DomainEvent(
+            Id: $"evt_{Guid.NewGuid():N}",
+            Type: "booking.created",
+            TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
+            // R15 D14-4: a walk-up was sold at the device clock's instant (its ChargedAt).
+            OccurredAt: spec.IsWalkUp && booking.ChargedAt is { } sold ? sold : DateTimeOffset.UtcNow,
+            // R13 (E13-2's rule, here): the actor's own role, never "acting for somebody else".
+            ActorUserId: actorId, ActorIsAdmin: await HoldsAdminAsync(actorId, ct),
+            SubjectUserId: userId,
+            Data: new()
+            {
+                ["booking_id"] = booking.Id,
+                ["court_id"] = court.Id,
+                ["court_number"] = court.CourtNumber,
+                ["court_name"] = court.Name,
+                ["user_id"] = userId,
+                ["starts_at"] = booking.StartsAt,
+                ["ends_at"] = booking.EndsAt,
+                ["slice_count"] = booking.SliceCount,
+                ["minutes"] = booking.SliceMinutes * booking.SliceCount,
+                ["amount_minutes"] = spec.TotalCost,
+                ["balance_after_minutes"] = balance,
+                ["walk_up"] = spec.IsWalkUp,
+            }), ct);
+
+        return new BookingResult.Ok(
+            booking, balance, spec.DeferConfirmation ? SendConfirmationAsync : null);
+    }
+
+    /// <summary>What the locked unit of <see cref="CommitAsync"/> decided: a refusal, or the balance the charge left.</summary>
+    private sealed record LockedCharge(BookingResult? Refusal, int Balance);
+
+    /// <summary>
+    /// The part of <see cref="CommitAsync"/> that runs under the payer lock and commits with it —
+    /// everything that decides and moves money. Split out (R16 BE16c) so it is ONE unit that
+    /// <see cref="DatabaseRetry.RunAsync{T}"/> can run again after a PostgreSQL abort; the mail and the
+    /// event below it describe a committed booking and are never repeated.
+    /// </summary>
+    private async Task<LockedCharge> ChargeUnderLockAsync(NewBooking spec, CancellationToken ct)
+    {
+        var (booking, court, settings) = (spec.Row, spec.Court, spec.Settings);
+        var userId = booking.UserId!.Value;
+        var actorId = booking.ActorUserId;
+
         // Balance is checked TWICE, and the second one is the one that counts.
         //
         // The caller's check is a fast refusal on the common case — a member who plainly
@@ -787,7 +877,7 @@ public sealed class BookingService
                 // Detached for the same reason the balance refusal below detaches: the row was
                 // built optimistically and this request is over.
                 _db.Entry(booking).State = EntityState.Detached;
-                return refused.Result;
+                return new LockedCharge(refused.Result, 0);
             }
         }
 
@@ -808,7 +898,7 @@ public sealed class BookingService
             // is over. Leaving it attached would have the next SaveChanges on this context
             // insert a booking nobody paid for.
             _db.Entry(booking).State = EntityState.Detached;
-            return new BookingResult.InsufficientBalance(spendable, spec.TotalCost);
+            return new LockedCharge(new BookingResult.InsufficientBalance(spendable, spec.TotalCost), 0);
         }
 
         // The code the member's phone will show at the box, staged on the context now so
@@ -895,7 +985,7 @@ public sealed class BookingService
                 "Booking with reference {Reference} was already posted by a concurrent request",
                 spec.ExternalReference);
             DiscardPendingAdds();
-            return new BookingResult.DuplicateRequest();
+            return new LockedCharge(new BookingResult.DuplicateRequest(), 0);
         }
         catch (DbUpdateException ex) when (IsOverlapViolation(ex))
         {
@@ -912,7 +1002,7 @@ public sealed class BookingService
             _logger.LogInformation(
                 "Booking lost the slot race on court {CourtId} at {StartsAt}",
                 booking.CourtId, booking.StartsAt);
-            return new BookingResult.SlotTaken();
+            return new LockedCharge(new BookingResult.SlotTaken(), 0);
         }
 
         _db.AuditLogs.Add(new AuditLog
@@ -953,67 +1043,7 @@ public sealed class BookingService
         // event is queued would serialise their bookings behind work that cannot fail the
         // booking anyway.
         await payerLock.CommitAsync(ct);
-
-        var startsAtLocal = TimeZoneInfo
-            .ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone))
-            // Invariant, as StartsAtLocalAsync and the PDF receipt already are: this string
-            // is the "Starts" line of a booking confirmation, and on the club's own en-ZA host
-            // the day and month names came out in a different language from the receipt
-            // attached to the same email.
-            .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
-        // The figures are fixed here; the message is composed and sent in the background (see
-        // MailConfirmationAsync) so neither the receipt nor SMTP latency holds the response.
-        // Minutes, not rand — the template printed a rand sign over both of these. The penalty
-        // policy travels with them for the same reason: it was hardcoded "15 minutes / 30%" and
-        // went on saying so after an admin moved the club.
-        // IsWalkUp travels with them because it decides what the mail may promise. A walk-up
-        // starts the instant it is bought and the same request lights the court, so the shared
-        // template's "cancelling early costs 30%" told a member already under the lights they
-        // would get 70% back; S4 returns nothing once a session has started, and the server's
-        // own cancellation quote for these bookings answers refundMinutes 0.
-        var details = new Email.BookingConfirmationDetails(
-            court.Name, startsAtLocal, spec.DurationLabel,
-            spec.TotalCost, balance,
-            settings.PenaltyWindowMinutes, settings.PenaltyPct,
-            IsWalkUp: spec.IsWalkUp,
-            // R19: an admin may now overdraw their OWN wallet, and "the club made this booking
-            // for you" is false when you made it yourself.
-            MadeByClub: actorId != userId);
-
-        Task SendConfirmationAsync(CancellationToken _) => MailConfirmationAsync(booking, userId, details);
-
-        // Sent here unless the caller asked to hold it. A walk-up holds it because the court
-        // is not lit yet and the mail it would send says otherwise; see
-        // BookingResult.Ok.SendConfirmationAsync.
-        if (!spec.DeferConfirmation) await SendConfirmationAsync(ct);
-
-        await _bus.EmitAsync(new DomainEvent(
-            Id: $"evt_{Guid.NewGuid():N}",
-            Type: "booking.created",
-            TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-            // R15 D14-4: a walk-up was sold at the device clock's instant (its ChargedAt).
-            OccurredAt: spec.IsWalkUp && booking.ChargedAt is { } sold ? sold : DateTimeOffset.UtcNow,
-            // R13 (E13-2's rule, here): the actor's own role, never "acting for somebody else".
-            ActorUserId: actorId, ActorIsAdmin: await HoldsAdminAsync(actorId, ct),
-            SubjectUserId: userId,
-            Data: new()
-            {
-                ["booking_id"] = booking.Id,
-                ["court_id"] = court.Id,
-                ["court_number"] = court.CourtNumber,
-                ["court_name"] = court.Name,
-                ["user_id"] = userId,
-                ["starts_at"] = booking.StartsAt,
-                ["ends_at"] = booking.EndsAt,
-                ["slice_count"] = booking.SliceCount,
-                ["minutes"] = booking.SliceMinutes * booking.SliceCount,
-                ["amount_minutes"] = spec.TotalCost,
-                ["balance_after_minutes"] = balance,
-                ["walk_up"] = spec.IsWalkUp,
-            }), ct);
-
-        return new BookingResult.Ok(
-            booking, balance, spec.DeferConfirmation ? SendConfirmationAsync : null);
+        return new LockedCharge(null, balance);
     }
 
     /// <summary>
@@ -1457,7 +1487,9 @@ public sealed class BookingService
 
         try
         {
-            await _ledger.PostManyAsync(postings, ct);
+            // R16 BE16c: one save, run again on a PostgreSQL abort (DatabaseRetry) — the status, the
+            // audit row and both movements roll back together, so nothing posts twice.
+            await DatabaseRetry.RunAsync(_db, () => _ledger.PostManyAsync(postings, ct), ct);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -1749,8 +1781,14 @@ public sealed class BookingService
             await PostManyOnClockAsync(postings, ct);
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException
-                                   || (ex is DbUpdateException due && (IsDuplicateReference(due) || IsOverlapViolation(due))))
+                                   || (ex is DbUpdateException due && (IsDuplicateReference(due) || IsOverlapViolation(due)))
+                                   || DatabaseRetry.IsRetryableAbort(ex))
         {
+            // R16 BE16c: a PostgreSQL abort (40P01 / 40001) lands here too. Restoring this row's
+            // end re-checks ck_bookings_no_overlapping_slot, so a booking INSERTed over the tail at
+            // that moment can deadlock with it; the abort rolled everything back, exactly as a lost
+            // race does, and the caller's re-read-and-go-again is the retry (it was a 500).
+            //
             // The other upload of the same evidence got there first, something else
             // decided the row, or the tail was sold between the read and the write.
             // Nothing was written — the transaction is rolled back with the lock, so no
@@ -2552,8 +2590,9 @@ public sealed class BookingService
         });
 
         // The range has to be freed before anything is put back into it: the slot exclusion
-        // constraint is checked per statement, not deferred.
-        await _db.SaveChangesAsync(ct);
+        // constraint is checked per statement, not deferred. Shrinking the end is an UPDATE the
+        // constraint checks, so a PostgreSQL abort is retried (R16 BE16c).
+        await DatabaseRetry.SaveAsync(_db, ct);
 
         var reinstated = new List<Guid>();
         foreach (var other in candidates)
@@ -2616,7 +2655,9 @@ public sealed class BookingService
 
         try
         {
-            await PostManyOnClockAsync(postings, ct);
+            // R16 BE16c: putting the row back re-checks the slot constraint — run again on a
+            // PostgreSQL abort, the row, the code and the re-charge rolling back together.
+            await DatabaseRetry.RunAsync(_db, () => PostManyOnClockAsync(postings, ct), ct);
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException
                                    || (ex is DbUpdateException due && (IsDuplicateReference(due) || IsOverlapViolation(due))))
@@ -2743,7 +2784,18 @@ public sealed class BookingService
     /// before this behaviour changed. Charged here as it always was.
     /// </para>
     /// </summary>
-    public async Task<ChargeResult> ChargeOnActivationAsync(Guid bookingId, Guid? payerOverrideUserId, Guid actorUserId, CancellationToken ct)
+    /// <remarks>
+    /// R16 BE16c: run again when PostgreSQL aborts it (<see cref="DatabaseRetry.RunAsync{T}"/>). The
+    /// reassignment UPDATEs the booking, which <c>ck_bookings_no_overlapping_slot</c> checks again, so a
+    /// booking INSERTed over the same court at that moment can deadlock with it. Both branches commit
+    /// in one transaction under the payer lock, and the guard reads committed state, so a retried
+    /// attempt refunds and charges exactly once — and a pay-for's paid nonce row, staged by its caller
+    /// to commit with the money, is staged again.
+    /// </remarks>
+    public Task<ChargeResult> ChargeOnActivationAsync(Guid bookingId, Guid? payerOverrideUserId, Guid actorUserId, CancellationToken ct) =>
+        DatabaseRetry.RunAsync(_db, () => ChargeOnActivationOnceAsync(bookingId, payerOverrideUserId, actorUserId, ct), ct);
+
+    private async Task<ChargeResult> ChargeOnActivationOnceAsync(Guid bookingId, Guid? payerOverrideUserId, Guid actorUserId, CancellationToken ct)
     {
         var booking = await _db.Bookings.FirstOrDefaultAsync(b => b.Id == bookingId, ct);
         if (booking is null || booking.UserId is null) return new ChargeResult.NotFound();

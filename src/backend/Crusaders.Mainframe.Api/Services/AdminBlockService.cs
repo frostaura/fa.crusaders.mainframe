@@ -107,7 +107,11 @@ public sealed class AdminBlockService
 
         try
         {
-            await _db.SaveChangesAsync(ct);
+            // R16 BE16c: run again when PostgreSQL aborts it. The block's INSERT is checked by
+            // ck_bookings_no_overlapping_slot; when an overlapping row is being UPDATEd at that
+            // moment (a check-in, a pay-for) each can wait on the other and PostgreSQL aborts one
+            // with 40P01 — a 500 for the desk. The catch below took 23P01 only.
+            await DatabaseRetry.SaveAsync(_db, ct);
         }
         catch (DbUpdateException ex) when (IsOverlapViolation(ex))
         {
@@ -160,7 +164,7 @@ public sealed class AdminBlockService
 
         try
         {
-            await _db.SaveChangesAsync(ct);
+            await DatabaseRetry.SaveAsync(_db, ct);   // R16 BE16c, as CreateAsync's save
         }
         catch (DbUpdateConcurrencyException)
         {

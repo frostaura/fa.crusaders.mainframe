@@ -56,6 +56,12 @@ public sealed class UtcInstantConverter : JsonConverter<DateTimeOffset>
 /// <item>R16 D16-1: a value PostgreSQL refused as unstorable (SQLSTATE 22001 too long, 22021 a NUL)
 /// is the same 400 — <c>malformed_body</c> on a device route, <c>invalid_body</c> elsewhere
 /// (<see cref="StorableText"/>).</item>
+/// <item>R16 BE16c: PostgreSQL aborting a transaction to be run again (SQLSTATE 40P01 deadlock,
+/// 40001 serialization failure) that outlived the retries in <see cref="Persistence.DatabaseRetry"/>, or
+/// reached a path that has none: <c>503 {"error":"conflict_retry"}</c> with <c>Retry-After</c>, on every
+/// route. Nothing the request did committed — the database rolled it back — so asking again is the
+/// right answer, and a box (which keeps an event on any 5xx and backs off) and a screen both read it
+/// as "try again", never as a fault in the server.</item>
 /// </list>
 /// </summary>
 public static class InternalErrors
@@ -93,6 +99,10 @@ public static class InternalErrors
         var request = ctx.Request;
         var (status, code) = Classify(feature?.Error, request, feature?.Path);
         ctx.Response.StatusCode = status;
+        if (code == Persistence.DatabaseRetry.ConflictRetry)
+        {
+            ctx.Response.Headers.RetryAfter = Persistence.DatabaseRetry.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
         ctx.Response.ContentType = "application/json";
         await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { error = code }));
     }
@@ -121,6 +131,13 @@ public static class InternalErrors
         if (StorableText.IsUnstorable(error))
         {
             return (StatusCodes.Status400BadRequest, device ? Services.DeviceErrorCodes.MalformedBody : InvalidBody);
+        }
+
+        // R16 BE16c: the database chose this request as a deadlock's (or a serialization failure's)
+        // victim and rolled it back. Not a server fault and not the caller's: ask again shortly.
+        if (Persistence.DatabaseRetry.IsRetryableAbort(error))
+        {
+            return (StatusCodes.Status503ServiceUnavailable, Persistence.DatabaseRetry.ConflictRetry);
         }
 
         return (StatusCodes.Status500InternalServerError, Code);
