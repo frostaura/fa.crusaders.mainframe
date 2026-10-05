@@ -150,6 +150,12 @@ export type BookingDetail = {
   /** R9 J9-5 — the desk made this booking for the member (absent on an older server: read as false). */
   booked_by_club?: boolean;
   status: BookingStatusWord;
+  /** R13 C13-1 — on a cancelled booking, who cancelled it ("member": the organiser; "club": an admin or the system). Null otherwise; absent on an older server. */
+  cancelled_by?: "member" | "club" | null;
+  /** R13 C13-1 — "displaced": the system cancelled and refunded it because an earlier booking's late check-in held the court. */
+  cancel_cause?: "displaced" | null;
+  /** R13 C13-1 — the admin's recorded reason on a club cancel; null otherwise. */
+  cancel_reason?: string | null;
   split_mode: SplitMode;
   viewer: { role: ViewerRole; participant_id: string | null };
   organiser: { user_id: string | null; name: string | null; photo_url: string | null };

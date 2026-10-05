@@ -16,32 +16,20 @@ export function isLive(p: DetailPlayer): boolean {
 
 const GONE = new Set<string>(["declined", "withdrawn", "removed"]);
 
-/** R1 F2.10 — a cancelled booking: nothing on it is still being asked of anyone. */
-/**
- * R13 J13-6 (contract C13-1) — who cancelled a cancelled booking, and why: the detail's three
- * top-level fields, null unless cancelled and absent from an older server. Declared here until the
- * integrator adds them to `BookingDetail` (scratchpad ask), so they are read as optional.
- */
-export type CancellationWire = {
-  cancelled_by?: "member" | "club" | null;
-  cancel_cause?: "displaced" | null;
-  cancel_reason?: string | null;
-};
-
 /** The banner's sentence and the reason line (null when none) for a cancelled booking. */
 export function cancellationWords(d: BookingDetail): { said: string; reason: string | null } {
-  const wire = d as BookingDetail & CancellationWire;
-  const reason = typeof wire.cancel_reason === "string" && wire.cancel_reason.trim() ? DETAIL_CANCELLED.reason(wire.cancel_reason.trim()) : null;
-  if (wire.cancelled_by === "club") {
-    return wire.cancel_cause === "displaced" ? { said: DETAIL_CANCELLED.displaced, reason: null } : { said: DETAIL_CANCELLED.byClub, reason };
+  const reason = typeof d.cancel_reason === "string" && d.cancel_reason.trim() ? DETAIL_CANCELLED.reason(d.cancel_reason.trim()) : null;
+  if (d.cancelled_by === "club") {
+    return d.cancel_cause === "displaced" ? { said: DETAIL_CANCELLED.displaced, reason: null } : { said: DETAIL_CANCELLED.byClub, reason };
   }
-  if (wire.cancelled_by === "member") {
+  if (d.cancelled_by === "member") {
     const name = organiserName(d);
     return { said: name ? DETAIL_CANCELLED.byOrganiser(name) : DETAIL_CANCELLED.byYou, reason: null };
   }
   return { said: DETAIL_CANCELLED.banner, reason: null };
 }
 
+/** R1 F2.10 — a cancelled booking: nothing on it is still being asked of anyone. */
 export function isCancelled(d: Pick<BookingDetail, "status">): boolean {
   return d.status === "cancelled";
 }
