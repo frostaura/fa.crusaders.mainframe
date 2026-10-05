@@ -138,7 +138,7 @@ to protect.
 
 `data` for the six ledger mirrors (`minutes.sold_at_desk`, `minutes.refunded`, `minutes.penalty_applied`,
 `minutes.adjusted`, `minutes.refund_reversed`, `minutes.penalty_returned` — the event is chosen by the row's type
-AND its sign, `LedgerService.MirrorTypeOf`):
+AND its sign, `LedgerService.MirrorTypeOf`). Their envelope actor is the person whose act wrote the row: the scanner on a late check-in's reversal legs and re-collected shares, the organiser, partner or admin on share moves — no longer null or the system (R14 E14-2, E14-3):
 ```json
 { "entry_id": "<uuid>", "user_id": "<uuid>", "entry_type": "AdminAdjustment",
   "amount_minutes": -45, "booking_id": "<uuid-or-null>", "reason": "Goodwill — lights failed" }

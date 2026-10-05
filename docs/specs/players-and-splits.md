@@ -411,6 +411,28 @@ Since review round 13:
   the organiser (E13-4).
 - **The "club put you in X's game" mail promises only what holds.** The share moves when the
   member accepts it, or when the club collects it (J13-7).
+- **Every share move names who caused it (R14).** The share cause says which act moved it:
+  `share_returned` is only "the partner withdrew"; `organiser_removed` (the organiser took them
+  off); `split_changed` (the organiser lowered their share while they stay on the game); an admin's
+  removal stays `club_removed`. A return posted later by the sweep keeps its cause, decided from the
+  seat (Withdrawn / Removed / still on). Share rows from an organiser removal, a split change, a
+  member cancel (on time or late) and a club cancel carry the **acting person** as ledger actor,
+  like the refund beside them. Audit rows `players.removed`, `players.split_changed` and
+  `players.game_cancelled` are written in the act's own save; the Night shows `booking.taken_off` /
+  `booking.took_player_off`, `booking.split_changed` / `booking.changed_split` and
+  `booking.game_cancelled`. The live frame carries `actor_name` — the player who acted, only when
+  that is another player on the game (members are told "the club", never an admin's name).
+- **A late check-in's reversal is the scanner's (R14 E14-3)** on the audit row, both money legs,
+  the re-collected shares, the Night ("Sam's check-in reached the club late — no-show reversed") and
+  every webhook.
+- **The club cancelling a session that had started (refund 0)** still tells the booker: an inbox
+  notice and a balance-neutral `cancelled_no_refund` frame; the mail says nothing was refunded and
+  promises no wallet line. Refund policy is unchanged (R14 E14-5).
+- **Links without `?seat=` still land (R14 J14-10).** A 404 from `GET /bookings/{id}` carries
+  `own_seat_id` — the viewer's own closed seat, newest, and nothing else — so old invites and mails
+  reach "You were taken off this game". Invites carry `consented_minutes` so a seat the club added
+  is never told its share "went up" (J14-9). `GET /wallet` carries `share_places` (court and start
+  only) for a share booking the member can no longer read.
 
 ## 7. Endpoints
 
