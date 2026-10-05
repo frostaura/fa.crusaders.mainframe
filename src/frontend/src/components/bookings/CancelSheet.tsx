@@ -14,9 +14,9 @@ import { ADMIN_CANCEL } from "@/lib/adminCancelCopy";
 import { ALREADY_CHECKED_IN_TEXT, cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
 import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
-import { minutesSpoken } from "@/lib/minutes";
-import { playersEndpoints, type BookingDetail } from "@/lib/playersApi";
+import { playersEndpoints } from "@/lib/playersApi";
 import { firstName } from "@/lib/playersNames";
+import { standingShares } from "@/lib/standingShares";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL, refusalReason } from "@/lib/bookingsCopy";
 import { BulkResults } from "./BulkResults";
@@ -304,12 +304,6 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
  * organiser. The same rule as the booking page's panel: a seat paid by hand, not accepted, or that
  * paid nothing has nothing in the app to stand.
  */
-function standingSharesOf(detail: BookingDetail): string[] {
-  return detail.players
-    .filter((p) => p.kind === "member" && p.user_id !== detail.organiser.user_id && p.status === "accepted" && !p.settled_outside && p.paid_minutes > 0)
-    .map((p) => `${firstName(p.name)}'s ${minutesSpoken(p.paid_minutes)}`);
-}
-
 /**
  * The booking's record, read only when the quote says somebody checked in on a club cancel — the
  * quote names partners' refunds and there are none, so who stands is the record's to say. Null
@@ -321,7 +315,7 @@ function useStandingShares(bookingId: string, wanted: boolean): { shares: string
     if (!wanted) return undefined;
     let live = true;
     playersEndpoints.detail(bookingId).then(
-      (d) => { if (live) setRead({ id: bookingId, shares: standingSharesOf(d), organiser: d.organiser.name?.trim() ? firstName(d.organiser.name) : null }); },
+      (d) => { if (live) setRead({ id: bookingId, shares: standingShares(d), organiser: d.organiser.name?.trim() ? firstName(d.organiser.name) : null }); },
       () => undefined,
     );
     return () => { live = false; };

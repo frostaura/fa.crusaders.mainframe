@@ -5,9 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Section } from "@/components/ui/page-shell";
 import { ADMIN_CANCEL } from "@/lib/adminCancelCopy";
 import { focusAfterAction } from "@/lib/focusAfterAction";
-import { minutesSpoken } from "@/lib/minutes";
 import type { BookingDetail } from "@/lib/playersApi";
-import { firstName } from "@/lib/playersNames";
+import { standingShares } from "@/lib/standingShares";
 
 type Props = { detail: BookingDetail; reload: () => void; now?: () => number };
 
@@ -21,11 +20,8 @@ function firstNameOf(detail: BookingDetail): string | null {
  * somebody checked in to refunds nothing, and the partners' shares stay with the organiser. A seat
  * paid by hand, or that paid nothing, has nothing in the app to stand.
  */
-function standingShares(detail: BookingDetail): string[] {
-  if (!detail.attendance.checked_in_at) return [];
-  return detail.players
-    .filter((p) => p.kind === "member" && p.user_id !== detail.organiser.user_id && p.status === "accepted" && !p.settled_outside && p.paid_minutes > 0)
-    .map((p) => `${firstName(p.name ?? "")}'s ${minutesSpoken(p.paid_minutes)}`);
+function standingSharesIfStarted(detail: BookingDetail): string[] {
+  return detail.attendance.checked_in_at ? standingShares(detail) : [];
 }
 
 /** Whether the organiser's own Cancel is on the page already — the desk's would be a second one. */
@@ -53,7 +49,7 @@ export function AdminCancelPanel({ detail, reload, now = Date.now }: Props) {
   const who = detail.organiser.name?.trim() || ADMIN_CANCEL.nobody;
   const started = new Date(detail.starts_at).getTime() <= now();
   const booking = { ...gridBookingOf(detail), mine: false, memberFirstName: firstNameOf(detail) };
-  const shares = started ? standingShares(detail) : [];
+  const shares = started ? standingSharesIfStarted(detail) : [];
   const description = started ? ADMIN_CANCEL.started(who) : ADMIN_CANCEL.upcoming(who);
   const done = (outcome: CancelledOutcome) => {
     if (outcome.cancelledIds.length === 0) return;
