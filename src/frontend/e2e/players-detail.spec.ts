@@ -1,7 +1,7 @@
 import { type Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { ALEX, BOOKING, PEOPLE, SAM, detailFixture, memberShellRoutes, seat } from "./playersKit";
-import { DETAIL_ACTIONS } from "../src/lib/playersCopy";
+import { DETAIL_ACTIONS, DETAIL_ADMIN } from "../src/lib/playersCopy";
 
 /**
  * P11 — the booking's own page, `/bookings/:bookingId`, in a real browser on a phone and a
@@ -200,8 +200,9 @@ test.describe("god mode", () => {
     const dialog = page.getByRole("dialog", { name: "Collect Alex's share?" });
     await expect(dialog).toContainText("This lands in the club's change log.");
     await dialog.getByRole("textbox", { name: "Reason" }).fill("Agreed at the desk");
-    // R1 F2.13 — the go-ahead names who goes below zero in full, and the most it can be.
-    await dialog.getByRole("checkbox", { name: `Take 25 minutes from ${PEOPLE.alex.name} even if it puts them up to 25 minutes below zero` }).click();
+    // R1 F2.13 — the go-ahead names who goes below zero in full. R15 J15-11 — it no longer claims
+    // "up to 25 minutes below zero": only what the balance doesn't cover goes below zero.
+    await dialog.getByRole("checkbox", { name: DETAIL_ADMIN.overdraftCollect("25 minutes", PEOPLE.alex.name) }).click();
     await dialog.getByRole("button", { name: "Collect share" }).click();
     await expect(page.getByText("Collected 25 minutes from Alex.")).toBeVisible();
     expect(sent).toEqual({ reason: "Agreed at the desk", allowNegativeBalance: true });
