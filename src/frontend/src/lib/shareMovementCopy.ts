@@ -27,6 +27,11 @@ export type ShareRowInput = {
   cancelledBy?: "club" | "member";
   /** R14 (BE14b §2) — the frame's `actor_name`: the player whose act moved the share, when not this member. */
   actor?: string | null;
+  /**
+   * R15 J15-5 — a toast names the day too ("Court 4 · Sat 17 Oct"): it stands alone. A ledger line
+   * under its group's heading (which says court, day and time) keeps the court alone.
+   */
+  dated?: boolean;
 };
 
 /**
@@ -42,7 +47,7 @@ export type ShareRowInput = {
  */
 export function shareRowSentence(input: ShareRowInput): string {
   const amount = minutesSpoken(Math.abs(input.signed));
-  const court = courtOf(input.place);
+  const court = (input.dated ? sharePlace(input.place) : null) ?? courtOf(input.place);
   const who = personName(input.other);
   const acted = input.cause ? actedShareSentence({
     side: input.side, signed: input.signed, cause: input.cause, cancelledBy: input.cancelledBy,
@@ -173,8 +178,17 @@ export function shareMovementPlain(
     const where = sharePlace(row.place) ?? "a split booking";
     return `${minutesSpoken(amount)} of your share of ${where} came back${shareCauseClause(row, null)}.`;
   }
-  const plain = movementSentence(amount, "share_transfer");
   const clause = shareCauseClause(row, null);
+  // R15 J15-5 — placed by the frame: the court and the day ("for a share of Court 4 · Sat 17 Oct").
+  const where = sharePlace(row.place);
+  if (where) {
+    const m = minutesSpoken(Math.abs(amount));
+    const placed = side === "organiser"
+      ? (amount > 0 ? `${m} came in for a share of ${where}` : `${m} went back from a share of ${where}`)
+      : (amount < 0 ? `${m} went on your share of ${where}` : `${m} of your share of ${where} came back`);
+    return `${placed}${clause}.`;
+  }
+  const plain = movementSentence(amount, "share_transfer");
   return clause ? `${plain.replace(/\.$/, "")}${clause}.` : plain;
 }
 

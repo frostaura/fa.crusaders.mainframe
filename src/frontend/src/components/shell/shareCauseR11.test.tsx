@@ -87,7 +87,8 @@ describe("R11 E11-1 — the chip's toast carries the frame's share cause", () =>
     await push({ balance_minutes: 200 });
     await push({ balance_minutes: 211, delta_minutes: 11, reason: "share_transfer", share_cause: "no_show", share_kept_minutes: 4 });
     expect(await screen.findByText(
-      "11 minutes of your share of Court 4 came back — nobody checked in, and 4 minutes are your part of the no-show penalty",
+      // R15 J15-5 — the toast says the day as well as the court.
+      "11 minutes of your share of Court 4 · Sat 3 Oct came back — nobody checked in, and 4 minutes are your part of the no-show penalty",
     )).toBeInTheDocument();
   });
 });

@@ -106,7 +106,8 @@ describe("R13 X13-3 — the partner is told the club cancelled", () => {
       share_cause: "booking_cancelled", cancelled_by: "club", checked_in_by_name: null,
     });
     await wait(600);
-    expect(toasts()).toEqual(["7 minutes of your share of Court 4 came back — the club cancelled the booking"]);
+    // R15 J15-5 — the toast says the day too.
+    expect(toasts()).toEqual(["7 minutes of your share of Court 4 · Sat 5 Oct came back — the club cancelled the booking"]);
   }, 15_000);
 
   it("the plain sentence (booking unreadable) says it too", async () => {

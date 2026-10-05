@@ -29,8 +29,8 @@ afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("R14 E14-7 — the share line of a game the member is off names its court and day", () => {
   it.each([
-    ["paid and returned", [row("s1", -7), row("s2", 7, "2030-10-06T09:00:00Z")], /^Your share · Court 1 · Tue 8 Oct — paid and returned/],
-    ["paid only", [row("s1", -7)], /^Your share · Court 1 · Tue 8 Oct/],
+    ["paid and returned", [row("s1", -7), row("s2", 7, "2030-10-06T09:00:00Z")], /^Your share · Court 1 · Tue 8 Oct, \d\d:\d\d — paid and returned/],
+    ["paid only", [row("s1", -7)], /^Your share · Court 1 · Tue 8 Oct, \d\d:\d\d/],
   ])("%s: court and day, still no link", async (_name, rows, name) => {
     stubFetch([]);
     renderPage(<LedgerTable rows={rows} label="Wallet ledger" groupShares shareBookings={shareBookingsFrom({ b1: null }, PLACES)} />);

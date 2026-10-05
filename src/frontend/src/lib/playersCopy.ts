@@ -664,9 +664,8 @@ export const DETAIL_CANCELLED = {
    * partners' shares went back to the partners out of it. Never "Refunded to you 50 min" beside a
    * cancel sheet that said "You keep 15 min".
    */
-  splitRefundNote: (who: string | null) => who
-    ? `${who} got back what they paid for the court, less the shares partners had paid them — those went straight back to the partners.`
-    : "You got back what you paid for the court, less the shares your partners had paid you — those went straight back to them.",
+  splitRefundNote: (who: string | null, partners: readonly string[] = []) =>
+    `${who ?? "You"} got back what ${who ? "they" : "you"} paid for the court, less ${sharesPaid(who, partners)}.`,
   paidRow: (paid: string) => `Paid ${paid}`,
   /** R2 F2-4 — a partner's share that went back when the game was cancelled: "25 min back". */
   returnedRow: (returned: string) => `${returned} back`,
@@ -677,10 +676,24 @@ export const DETAIL_CANCELLED = {
    * own two rows: the refund in full, then the penalty kept from it.
    */
   penalty: "Late-cancellation penalty",
-  splitRefundPenaltyNote: (who: string | null, penalty: string) => who
-    ? `${who} got back what they paid for the court less the ${penalty} late-cancellation penalty, and less the shares partners had paid them — those went straight back to the partners.`
-    : `You got back what you paid for the court less the ${penalty} late-cancellation penalty, and less the shares your partners had paid you — those went straight back to them.`,
+  splitRefundPenaltyNote: (who: string | null, penalty: string, partners: readonly string[] = []) =>
+    `${who ?? "You"} got back what ${who ? "they" : "you"} paid for the court less the ${penalty} late-cancellation penalty, and less ${sharesPaid(who, partners)}.`,
 } as const;
+
+/**
+ * R14 J14-7 / R15 — the shares that went back out of a split's refund, by name: "the share Sam had
+ * paid you — that went straight back to Sam"; two or more, "the shares Sam and Alex had paid you —
+ * those went straight back to them". No names on the wire (an older server): the plural said
+ * generally, as before.
+ */
+function sharesPaid(who: string | null, partners: readonly string[]): string {
+  const you = who ? "them" : "you";
+  if (partners.length === 1) return `the share ${partners[0]} had paid ${you} — that went straight back to ${partners[0]}`;
+  if (partners.length > 1) return `the shares ${listNames(partners)} had paid ${you} — those went straight back to them`;
+  return who
+    ? "the shares partners had paid them — those went straight back to the partners"
+    : "the shares your partners had paid you — those went straight back to them";
+}
 
 /**
  * R5 M5-8 — the booking page for a member who is no longer on the game (the API's 404), when the

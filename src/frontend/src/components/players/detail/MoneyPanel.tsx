@@ -155,6 +155,13 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
   );
 }
 
+/** R15 J14-7 — the member partners whose share went back on the cancel, as the sentence names them. */
+function sharesBack(detail: BookingDetail): string[] {
+  return detail.players
+    .filter((p) => p.kind === "member" && (p.returned_minutes ?? 0) > 0)
+    .map((p) => seatName(p, detail.players));
+}
+
 /** What one partner's row says on a cancelled game: paid and standing, came back (R2 F2-4), or nothing owed. */
 function cancelledSeatWords(p: BookingDetail["players"][number]): string {
   if (p.paid_minutes > 0) return DETAIL_CANCELLED.paidRow(minutesSpoken(p.paid_minutes));
@@ -191,9 +198,10 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
       </dl>
       {refunded > 0 && money.is_split ? (
         <p className="text-sm text-text-secondary" data-split-refund="">
+          {/* R15 J14-7 — the partners whose shares went back, by name: one partner is one share. */}
           {penalty > 0
-            ? keepAmounts(DETAIL_CANCELLED.splitRefundPenaltyNote(who, minutesSpoken(penalty)))
-            : DETAIL_CANCELLED.splitRefundNote(who)}
+            ? keepAmounts(DETAIL_CANCELLED.splitRefundPenaltyNote(who, minutesSpoken(penalty), sharesBack(detail)))
+            : DETAIL_CANCELLED.splitRefundNote(who, sharesBack(detail))}
         </p>
       ) : null}
       <SeatLines detail={detail} seats={live} words={cancelledSeatWords} />

@@ -37,6 +37,8 @@ export async function namedShareMovement(
     side, signed: row.signedAmountMinutes, place: booking, other, cause: cause?.shareCause, kept: cause?.shareKeptMinutes, by: cause?.checkedInBy,
     // R13 X13-3 — a partner told the club cancelled, when it did. R14 — and who acted, by name.
     cancelledBy: cause?.cancelledBy, actor: cause?.actorName,
+    // R15 J15-5 — a toast stands alone: it says the day as well as the court.
+    dated: true,
   });
 }
 

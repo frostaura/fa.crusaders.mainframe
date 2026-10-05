@@ -48,7 +48,8 @@ describe("the wallet ledger's share lines", () => {
 
     const expected = shareGroupSentence({ side: "organiser", net: 50, place: { courtName: "Court 1", startsAt: "2026-09-30T16:00:00Z" }, partners: 2 });
     // D10 — no amount in the sentence: the Amount column carries it.
-    expect(expected).toBe("Shares for Court 1 · Wed 30 Sep from 2 partners");
+    // R15 J15-8 — with the start time: two games on one court and day must read apart.
+    expect(expected).toBe("Shares for Court 1 · Wed 30 Sep, 18:00 from 2 partners");
     const toggle = await screen.findByRole("button", { name: new RegExp(`^${escape(expected)}`) });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -140,11 +141,11 @@ describe("the share sentences", () => {
   });
 
   it("says a paid-and-returned booking plainly", () => {
-    expect(shareGroupSentence({ side: "organiser", net: 0, place, partners: 1 })).toBe("Shares for Court 1 · Wed 30 Sep — paid and returned");
+    expect(shareGroupSentence({ side: "organiser", net: 0, place, partners: 1 })).toBe("Shares for Court 1 · Wed 30 Sep, 18:00 — paid and returned");
   });
 
   it("R1 F2.14: a partner's share that came back in full says so, too", () => {
-    expect(shareGroupSentence({ side: "partner", net: 0, place, partners: null })).toBe("Your share · Court 1 · Wed 30 Sep — paid and returned");
+    expect(shareGroupSentence({ side: "partner", net: 0, place, partners: null })).toBe("Your share · Court 1 · Wed 30 Sep, 18:00 — paid and returned");
   });
 });
 

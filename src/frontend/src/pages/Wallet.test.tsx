@@ -185,7 +185,7 @@ describe("Wallet — one balance, and a way to refresh it", () => {
     ]);
     renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
 
-    expect(await screen.findByRole("button", { name: /^Shares for Court 3 · Wed 30 Sep from 1 partner/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Shares for Court 3 · Wed 30 Sep, \d\d:\d\d from 1 partner/ })).toBeInTheDocument();
     const pageRead = stub.calls.find((c) => c.path.startsWith("/api/v1/wallet?") && c.path.includes("limit=100"))!;
     expect(pageRead.path).toContain("include=share_bookings");
     expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/bookings/"))).toHaveLength(0);

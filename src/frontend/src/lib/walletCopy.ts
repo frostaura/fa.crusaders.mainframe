@@ -162,7 +162,9 @@ export function minutesLeftSentence(amount: number, entryType: LedgerEntryType |
 export function movementSentence(amount: number, reason: string | undefined, parts?: readonly MovementPart[], who: MovementWho = {}): string {
   const minutes = minutesSpoken(Math.abs(amount));
   const up = amount > 0;
-  const said: Said = { minutes, up, split: splitParts(parts), by: who.checkedInBy, where: sharePlace(who.place), whereAt: placeAt(who.place) };
+  const said: Said = {
+    minutes, up, split: splitParts(parts), by: who.checkedInBy, where: sharePlace(who.place), whereAt: placeAt(who.place), other: namedOther(parts),
+  };
   const caused = reason ? causedSentence(reason, said, parts, who) : null;
   if (caused) return caused;
   // `mixed` without its rows, and anything unknown: true whoever caused it.
@@ -279,6 +281,12 @@ function namedFigures(rows: readonly MovementPart[]): [string, number][] | null 
   return [...byName].map(([who, n]) => [firstName(who), n]);
 }
 
+/** R15 E15-7 — the first name a movement's rows give the other member, or null. */
+function namedOther(parts: readonly MovementPart[] | undefined): string | null {
+  const name = parts?.find((p) => typeof p.counterparty_name === "string" && p.counterparty_name.trim() !== "")?.counterparty_name?.trim();
+  return name && !/^the club$/i.test(name) ? firstName(name) : null;
+}
+
 /** "a", "a and b", "a, b and c". */
 function listed(items: readonly string[]): string {
   return items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
@@ -340,6 +348,8 @@ type Said = {
   minutes: string; up: boolean; split: Split; by?: string;
   /** R14 E14-7 — "Court 3 · Mon 5 Oct", and with the time ("Court 3 · Mon 5 Oct, 18:00"); null when unplaced. */
   where: string | null; whereAt: string | null;
+  /** R15 E15-7 — the other member on the rows (`counterparty_name`), first name; null when none is named. */
+  other: string | null;
 };
 
 /** "Dan Splitter checked in, so …" or this member's own "… — you were checked in after all". */
@@ -367,12 +377,13 @@ const PRECISE_MOVEMENT: Record<string, (s: Said) => string> = {
       ? `${lead}: the ${s.split.back} penalty came back and the ${s.split.charged} refund was taken back, ${net(s)}.`
       : `${lead}: ${s.minutes} ${s.up ? "came back to" : "left"} your wallet.`;
   },
+  // R15 E15-7 — who paid (or whose court it was), and which court and when, where the frame says.
   pay_for_refund: (s) => s.up
-    ? `Another member paid for your booking at the court, so its ${s.minutes} came back to your wallet.`
+    ? `${s.other ?? "Another member"} paid for your booking${s.whereAt ? ` on ${s.whereAt}` : ""} at the court, so its ${s.minutes} came back to your wallet.`
     : `${s.minutes} of a pay-at-court refund left your wallet.`,
   pay_for_charge: (s) => s.up
     ? `${s.minutes} came back from a court you paid for at the box.`
-    : `${s.minutes} went on another member's court, paid at the box.`,
+    : `${s.minutes} went on ${s.other ? `${s.other}'s` : "another member's"} court${s.whereAt ? ` on ${s.whereAt}` : ""}, paid at the box.`,
   displaced_refund: (s) => s.up
     // R14 E14-7 — which booking: the court and the time.
     ? s.whereAt
@@ -504,8 +515,8 @@ export type ShareGroupInput = {
 
 /**
  * The one line a booking's shares collapse under.
- * Organiser: "Shares for Court 1 · Tue 30 Sep from 2 partners".
- * Partner: "Your share · Court 1 · Tue 30 Sep".
+ * Organiser: "Shares for Court 1 · Tue 30 Sep, 18:00 from 2 partners".
+ * Partner: "Your share · Court 1 · Tue 30 Sep, 18:00".
  *
  * <p>
  * D10 — no amount: the line sits in the ledger's own row, whose Amount column already carries
@@ -513,7 +524,8 @@ export type ShareGroupInput = {
  * </p>
  */
 export function shareGroupSentence(input: ShareGroupInput): string {
-  const where = sharePlace(input.place, input.timezone);
+  // R15 J15-8 — with the start time: two games on one court and day read the same without it.
+  const where = placeAt(input.place, input.timezone);
   if (input.side === "partner") {
     const own = where ? `Your share · ${where}` : "Your share of a split booking";
     // R1 F2.14 — a share that came back in full nets to nothing: say why, or it reads as a glitch.

@@ -108,9 +108,10 @@ describe("MinutesChip — whose movement it was", () => {
     await w.push({ balance_minutes: 200 });
     await w.push({ balance_minutes: 220, delta_minutes: 20, reason: "share_transfer" });
     const expected = shareRowSentence({
-      side: "organiser", signed: 20, place: { courtName: "Court 1", startsAt: "2026-09-29T16:00:00Z" }, other: "Sam Petersen",
+      side: "organiser", signed: 20, place: { courtName: "Court 1", startsAt: "2026-09-29T16:00:00Z" }, other: "Sam Petersen", dated: true,
     });
-    expect(expected).toBe("Sam paid you 20 minutes for their share of Court 1");
+    // R15 J15-5 — a toast stands alone: the court AND the day.
+    expect(expected).toBe("Sam paid you 20 minutes for their share of Court 1 · Tue 29 Sep");
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.queryByText(/The club/)).toBeNull();
   });

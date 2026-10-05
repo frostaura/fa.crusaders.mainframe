@@ -37,11 +37,22 @@ function payingPartners(booking: ShareBooking | null | undefined): number | null
   return booking.partners.filter((p) => p.paid > 0).length;
 }
 
-/** The other person on one movement: the organiser for a partner; for the organiser, the partner who acted. */
+/**
+ * The other person on one movement: the organiser for a partner; for the organiser, the partner who
+ * acted. R15 J15-7 / E15-9 — else the row's own counterparty (the To of a debit, the From of a
+ * credit): a club collection (the actor an admin) said "A partner paid you", and an unreadable
+ * booking "moved to the organiser", beside a To column naming them. "The club" names nobody here.
+ */
 function otherParty(row: LedgerRow, side: ShareSide, booking: ShareBooking | null | undefined): string | null {
-  if (!booking) return null;
-  if (side === "partner") return booking.organiserName;
-  return booking.partners.find((p) => p.userId === row.actorUserId)?.name ?? null;
+  const fromBooking = !booking ? null
+    : side === "partner" ? booking.organiserName
+    : booking.partners.find((p) => p.userId === row.actorUserId)?.name ?? null;
+  return fromBooking ?? rowCounterparty(row);
+}
+
+function rowCounterparty(row: LedgerRow): string | null {
+  const name = (row.signedAmountMinutes < 0 ? row.to : row.from)?.trim() ?? "";
+  return name === "" || /^the club$/i.test(name) ? null : name;
 }
 
 /**

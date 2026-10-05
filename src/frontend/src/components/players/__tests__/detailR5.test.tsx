@@ -186,7 +186,7 @@ describe("M5-7 — a late cancellation says its penalty on the page", () => {
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
     expect(figure(DETAIL_CANCELLED.penalty)).toBe(fig(-15));
-    expect(money()).toHaveTextContent(DETAIL_CANCELLED.splitRefundPenaltyNote(null, minutesSpoken(15)));
+    expect(money()).toHaveTextContent(DETAIL_CANCELLED.splitRefundPenaltyNote(null, minutesSpoken(15), ["Thandi"]));
     expect(money()).toHaveTextContent(DETAIL_CANCELLED.returnedRow(minutesSpoken(25)));
     expect(figure(DETAIL_MONEY.net(null))).toBe(fig(15));
   });
