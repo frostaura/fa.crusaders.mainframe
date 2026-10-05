@@ -454,7 +454,10 @@ public class CourtActivationService
         // beside the row write is the whole of that ordering.
         if (lightRow is not null) await _lights.PublishAsync(lightRow, court.CourtNumber, ct);
 
-        await _bus.EmitAsync(LightsOnEvent(court, booking, (payerUserId, identifiedUserId), method, now), ct);
+        // R13: announced under the court's cue lock, AFTER the check-in committed above — so the
+        // lights-off sweep either already sees this booking lit (and sends no off over it), or has
+        // already sent its off before this on (CourtCueLock).
+        await EmitUnderCueLockAsync(court, LightsOnEvent(court, booking, (payerUserId, identifiedUserId), method, now), ct);
 
         return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: false);
     }
@@ -520,11 +523,23 @@ public class CourtActivationService
     /// upload after the slot read "duration_seconds": 2 for a 25-minute grant). Its off is
     /// <c>LightsCueWorker</c>'s attended-and-over pass, at the restored end.
     /// </remarks>
-    public ValueTask EmitReversedLightsOnAsync(
+    public async ValueTask EmitReversedLightsOnAsync(
         Court court, Booking booking, (Guid Identified, DateTimeOffset ScannedAt) scan, string method, CancellationToken ct)
     {
         var payer = booking.PaidByUserId ?? booking.UserId ?? scan.Identified;
-        return _bus.EmitAsync(LightsOnEvent(court, booking, (payer, scan.Identified), method, scan.ScannedAt), ct);
+        // R13: under the court's cue lock, like every lights_on — the reversal committed its check-in first.
+        await EmitUnderCueLockAsync(court, LightsOnEvent(court, booking, (payer, scan.Identified), method, scan.ScannedAt), ct);
+    }
+
+    /// <summary>
+    /// R13: a <c>booking.lights_on</c> sent while holding the court's <see cref="CourtCueLock"/>, in a
+    /// transaction of its own that holds nothing else — the check-in it announces is already committed.
+    /// </summary>
+    private async Task EmitUnderCueLockAsync(Court court, DomainEvent lightsOn, CancellationToken ct)
+    {
+        await using var cue = await CourtCueLock.BeginAsync(_db, _tenant.TenantId, court.Id, ct);
+        await _bus.EmitAsync(lightsOn, ct);
+        await cue.CommitAsync(ct);
     }
 
     private DomainEvent LightsOnEvent(Court court, Booking booking, (Guid Payer, Guid Identified) who, string method, DateTimeOffset now)

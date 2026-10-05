@@ -1,6 +1,7 @@
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 
@@ -19,6 +20,12 @@ public sealed class LightsCueWorker : BackgroundService
 
     public LightsCueWorker(IServiceProvider services, IEventBus bus, ILogger<LightsCueWorker> logger)
     { _services = services; _bus = bus; _logger = logger; }
+
+    /// <summary>
+    /// Tests only: runs after a booking's off has been DECIDED and before it is saved and sent — the
+    /// window a concurrent check-in must not be able to slip into (R13, <c>R13LightsCueRaceHttpTests</c>).
+    /// </summary>
+    internal Func<Booking, Task>? AfterOffDecidedForTests { get; init; }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -78,7 +85,11 @@ public sealed class LightsCueWorker : BackgroundService
         {
             // R13 (E13-1's rule, for every slot): said at the instant the court is next free — never
             // after the lights_on of the next session already lit on it, which closes the court itself.
+            // Read, decided, saved and SENT under the court's cue lock, so a check-in committing
+            // meanwhile announces its lights_on after this off, never before it (CourtCueLock).
+            await using var cue = await CourtCueLock.BeginAsync(db, b.TenantId, b.CourtId, ct);
             var offAt = await NextFreeAsync(db, b, now, ct);
+            if (AfterOffDecidedForTests is { } hook) await hook(b);
             b.LightsOffCuedAt = now;
 
             // Only promote a booking that was actually attended. Flipping an
@@ -105,9 +116,14 @@ public sealed class LightsCueWorker : BackgroundService
             // between loses one lights-off cue, which the Mega's own auto-off timer already
             // backstops by design — whereas a duplicate cue is noise a club's webhook
             // consumer has no way to tell from a real one.
+            //
+            // R13: the send is inside the lock and so before the commit. A commit that then fails
+            // (the connection died — the save itself already passed its concurrency check) loses
+            // the marker and the next tick says the off again: the one way this is not at-most-once.
             if (await SaveOneAsync(db, b, ct))
             {
                 if (offAt is { } at) await FireLightsAsync(db, tenant, b, on: false, ct, occurredAt: at);
+                await cue.CommitAsync(ct);
                 if (promoted) await FireCompletedAsync(db, tenant, b, ct);
             }
         }
@@ -137,6 +153,8 @@ public sealed class LightsCueWorker : BackgroundService
             .ToListAsync(ct);
         foreach (var b in attendedAndOver)
         {
+            // R13: the court's cue lock, as in the sweep above — this pass can say an off too.
+            await using var cue = await CourtCueLock.BeginAsync(db, b.TenantId, b.CourtId, ct);
             b.Status = BookingStatus.Completed;
             // R12 E12-3 (decision I12, amended): a reversal that came AFTER the off cue re-emitted
             // `booking.lights_on` for the late scan, so the court is lit again on every consumer's
@@ -155,6 +173,7 @@ public sealed class LightsCueWorker : BackgroundService
             if (await SaveOneAsync(db, b, ct))
             {
                 if (offAt is { } at) await FireLightsAsync(db, tenant, b, on: false, ct, occurredAt: at);
+                await cue.CommitAsync(ct);
                 await FireCompletedAsync(db, tenant, b, ct);
             }
         }
@@ -182,7 +201,8 @@ public sealed class LightsCueWorker : BackgroundService
     private static async Task<DateTimeOffset?> NextFreeAsync(MainframeDbContext db, Booking b, DateTimeOffset now, CancellationToken ct)
     {
         var at = b.EndsAt;
-        var holders = await db.Bookings.IgnoreQueryFilters()
+        // Untracked: a tracked row would answer with what this tick read before the lock, not now.
+        var holders = await db.Bookings.IgnoreQueryFilters().AsNoTracking()
             .Where(o => o.TenantId == b.TenantId && o.CourtId == b.CourtId && o.Id != b.Id
                 && (o.Status == BookingStatus.Booked || o.Status == BookingStatus.Completed || o.Status == BookingStatus.NoShow)
                 && o.EndsAt > at && o.StartsAt <= now)
