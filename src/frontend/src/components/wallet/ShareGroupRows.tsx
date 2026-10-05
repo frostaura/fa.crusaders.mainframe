@@ -50,6 +50,14 @@ function otherParty(row: LedgerRow, side: ShareSide, booking: ShareBooking | nul
   return fromBooking ?? rowCounterparty(row);
 }
 
+/**
+ * R16 J16-2 — a row moved because a player was added is said as that act, with who added them
+ * (the row's `actor_name`; none: the club). Other causes keep the ledger's own words.
+ */
+function rowCause(row: LedgerRow): { cause?: string; actor?: string | null } {
+  return row.share_cause === "player_added" ? { cause: row.share_cause, actor: row.actor_name ?? null } : {};
+}
+
 /** The row's `counterparty_name` (C5, sent on every share row with an owned twin), else its To / From. */
 function rowCounterparty(row: LedgerRow): string | null {
   const said = [row.counterparty_name, row.signedAmountMinutes < 0 ? row.to : row.from]
@@ -89,7 +97,7 @@ export function ShareGroupRows(props: ShareGroupRowsProps) {
         <TableRow key={row.id} id={childIds[i]} hidden={!open} data-share-row="" className="bg-bg-muted/40">
           {columns.map((column) => (
             <Fragment key={column}>
-              {CELL[column](row, column === "comment" ? shareRowSentence({ side, signed: row.signedAmountMinutes, place: booking, other: otherParty(row, side, booking) }) : undefined)}
+              {CELL[column](row, column === "comment" ? shareRowSentence({ side, signed: row.signedAmountMinutes, place: booking, other: otherParty(row, side, booking), ...rowCause(row) }) : undefined)}
             </Fragment>
           ))}
         </TableRow>

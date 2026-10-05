@@ -101,6 +101,10 @@ function partnerActed(a: Acted, minutes: string, where: string): string | null {
     // R14 §9 — the club recorded the share as paid outside the app; a return no record explains names nobody.
     club_settled: () => `${minutes} of your share of ${a.where ?? "a split booking"} came back — the club recorded your share as paid outside the app`,
     share_back: () => `${minutes} of your share of ${a.where ?? "a split booking"} came back`,
+    // R16 J16-2 — an equal split went down because a player was added: by the organiser (named),
+    // else the club (no actor on the frame, or "The club").
+    player_added: () => `${minutes} of your share of ${a.where ?? "a split booking"} came back — ${
+      a.actor && a.actor !== "The club" ? a.actor : "the club"} added a player, so the split went down`,
   };
   return said[a.cause]?.() ?? null;
 }
@@ -120,6 +124,8 @@ function organiserActed(a: Acted, minutes: string, where: string): string | null
     organiser_removed: () => `You took ${partner ?? "a partner"} off ${where} — ${minutes} went back to them`,
     split_changed: () => `You changed the split on ${a.where ?? "your game"} — ${minutes} went back to ${partner ?? "your partner"}`,
     club_removed: () => `The club took ${partner ?? "a partner"} off ${where} — ${minutes} went back to them`,
+    // R16 J16-2 — the organiser's own add ("You"), the club's, or — nobody named — the plain fact.
+    player_added: () => `${addedBy(a.actor)} to ${of}, so the split went down — ${minutes} went back to ${to}`,
   };
   return said[a.cause]?.() ?? null;
 }
@@ -200,6 +206,12 @@ function personName(name: string | null | undefined): string | null {
   const said = name?.trim() ?? "";
   if (said === "" || said === "null") return null;
   return /^the club$/i.test(said) ? "The club" : firstName(said);
+}
+
+/** R16 J16-2 — who added the player, on the organiser's side: "The club", else the organiser themself. */
+function addedBy(actor: string | null): string {
+  if (actor === "The club") return "The club added a player";
+  return actor ? "You added a player" : "A player was added";
 }
 
 /** "a", "a and b", "a, b and c". */

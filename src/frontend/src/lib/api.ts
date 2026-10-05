@@ -737,6 +737,13 @@ export type LedgerRow = {
   counterparty_name?: string | null;
   /** C5 — that member's user id. Null / absent on every other row. */
   counterparty_user_id?: string | null;
+  /**
+   * R16 J16-2 (BE16b) — on a share row, why it moved (`player_added`, …), as the live frame says it.
+   * Absent from an older API.
+   */
+  share_cause?: string | null;
+  /** R16 E16-7 (BE16b) — who acted, when not the member themself or the club's system. */
+  actor_name?: string | null;
 };
 
 export type WalletResponse = {
