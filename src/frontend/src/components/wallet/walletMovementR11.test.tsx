@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "@/lib/auth";
 import { BalanceProvider } from "@/lib/balance";
 import type { BalanceFrame, BalanceTransport } from "@/lib/liveBalance";
-import { movementSentence } from "@/lib/walletCopy";
+import { movementSentence } from "@/lib/movementCopy";
 import WalletPage from "@/pages/Wallet";
 import { ToastProvider } from "../Toast";
 import { MinutesChip } from "../shell/MinutesChip";

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import type { LedgerRow } from "@/lib/api";
-import { movementSentence, shareGroupSentence } from "@/lib/walletCopy";
+import { shareGroupSentence } from "@/lib/walletCopy";
+import { movementSentence } from "@/lib/movementCopy";
 import { shareMovementPlain, shareRowSentence } from "@/lib/shareMovementCopy";
 import { DETAIL_CANCELLED } from "@/lib/playersCopy";
 import { renderPage, stubFetch } from "@/test/harness";
@@ -65,7 +66,8 @@ describe("R15 E15-7 — a pay-for toast names the person, the court and the day"
 
   it("the volunteer: whose court, and when", () => {
     expect(movementSentence(-30, "pay_for_charge", [{ reason: "booking_charge", delta_minutes: -30, counterparty_name: "Bea Booker" }], where))
-      .toBe("30 minutes went on Bea's court on Court 2 · Mon 5 Oct, 18:30, paid at the box.");
+      // R16 E16-4 — whose booking, not "Bea's court on Court 2".
+      .toBe("30 minutes went on Bea's booking on Court 2 · Mon 5 Oct, 18:30, paid at the box.");
   });
 
   it("no name on the wire (an older server): still the court and the day", () => {

@@ -1,6 +1,6 @@
 import { minutesSpoken } from "./minutes";
 import { firstName } from "./playersNames";
-import { courtOf, movementSentence, sharePlace, type SharePlace } from "./walletCopy";
+import { courtOf, plainMovementSentence, sharePlace, type SharePlace } from "./walletCopy";
 
 /*
  * The words for ONE share movement — a ledger line's sentence and the chip's share toast (D11, R11–R14).
@@ -188,7 +188,7 @@ export function shareMovementPlain(
       : (amount < 0 ? `${m} went on your share of ${where}` : `${m} of your share of ${where} came back`);
     return `${placed}${clause}.`;
   }
-  const plain = movementSentence(amount, "share_transfer");
+  const plain = plainMovementSentence(amount, "share_transfer");
   return clause ? `${plain.replace(/\.$/, "")}${clause}.` : plain;
 }
 

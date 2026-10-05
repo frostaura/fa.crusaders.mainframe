@@ -5,7 +5,7 @@ import { AuthProvider } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { BalanceProvider } from "@/lib/balance";
 import type { BalanceFrame, BalanceTransport } from "@/lib/liveBalance";
-import { movementSentence } from "@/lib/walletCopy";
+import { movementSentence } from "@/lib/movementCopy";
 import { shareRowSentence } from "@/lib/shareMovementCopy";
 import { ToastProvider } from "../Toast";
 import { MinutesChip } from "./MinutesChip";

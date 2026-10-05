@@ -11,7 +11,7 @@ import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn } from "@/lib/utils";
 import { clubRowTime } from "@/lib/clubClock";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
-import { movementSentence } from "@/lib/walletCopy";
+import { plainMovementSentence, type MovementPart, type MovementWho } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/useAuth";
 import { phoneIsOffline } from "@/lib/api";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
@@ -58,6 +58,17 @@ const CANCEL_MERGE_MS = 1_000;
 
 type PendingCancel = { delta: BalanceDelta; timer: number };
 
+/**
+ * R16 — the precise sentence, from `lib/movementCopy` (out of the entry chunk, fetched with the
+ * first frame to say); the reason's plain sentence if that chunk cannot be had. A toast is never lost.
+ */
+function sayMovement(say: (text: string) => void, amount: number, reason: string | undefined, parts?: readonly MovementPart[], who?: MovementWho) {
+  void import("@/lib/movementCopy").then(
+    (m) => m.movementSentence(amount, reason, parts, who),
+    () => plainMovementSentence(amount, reason),
+  ).then(say);
+}
+
 /** The rows a toast reads: the frame's own, or the refund alone. */
 function partsOf(delta: BalanceDelta): BalancePart[] {
   return delta.parts ?? [{ reason: delta.reason ?? "cancellation_refund", delta_minutes: delta.amount }];
@@ -103,27 +114,27 @@ function useClubMovementToast() {
       const parts = [...partsOf(held.delta), { reason: "share_transfer", delta_minutes: delta.amount }];
       const amount = held.delta.amount + delta.amount;
       const heldWho = { cancelledBy: held.delta.cancelledBy, checkedInBy: held.delta.checkedInBy, place: held.delta.place };
-      sayAs(amount, parts)(movementSentence(amount, "cancellation_refund", parts, heldWho));
+      sayMovement(sayAs(amount, parts), amount, "cancellation_refund", parts, heldWho);
       return;
     }
     if (held) {
       window.clearTimeout(held.timer);
       pending.current = null;
-      sayAs(held.delta.amount, held.delta.parts)(movementSentence(held.delta.amount, held.delta.reason, held.delta.parts, held.delta));
+      sayMovement(sayAs(held.delta.amount, held.delta.parts), held.delta.amount, held.delta.reason, held.delta.parts, held.delta);
     }
     const say = sayAs(delta.amount, delta.parts);
     if (delta.reason === "share_transfer") {
       // R11 E11-1 / R13 / R14 X14-2 — said with the frame's cause and who acted, named or plain.
       // The words load with the first share frame (`shareMovement`), out of the entry chunk.
-      void import("./shareMovement").then((m) => m.shareToast(delta, me)).then(say, () => say(movementSentence(delta.amount, "share_transfer")));
+      void import("./shareMovement").then((m) => m.shareToast(delta, me)).then(say, () => say(plainMovementSentence(delta.amount, "share_transfer")));
     } else if (awaitsShares(delta)) {
       const timer = window.setTimeout(() => {
         pending.current = null;
-        say(movementSentence(delta.amount, delta.reason, delta.parts, who));
+        sayMovement(say, delta.amount, delta.reason, delta.parts, who);
       }, CANCEL_MERGE_MS);
       pending.current = { delta, timer };
     } else {
-      say(movementSentence(delta.amount, delta.reason, delta.parts, who));
+      sayMovement(say, delta.amount, delta.reason, delta.parts, who);
     }
   }, [delta, toast, me]);
 

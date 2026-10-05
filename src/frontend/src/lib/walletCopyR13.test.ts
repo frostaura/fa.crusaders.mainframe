@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { memberLedgerComment, movementSentence } from "./walletCopy";
+import { memberLedgerComment } from "./walletCopy";
+import { movementSentence } from "./movementCopy";
 import { shareMovementPlain } from "./shareMovementCopy";
 
 /**

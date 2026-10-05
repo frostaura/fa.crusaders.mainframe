@@ -121,7 +121,7 @@ describe("X6-2 — minutes in words are spoken words", () => {
   it("the wallet's sentences", () => {
     said(wallet.minutesArrivedSentence(90, "AdminAdjustment", "Thandi"));
     said(wallet.minutesLeftSentence(45, "BookingCharge"));
-    said(wallet.movementSentence(-45, "booking_charge"));
+    said(wallet.plainMovementSentence(-45, "booking_charge"));
     said(wallet.spendableLine(-4));
     said(wallet.spendableLine(30));
     said(wallet.chipHeldTitle(15, 10));
