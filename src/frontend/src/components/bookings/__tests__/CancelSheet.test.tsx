@@ -81,11 +81,12 @@ describe("CancelSheet — a member's own booking", () => {
     expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}35 min`);
   });
 
-  it("says nothing comes back once the lights have been on", async () => {
-    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote({ refundMinutes: 0, checkedIn: true }) }]);
-    open();
-    expect(await screen.findByText(CANCEL_SHEET.checkedIn(null))).toBeTruthy();
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}0 min`);
+  it("says nothing comes back once the lights have been on (the club's own booking)", async () => {
+    // R15 D15-5 — a MEMBER is refused up front once checked in (CancelSheet.r15.test); the club is not.
+    stubFetch([{ path: "/api/v1/bookings/bk-2/cancellation-quote", body: quote({ bookingId: "bk-2", refundMinutes: 0, checkedIn: true }) }]);
+    open({ isAdmin: true, bookings: [THANDI] });
+    expect(await screen.findByText(CANCEL_SHEET.checkedIn("Thandi"))).toBeTruthy();
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack("Thandi")}0 min`);
   });
 
   it("cancels once, closes, and says what moved in a toast — no tick for a destructive action", async () => {

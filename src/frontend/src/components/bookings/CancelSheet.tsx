@@ -9,11 +9,11 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, type CancellationQuote } from "@/lib/api";
-import { cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
+import { ALREADY_CHECKED_IN_TEXT, cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
 import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL } from "@/lib/bookingsCopy";
+import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL, refusalReason } from "@/lib/bookingsCopy";
 import { BulkResults } from "./BulkResults";
 import { MoneyRows, SendingNote, SlotList, type MoneyRow, type SlotLine } from "./SheetParts";
 import {
@@ -110,6 +110,12 @@ function useCancelFlow(props: FlowProps) {
 
   const single = bookings.length === 1;
   const forOthers = isAdmin && bookings.some((b) => !b.mine);
+  // R15 D15-5 — a member may not cancel a booking they have checked in to (the server answers 409
+  // `already_checked_in`): refused up front off the quote, never sent. The member route refuses an
+  // admin's OWN booking too; only the club's route (an admin, somebody else's booking) is not.
+  const readyQuotes = quotes.state.status === "ready" ? quotes.state.quotes : null;
+  const refused = (b: GridBooking) => !(isAdmin && !b.mine) && readyQuotes?.get(b.bookingId)?.checkedIn === true;
+  const sendable = bookings.filter((b) => !refused(b));
   // R4 A4-4: an admin cancelling somebody else's booking always says why — the member is told,
   // and it goes on the club's change record (the API refuses it without, 400 reason_required).
   const reasonNeeded = forOthers;
@@ -119,7 +125,7 @@ function useCancelFlow(props: FlowProps) {
     async () => {
       refuseWhenOffline();
       return cancelBookings({
-        bookings, isAdmin, waive: forOthers && waive, reason, idempotencyKey: key, reread: props.reread,
+        bookings: sendable, isAdmin, waive: forOthers && waive, reason, idempotencyKey: key, reread: props.reread,
         quotes: quotes.state.status === "ready" ? quotes.state.quotes : null,
       });
     },
@@ -147,6 +153,7 @@ function useCancelFlow(props: FlowProps) {
   );
 
   const confirm = () => {
+    if (sendable.length === 0) return;
     if (reasonNeeded && reason.trim() === "") {
       setReasonShown(true);
       return;
@@ -157,7 +164,7 @@ function useCancelFlow(props: FlowProps) {
   };
 
   return {
-    quotes, waive, setWaive, reason, setReason, reasonNeeded, forOthers, single,
+    quotes, waive, setWaive, reason, setReason, reasonNeeded, forOthers, single, refused, sendable: sendable.length,
     reasonMissing: reasonShown && reasonNeeded && reason.trim() === "",
     action, run, confirm,
   };
@@ -188,9 +195,12 @@ function CancelFlowView(props: FlowProps) {
           <>
             {/* R4 I4-1 — no way out while the cancel is on its way; the note says why. */}
             {busy ? null : <Button variant="outline" onClick={props.onClose}>{CANCEL_SHEET.keep(count)}</Button>}
-            <Button variant="danger" pending={flow.action.pending} onClick={flow.confirm}>
-              {CANCEL_SHEET.confirm(count)}
-            </Button>
+            {/* R15 D15-5 — nothing this member may cancel (checked in): no Cancel to press. */}
+            {flow.sendable === 0 ? null : (
+              <Button variant="danger" pending={flow.action.pending} onClick={flow.confirm}>
+                {CANCEL_SHEET.confirm(flow.sendable)}
+              </Button>
+            )}
           </>
         )}
       </DialogFooter>
@@ -260,7 +270,9 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
   const loading = flow.quotes.state.status === "loading";
   const waived = flow.forOthers && flow.waive;
   const subject = booking.mine ? null : booking.memberFirstName ?? "This member";
-  const said = quote ? consequence(quote, waived, subject) : null;
+  const said = quote && flow.refused(booking)
+    ? { tone: "warning" as const, text: ALREADY_CHECKED_IN_TEXT }
+    : quote ? consequence(quote, waived, subject) : null;
   return (
     <>
       <SlotList lines={[lineFor(booking, undefined, false)]} label={CANCEL_SHEET.title(1)} refusedWord="" />
@@ -298,7 +310,7 @@ function ManyCancel({ flow, bookings, quotes }: { flow: CancelFlow; bookings: Gr
   return (
     <>
       <SlotList
-        lines={bookings.map((b) => lineFor(b, quoteNote(loading ? undefined : quotes.get(b.bookingId) ?? null, waived) || undefined, loading))}
+        lines={bookings.map((b) => lineFor(b, (flow.refused(b) ? refusalReason("already_checked_in") : quoteNote(loading ? undefined : quotes.get(b.bookingId) ?? null, waived)) || undefined, loading))}
         label={CANCEL_SHEET.title(bookings.length)}
         refusedWord=""
       />

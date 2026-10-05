@@ -30,6 +30,13 @@ import { rateLimitedSentence } from "./errors";
  * plain sentence that says what to do next, and the token is left to the console.
  * </p>
  */
+/**
+ * R15 D15-5 — a member's own booking once they have checked in: the 409 `already_checked_in`, and
+ * the grid's cancel sheet saying it up front off the quote's `checkedIn` (so it is never reached).
+ */
+export const ALREADY_CHECKED_IN_TEXT =
+  "You've checked in to this booking, so it can't be cancelled — the court is yours until it ends. If something's wrong, speak to the club.";
+
 const BOOKING_ERROR_TEXT: Record<string, string> = {
   past_time: "That slot has already started — pick a later one.",
   /**
@@ -54,7 +61,7 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
   already_started: "That booking has already started, so it can't be cancelled.",
   // R15 D15-5 — a member may not cancel a booking they have checked in to: the lights have been
   // on, nothing would come back, and the slot would be sold twice. The club can still cancel it.
-  already_checked_in: "You've checked in to this booking, so it can't be cancelled — the court is yours until it ends. If something's wrong, speak to the club.",
+  already_checked_in: ALREADY_CHECKED_IN_TEXT,
   booking_not_found: "That booking is no longer there. The schedule behind this is up to date now.",
   block_not_found: "That block has already been lifted.",
   // A suspended membership is not a stale screen. Without this key the refusal fell through to
