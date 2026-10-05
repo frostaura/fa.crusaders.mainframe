@@ -56,12 +56,19 @@ public sealed class BookingService
         MainframeDbContext db, ITenantContext tenant, LedgerService ledger, TenantSettingsAccessor settings,
         IEmailService email, IEventBus bus, AccessCodeService codes, Realtime.RealtimeOutbox outbox,
         BookingRules rules, ILogger<BookingService> logger, Email.ClubIdentityResolver club,
-        AdminChangeRecorder changes, IServiceScopeFactory scopes)
+        AdminChangeRecorder changes, IServiceScopeFactory scopes, TimeProvider clock)
     {
         _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus;
         _codes = codes; _outbox = outbox; _rules = rules; _logger = logger; _club = club; _changes = changes;
         _scopes = scopes;
+        _clock = clock;
     }
+
+    /// <summary>
+    /// R14 D14-4: the club's clock for the decisions a device path reaches here — a walk-up's start
+    /// and a late check-in's reversal — the instant every device route around them now decides at.
+    /// </summary>
+    private readonly TimeProvider _clock;
 
     /// <summary>
     /// Where a confirmation is composed: a scope of its own, after the response (perf round).
@@ -370,7 +377,7 @@ public sealed class BookingService
         if (court is null) return new BookingResult.NotFound();
         if (requestedMinutes <= 0) return new BookingResult.NoTimeAvailable(requestedMinutes, 0);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.GetUtcNow();
 
         var (refusal, endsAt) = await SellableEndAsync(courtId, now, requestedMinutes, settings, ct);
         if (refusal is not null) return refusal;
@@ -1617,7 +1624,7 @@ public sealed class BookingService
     {
         if (booking.Status != BookingStatus.NoShow || booking.UserId is null) return new NoShowReversalResult.NotNoShow();
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.GetUtcNow();
         var payerUserId = booking.PaidByUserId ?? booking.UserId.Value;
         // R13 E13-5 (C13-2): the reversal and the shares that follow it reach each wallet as ONE frame.
         await using var frames = WalletFrameScope.Open(_outbox.Holds, _ledger, _tenant.TenantId, booking.Id);

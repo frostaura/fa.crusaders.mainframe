@@ -36,7 +36,8 @@ Earlier: `decisions-backend-r13b.md`. Contract: lane scratch `r14-contract-BE14b
   cancelled_no_refund`; the cancellation mail says "Nothing — the session had started" instead of
   promising a wallet line (`CancelledSlot.SessionStarted`).
 - **`GET /wallet?include=share_bookings` carries `share_places`** (E14-7, FE14m's ask): `{bookingId: {court_name, starts_at}}` for every booking the member has a share row on, readable or not (`share_bookings` keeps its null for an off-game booking). Court and start only — tenant-filtered, own rows only.
+- **`BookingService` decides device paths at the injected `TimeProvider`** (D14-4, BE14a's ask): a walk-up's start and a reversal's `NoShowReversedAt` read `_clock`, like every device route; member-facing create/cancel still read the wall. A pinned-clock walk-up was refused 409 before.
 - **404 detail names the viewer's own closed seat** (`own_seat_id`, J14-10) — own seat only.
 - Share receipts for removal / split / cancel say who, with court and day; share mails after a
   cancel name who cancelled (J14-8). Outage-reversal mail: one "so".
-- Tests: `R14ShareCausesHttpTests`, `R14NightAndCancelHttpTests` — 24/24 red at HEAD 0ab1b559 first.
+- Tests: `R14ShareCausesHttpTests`, `R14NightAndCancelHttpTests` (24/24 red at HEAD 0ab1b559 first), `R14PlayerAsksHttpTests`, `R14BookingClockHttpTests` — each seen red first.
