@@ -145,6 +145,10 @@ export type DetailPlayer = {
    * is asked only then. Null where collect does not apply; absent from an older API (asked, as before).
    */
   collect_needs_overdraft?: boolean | null;
+  /** R16 J16-1 (BE16b) — who last changed this seat's share since its invite; null: nobody, absent: an older API. */
+  share_changed_by?: ShareChangedBy | null;
+  /** R16 J16-1 — the organiser's name when they changed it; null for the club. */
+  share_changed_by_name?: string | null;
   lapsed: boolean;
   checked_in_at: string | null;
   invited_at: string | null;
@@ -259,6 +263,9 @@ export type MySeat = {
   removed_by?: SeatRemovedBy | null;
 };
 
+/** R16 J16-1 — who changed a seat's share: the organiser, or the club. */
+export type ShareChangedBy = "organiser" | "club";
+
 /** R15 J15-1 — who took a member off a game: the club (an admin) or the organiser. */
 export type SeatRemovedBy = "club" | "organiser";
 
@@ -312,6 +319,9 @@ export type Invite = {
   timezone?: string;
   /** R15 J15-1 (BE15b) — the club put this member on the game, not the organiser. Absent: an older API (read as the organiser). */
   added_by_club?: boolean;
+  /** R16 J16-1 (BE16b) — who last changed the share since the invite; the organiser's name when they did. */
+  share_changed_by?: ShareChangedBy | null;
+  share_changed_by_name?: string | null;
 };
 
 /**

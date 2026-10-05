@@ -781,6 +781,8 @@ export const DETAIL_PLAYER = {
   askedAgain: (share: string) => `Your share went up to ${share}. Review it to say yes again.`,
   /** R14 J14-9 — the club accepted the seat without asking and nothing was ever agreed: not "went up". */
   askedFirst: (share: string) => `The club has asked you for ${share} — review it to say yes.`,
+  /** R16 J16-1 — who changed the share ("Sam" / "The club"), and whether a yes to less came before. */
+  changedBy: (who: string, share: string, again: boolean) => `${who} changed your share to ${share}. Review it to say yes${again ? " again" : ""}.`,
   review: "Review your share",
   withdraw: "Pull out",
   withdrawUntil: (when: string) => `You can pull out until ${when}.`,
@@ -958,6 +960,9 @@ export const INVITES_COPY = {
   askedAgainTitle: "Your share went up",
   /** R14 J14-9 — the heading for a seat the club accepted without asking. */
   askedFirstTitle: "The club added you to this game",
+  /** R16 J16-1 — the share was changed, by whoever the record names (the line under it says who). */
+  shareChangedTitle: "Your share changed",
+  statusShareChanged: "Your share changed — it needs a yes",
   court: "Court",
   when: "When",
   organiser: "Booked by",
@@ -1062,6 +1067,11 @@ export function acceptedUnpaidLine(toPay: number): string {
 /** R14 J14-9 — the line under `askedFirstTitle`: the share asked for, the first time. */
 export function askedFirstLine(share: number): string {
   return `The club has asked you for ${minutesSpoken(share)} — check it and say yes.`;
+}
+
+/** R16 J16-1 — "Owen changed your share to 25 minutes. Check it and say yes." — the changer named. */
+export function changedByLine(who: string, share: number, again: boolean): string {
+  return `${who} changed your share to ${minutesSpoken(share)}. Check it and say yes${again ? " again" : ""}.`;
 }
 
 export function askedAgainLine(organiser: string, share: number): string {

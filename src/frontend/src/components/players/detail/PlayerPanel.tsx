@@ -14,7 +14,7 @@ import { Minutes } from "@/components/Minutes";
 import { minutesSpoken } from "@/lib/minutes";
 import { playersEndpoints, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
 import { UnsureOutcome } from "@/lib/lostReply";
-import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_NO_SHOW, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal, playersWhen } from "@/lib/playersCopy";
+import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_NO_SHOW, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, firstName, playersRefusal, playersWhen } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { isCancelled, isNoShow, keepAmounts, mySeat } from "./detailModel";
 import { leaveOrProve } from "./detailReadBack";
@@ -52,7 +52,7 @@ export function PlayerPanel({ detail, reload, say }: Props) {
   const docked = !wide && (review !== null || decline !== null);
   return (
     <Section title={DETAIL_PLAYER.title}>
-      <ShareFigures seat={seat} />
+      <ShareFigures seat={seat} organiser={detail.organiser.name} />
       <div className="flex flex-wrap items-center gap-3">
         {docked ? null : review}
         {docked ? null : decline}
@@ -103,12 +103,18 @@ function NoShowShare({ seat }: { seat: DetailPlayer }) {
  * R14 J14-9 — "went up" only when the seat had agreed to something smaller; a seat the club
  * accepted without asking (nothing agreed) is being asked for the first time.
  */
-function consentAsk(seat: DetailPlayer): string {
+function consentAsk(seat: DetailPlayer, organiser: string | null): string {
   const share = minutesSpoken(seat.share_minutes);
+  // R16 J16-1 — the record says who changed it: never "the club" for the organiser's act.
+  const by = seat.share_changed_by;
+  if (by === "club" || by === "organiser") {
+    const who = by === "club" ? "The club" : firstName(seat.share_changed_by_name ?? organiser);
+    return DETAIL_PLAYER.changedBy(who, share, seat.consented_minutes > 0);
+  }
   return seat.consented_minutes > 0 ? DETAIL_PLAYER.askedAgain(share) : DETAIL_PLAYER.askedFirst(share);
 }
 
-function ShareFigures({ seat }: { seat: DetailPlayer }) {
+function ShareFigures({ seat, organiser }: { seat: DetailPlayer; organiser: string | null }) {
   return (
     <div className="flex flex-col gap-3">
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
@@ -116,7 +122,7 @@ function ShareFigures({ seat }: { seat: DetailPlayer }) {
         <Figure term={DETAIL_PLAYER.paid} value={seat.paid_minutes} />
         <Figure term={DETAIL_PLAYER.toPay} value={seat.unpaid_minutes} strong />
       </dl>
-      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(consentAsk(seat))}</Alert> : null}
+      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(consentAsk(seat, organiser))}</Alert> : null}
       {seat.status === "accepted" && seat.unpaid_minutes <= 0 && !seat.needs_consent ? (
         <p className="text-sm text-success-strong">{DETAIL_PLAYER.paidAll}</p>
       ) : null}

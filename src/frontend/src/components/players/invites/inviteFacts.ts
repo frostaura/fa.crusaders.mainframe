@@ -3,7 +3,7 @@ import { UnsureOutcome } from "@/lib/bookingOutcome";
 import { clubClock } from "@/lib/clubClock";
 import type { Invite, PartnerCap } from "@/lib/playersApi";
 import {
-  INVITE_REFUSAL, INVITE_UNSURE, INVITES_COPY, PLAYERS_UNSURE, acceptedUnpaidLine, askedAgainLine, askedFirstLine, firstName, invitedLine,
+  INVITE_REFUSAL, INVITE_UNSURE, INVITES_COPY, PLAYERS_UNSURE, acceptedUnpaidLine, askedAgainLine, askedFirstLine, changedByLine, firstName, invitedLine,
   playersRefusal, playersWhen,
 } from "@/lib/playersCopy";
 
@@ -19,8 +19,16 @@ function neverAgreed(invite: Invite): boolean {
   return invite.needs_consent && invite.consented_minutes === 0;
 }
 
+/** R16 J16-1 — who changed the share, when the record says: "The club", or the organiser's first name. */
+function changer(invite: Invite): string | null {
+  if (invite.share_changed_by === "club") return "The club";
+  if (invite.share_changed_by === "organiser") return firstName(invite.share_changed_by_name ?? invite.organiser?.name);
+  return null;
+}
+
 /** Where the seat stands, as one line: waiting · asked (again) · accepted with something to pay. */
 export function inviteStatus(invite: Invite): { text: string; tone: InviteTone } {
+  if (invite.needs_consent && changer(invite)) return { text: INVITES_COPY.statusShareChanged, tone: "warning" };
   if (neverAgreed(invite)) return { text: INVITES_COPY.statusAskedFirst, tone: "warning" };
   if (invite.needs_consent) return { text: INVITES_COPY.statusAskedAgain, tone: "warning" };
   if (invite.status === "accepted") return { text: acceptedUnpaidLine(invite.to_pay_minutes), tone: "info" };
@@ -33,6 +41,10 @@ export function inviteStatus(invite: Invite): { text: string; tone: InviteTone }
  */
 export function inviteHeading(invite: Invite, invitedTitle: string): { title: string; line: string } {
   const organiser = organiserName(invite);
+  const who = changer(invite);
+  if (invite.status === "accepted" && invite.needs_consent && who) {
+    return { title: INVITES_COPY.shareChangedTitle, line: changedByLine(who, invite.share_minutes, (invite.consented_minutes ?? 0) > 0) };
+  }
   if (invite.status === "accepted" && neverAgreed(invite)) {
     return { title: INVITES_COPY.askedFirstTitle, line: askedFirstLine(invite.share_minutes) };
   }
