@@ -750,7 +750,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         scope.ServiceProvider.GetRequiredService<LedgerService>(),
         scope.ServiceProvider.GetRequiredService<DeviceFaultSink>(),
         scope.ServiceProvider.GetRequiredService<AccessCodeService>(),
-        scope.ServiceProvider.GetRequiredService<MemberCodeService>());
+        scope.ServiceProvider.GetRequiredService<MemberCodeService>(),
+        scope.ServiceProvider.GetRequiredService<TimeProvider>());
 
     private static (int Status, JsonElement Body) Unwrap(IResult result) => (
         (result as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status200OK,

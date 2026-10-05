@@ -43,9 +43,9 @@ last_verified: 2026-09-29
   not another local run. **`-v q` suppresses the assertion message in CI**, leaving only `[FAIL]`
   and a name; pass `-v n` when a CI-only failure has to be read rather than guessed.
 - **A member-code test that builds a code and then sends it races the 30 s step.** A ±1 offset
-  becomes ±2 when a boundary falls between (CI run of 2026-09-29, `offset: -1`). The door,
-  activation and pay-for take their instant from the DI `TimeProvider`; a test passes
-  `MemberCodeClub.Wired(…, clock)` with a `PinnedClock` and builds with `Code(…, at: clock.Now)`.
+  becomes ±2 when a boundary falls between (CI run of 2026-09-29, `offset: -1`). Door, activation,
+  pay-for and walk-up (wall clock until 2026-10-05: 400 under load) read the DI `TimeProvider`; a
+  test passes `MemberCodeClub.Wired(…, clock)` with a `PinnedClock`, builds `Code(…, at: clock.Now)`.
   A test about something other than the club's midnight seeds `MemberCodeClub.SettingsAtNoon()`
   (an `Etc/GMT±N` zone at local noon).
 - **Every member payload that is a cold entry point carries the club's `timezone` at top level;

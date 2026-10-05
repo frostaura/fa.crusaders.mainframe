@@ -1640,14 +1640,15 @@ public static class DeviceEventEndpoints
     public static async Task<IResult> WalkUpForDeviceAsync(
         Device device, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, _, _, _, settingsAccessor, _, _, _, _) = services;
+        var (db, _, _, _, settingsAccessor, _, _, _, _, clock) = services;
+        var now = clock.GetUtcNow();
 
         var settings = await settingsAccessor.GetAsync(ct);
 
         // A box selling court time is a box that is reporting (finding L-F5). Recorded
         // before the decision, so a refused purchase counts as liveness too — the box
         // called, whatever the answer was.
-        await DeviceSilenceLog.NoteContactAsync(db, device, settings, DateTimeOffset.UtcNow, ct);
+        await DeviceSilenceLog.NoteContactAsync(db, device, settings, now, ct);
 
         // A door sells nothing. Refused before the nonce, before the replay check and long
         // before anything commits — see GateAccess.NotACourtBox for why this is stated rather
@@ -1671,7 +1672,7 @@ public static class DeviceEventEndpoints
         // Either code family (member-code §4.1). A v1 code is checked at the instant the box
         // read it — two presses ago, which is what scan_age_ms carries — and identifies its
         // member; a legacy code must be a member-ident code, as it always had to be.
-        var (userId, match) = await WalkUpBuyerAsync(req, services, settings, ct);
+        var (userId, match) = await WalkUpBuyerAsync(req, services, settings, now, ct);
         if (userId is null) return Results.BadRequest(new { error = "not_recognised" });
 
         // A member the club has barred cannot buy court time here (finding K-F1). This was
@@ -1747,11 +1748,11 @@ public static class DeviceEventEndpoints
     /// that identifies globally, and the match to claim the use against. Null user otherwise.
     /// </summary>
     private static async Task<(Guid? UserId, MemberCodeMatch? Match)> WalkUpBuyerAsync(
-        WalkUpRequest req, WalkUpServices services, TenantSettingsView settings, CancellationToken ct)
+        WalkUpRequest req, WalkUpServices services, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
         if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return (null, null);
         var (resolved, match) = await MemberCodeIdentity.ResolveAsync(
-            services.Codes, services.MemberCodes, new ScannedCode(req.Token, req.ScanAgeMs), settings, DateTimeOffset.UtcNow, ct);
+            services.Codes, services.MemberCodes, new ScannedCode(req.Token, req.ScanAgeMs), settings, now, ct);
         return resolved?.Purpose == AccessCodePurpose.MemberIdent ? (resolved.UserId, match) : (null, null);
     }
 
@@ -1765,7 +1766,7 @@ public static class DeviceEventEndpoints
     private static async Task<IResult> SellAsync(WalkUpSale sale, WalkUpServices services, CancellationToken ct)
     {
         var (device, req, court, userId, reference, claim) = sale;
-        var (db, bookings, activation, _, _, _, _, _, _) = services;
+        var (db, bookings, activation, _, _, _, _, _, _, _) = services;
 
         BookingResult created;
         try
@@ -1930,7 +1931,7 @@ public static class DeviceEventEndpoints
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, bookings, activation, _, _, ledger, _, _, _) = services;
+        var (db, bookings, activation, _, _, ledger, _, _, _, _) = services;
 
         var entry = await db.LedgerEntries.AsNoTracking()
             .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
@@ -2098,7 +2099,14 @@ public sealed record WalkUpServices(
     /// <summary>Legacy access codes, for the family check (member-code §4.1).</summary>
     AccessCodeService Codes,
     /// <summary>The v1 member-code check and its use table (member-code §4).</summary>
-    MemberCodeService MemberCodes);
+    MemberCodeService MemberCodes,
+    /// <summary>
+    /// The instant the code is checked at — see <see cref="GateServices.Clock"/>. The walk-up read
+    /// <c>DateTimeOffset.UtcNow</c> here while the door, the activation and pay-for read this, so a
+    /// pinned clock more than a step behind the wall refused a code every sibling accepted. The
+    /// booking it sells is still timed by <see cref="BookingService"/>, which reads the wall clock.
+    /// </summary>
+    TimeProvider Clock);
 
 /// <summary>
 /// One activation as a box reported it, resolved: the court and booking the token named,

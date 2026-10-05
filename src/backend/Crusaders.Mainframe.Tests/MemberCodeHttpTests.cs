@@ -407,6 +407,31 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<Post
         Assert.Equal(HttpStatusCode.OK, free.StatusCode);
     }
 
+    /// <summary>
+    /// The walk-up checked its code against <c>DateTimeOffset.UtcNow</c> while the door, the
+    /// activation and pay-for check theirs against the injected <see cref="TimeProvider"/>. Under
+    /// load a test whose pinned instant fell more than a step behind the wall clock had its walk-up
+    /// refused <c>not_recognised</c> (400) — a code every sibling path accepted. Pinned five minutes
+    /// back, so ten steps separate the two clocks and the test cannot pass by luck.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_walk_up_checks_the_code_at_the_servers_clock_as_every_other_device_path_does()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var factory = pg.SharedHost;
+        var clock = new PinnedClock(DateTimeOffset.UtcNow.AddMinutes(-5));
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
+        var club = await MemberCodeClub.SeedAsync(app, "walkclock", MemberCodeClub.SettingsAtNoon());
+        var device = app.CreateClient();
+
+        var door = await MemberCodeClub.JsonAsync(await device.SendAsync(club.Gate(club.Code(club.Pam, at: clock.Now))));
+        Assert.True(door.GetProperty("opened").GetBoolean());
+
+        var bought = await device.SendAsync(club.WalkUp(club.Code(club.Pam, at: clock.Now), court: 3, nonce: "eeeeeeeeeeeeeeee"));
+        Assert.Equal(HttpStatusCode.OK, bought.StatusCode);
+        Assert.Equal(1, await club.UsesAsync(app, MemberCodeUseClass.Money));
+    }
+
     // ---- Legacy codes across the phases (§8) -----------------------------------------------------
 
     [SkippableFact]
