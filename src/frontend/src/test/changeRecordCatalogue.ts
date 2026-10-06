@@ -300,7 +300,7 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
   }),
   row({
     action: "booking.share_settled_outside", area: "booking",
-    headline: "Recorded a share as paid outside the app — Sipho Dlamini",
+    headline: "Recorded a share as paid by hand — Sipho Dlamini",
     writer: "PlayersAdminService.SettleOutsideAsync", before: SEAT,
     after: { share_minutes: 40, paid_in_app_minutes: 0, overdraft_authorised: false },
   }),
