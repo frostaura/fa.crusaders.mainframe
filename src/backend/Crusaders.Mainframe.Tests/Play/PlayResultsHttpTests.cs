@@ -103,9 +103,13 @@ public sealed class PlayResultsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         Assert.Equal(reason, body.GetProperty("reason").GetString());
     }
 
-    /// <summary>S4 (cancelled after check-in) and a reversed no-show were played; a no-show was not.</summary>
+    /// <summary>
+    /// A reversed no-show was played; a no-show was not — and (R18 J18-1, reversing S4) neither was a
+    /// session cancelled after check-in: only the club can, and a game called off takes no result, as it
+    /// counts no attendance (R17 J17-5).
+    /// </summary>
     [SkippableFact]
-    public async Task A_cancellation_after_check_in_and_a_reversed_no_show_are_recordable_and_a_no_show_is_not()
+    public async Task A_reversed_no_show_is_recordable_and_a_cancellation_after_check_in_and_a_no_show_are_not()
     {
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
@@ -119,7 +123,7 @@ public sealed class PlayResultsHttpTests(PostgresFixture pg) : IClassFixture<Pos
             b.Status = BookingStatus.Cancelled;
             b.CancelledAt = b.StartsAt.AddMinutes(20);
         });
-        Assert.Equal(HttpStatusCode.Created, (await RecordAsync(organiser, s4, [U(club.Organiser)], [U(club.Sam)])).StatusCode);
+        await AssertNotRecordable(organiser, s4, "cancelled");
 
         var reversed = await club.GameAsync(f, Earlier(6), club.Organiser, [club.Sam], checkIn: false);
         await club.WriteAsync(f, db =>

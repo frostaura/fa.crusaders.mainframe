@@ -100,6 +100,11 @@ public sealed class PlayersAdminService
         var game = await _players.LoadAsync(act.BookingId, ct);
         if (game is null) return PlayerOutcome.BookingNotFound;
         var seat = game.Seats.FirstOrDefault(s => s.Id == act.SeatId && s.Seat > 1 && s.IsLive);
+        // R18 J18-4: the desk's second press on a seat already taken off answers as the first did.
+        if (seat is null && game.Seats.Any(s => s.Id == act.SeatId && s.Seat > 1 && s.Status == ParticipantStatus.Removed))
+        {
+            return await WithReturnStateAsync(PlayerOutcome.Ok(null), act.SeatId!.Value, ct);
+        }
         if (seat is null) return PlayerOutcome.PlayerNotFound;
         if (await UncoveredReturnRefusalAsync(game, seat, act, ct) is { } uncovered) return uncovered;
 
@@ -135,6 +140,8 @@ public sealed class PlayersAdminService
         if (Reason(act) is { } missing) return missing;
         var (game, seat) = await SeatAsync(act, ct);
         if (seat is null) return PlayerOutcome.PlayerNotFound;
+        // R18 J18-2: the member is already playing — the desk's twin press, or their own yes. Nothing to write.
+        if (seat.Status == ParticipantStatus.Accepted && seat.UserId is not null) return PlayersService.AlreadyThere(seat);
         if (seat.Status != ParticipantStatus.Invited || seat.UserId is null) return PlayerOutcome.Refuse(409, PlayerErrors.NotInvited);
 
         seat.Status = ParticipantStatus.Accepted;
@@ -150,7 +157,7 @@ public sealed class PlayersAdminService
         // R16 E16-1: and the organiser — their game has a player they did not see say yes.
         MemberNotices.Stage(_db, _tenant.TenantId,
             await PlayerNotices.ClubAcceptedForOrganiserAsync(_db, game.Booking, seat, game.Settings, ct), game.Settings);
-        return await SaveAndSettleAsync(game, seat, ct);
+        return await SaveAndSettleAsync(game, seat, s => s.Status == ParticipantStatus.Accepted, ct);
     }
 
     /// <summary>
@@ -165,6 +172,9 @@ public sealed class PlayersAdminService
         var (game, seat) = await SeatAsync(act, ct);
         if (seat is null || seat.UserId is null) return PlayerOutcome.PlayerNotFound;
         if (seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.NotAccepted);
+        // R18 J18-3: already recorded as paid by hand — the same answer, and nothing written a second
+        // time: no change record, no audit row, no notices, and SettledOutsideAt keeps its first instant.
+        if (seat.SettledOutsideAt is not null) return await WithReturnStateAsync(PlayerOutcome.Ok(null), seat.Id, ct);
         if (await UncoveredReturnRefusalAsync(game!, seat, act, ct) is { } uncovered) return uncovered;
 
         var paid = await _shares.PaidAsync(seat, ct);
@@ -183,7 +193,8 @@ public sealed class PlayersAdminService
         }
         // R15 E15-8: the return's receipts carry the desk's reason.
         var options = OptionsFor(act, seat) with { ClubReason = act.Reason };
-        return await WithReturnStateAsync(await SaveAndSettleAsync(game!, seat, ct, options), seat.Id, ct);
+        return await WithReturnStateAsync(
+            await SaveAndSettleAsync(game!, seat, s => s.SettledOutsideAt is not null, ct, options), seat.Id, ct);
     }
 
     /// <summary>
@@ -251,20 +262,29 @@ public sealed class PlayersAdminService
         return (game, seat);
     }
 
+    /// <summary>
+    /// Saves the act and moves the shares after it. R18 J18-2: a save that lost to a concurrent writer —
+    /// the seat's version, or the twin's notice already holding its dedupe key in the outbox
+    /// (<c>IX_admin_notifications_TenantId_DedupeKey</c>, which answered the desk a 500) — re-reads the
+    /// seat: where <paramref name="landed"/> says this act was taking it, the twin's work is this
+    /// answer too (200, and the twin moved the shares); anywhere else, <c>conflict_retry</c>.
+    /// </summary>
     private async Task<PlayerOutcome> SaveAndSettleAsync(
-        PlayersService.Game game, BookingParticipant seat, CancellationToken ct, ReconcileOptions? options = null)
+        PlayersService.Game game, BookingParticipant seat, Func<BookingParticipant, bool> landed, CancellationToken ct,
+        ReconcileOptions? options = null)
     {
         try
         {
             await _db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (DbUpdateException ex) when (SeatRaces.IsLostRace(ex))
         {
             _db.ChangeTracker.Clear();
-            return PlayerOutcome.Refuse(409, PlayerErrors.Conflict);
+            var now = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seat.Id, ct);
+            return now is not null && landed(now) ? PlayersService.AlreadyThere(now) : PlayerOutcome.Refuse(409, PlayerErrors.Conflict);
         }
         await _shares.ReconcileAsync(game.Booking.Id, ct, options);
-        return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
+        return PlayersService.AlreadyThere(seat);
     }
 
     private static PlayerOutcome? Reason(AdminAct act) =>

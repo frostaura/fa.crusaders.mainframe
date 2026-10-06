@@ -105,7 +105,8 @@ public sealed partial class PlayersService
         var seat = await _db.BookingParticipants.FirstOrDefaultAsync(p => p.Id == seatId, ct);
         if (SeatRefusal(seat, ask) is { } notYours) return notYours;
         var expected = ask.Expected!.Value;
-        var game = await LoadAsync(seat!.BookingId, ct);
+        await HoldBookingAsync(seat!.BookingId, ct);
+        var game = await LoadAsync(seat.BookingId, ct);
         if (game is null) return PlayerOutcome.InviteNotFound;
         seat = game.Seats.First(s => s.Id == seatId);
 
@@ -165,6 +166,29 @@ public sealed partial class PlayersService
     }
 
     /// <summary>
+    /// R18 J18-5: the booking row, locked (<c>FOR NO KEY UPDATE</c> — the lock an UPDATE of it takes)
+    /// for the rest of the accept's transaction and taken BEFORE the booking is read. An organiser's
+    /// cancel landing between the accept's read and its save used to leave "accepted, paid" on a game
+    /// that was already off — the share refunded by a later sweep, the partner told "see you on court".
+    /// Now the cancel's UPDATE waits for this accept to commit (and its reconcile returns the share it
+    /// took), or this accept reads the cancel and refuses.
+    ///
+    /// <para>
+    /// Not <c>FOR SHARE</c>: the accept's own save updates the booking (the play recompute marker), so
+    /// two accepts holding a shared lock each waited to upgrade past the other's — a deadlock. Taken
+    /// last — member, seat, then booking — two partners accepting one game queue on it for one short
+    /// transaction each; a deadlock the database still found would be its 40P01, answered
+    /// <c>503 conflict_retry</c> by the global net, never a 500.
+    /// </para>
+    /// </summary>
+    private async Task HoldBookingAsync(Guid bookingId, CancellationToken ct)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlRawAsync(
+            "SELECT 1 FROM bookings WHERE \"Id\" = {0} AND \"TenantId\" = {1} FOR NO KEY UPDATE", [bookingId, _tenant.TenantId], ct);
+    }
+
+    /// <summary>
     /// Is this seat the caller's to accept at all? A 404 for anything that is not — the organiser's
     /// seat, a guest's, somebody else's, and an open link seat reached by its id rather than its
     /// link. Only then is the figure asked for, so a stranger reads the same uninformative 404.
@@ -183,6 +207,11 @@ public sealed partial class PlayersService
     /// </summary>
     private static PlayerOutcome? StandingRefusal(Game game, BookingParticipant seat, Guid me, DateTimeOffset now)
     {
+        // R18 J18-5: a game that is off is said as that — the code the organiser's and the desk's routes use.
+        if (game.Booking.Status == BookingStatus.Cancelled)
+        {
+            return PlayerOutcome.Refuse(409, PlayerErrors.BookingNotOpen, new { booking_id = game.Booking.Id });
+        }
         if (!seat.IsLive || !IsOpen(game, now) || seat.SettledOutsideAt is not null || seat.LapsedAt is not null)
         {
             return PlayerOutcome.Refuse(409, PlayerErrors.InviteClosed);
@@ -265,6 +294,8 @@ public sealed partial class PlayersService
         var game = await LoadAsync(seat.BookingId, ct);
         if (game is null) return PlayerOutcome.InviteNotFound;
         seat = game.Seats.First(s => s.Id == seatId);
+        // R18 J18-4: a second tap (or its twin's answer) on a seat already declined is the first one's answer.
+        if (seat.Status == ParticipantStatus.Declined) return AlreadyThere(seat);
         if (seat.Status != ParticipantStatus.Invited) return PlayerOutcome.Refuse(409, PlayerErrors.NotInvited);
 
         seat.Status = ParticipantStatus.Declined;
@@ -274,7 +305,7 @@ public sealed partial class PlayersService
         // R17 E17-8: their own no, on the record in the decline's own save.
         _db.AuditLogs.Add(SeatAudit(DeclinedAction, game.Booking, seat, me, new { share_minutes = seat.ShareMinutes }));
         await PlayerNotices.AnsweredAsync(_db, game.Booking.Id, me, now, ct);
-        if (await SaveAsync(ct) is { } conflict) return conflict;
+        if (await SaveAsync(ct, new Landing(seat.Id, ParticipantStatus.Declined)) is { } conflict) return conflict;
         await AbsorbFreedShareAsync(game.Booking, ct);
         await AfterAsync(game.Booking.Id, [game.Booking.UserId!.Value], ct);
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
@@ -293,6 +324,8 @@ public sealed partial class PlayersService
         var game = await LoadAsync(seat.BookingId, ct);
         if (game is null) return PlayerOutcome.PlayerNotFound;
         seat = game.Seats.First(s => s.Id == seatId);
+        // R18 J18-4: a second tap on a seat already given up is the first one's answer.
+        if (seat.Status == ParticipantStatus.Withdrawn) return AlreadyThere(seat);
         if (seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.NotInvited);
 
         var closesAt = game.Booking.StartsAt.AddMinutes(-game.Settings.PenaltyWindowMinutes);
@@ -306,7 +339,7 @@ public sealed partial class PlayersService
         seat.UpdatedAt = now.Storable();
         MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "withdrew", ct), game.Settings);
         _db.AuditLogs.Add(await WithdrewAuditAsync(game.Booking, seat, ct));
-        if (await SaveAsync(ct) is { } conflict) return conflict;
+        if (await SaveAsync(ct, new Landing(seat.Id, ParticipantStatus.Withdrawn)) is { } conflict) return conflict;
         await AbsorbFreedShareAsync(game.Booking, ct);
         // R13 E13-4: the share going back is the partner's own act, not the club's system — the
         // ledger rows name them, and their receipt is born read like any receipt of their own.

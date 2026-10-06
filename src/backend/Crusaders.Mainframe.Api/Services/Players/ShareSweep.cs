@@ -122,6 +122,11 @@ public sealed class ShareSweep
             // Nothing to reconcile — but a marker a failure left here is made good all the same,
             // or no sweep would ever clear it (review round 7).
             await ClearMarkerAsync(bookingId, started, ct);
+            // R18 J18-9: a court with nobody else on it is still the organiser's, and the club cancelling it is said.
+            if (await TellOrganiserAloneAsync(bookingId, ct) is { } alone)
+            {
+                await MemberNotices.PublishUnreadAsync(_db, _bus, _tenant.TenantId, [alone], ct);
+            }
             return;
         }
 
@@ -183,7 +188,34 @@ public sealed class ShareSweep
             }
         }
         await TellSharesStandAsync(booking, by, seats.Where(p => paidIn.Contains(p.Id)), ct);
+        if (await TellOrganiserAsync(booking, by, organiser, game, settings, ct)) told.Add(booking.UserId!.Value);
         return told;
+    }
+
+    /// <summary>R18 J18-9: the organiser's own line when the club cancelled their game (<see cref="ClubCancelNotices.ForOrganiser"/>).</summary>
+    private async Task<bool> TellOrganiserAsync(
+        Booking booking, BookingCancellation? by, string organiser, GameText game, TenantSettingsView settings, CancellationToken ct)
+    {
+        return ClubCancelNotices.ForOrganiser(booking, by, organiser, game) is { } line
+               && await MemberNotices.RaiseAsync(_db, _tenant.TenantId, line, settings, ct);
+    }
+
+    /// <summary>
+    /// R18 J18-9: the same line on a booking with no partner seats. One indexed read of the booking when
+    /// it is not a club-cancelled one that never started — which is every settlement but this one.
+    /// Answers the organiser when told.
+    /// </summary>
+    private async Task<Guid?> TellOrganiserAloneAsync(Guid bookingId, CancellationToken ct)
+    {
+        var booking = await _db.Bookings.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.Id == bookingId && b.Status == BookingStatus.Cancelled && b.CheckedInAt == null && b.UserId != null, ct);
+        if (booking is null) return null;
+        var by = await BookingCancellation.ForAsync(_db, booking, ct);
+        if (by is not { ByClub: true }) return null;
+        var settings = await _settings.GetAsync(ct);
+        var game = await GameText.ForAsync(_db, booking, settings, ct);
+        var organiser = PersonNames.Of(booking.UserId, await PersonNames.ForAsync(_db, [booking.UserId], ct)) ?? "The organiser";
+        return await TellOrganiserAsync(booking, by, organiser, game, settings, ct) ? booking.UserId : null;
     }
 
     /// <summary>What a partner's "the game is off" ends with: it had started, the share was paid by hand, and whether they had paid one in the app.</summary>
@@ -217,12 +249,17 @@ public sealed class ShareSweep
     private async Task TellSharesStandAsync(Booking booking, BookingCancellation? by, IEnumerable<BookingParticipant> paidIn, CancellationToken ct)
     {
         if (booking.CheckedInAt is null || by?.ByClub != true) return;
-        foreach (var seat in paidIn.Where(s => s.Status == ParticipantStatus.Accepted && s.SettledOutsideAt is null))
+        var standing = paidIn.Where(s => s.Status == ParticipantStatus.Accepted && s.SettledOutsideAt is null).ToList();
+        if (standing.Count == 0) return;
+        // R18 E18-2: who checked in, as the organiser's frame says it — "Sam had checked in", or "you had".
+        var checkedInBy = await ClubCancelNotices.CheckedInByAsync(_db, booking, ct);
+        foreach (var seat in standing)
         {
             var frame = new WalletFrame(0, CancelledShareStandsReason, [], null, false)
             {
                 BookingId = booking.Id,
                 CancelledBy = WalletCancelledBy.Club,
+                CheckedInBy = checkedInBy,
             };
             await _shares.PublishFrameAsync(seat.UserId!.Value, frame, ct);
         }

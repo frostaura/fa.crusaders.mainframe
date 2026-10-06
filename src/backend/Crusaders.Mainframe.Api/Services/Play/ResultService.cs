@@ -53,6 +53,9 @@ public static class ResultErrors
     /// <summary>The court time has not begun (review round 1, B15): a box check-in during early entry is not a game played.</summary>
     public const string NotStarted = "not_started";
     public const string WindowClosed = "window_closed";
+
+    /// <summary>R18 J18-1: the booking was cancelled — a game called off is not one played, so it takes no result.</summary>
+    public const string Cancelled = "cancelled";
 }
 
 /// <summary>Reads and writes a result's <c>GamesJson</c>: <c>[{"a":11,"b":7}, …]</c>.</summary>
@@ -215,6 +218,9 @@ public sealed class ResultService
     /// <summary>Why <paramref name="booking"/> cannot take a result now (§3.1), or null when it can.</summary>
     public static string? NotRecordableReason(Booking booking, int candidates, TenantSettingsView settings, DateTimeOffset now)
     {
+        // R18 J18-1: first — a game the club called off after it started was checked in, so every
+        // later rule passed and it took a result nobody's attendance counted.
+        if (IsCalledOff(booking)) return ResultErrors.Cancelled;
         if (booking.UserId is null || candidates < 2) return ResultErrors.NotEnoughPlayers;
         if (booking.CheckedInAt is not { } checkedIn) return ResultErrors.NotCheckedIn;
         // B15: from the court time's start or the check-in, whichever is later — a scan at the box
@@ -222,6 +228,16 @@ public sealed class ResultService
         if (now < (checkedIn > booking.StartsAt ? checkedIn : booking.StartsAt)) return ResultErrors.NotStarted;
         if (now > RecordClosesAt(booking, settings)) return ResultErrors.WindowClosed;
         return null;
+    }
+
+    /// <summary>R18 J18-1: the booking was cancelled — the one rule <see cref="AttendanceQuery"/> also keeps.</summary>
+    public static bool IsCalledOff(Booking booking) => booking.Status == BookingStatus.Cancelled || booking.CancelledAt is not null;
+
+    /// <summary>R18 J18-1: the refusal a confirm or an edit meets on a game since called off.</summary>
+    private static Decision? CalledOff(Booking booking)
+    {
+        if (!IsCalledOff(booking)) return null;
+        return Decision.Answer(ResultOutcome.Refuse(409, ResultErrors.NotRecordable, new { reason = ResultErrors.Cancelled }));
     }
 
     /// <summary>The last instant a result may be recorded: the booking's end as it stands plus <c>result_record_days</c>.</summary>
@@ -234,6 +250,7 @@ public sealed class ResultService
         return ActAsync(new Act(bookingId, me, now), async (r, booking) =>
         {
             if (!OnSide(r, me, PlayNotices.SubmittingSide(r))) return Decision.Answer(ResultOutcome.Refuse(403, ResultErrors.NotYours));
+            if (CalledOff(booking) is { } off) return off;
             if (r.Status != MatchResultStatus.Pending) return Decision.Answer(NotPending(r));
             if (req.ExpectedVersion != r.Version) return Decision.Answer(Stale(r));
 
@@ -260,10 +277,11 @@ public sealed class ResultService
 
     public Task<ResultOutcome> ConfirmAsync(Guid bookingId, Guid me, int? expectedVersion, DateTimeOffset now, CancellationToken ct)
     {
-        return ActAsync(new Act(bookingId, me, now), async (r, _) =>
+        return ActAsync(new Act(bookingId, me, now), async (r, booking) =>
         {
             if (!OnConfirmingSide(r, me)) return Decision.Answer(ResultOutcome.Refuse(403, ResultErrors.NotYoursToConfirm));
             if (r.Status == MatchResultStatus.Confirmed && r.ConfirmedByUserId == me) return Decision.Answer(ResultOutcome.Ok(r));
+            if (CalledOff(booking) is { } off) return off;
             if (r.Status != MatchResultStatus.Pending) return Decision.Answer(NotPending(r));
             if (expectedVersion != r.Version) return Decision.Answer(Stale(r));
 

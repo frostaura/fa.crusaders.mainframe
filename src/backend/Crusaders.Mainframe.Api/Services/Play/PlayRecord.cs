@@ -33,7 +33,7 @@ public sealed record PlayRecord(
         // was hit. Not yet started is not yet attended; the check-in's recompute marker is staged
         // for the court's start (MainframeDbContext.PlayStaging), which is when this runs again.
         var sessions = (await AttendanceQuery.SessionsAsync(db, userId, ct)).Where(s => s.StartsAt <= now).ToList();
-        var results = await ConfirmedResultsAsync(db, userId, ct);
+        var results = Attended(await ConfirmedResultsAsync(db, userId, ct), sessions);
         var pauses = await db.MemberStreakPauses.AsNoTracking().Where(p => p.UserId == userId).OrderBy(p => p.StartedAt).ToListAsync(ct);
         var profile = await db.MemberPlayProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId, ct);
 
@@ -55,6 +55,18 @@ public sealed record PlayRecord(
         var ids = rows.Select(r => r.BookingId).Distinct().ToList();
         var starts = await db.Bookings.AsNoTracking().Where(b => ids.Contains(b.Id)).ToDictionaryAsync(b => b.Id, b => b.StartsAt, ct);
         return rows.Select(r => PlayStats.FromSide(r, starts[r.BookingId], userId)).OfType<MemberResult>().ToList();
+    }
+
+    /// <summary>
+    /// R18 J18-1: a result counts only on a session the member ATTENDED — the one definition
+    /// (<see cref="AttendanceQuery"/>), so matches played, wins, games, form, opponents and the result
+    /// badges can never disagree with sessions attended. A result on a game the club has since
+    /// cancelled stops counting at once (derived on read; a badge already awarded is kept, §3.3).
+    /// </summary>
+    public static List<MemberResult> Attended(IReadOnlyList<MemberResult> results, IReadOnlyList<AttendedSession> sessions)
+    {
+        var attended = sessions.Select(s => s.BookingId).ToHashSet();
+        return [.. results.Where(r => attended.Contains(r.BookingId))];
     }
 
     /// <summary>The figures of §5.1, derived.</summary>

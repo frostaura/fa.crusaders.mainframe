@@ -514,6 +514,11 @@ public sealed partial class PlayersService
     internal async Task<PlayerOutcome> RemoveSeatAsync(Game game, Guid seatId, DateTimeOffset now, CancellationToken ct, ReconcileOptions? options = null)
     {
         var seat = game.Seats.FirstOrDefault(s => s.Id == seatId && s.Seat > 1 && s.IsLive);
+        // R18 J18-4: a second tap on a seat already taken off is the first one's answer.
+        if (seat is null && game.Seats.FirstOrDefault(s => s.Id == seatId && s.Seat > 1) is { Status: ParticipantStatus.Removed } gone)
+        {
+            return AlreadyThere(gone);
+        }
         if (seat is null) return PlayerOutcome.PlayerNotFound;
 
         seat.Status = ParticipantStatus.Removed;
@@ -532,7 +537,7 @@ public sealed partial class PlayersService
             _db.AuditLogs.Add(SeatAudit(SeatFacts.RemovedAction, game.Booking, seat, RemoverOf(game, options), new { by_club = options?.ClubRemoval is not null }));
         }
 
-        if (await SaveAsync(ct) is { } conflict) return conflict;
+        if (await SaveAsync(ct, new Landing(seat.Id, ParticipantStatus.Removed)) is { } conflict) return conflict;
         await AbsorbFreedShareAsync(game.Booking, ct);
         await AfterAsync(game.Booking.Id, seat.UserId is { } u ? [u] : [], ct, options);
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
@@ -717,27 +722,56 @@ public sealed partial class PlayersService
     public const string ShareCollectedAction = "players.share_collected";
 
     /// <summary>
-    /// Saves, turning a lost race into a 409 the client retries: a concurrent change to the same
-    /// seat (the version token), or a seat or member taken by another request (the partial unique
-    /// indexes). Nothing is half-written — the whole decision was one save.
+    /// Saves. Null when it saved; otherwise the answer to give. Nothing is half-written — the whole
+    /// decision was one save.
+    ///
+    /// <para>
+    /// R18 J18-4: <c>seat_taken</c> only when a seat or member really was taken (the partial unique
+    /// indexes on the seats). Any other loss — the seat's version moved, or this act's twin wrote the
+    /// same notice first (its dedupe key) — re-reads the seat: already where <paramref name="landing"/>
+    /// says this act was taking it is the twin's work and this caller's answer too, 200; anywhere else
+    /// is <c>conflict_retry</c>, and asked again it is refused for what actually happened.
+    /// </para>
     /// </summary>
-    private async Task<PlayerOutcome?> SaveAsync(CancellationToken ct)
+    private async Task<PlayerOutcome?> SaveAsync(CancellationToken ct, Landing? landing = null)
     {
         try
         {
             await _db.SaveChangesAsync(ct);
             return null;
         }
-        catch (DbUpdateConcurrencyException)
-        {
-            _db.ChangeTracker.Clear();
-            return PlayerOutcome.Refuse(409, PlayerErrors.Conflict);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        catch (DbUpdateException ex) when (SeatRaces.IsSeatTaken(ex))
         {
             _db.ChangeTracker.Clear();
             return PlayerOutcome.Refuse(409, PlayerErrors.SeatTaken);
         }
+        catch (DbUpdateException ex) when (SeatRaces.IsLostRace(ex))
+        {
+            _db.ChangeTracker.Clear();
+            return await LandedAsync(landing, ct);
+        }
+    }
+
+    /// <summary>Where a seat act was taking its seat: the seat, and the status it ends in (R18 J18-4).</summary>
+    private sealed record Landing(Guid SeatId, ParticipantStatus Status);
+
+    /// <summary>
+    /// After a lost race: the seat as the winner left it. In this act's target state → the same 200 the
+    /// winner gave (<c>{participant_id, status}</c>); otherwise <c>conflict_retry</c>.
+    /// </summary>
+    private async Task<PlayerOutcome> LandedAsync(Landing? landing, CancellationToken ct)
+    {
+        if (landing is null) return PlayerOutcome.Refuse(409, PlayerErrors.Conflict);
+        var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == landing.SeatId, ct);
+        return seat?.Status == landing.Status
+            ? AlreadyThere(seat)
+            : PlayerOutcome.Refuse(409, PlayerErrors.Conflict);
+    }
+
+    /// <summary>The answer to a seat act whose seat is already where the act would take it.</summary>
+    internal static PlayerOutcome AlreadyThere(BookingParticipant seat)
+    {
+        return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
     }
 
     /// <summary>The consequence of any committed seat change: the shares follow, and the badge moves.</summary>
