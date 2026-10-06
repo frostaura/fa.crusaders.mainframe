@@ -63,6 +63,14 @@ void ScanDebounce::decided(const char* token, uint32_t nowMs) {
   }
 }
 
+void ScanDebounce::observe(uint32_t nowMs) {
+  for (uint8_t i = 0U; i < kDebounceSlots; ++i) {
+    if (slots_[i].seen && tb::since(nowMs, slots_[i].decidedAtMs) >= windowMs_) {
+      slots_[i].seen = false;
+    }
+  }
+}
+
 void ScanDebounce::reset() {
   for (uint8_t i = 0U; i < kDebounceSlots; ++i) {
     slots_[i].seen = false;

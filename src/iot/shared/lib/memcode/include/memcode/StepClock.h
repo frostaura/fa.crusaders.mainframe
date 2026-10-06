@@ -32,7 +32,8 @@
 // --------
 // The age is `tb::since`, never a subtraction of raw readings, so a sync taken
 // seconds before millis() wraps still counts forward correctly after it — the
-// corpus's `across-the-millis-wrap` scenario pins it.
+// corpus's `across-the-millis-wrap` scenario pins it. An age past 2^32 ms is a
+// different matter — it reads young again — and observe() is what stops that.
 //
 // No Arduino headers, no heap. Compiles for AVR, Xtensa and the host.
 
@@ -63,6 +64,18 @@ public:
   /// Synced, and the sync is no older than maxAgeMs.
   bool trusted(uint32_t nowMs) const;
 
+  /// Look at the sync's age on THIS pass, and remember for good that it went
+  /// past maxAgeMs if it has. The loop calls it on every pass, link or no
+  /// link. Only the next sync() clears it.
+  ///
+  /// Why (review round 18, D18-2): the age is a 32-bit difference, so a sync
+  /// taken 2^32 ms + 1 s ago read one second old — trusted, 143 165 steps
+  /// behind every phone, and accepting any code photographed at the time of
+  /// that sync. A single reading cannot tell the two apart; a watched age can.
+  /// Contract: called at least once between maxAgeMs and 2^32 ms after the
+  /// sync. Roster::observe states the same rule for the same reason.
+  void observe(uint32_t nowMs);
+
   /// Milliseconds since the last sync, or 0 when never synced.
   uint32_t ageMs(uint32_t nowMs) const;
 
@@ -78,6 +91,8 @@ private:
   uint32_t stepMs_ = 0U;
   uint32_t anchorMs_ = 0U;
   bool synced_ = false;
+  /// Latched by observe(); cleared only by sync().
+  bool agedOut_ = false;
 };
 
 } // namespace memcode

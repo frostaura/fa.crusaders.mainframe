@@ -6411,6 +6411,152 @@ void test_app_a_door_nobody_used_for_weeks_still_asks_about_the_next_member() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// R18 D18-2 — an AGE must not read young again after the 2^32 ms wrap
+// ---------------------------------------------------------------------------
+
+/// The two ages past the 49.7-day wrap every age-style timer is run across.
+constexpr uint64_t kWrapMs = 0x100000000ULL;
+constexpr uint64_t kAgesPastTheWrap[] = {kWrapMs + 1000ULL, kWrapMs + kDayMs};
+
+/// passThrough for a span past 2^32 ms, in two halves that each fit a uint32.
+void passThroughLong(Rig& rig, uint64_t ms) {
+  const uint32_t first = 0x80000000UL;
+  passThrough(rig, first);
+  passThrough(rig, static_cast<uint32_t>(ms - first));
+}
+
+/// THE DOOR, OFFLINE FOR 49.7 DAYS. The roster's age is a 32-bit difference, so
+/// a roster accepted 2^32 ms + 1 s ago read one second old and the door opened
+/// for a booking from seven weeks earlier, offline, with nobody to ask. The
+/// loop observes the age every pass; past its maximum it stays stale until the
+/// next heartbeat brings a roster.
+void test_app_a_roster_from_before_the_millis_wrap_admits_nobody() {
+  const uint32_t bases[] = {kBaseMid, kBaseWrapSoon};
+  for (const uint32_t base : bases) {
+    for (const uint64_t age : kAgesPastTheWrap) {
+      Rig rig(base);
+      rig.boot(true);
+      rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+      rig.forceHeartbeat();
+      TEST_ASSERT_EQUAL_UINT8(1U, rig.roster.size());
+
+      rig.link.set(false);
+      passThroughLong(rig, age);
+
+      rig.log.forget();
+      rig.scanner.feed("MEMBERTOKEN1\n");
+      rig.tick();
+      rig.tick();
+      TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "a roster 49.7 days old opened the door");
+      TEST_ASSERT_EQUAL_size_t(1U, rig.log.total());
+      TEST_ASSERT_EQUAL_STRING("roster_stale", rig.log.last().reason);
+
+      // The next heartbeat is a new roster, and the door works again.
+      rig.runFor(gatelogic::kScanDebounceMs);
+      rig.forceHeartbeat();
+      rig.link.set(false);
+      rig.tick();
+      rig.scanner.feed("MEMBERTOKEN1\n");
+      rig.tick();
+      rig.tick();
+      TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "a fresh roster did not clear the stale one");
+    }
+  }
+}
+
+/// THE DEBOUNCE, ACROSS EXACTLY 2^32 ms. A slot is "decided less than the
+/// window ago" by a 32-bit difference, so the same member scanning 49.7 days
+/// after their last scan, to the millisecond window, was dropped without a
+/// decision or a blink. Observed every pass, a slot past its window is gone.
+void test_app_a_scan_exactly_one_wrap_after_the_last_is_still_decided() {
+  const uint32_t bases[] = {kBaseMid, kBaseWrapSoon};
+  for (const uint32_t base : bases) {
+    Rig rig(base);
+    rig.boot(true);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+    rig.forceHeartbeat();
+
+    const uint32_t scannedAt = rig.clock.value();
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    rig.tick();
+    TEST_ASSERT_TRUE(rig.lock.released());
+    rig.runFor(30000U);
+
+    // To one wrap after the scan: what is left of 2^32 ms, in two halves.
+    passThrough(rig, 0x80000000UL);
+    passThrough(rig, 0x80000000UL - tb::since(rig.clock.value(), scannedAt + 0x80000000UL));
+    rig.log.forget();
+    rig.http.forget();
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+    TEST_ASSERT_TRUE(tb::since(rig.clock.value(), scannedAt) < gatelogic::kScanDebounceMs);
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    rig.tick();
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.total(), "a scan one wrap after the last was dropped");
+    TEST_ASSERT_TRUE(rig.lock.released());
+  }
+}
+
+/// THE LAMP AT THE DOOR, ONE WRAP AFTER A REFUSAL: the pass is what observes
+/// the cue, so the board's own lamp pin stays dark rather than stuttering at
+/// nobody 2^32 ms after the last refused member.
+void test_app_the_lamp_does_not_replay_a_refusal_one_wrap_later() {
+  const uint32_t bases[] = {kBaseMid, kBaseWrapSoon};
+  for (const uint32_t base : bases) {
+    Rig rig(base);
+    rig.boot(true);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathGate, 200U,
+                    "{\"opened\":false,\"reason\":\"not_recognised\",\"unlock_seconds\":0}", 0U);
+    rig.forceHeartbeat();
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.app.pass();
+    rig.app.pass();
+    const uint32_t refusedAt = rig.clock.value();
+    TEST_ASSERT_TRUE(rig.ledPin.readBack() ==
+                     gatelogic::ledPinLevel(true, gatelogic::kGateConfig.ledActiveHigh));
+
+    passThrough(rig, 0x80000000UL);
+    passThrough(rig, 0x80000000UL - tb::since(rig.clock.value(), refusedAt + 0x80000000UL));
+    TEST_ASSERT_TRUE(tb::since(rig.clock.value(), refusedAt) < gatelogic::kDeniedHalfMs);
+    rig.app.pass();
+    TEST_ASSERT_TRUE_MESSAGE(rig.ledPin.readBack() ==
+                                 gatelogic::ledPinLevel(false, gatelogic::kGateConfig.ledActiveHigh),
+                             "the lamp replayed a refusal one wrap later");
+  }
+}
+
+/// THE LAMP. An ended cue was left armed (on() is const), so 2^32 ms after the
+/// last refusal the lamp replayed its three-blink stutter at nobody. Observed
+/// every pass, an ended cue is forgotten.
+void test_led_a_cue_from_before_the_millis_wrap_never_replays() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    const uint32_t base = kBases[b];
+    gatelogic::LedPattern led;
+    led.setLinkUp(true);
+    led.cue(gatelogic::LedCue::Denied, base);
+    TEST_ASSERT_TRUE(led.on(base + 10U));
+    for (uint64_t t = 0U; t < kWrapMs; t += 3600000ULL) {
+      led.observe(static_cast<uint32_t>(base + t));
+    }
+    // One wrap later, inside what was the stutter's first lit half.
+    const uint32_t replay = static_cast<uint32_t>(base + kWrapMs + 10U);
+    led.observe(replay);
+    TEST_ASSERT_FALSE_MESSAGE(led.on(replay), "a refusal cue replayed one wrap later");
+
+    // And a running cue is untouched by observing it every pass.
+    led.cue(gatelogic::LedCue::Denied, replay);
+    for (uint32_t t = 0U; t < gatelogic::kDeniedHalfMs; t += 10U) {
+      led.observe(replay + t);
+      TEST_ASSERT_TRUE(led.on(replay + t));
+    }
+  }
+}
+
 } // namespace
 
 void setUp() {
@@ -6578,6 +6724,10 @@ int main(int, char**) {
   RUN_TEST(test_unlock_a_running_dwell_is_still_honoured_by_a_ticking_loop);
   RUN_TEST(test_app_a_window_armed_before_a_long_outage_is_spent_when_the_link_returns);
   RUN_TEST(test_app_a_door_nobody_used_for_weeks_still_asks_about_the_next_member);
+  RUN_TEST(test_app_a_roster_from_before_the_millis_wrap_admits_nobody);
+  RUN_TEST(test_app_a_scan_exactly_one_wrap_after_the_last_is_still_decided);
+  RUN_TEST(test_led_a_cue_from_before_the_millis_wrap_never_replays);
+  RUN_TEST(test_app_the_lamp_does_not_replay_a_refusal_one_wrap_later);
   RUN_TEST(test_app_a_boot_hold_back_does_not_outlive_a_long_outage);
 
   return UNITY_END();

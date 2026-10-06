@@ -839,17 +839,39 @@ void test_a_wrong_off_is_refused_as_not_recognised_and_arms_nothing(void) {
 // ---------------------------------------------------------------------------
 
 void test_pay_for_quote_answers_that_are_not_decisions_are_the_old_walk_up_choice(void) {
-  // A server that never heard of pay-for, a dead link, a cut body: the court
-  // press is exactly what it was before D10.
+  // A server that never heard of pay-for, a cut body: the court press is
+  // exactly what it was before D10. (A dead link and a busy server are NOT
+  // this — see the next test.)
   const char ok[] = "{\"payable\":true,\"reason\":\"ok\",\"court_number\":2,\"amount_label\":\"50\"}";
   TEST_ASSERT_EQUAL(bridgelogic::PayForKind::WalkUp, bridgelogic::onPayForQuote(404U, "{}", 2U, 2).kind);
-  TEST_ASSERT_EQUAL(bridgelogic::PayForKind::WalkUp, bridgelogic::onPayForQuote(0U, "", 0U, 2).kind);
   TEST_ASSERT_EQUAL(bridgelogic::PayForKind::WalkUp,
                     bridgelogic::onPayForQuote(200U, ok, strlen(ok) - 1U, 2).kind);
   // A price for a DIFFERENT court is not a question anybody can be asked here.
   TEST_ASSERT_EQUAL(bridgelogic::PayForKind::WalkUp,
                     bridgelogic::onPayForQuote(200U, ok, strlen(ok), 3).kind);
   TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Quote, bridgelogic::onPayForQuote(200U, ok, strlen(ok), 2).kind);
+}
+
+/// R18 D18-3. The quote is asked only about a court this box believes is TAKEN,
+/// so a quote that got no decision — a dead link, a 429, a 5xx — must not fall
+/// through to CHOOSE TIME: that offers walk-up time on a court somebody is
+/// playing on. It reads BUSY / PRESS AGAIN (NO CONNECTION for a dead link) and
+/// keeps the scan, so the same court press asks again. Every status, with and
+/// without a body.
+void test_pay_for_quote_a_busy_or_dead_server_never_offers_the_walk_up_choice(void) {
+  const uint16_t statuses[] = {0U, 429U, 500U, 502U, 503U, 504U};
+  const char* bodies[] = {"", "{\"error\":\"rate_limited\"}", "<html>bad gateway</html>",
+                          "{\"error\":\"conflict_retry\"}",
+                          "{\"payable\":true,\"reason\":\"ok\",\"court_number\":2,\"amount_label\":\"50\"}"};
+  for (const uint16_t status : statuses) {
+    for (const char* body : bodies) {
+      const bridgelogic::PayForAnswer a = bridgelogic::onPayForQuote(status, body, strlen(body), 2);
+      TEST_ASSERT_EQUAL_MESSAGE(bridgelogic::PayForKind::Undecided, a.kind,
+                                "a busy quote offered the walk-up");
+      TEST_ASSERT_EQUAL_STRING(status == 0U ? "NoConnection" : "Busy", screenName(a.screen));
+      TEST_ASSERT_FALSE(a.spendsScan);
+    }
+  }
 }
 
 void test_pay_for_confirm_that_got_no_decision_keeps_the_nonce(void) {
@@ -1011,6 +1033,7 @@ int main(int, char**) {
   RUN_TEST(test_offline_v1_code_with_no_clock_reads_as_the_stale_roster);
   RUN_TEST(test_a_wrong_off_is_refused_as_not_recognised_and_arms_nothing);
   RUN_TEST(test_pay_for_quote_answers_that_are_not_decisions_are_the_old_walk_up_choice);
+  RUN_TEST(test_pay_for_quote_a_busy_or_dead_server_never_offers_the_walk_up_choice);
   RUN_TEST(test_pay_for_confirm_that_got_no_decision_keeps_the_nonce);
   RUN_TEST(test_pay_for_a_used_code_reads_as_it_does_at_every_other_button);
   RUN_TEST(test_pay_for_labels_are_refused_rather_than_cut);

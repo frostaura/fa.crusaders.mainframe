@@ -2021,6 +2021,60 @@ court::Outcome outcomeOf(court::Action action, uint8_t court, bool recognised) {
   return o;
 }
 
+/// R18 D18-4. BUSY / PRESS AGAIN is shown for the CHOICE window, and the press
+/// it asks for only reaches the bridge if the Mega's button window is still
+/// armed and the scan still remembered. A walk-up or pay-for that got no
+/// decision used to leave both where the SCAN left them, so a member who
+/// pressed again a few seconds before the countdown ended pressed into
+/// nothing. An undecided answer re-arms the window for a full TTL — never
+/// changing which court an OFF press may release — and holds the scan for at
+/// least the choice window, never shortening it.
+void test_auth_policy_an_undecided_answer_keeps_press_again_working_for_the_whole_choice_window() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    const uint32_t ttl = 30000UL;
+    const uint32_t choice = 20000UL;
+
+    // Unbound: a recognised refusal armed it, 28 s pass, the walk-up is BUSY.
+    bridgelogic::AuthPolicy auth(ttl);
+    TEST_ASSERT_TRUE(auth.afterScan(outcomeOf(court::Action::Refuse, eventq::Event::kNoCourt, true), base) ==
+                     bridgelogic::AuthCommand::Arm);
+    const uint32_t busyAt = base + 28000UL;
+    TEST_ASSERT_TRUE_MESSAGE(auth.afterUndecided(busyAt) == bridgelogic::AuthCommand::Arm,
+                             "an undecided answer left the Mega's window to lapse under PRESS AGAIN");
+    TEST_ASSERT_TRUE(auth.armed(busyAt + choice));
+    TEST_ASSERT_FALSE(auth.lapsed(busyAt + ttl - 1U));
+    TEST_ASSERT_EQUAL_UINT8(bridgelogic::AuthPolicy::kUnbound, auth.boundCourt());
+
+    // Bound: the member's own court stays theirs to switch off, and only theirs.
+    bridgelogic::AuthPolicy bound(ttl);
+    static_cast<void>(bound.afterHeldCourtRescan(2U, base));
+    TEST_ASSERT_TRUE(bound.afterUndecided(busyAt) == bridgelogic::AuthCommand::Arm);
+    TEST_ASSERT_TRUE(bound.allowsRelease(2U, busyAt + choice));
+    TEST_ASSERT_FALSE(bound.allowsRelease(1U, busyAt + choice));
+
+    // A window that had already lapsed is opened again, unbound.
+    bridgelogic::AuthPolicy lapsed(ttl);
+    static_cast<void>(lapsed.afterHeldCourtRescan(1U, base));
+    TEST_ASSERT_TRUE(lapsed.lapsed(base + ttl));
+    TEST_ASSERT_TRUE(lapsed.afterUndecided(base + ttl + 5U) == bridgelogic::AuthCommand::Arm);
+    TEST_ASSERT_TRUE(lapsed.armed(base + ttl + 5U + choice));
+    TEST_ASSERT_FALSE(lapsed.allowsRelease(1U, base + ttl + 5U));
+
+    // The scan: 2 s left at the BUSY answer becomes the whole choice window...
+    tb::Deadline scanAt;
+    scanAt.arm(base, ttl);
+    bridgelogic::holdScanFor(scanAt, choice, busyAt);
+    TEST_ASSERT_FALSE_MESSAGE(scanAt.expired(busyAt + choice - 1U), "the scan lapsed under PRESS AGAIN");
+    TEST_ASSERT_TRUE(scanAt.expired(busyAt + choice));
+    // ...and 25 s left is never cut to 20.
+    scanAt.arm(base, ttl);
+    bridgelogic::holdScanFor(scanAt, choice, base + 5000UL);
+    TEST_ASSERT_FALSE(scanAt.expired(base + ttl - 1U));
+    TEST_ASSERT_TRUE(scanAt.expired(base + ttl));
+  }
+}
+
 void test_auth_policy_a_refused_scan_cannot_release_any_court() {
   // THE #4/#14 PIN, half one. NOT RECOGNISED, then COURT B, then OFF used to
   // darken court B mid-match, repeatable every thirty seconds by anyone with
@@ -3014,6 +3068,63 @@ void test_the_clock_advances_between_heartbeats_and_wraps_at_midnight() {
   }
 }
 
+/// THE WALL CLOCK, UNCONFIRMED FOR 49.7 DAYS (R18 D18-2). Its age is a 32-bit
+/// difference, so a clock adopted 2^32 ms + 1 s ago read one second old: the
+/// box sent the Mega a time about 17 hours wrong and every screen planned
+/// around it. Observed every pass (hourly here), a clock past the longest trust
+/// window there is stays blank until the next adoption — whatever the tenant's
+/// window, so lengthening it cannot revive a clock from seven weeks ago.
+void test_a_clock_adopted_before_the_millis_wrap_never_reads_trusted_again() {
+  const uint64_t ages[] = {0x100000000ULL + 1000ULL, 0x100000000ULL + 86400000ULL};
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    for (const uint64_t age : ages) {
+      bridgelogic::WallClock clock;
+      clock.setTrustMinutes(60U);
+      TEST_ASSERT_TRUE(clock.adopt("2026-10-06T18:00:00", base));
+      for (uint64_t t = 0U; t < age; t += 3600000ULL) {
+        const uint32_t now = static_cast<uint32_t>(base + t);
+        clock.observe(now);
+        TEST_ASSERT_EQUAL(t <= 3600000ULL, clock.trusted(now));
+      }
+      const uint32_t back = static_cast<uint32_t>(base + age);
+      clock.observe(back);
+      TEST_ASSERT_FALSE_MESSAGE(clock.trusted(back), "a clock adopted 49.7 days ago read trusted again");
+      char wire[bridgelogic::kWireTimeLen] = {};
+      char shown[bridgelogic::kDisplayTimeLen] = {};
+      clock.wireTime(back, wire, sizeof(wire));
+      clock.displayTime(back, shown, sizeof(shown));
+      TEST_ASSERT_EQUAL_STRING(proto::kNoClock, wire);
+      TEST_ASSERT_EQUAL_STRING("", shown);
+      clock.setTrustMinutes(bridgelogic::kMaxClockTrustMinutes);
+      TEST_ASSERT_FALSE(clock.trusted(back));
+
+      // An adoption is the one thing that clears it.
+      TEST_ASSERT_TRUE(clock.adopt("2026-11-25T11:03:00", back));
+      TEST_ASSERT_TRUE(clock.trusted(back));
+      clock.wireTime(back, wire, sizeof(wire));
+      TEST_ASSERT_EQUAL_STRING("1103", wire);
+    }
+  }
+}
+
+/// Lengthening the window still works on a clock that is merely past the OLD
+/// one: only an age past the longest window there is latches.
+void test_a_lengthened_trust_window_still_restores_a_recently_adopted_clock() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::WallClock clock;
+    clock.setTrustMinutes(60U);
+    TEST_ASSERT_TRUE(clock.adopt("2026-10-06T18:00:00", base));
+    for (uint32_t t = 0U; t <= 2U * 3600000UL; t += 60000UL) {
+      clock.observe(base + t);
+    }
+    TEST_ASSERT_FALSE(clock.trusted(base + 2U * 3600000UL));
+    clock.setTrustMinutes(180U);
+    TEST_ASSERT_TRUE(clock.trusted(base + 2U * 3600000UL));
+  }
+}
+
 void test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies() {
   for (size_t i = 0U; i < kBaseCount; ++i) {
     const uint32_t base = kBases[i];
@@ -3476,6 +3587,7 @@ int main(int, char**) {
   RUN_TEST(test_an_activation_waits_on_its_own_words_never_buying_your_time);
   RUN_TEST(test_scan_flow_a_grant_carries_the_uncapped_booking_remainder);
   RUN_TEST(test_auth_policy_a_refused_scan_cannot_release_any_court);
+  RUN_TEST(test_auth_policy_an_undecided_answer_keeps_press_again_working_for_the_whole_choice_window);
   RUN_TEST(test_auth_policy_a_recognised_refusal_arms_for_a_walk_up_but_releases_nothing);
   RUN_TEST(test_auth_policy_the_member_whose_scan_lit_b_can_release_b_and_only_b);
   RUN_TEST(test_session_and_walkup_say_whether_the_scan_was_recognised);
@@ -3497,6 +3609,8 @@ int main(int, char**) {
   RUN_TEST(test_this_boot_has_an_identity_and_it_is_never_the_wires_absent_value);
   RUN_TEST(test_server_time_is_read_as_club_local_wall_time_or_refused);
   RUN_TEST(test_the_clock_advances_between_heartbeats_and_wraps_at_midnight);
+  RUN_TEST(test_a_clock_adopted_before_the_millis_wrap_never_reads_trusted_again);
+  RUN_TEST(test_a_lengthened_trust_window_still_restores_a_recently_adopted_clock);
   RUN_TEST(test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies);
   RUN_TEST(test_every_screen_holds_the_layout_contract);
   RUN_TEST(test_a_sixteen_character_name_still_fits_the_panel);

@@ -142,7 +142,13 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.7 and Mega 2.0.0**: 2.2.7
+`platformio.ini`. The current images are **bridge 2.2.8 and Mega 2.0.0**: 2.2.8
+observes every "how old is it?" age — the roster's, the member-code step
+clock's, the wall clock's — on every pass, so none can read fresh again after
+the 49.7-day millis() wrap; answers a pay-for quote that got no decision with
+BUSY / PRESS AGAIN (or NO CONNECTION) instead of offering walk-up time on a
+court somebody holds; and re-arms the scan and the Mega's button window for the
+whole choice window whenever it says PRESS AGAIN; 2.2.7
 keeps the event drain's pace through an outage — a backoff window armed just
 before the link or the API went away can no longer read as pending again after
 24.8 days — and shows BUSY / PRESS AGAIN for a 429 or 5xx on a walk-up or

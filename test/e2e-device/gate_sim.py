@@ -929,7 +929,7 @@ def dsim_firmware(door: Any) -> None:
                     "row for the binary's MAC, auto-registered as a Gate, running the version the "
                     "image reports, with a last_seen_at only a real request can set",
             bool(row) and row.get("kind") == "Gate" and row.get("auto_registered") is True
-            and row.get("running_version") == "1.1.1" and bool(row.get("last_seen_at")),
+            and row.get("running_version") == "1.1.2" and bool(row.get("last_seen_at")),
             f"row={row} first_hb={first.raw}")
         if not sim_id:
             raise StepFailed("the simulator's board did not register — nothing below can run")

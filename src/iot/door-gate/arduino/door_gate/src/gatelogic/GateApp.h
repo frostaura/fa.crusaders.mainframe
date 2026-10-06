@@ -399,7 +399,10 @@ private:
   /// Disarms every gating window that has ended — the drain's backoff, the
   /// heartbeat's floor, the boot hold-back, the `/gate` call floor and the
   /// unreadable-line window — so none can age past 2^31 ms and read as pending
-  /// again. Called first thing on every pass. Review round 17, D17-2.
+  /// again. Called first thing on every pass. Review round 17, D17-2. It also
+  /// observes every AGE — the roster, the step clock, the debounce slots and
+  /// the lamp's cue — so none past its bound can read young again after the
+  /// 2^32 ms wrap. Review round 18, D18-2.
   void forgetElapsedWindows(uint32_t nowMs);
 
   void pumpHeartbeat();

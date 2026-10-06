@@ -186,7 +186,7 @@ within one heartbeat as `Kind=Gate`.
 `src/build_config.h` carries every `-D` its PlatformIO environment sets — with
 `build_unflags` applied by exact token, exactly as PlatformIO applies it. That
 is what makes the firmware version in here
-**1.1.1** rather than the 2.0.0 that `[common]` pins for the
+**1.1.2** rather than the 2.0.0 that `[common]` pins for the
 court box — this environment does not inherit `[common]` at all and spells its
 own version out, which is what stopped `build_unflags` deleting the tokens it
 had just been given. `build_config.h` is included first in every file of the sketch,

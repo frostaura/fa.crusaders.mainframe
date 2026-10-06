@@ -100,10 +100,12 @@
 // 1.1.0 is the single rotating member code (docs/specs/member-code.md): the
 // first gate image that verifies a v1 code offline and reports `codes:m1`.
 // 1.1.1 spends every gating window on the pass it ends, so none can outlive a
-// quiet spell past 2^31 ms (review round 17, D17-2). The Devices page showing
-// 1.1.1 is how the person who flashed it knows it landed.
-#if (FW_VERSION_MAJOR != 1) || (FW_VERSION_MINOR != 1) || (FW_VERSION_PATCH != 1)
-#error "this image is not reporting the gate's own firmware version (1.1.1)"
+// quiet spell past 2^31 ms (review round 17, D17-2). 1.1.2 observes every age
+// on every pass, so none reads young again after the 2^32 ms wrap (review round
+// 18, D18-2). The Devices page showing 1.1.2 is how the person who flashed it
+// knows it landed.
+#if (FW_VERSION_MAJOR != 1) || (FW_VERSION_MINOR != 1) || (FW_VERSION_PATCH != 2)
+#error "this image is not reporting the gate's own firmware version (1.1.2)"
 #endif
 
 // The four compiled-in values, all MANDATORY. There is no runtime store and no

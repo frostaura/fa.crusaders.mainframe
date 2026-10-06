@@ -23,6 +23,12 @@ void LedPattern::cue(LedCue which, uint32_t nowMs) {
   cueActive_ = true;
 }
 
+void LedPattern::observe(uint32_t nowMs) {
+  if (cueActive_ && tb::since(nowMs, cueStartedAtMs_) >= cueHalfMs_ * static_cast<uint32_t>(cueHalves_)) {
+    cueActive_ = false;
+  }
+}
+
 bool LedPattern::on(uint32_t nowMs) const {
   // Released wins outright. Somebody is pushing the door.
   if (released_) {

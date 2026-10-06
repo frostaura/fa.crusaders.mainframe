@@ -674,6 +674,16 @@ void forgetScan() {
   applyAuth(gAuth.disarm());
 }
 
+/// A walk-up, a pay-for quote or a pay-for confirm got no decision and the
+/// glass says PRESS AGAIN for the choice window (review round 18, D18-4). The
+/// press it asks for needs BOTH ends of the cable: the scan remembered here,
+/// and the Mega's button window to forward it. Each used to be left where the
+/// SCAN left it, so a press late in the countdown went nowhere.
+void holdForPressAgain(uint32_t nowMs) {
+  bridgelogic::holdScanFor(gScanAt, gLcdSettings.choiceMs, nowMs);
+  applyAuth(gAuth.afterUndecided(nowMs));
+}
+
 /// Learns this board's MAC and renders the one header every call carries.
 ///
 /// The MAC is available before the radio associates — it is a fact about the
@@ -1428,6 +1438,12 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
     forgetScan();
     return;
   }
+  if (!answer.decided) {
+    // BUSY / PRESS AGAIN or NO CONNECTION: the scan and the nonce are kept,
+    // and now so is the way to press again (D18-4).
+    holdForPressAgain(nowMs);
+    return;
+  }
   applyAuth(gAuth.afterWalkUp(answer.outcome, nowMs));
 }
 
@@ -1480,6 +1496,9 @@ void confirmPayFor() {
     // a court somebody is playing on.
     gPayFor.arm(relay, gPayFor.courtNumber(), gPayFor.amountLabel(), gLcdSettings.choiceMs, nowMs);
     gPad.clear();
+    // And the scan and the Mega's window with it, for the same whole window
+    // (D18-4): a re-armed quote nobody can press for is no retry at all.
+    holdForPressAgain(nowMs);
     sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
     return;
   }
@@ -1592,10 +1611,16 @@ bool quotePayFor(uint8_t relay, uint32_t nowMs) {
   case bridgelogic::PayForKind::Refused:
   case bridgelogic::PayForKind::Paid:
   case bridgelogic::PayForKind::Undecided:
-    // A decided refusal of the quote. The selection goes with it, so a
-    // duration press cannot turn a refused pay-for into a walk-up on a court
-    // somebody is playing on.
+    // A decided refusal of the quote, or no decision at all (D18-3: a dead
+    // link, a 429, a 5xx — NO CONNECTION or BUSY, never CHOOSE TIME on a court
+    // somebody holds). The selection goes with it, so a duration press cannot
+    // turn either into a walk-up on a court somebody is playing on.
     gPad.clear();
+    if (answer.kind == bridgelogic::PayForKind::Undecided) {
+      // PRESS AGAIN: the same court press asks again, so the scan and the
+      // Mega's window are held for the whole choice window (D18-4).
+      holdForPressAgain(now);
+    }
     sendScreen(
         bridgelogic::screenFor(answer.screen, payForFacts(relay, answer.amountLabel, now), gLcdSettings));
     if (answer.spendsScan) {
@@ -2005,6 +2030,16 @@ void loop() {
   // lapse deadlines are never evaluated against two different instants.
   const uint32_t now = gClock.nowMs();
   gUptime.tick(now);
+
+  // EVERY "HOW OLD IS IT?" AGE, ON EVERY PASS, LINK OR NO LINK (review round
+  // 18, D18-2). Each is a 32-bit difference, so one 2^32 ms + 1 s old reads
+  // one second old: a box offline for 49.7 days trusted a roster from seven
+  // weeks earlier, a step clock 143 165 steps behind, and a wall clock about
+  // seventeen hours wrong. Observed here, each latches on the pass it passes
+  // its bound and stays so until the next heartbeat re-anchors it.
+  gRoster.observe(now);
+  gStepClock.observe(now);
+  gWallClock.observe(now);
 
   // A court selected and then abandoned lapses on its own, so the next member to
   // press a duration button does not inherit somebody else's half-made purchase.

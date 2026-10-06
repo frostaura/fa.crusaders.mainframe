@@ -68,6 +68,13 @@ public:
   /// immediately.
   void reset();
 
+  /// Forget every slot whose window has ended. The loop calls it on every
+  /// pass (review round 18, D18-2): a slot's age is a 32-bit difference, so a
+  /// slot left alone read as "decided a moment ago" again exactly 2^32 ms after
+  /// its scan, and that member's next scan was dropped without a decision.
+  /// Forgotten reads exactly as elapsed, so no decision changes otherwise.
+  void observe(uint32_t nowMs);
+
 private:
   struct Slot {
     char token[roster::kMaxTokenLen + 1U] = {};

@@ -98,6 +98,16 @@ public:
   /// to a court it lit.
   AuthCommand afterPayForQuote(uint32_t nowMs);
 
+  /// A walk-up, a pay-for quote or a pay-for confirm got NO DECISION — a dead
+  /// link, a 429, a 5xx — and the glass says PRESS AGAIN for the choice window
+  /// (review round 18, D18-4). The window is re-armed for a full TTL, which the
+  /// parser holds at or above the choice window, so the press it asks for is
+  /// forwarded for as long as the countdown runs. Its binding is KEPT — the
+  /// member's own lit court stays theirs to switch off, and no other becomes
+  /// so; a window that had lapsed comes back unbound. It used to be left where
+  /// the scan left it, and a press near the end of the countdown went nowhere.
+  AuthCommand afterUndecided(uint32_t nowMs);
+
   /// Whether an OFF press for `court` is honoured right now: the window must
   /// be armed, unexpired and bound to exactly that court.
   bool allowsRelease(uint8_t court, uint32_t nowMs) const;
@@ -123,6 +133,17 @@ private:
   tb::Deadline until_;
   uint8_t court_ = kUnbound;
 };
+
+/// The remembered scan's deadline after an answer that decided nothing (R18
+/// D18-4): at least `holdMs` — the choice window — from now, and never shorter
+/// than it already was. The other half of afterUndecided: the Mega forwarding
+/// a press is no use if the bridge has forgotten who is pressing.
+///
+/// It can extend the scan past armPayForQuote's "scan memory plus one choice
+/// window from the SCAN" bound, once per undecided answer — each needs a press
+/// and a server that decided nothing, and the nonce kept with it means the
+/// retry is the SAME purchase, never a new one on somebody's left-behind scan.
+void holdScanFor(tb::Deadline& scanAt, uint32_t holdMs, uint32_t nowMs);
 
 } // namespace bridgelogic
 

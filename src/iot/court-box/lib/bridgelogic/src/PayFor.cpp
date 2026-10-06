@@ -138,8 +138,16 @@ size_t renderPayForBody(char* out, size_t cap, const PayForRequest& request) {
 }
 
 PayForAnswer onPayForQuote(uint16_t status, const char* body, size_t len, int16_t courtNumber) {
-  // Anything that is not a readable decision is the walk-up choice the press
-  // always was: a server that does not know pay-for, a dead link, a cut body.
+  // NO DECISION IS NOT A WALK-UP (review round 18, D18-3). The quote is only
+  // ever asked about a court this box believes is TAKEN, so a dead link, a 429
+  // or a 5xx falling through to CHOOSE TIME offered walk-up time on a court
+  // somebody is playing on. Undecided, as on the confirm: nothing was quoted,
+  // the scan is kept, and the same court press asks again.
+  if (undecidedStatus(status)) {
+    return answer(PayForKind::Undecided, status == 0U ? ScreenId::NoConnection : ScreenId::Busy);
+  }
+  // Any other answer that is not a readable decision is the walk-up choice the
+  // press always was: a server that does not know pay-for, a cut body.
   if (status != 200U || body == nullptr || !devapi::json::isCompleteObject(body, len)) {
     return answer(PayForKind::WalkUp, ScreenId::ChooseTime);
   }

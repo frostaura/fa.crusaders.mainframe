@@ -12,6 +12,7 @@ bool StepClock::sync(uint32_t step, uint32_t stepMs, uint32_t nowMs) {
   stepMs_ = stepMs;
   anchorMs_ = nowMs;
   synced_ = true;
+  agedOut_ = false;
   return true;
 }
 
@@ -19,8 +20,14 @@ uint32_t StepClock::ageMs(uint32_t nowMs) const {
   return synced_ ? tb::since(nowMs, anchorMs_) : 0U;
 }
 
+void StepClock::observe(uint32_t nowMs) {
+  if (synced_ && tb::since(nowMs, anchorMs_) > maxAgeMs_) {
+    agedOut_ = true;
+  }
+}
+
 bool StepClock::trusted(uint32_t nowMs) const {
-  return synced_ && ageMs(nowMs) <= maxAgeMs_;
+  return synced_ && !agedOut_ && ageMs(nowMs) <= maxAgeMs_;
 }
 
 uint32_t StepClock::stepAt(uint32_t nowMs) const {

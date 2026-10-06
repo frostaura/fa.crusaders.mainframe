@@ -236,6 +236,20 @@ public:
   /// True when the roster has aged out and can no longer be trusted.
   bool stale(uint32_t nowMs) const;
 
+  /// Look at the roster's age on THIS pass, and remember for good that it
+  /// aged out if it has. The loop calls it on every pass, link or no link.
+  ///
+  /// WHY AN AGE LATCHES (review round 18, D18-2). `ageMs` is a 32-bit
+  /// difference, so a roster accepted 2^32 ms + 1 s ago reads ONE SECOND old:
+  /// a box offline for 49.7 days admitted a booking from seven weeks earlier.
+  /// No single reading can tell those two apart — the arguments are
+  /// bit-identical — so the age has to be WATCHED: once any pass sees it past
+  /// `maxAgeMs`, the roster stays stale until the next one is accepted.
+  /// Contract: called at least once between the maximum age and 2^32 ms after
+  /// acceptance (49.4 days of slack against a loop that runs every few
+  /// milliseconds), the same kind of precondition `tb::Uptime64` states.
+  void observe(uint32_t nowMs);
+
   /// Milliseconds since the roster was accepted. Zero if never.
   uint32_t ageMs(uint32_t nowMs) const;
 
@@ -274,6 +288,9 @@ private:
   uint32_t acceptedAtMs_ = 0U;
   uint32_t stagingAtMs_ = 0U;
   bool loaded_ = false;
+  /// Latched by observe() once the age passed maxAgeMs_; cleared only by
+  /// commitReplace(). See observe().
+  bool agedOut_ = false;
   uint8_t dropped_ = 0U;
 };
 
@@ -317,6 +334,8 @@ template <uint8_t Capacity> void Roster<Capacity>::commitReplace() {
   count_ = stagingCount_;
   acceptedAtMs_ = stagingAtMs_;
   loaded_ = true;
+  // A new anchor, and the only thing that clears an aged-out one.
+  agedOut_ = false;
   replacing_ = false;
 }
 
@@ -329,8 +348,14 @@ template <uint8_t Capacity> uint32_t Roster<Capacity>::ageMs(uint32_t nowMs) con
   return tb::since(nowMs, acceptedAtMs_);
 }
 
+template <uint8_t Capacity> void Roster<Capacity>::observe(uint32_t nowMs) {
+  if (loaded_ && tb::since(nowMs, acceptedAtMs_) > maxAgeMs_) {
+    agedOut_ = true;
+  }
+}
+
 template <uint8_t Capacity> bool Roster<Capacity>::stale(uint32_t nowMs) const {
-  if (!loaded_) {
+  if (!loaded_ || agedOut_) {
     return true;
   }
   return ageMs(nowMs) > maxAgeMs_;

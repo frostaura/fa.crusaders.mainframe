@@ -134,6 +134,12 @@ public:
   /// without a fake pin.
   bool on(uint32_t nowMs) const;
 
+  /// Forget a cue that has finished. The loop calls it on every pass (review
+  /// round 18, D18-2): on() is const and leaves an ended cue armed, and its
+  /// age is a 32-bit difference, so 2^32 ms after the last refusal the lamp
+  /// replayed the stutter at nobody. A running cue is untouched.
+  void observe(uint32_t nowMs);
+
 private:
   /// Half-periods elapsed since the cue started, or the total the cue lasts.
   uint32_t cueHalfMs_ = 0U;

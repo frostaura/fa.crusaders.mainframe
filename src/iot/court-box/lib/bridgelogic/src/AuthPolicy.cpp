@@ -47,6 +47,23 @@ AuthCommand AuthPolicy::afterPayForQuote(uint32_t nowMs) {
   return arm(kUnbound, nowMs);
 }
 
+AuthCommand AuthPolicy::afterUndecided(uint32_t nowMs) {
+  // Re-armed with the binding it has: PRESS AGAIN is about the purchase, and
+  // must neither hand an OFF press a court it did not have nor take away the
+  // member's own. A window that already lapsed has kUnbound here.
+  if (!armed(nowMs)) {
+    court_ = kUnbound;
+  }
+  return arm(court_, nowMs);
+}
+
+void holdScanFor(tb::Deadline& scanAt, uint32_t holdMs, uint32_t nowMs) {
+  // Never SHORTER than it was: a member with 25 s of scan memory left keeps it.
+  if (scanAt.remaining(nowMs) < holdMs) {
+    scanAt.arm(nowMs, holdMs);
+  }
+}
+
 bool AuthPolicy::allowsRelease(uint8_t court, uint32_t nowMs) const {
   return armed(nowMs) && court_ != kUnbound && court_ == court;
 }

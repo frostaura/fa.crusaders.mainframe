@@ -108,6 +108,19 @@ public:
   /// more than `trustMinutes()` has passed without another one.
   bool trusted(uint32_t nowMs) const;
 
+  /// Look at the adoption's age on THIS pass, and remember for good that it
+  /// is older than the LONGEST trust window there is (kMaxClockTrustMinutes)
+  /// if it is. The loop calls it on every pass; only adopt() clears it.
+  ///
+  /// Why (review round 18, D18-2): the age is a 32-bit difference, so a clock
+  /// adopted 2^32 ms + 1 s ago read one second old and the box sent the Mega a
+  /// time about seventeen hours wrong. The ceiling rather than the tenant's
+  /// window, so an admin LENGTHENING the window still revives a clock that is
+  /// merely past the old one — setTrustMinutes's promise — while nothing can
+  /// revive one from a day ago. Contract: called at least once between a day
+  /// and 2^32 ms after the adoption.
+  void observe(uint32_t nowMs);
+
   /// Second of the club's day, 0..86399, advanced on millis() since the last
   /// adoption and wrapped at midnight. Meaningless — and never rendered — when
   /// `trusted()` is false.
@@ -143,6 +156,8 @@ private:
   /// second meaning.
   uint32_t adoptedSinceMs_ = 0U;
   bool adopted_ = false;
+  /// Latched by observe(); cleared only by adopt().
+  bool agedOut_ = false;
 };
 
 } // namespace bridgelogic

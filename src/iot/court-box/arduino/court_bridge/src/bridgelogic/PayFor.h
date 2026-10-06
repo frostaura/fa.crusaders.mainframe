@@ -22,7 +22,10 @@
 // answer that is not a decision: a server that has never heard of pay-for
 // answers 404, and a box flashed before its server was upgraded must behave
 // exactly as the box before it did. `not_booked` is the same: the court was
-// free after all, so the press was a walk-up.
+// free after all, so the press was a walk-up. A dead link, a 429 or a 5xx is
+// NOT one of those (R18 D18-3): the box still believes the court is taken, so
+// it says NO CONNECTION or BUSY / PRESS AGAIN and keeps the scan rather than
+// offering walk-up time on a court somebody is playing on.
 //
 // THE NONCE
 // ---------
@@ -124,6 +127,11 @@ bool validAmountLabel(const char* label);
 
 /// Interprets the answer to a QUOTE for the court numbered `courtNumber`.
 ///
+///   0, 429, 5xx                                                         -> Undecided:
+///                                                    0 paints NO CONNECTION, 429 and
+///                                                    5xx BUSY / PRESS AGAIN; the scan
+///                                                    is kept (R18 D18-3 — never the
+///                                                    walk-up choice on a taken court)
 ///   200 payable:true, court_number == courtNumber, a valid amount_label -> Quote
 ///   200 payable:false, reason not_booked                                  -> WalkUp
 ///   200 payable:false, any other reason                                   -> Refused

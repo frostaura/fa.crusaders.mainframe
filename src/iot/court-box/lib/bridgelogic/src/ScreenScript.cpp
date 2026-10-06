@@ -368,7 +368,10 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
     // A 429 or a 5xx on the pay-for confirm: nothing was decided, the quote and
     // its nonce stay armed for the CHOICE window — which is why this holds for
     // that window and counts it down — and the court press retries the same
-    // payment. Rows 0-1 are the walk-up's two lines for the same answer
+    // payment. The same answer to the QUOTE paints it too (R18 D18-3), and
+    // either way the scan and the Mega's button window are re-armed for that
+    // whole window (D18-4), so PRESS AGAIN works for as long as it is shown. Rows 0-1 are the walk-up's two
+    // lines for the same answer
     // (WalkUp.cpp), so a 1602 reads them whole. Row 2 is the nonce's promise.
     {ScreenId::Busy,
      {{"BUSY", RowArg::None, ""},

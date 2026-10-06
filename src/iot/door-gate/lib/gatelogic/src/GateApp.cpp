@@ -223,6 +223,18 @@ void GateApp::forgetElapsedWindows(uint32_t nowMs) {
   forgetIfElapsed(unreadableAt_, nowMs);
   forgetIfElapsed(heartbeatFloorAt_, nowMs);
   forgetIfElapsed(eventsAt_, nowMs);
+
+  // AND EVERY "HOW OLD IS IT?" AGE, for the mirror-image reason (review round
+  // 18, D18-2). An age is a 32-bit difference, so one 2^32 ms + 1 s old reads
+  // one second old: a roster from before a 49.7-day outage opened the door for
+  // a seven-week-old booking, the step clock trusted a sync 143 165 steps
+  // behind, a debounce slot dropped its member's next scan, and the lamp
+  // replayed a refusal. Each latches — or forgets — here, on the pass its age
+  // passes its bound, so no later reading can make it young again.
+  roster_.observe(nowMs);
+  stepClock_.observe(nowMs);
+  debounce_.observe(nowMs);
+  led_.observe(nowMs);
 }
 
 void GateApp::pumpFaults() {

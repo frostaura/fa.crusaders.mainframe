@@ -858,9 +858,11 @@ and every flag in `build_config.h` that is safe to change.
 That folder is **generated** and is never hand-edited: `make arduino-export`
 writes it from `lib/`, `../shared/lib/`, `src/` and the `-D` flags in
 [`platformio.ini`](platformio.ini) (with `build_unflags` applied, which is what
-makes the sketch report **1.1.1** — the single rotating member code,
+makes the sketch report **1.1.2** — the single rotating member code,
 [`docs/specs/member-code.md`](../../../docs/specs/member-code.md), with every
-gating window spent on the pass it ends (review round 17) — rather than
+gating window spent on the pass it ends (review round 17) and every age
+observed on every pass so none reads young again after the 49.7-day wrap
+(review round 18) — rather than
 the 2.0.0 `[common]` pins for the court box), and `make arduino-check`
 regenerates and fails on a diff. A hand-edit
 there is deleted by the next export, not flagged.

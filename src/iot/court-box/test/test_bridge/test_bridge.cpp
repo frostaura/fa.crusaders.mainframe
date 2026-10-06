@@ -463,6 +463,64 @@ void test_roster_goes_stale_and_refuses_rather_than_guesses() {
   }
 }
 
+/// R18 D18-2: the two ages past the 49.7-day millis() wrap every age-style
+/// timer is run across — 2^32 ms plus a second, and plus a day.
+constexpr uint64_t kWrapMs = 0x100000000ULL;
+constexpr uint64_t kAgesPastTheWrap[] = {kWrapMs + 1000ULL, kWrapMs + 86400000ULL};
+constexpr uint32_t kHourMs = 3600000UL;
+
+/// `base` advanced by `offsetMs`, as the 32-bit millis() would read it.
+uint32_t readingAt(uint32_t base, uint64_t offsetMs) {
+  return static_cast<uint32_t>(static_cast<uint64_t>(base) + offsetMs);
+}
+
+/// THE ROSTER, OFFLINE FOR 49.7 DAYS (R18 D18-2). `ageMs` is a 32-bit
+/// difference, so a roster accepted 2^32 ms + 1 s ago read ONE SECOND old and
+/// admitted a booking from seven weeks earlier. The loop observes the age every
+/// pass — hourly here — and once past its maximum it stays stale until a new
+/// roster is accepted.
+void test_roster_an_age_past_the_millis_wrap_never_reads_fresh_again() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    for (const uint64_t age : kAgesPastTheWrap) {
+      Cache cache(kSixHoursMs);
+      const roster::Entry entries[] = {booking("tok-alice", 1U, 0U, 86400000UL)};
+      loadRoster(cache, base, entries, 1U);
+      for (uint64_t t = 0U; t < age; t += kHourMs) {
+        cache.observe(readingAt(base, t));
+      }
+      const uint32_t back = readingAt(base, age);
+      cache.observe(back);
+      TEST_ASSERT_TRUE_MESSAGE(cache.stale(back), "a roster 49.7 days old read fresh again");
+      TEST_ASSERT_TRUE(cache.decide("tok-alice", 1U, back).verdict == roster::Verdict::Stale);
+      TEST_ASSERT_FALSE(cache.occupied(1U, back));
+
+      // A new roster is a new anchor, and only that clears it.
+      loadRoster(cache, back, entries, 1U);
+      TEST_ASSERT_FALSE(cache.stale(back));
+      TEST_ASSERT_TRUE(cache.decide("tok-alice", 1U, back + 1000U).verdict == roster::Verdict::Allow);
+    }
+  }
+}
+
+/// And observing a FRESH roster every pass changes nothing: it is good to the
+/// millisecond of its maximum age, and stale one millisecond after.
+void test_roster_observing_a_fresh_roster_every_pass_does_not_age_it() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Cache cache(kSixHoursMs);
+    const roster::Entry entries[] = {booking("tok-alice", 1U, 0U, 86400000UL)};
+    loadRoster(cache, base, entries, 1U);
+    for (uint32_t t = 0U; t <= kSixHoursMs; t += 60000UL) {
+      cache.observe(base + t);
+      TEST_ASSERT_FALSE(cache.stale(base + t));
+    }
+    TEST_ASSERT_TRUE(cache.decide("tok-alice", 1U, base + kSixHoursMs).verdict == roster::Verdict::Allow);
+    cache.observe(base + kSixHoursMs + 1U);
+    TEST_ASSERT_TRUE(cache.stale(base + kSixHoursMs + 1U));
+  }
+}
+
 void test_roster_before_its_first_load_is_stale_not_empty() {
   Cache cache(kSixHoursMs);
   TEST_ASSERT_FALSE(cache.everLoaded());
@@ -1444,6 +1502,8 @@ int main(int, char**) {
   RUN_TEST(test_roster_prefers_the_court_the_member_is_standing_at);
   RUN_TEST(test_roster_goes_stale_and_refuses_rather_than_guesses);
   RUN_TEST(test_roster_before_its_first_load_is_stale_not_empty);
+  RUN_TEST(test_roster_an_age_past_the_millis_wrap_never_reads_fresh_again);
+  RUN_TEST(test_roster_observing_a_fresh_roster_every_pass_does_not_age_it);
   RUN_TEST(test_roster_an_abandoned_replacement_leaves_the_old_one_live);
   RUN_TEST(test_roster_a_cancelled_booking_disappears_on_the_next_push);
   RUN_TEST(test_roster_reports_entries_that_did_not_fit);

@@ -796,6 +796,42 @@ void test_step_clock_refuses_a_phase_outside_the_step_and_forgets_on_demand(void
   TEST_ASSERT_FALSE(clock.trusted(100U));
 }
 
+/// THE STEP CLOCK, UNSYNCED FOR 49.7 DAYS (R18 D18-2). Its age is a 32-bit
+/// difference, so a sync taken 2^32 ms + 1 s ago read one second old: trusted,
+/// and 143 165 steps behind the member's phone — which accepts any code
+/// photographed at the time of that sync. Observed every pass (hourly here),
+/// a clock past its maximum age stays untrusted until the next sync. Every
+/// clock base, both ages past the wrap.
+void test_step_clock_an_age_past_the_millis_wrap_never_reads_trusted_again(void) {
+  const uint32_t bases[] = {0U, 1234567U, 0xFFFFF000U, 0xFFFFFFFFU};
+  const uint64_t ages[] = {0x100000000ULL + 1000ULL, 0x100000000ULL + 86400000ULL};
+  const uint32_t sixHours = 21600000UL;
+  for (const uint32_t base : bases) {
+    for (const uint64_t age : ages) {
+      memcode::StepClock clock(sixHours);
+      TEST_ASSERT_TRUE(clock.sync(1000U, 0U, base));
+      for (uint64_t t = 0U; t < age; t += 3600000ULL) {
+        const uint32_t now = static_cast<uint32_t>(base + t);
+        clock.observe(now);
+        // Observing a fresh clock does not age it.
+        TEST_ASSERT_EQUAL(t <= sixHours, clock.trusted(now));
+      }
+      const uint32_t back = static_cast<uint32_t>(base + age);
+      clock.observe(back);
+      TEST_ASSERT_FALSE_MESSAGE(clock.trusted(back), "a step clock 49.7 days old read trusted again");
+      TEST_ASSERT_EQUAL_UINT32(0U, clock.stepAt(back));
+
+      // Only a sync clears it — and a forget and re-sync too.
+      TEST_ASSERT_TRUE(clock.sync(144166U, 0U, back));
+      TEST_ASSERT_TRUE(clock.trusted(back));
+      TEST_ASSERT_EQUAL_UINT32(144166U, clock.stepAt(back));
+      clock.forget();
+      TEST_ASSERT_TRUE(clock.sync(144166U, 0U, back));
+      TEST_ASSERT_TRUE(clock.trusted(back + sixHours));
+    }
+  }
+}
+
 void test_replay_ring_keeps_the_highest_step_and_evicts_the_oldest(void) {
   memcode::ReplayRing<2U> used;
   TEST_ASSERT_FALSE(used.seen(7U, 100U));
@@ -1064,6 +1100,7 @@ int main(int, char**) {
   RUN_TEST(test_code_sync_applies_a_whole_body_by_the_roster_rules);
   RUN_TEST(test_offline_verification_scenarios);
   RUN_TEST(test_step_clock_refuses_a_phase_outside_the_step_and_forgets_on_demand);
+  RUN_TEST(test_step_clock_an_age_past_the_millis_wrap_never_reads_trusted_again);
   RUN_TEST(test_replay_ring_keeps_the_highest_step_and_evicts_the_oldest);
   RUN_TEST(test_key_ring_looks_keys_up_by_the_slot_whose_range_holds_the_step);
   RUN_TEST(test_a_scanned_ref_list_never_matches_and_a_ref_never_matches_a_code);

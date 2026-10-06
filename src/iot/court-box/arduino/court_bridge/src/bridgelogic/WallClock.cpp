@@ -94,6 +94,7 @@ bool WallClock::adopt(const char* serverTime, uint32_t nowMs) {
   adoptedSecondOfDay_ = secondOfDay;
   adoptedSinceMs_ = nowMs;
   adopted_ = true;
+  agedOut_ = false;
   return true;
 }
 
@@ -108,8 +109,14 @@ void WallClock::setTrustMinutes(uint32_t minutes) {
   trustMinutes_ = bounded;
 }
 
+void WallClock::observe(uint32_t nowMs) {
+  if (adopted_ && tb::since(nowMs, adoptedSinceMs_) > kMaxClockTrustMinutes * 60000UL) {
+    agedOut_ = true;
+  }
+}
+
 bool WallClock::trusted(uint32_t nowMs) const {
-  return adopted_ && tb::since(nowMs, adoptedSinceMs_) <= trustMs();
+  return adopted_ && !agedOut_ && tb::since(nowMs, adoptedSinceMs_) <= trustMs();
 }
 
 uint32_t WallClock::secondOfDay(uint32_t nowMs) const {

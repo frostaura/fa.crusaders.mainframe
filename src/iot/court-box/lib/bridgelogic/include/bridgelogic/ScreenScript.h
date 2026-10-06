@@ -222,7 +222,9 @@ enum class ScreenId : uint8_t {
   /// A pay-for confirm answered 429 or 5xx: the server was too busy to decide,
   /// the quote and its nonce are still armed, and pressing the court again
   /// asks whether THIS payment happened — never for a second one. It read SEE
-  /// THE DESK, which sent a member away from a retry that works.
+  /// THE DESK, which sent a member away from a retry that works. Since R18
+  /// (D18-3) a QUOTE answered 429 or 5xx paints it too: nothing was quoted,
+  /// the scan is kept, and the same court press asks again.
   Busy,
 };
 
