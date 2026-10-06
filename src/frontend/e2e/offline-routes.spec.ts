@@ -153,6 +153,12 @@ test.describe("with the service worker", () => {
   });
 
   test("a chunk that is somehow not on the phone gets the offline boundary with Retry, not a crash", async ({ page, context }) => {
+    // R17 CI: the idle nav prefetch (routeChunks.prefetchNavChunks) can load the Wallet chunk into
+    // memory before its cache entry is deleted below — on a slow runner it always did — and then
+    // nothing is missing. A phone on data saver never prefetches, so this phone is one.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "connection", { configurable: true, value: { saveData: true } });
+    });
     await signedInAtMyCode(page);
     await workerInControl(page);
     // The post-activation precache must have finished, or it could put the chunk back (X15-2).
