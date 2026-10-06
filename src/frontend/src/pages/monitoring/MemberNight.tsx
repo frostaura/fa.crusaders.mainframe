@@ -430,7 +430,7 @@ function TraceCard({ event, subjectName, timezone }: {
 }) {
   // `code_holder` (R10 E10-2): whose code the board read; an older server simply omits it.
   const codeHolder = event.code_holder;
-  const clause = actorClause(event.actor, subjectName, event.subject, codeHolder);
+  const clause = actorClause(event.actor, subjectName, event.subject, codeHolder, event);
   const onBehalf = isOnBehalf(event.actor);
   return (
     // R7 L7-15: every card carries the 4px rule — transparent unless somebody acted on the member —

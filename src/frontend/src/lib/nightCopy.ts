@@ -1,6 +1,6 @@
 import { clubClock, clubDate } from "./clubClock";
 import { minutesSpoken } from "./minutes";
-import type { AdminPerson, TraceActor, TraceView } from "./adminApi";
+import type { AdminPerson, TraceActor, TraceEvent, TraceView } from "./adminApi";
 
 /**
  * Every sentence on a person's night, and on the club's own change record.
@@ -72,11 +72,12 @@ export function nightWindowHint(range: TraceView["range"], timezone: string | un
  */
 export function actorClause(
   actor: TraceActor | null | undefined, subjectName: string, subject?: AdminPerson | null,
-  codeHolder?: CodeHolder | null,
+  codeHolder?: CodeHolder | null, row?: ClauseRow | null,
 ): string | null {
   if (!actor) return null;
   if (actor.kind === "system") return "by the club's own automatic check";
-  if (actor.kind === "device") return deviceClause(codeHolder ?? subject);
+  if (actor.kind === "device") return boardClause(row, codeHolder ?? subject);
+  if (row?.kind === ADMIN_INHERITED) return INHERITED_CLAUSE;
   const name = (actor.name ?? "").trim();
   if (actor.is_self === true) {
     // "by Thandi herself" needs a first name and a pronoun this product does not hold. The
@@ -102,6 +103,31 @@ function deviceClause(person: { name?: string | null } | null | undefined): stri
   const name = (person?.name ?? "").trim();
   return name === "" ? "reported by the court's board" : `with ${name}'s code, at the board`;
 }
+
+/** What of the row the clause reads beyond its people: which kind, at which court (R18). */
+export type ClauseRow = Pick<TraceEvent, "kind" | "court">;
+
+/**
+ * Kinds a board writes without reading anybody's code (R18 E18-3). A `lights.restored` row is the
+ * box re-energising a relay after a power cut: its `subject` is the booking's organiser — that is
+ * why it is on their Night — and falling back to the subject said "with Olga's code, at the board"
+ * when nobody scanned. These rows name the board that reported, never a person.
+ */
+const NO_CODE_READ: ReadonlySet<string> = new Set(["lights.restored"]);
+
+function boardClause(row: ClauseRow | null | undefined, person: { name?: string | null } | null | undefined): string {
+  if (!row || !NO_CODE_READ.has(row.kind)) return deviceClause(person);
+  const court = (row.court?.name ?? "").trim();
+  return court === "" ? "reported by the court's board" : `reported by ${court}'s board`;
+}
+
+/**
+ * R18 E18-3: rights that came from the club's set-up naming their address. The row's actor is the
+ * member — their own sign-in wrote it — and "by Thandi themselves" read as if they made
+ * themselves an administrator. Nobody granted it; the sign-in is when it happened.
+ */
+const ADMIN_INHERITED = "account.admin_inherited";
+const INHERITED_CLAUSE = "when they signed in";
 
 /** Whose code a board read on a lights-on row (R10 E10-2, the trace's `code_holder`). */
 export type CodeHolder = { user_id?: string | null; name?: string | null };

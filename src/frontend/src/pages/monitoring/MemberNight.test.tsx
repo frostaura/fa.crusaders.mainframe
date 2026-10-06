@@ -699,3 +699,26 @@ describe("a box's refusals are never folded across different attempts (R11 E11-4
     expect(screen.queryByText(/3 in /)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * R18 E18-3 (BE18b): a box re-energising a relay after a power cut is on the organiser's Night as
+ * `lights.restored` — actor `device`, no `code_holder`, subject the organiser. Nobody scanned, so
+ * the card names the board that reported it and never "with Olga's code".
+ */
+describe("a lights restore after a power cut names the board, not a code (R18 E18-3)", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("the card says Court 2's board reported it", async () => {
+    stubFetch(nightRoutes(traceView([traceEvent({
+      strand: "lights", kind: "lights.restored", headline: "Court 2 lights came back on after a power cut",
+      actor: { user_id: null, name: null, kind: "device", is_self: false },
+      subject: { user_id: "u-olga", name: "Olga Organiser" },
+      court: { id: "c2", number: 2, name: "Court 2" }, code_holder: null,
+    })])));
+    renderNight();
+    await screen.findByText("Court 2 lights came back on after a power cut");
+    expect(screen.getByText("reported by Court 2's board")).toBeInTheDocument();
+    expect(screen.queryByText(/code, at the board/)).not.toBeInTheDocument();
+  });
+});

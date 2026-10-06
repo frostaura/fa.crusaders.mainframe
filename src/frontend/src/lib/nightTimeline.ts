@@ -61,6 +61,12 @@ function burstKey(event: TraceEvent): string {
   // cancelled — is a story each; three in a minute folded into "3 in 1 minute" hid who and what.
   if (PLAYER_ACTS.has(event.kind)) return `act:${event.kind}:${event.source_id ?? event.at}:${event.headline ?? ""}`;
   const family = (event.kind ?? "").split(".")[0];
+  // R18 E18-3: a change to the account is one actor's act each — the desk setting a PIN, enrolling a
+  // fingerprint and clearing it in a minute are three stories with who did each, not "3 in 1 minute".
+  if (family === "account") return `account:${event.kind}:${event.source_id ?? event.at}:${event.headline ?? ""}`;
+  // R18 E18-3: a relay re-energised after a power cut is its own story; it folds only with other
+  // restores, never into the lights-on rows at the same court.
+  if (event.kind === "lights.restored") return `restored:${placeOf(event)}`;
   // R11 E11-4: a box's refusal names what the scan was trying to do; a lights scan, a walk-up and
   // a pay-for at one box are three stories, never "3 in 1 minute".
   const attempt = typeof event.detail?.attempt === "string" ? event.detail.attempt : "";
