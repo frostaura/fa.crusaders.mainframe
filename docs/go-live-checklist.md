@@ -89,6 +89,10 @@ the schema exactly as it was (the refusal runs first, inside the migration's tra
 
 Development stacks reset with `make down-reset`, which drops every volume.
 
+This is the only migration allowed to refuse a populated database. `MigrationUpgradePathTests`
+runs the whole chain over rows in every table and fails on any other refusal; its allow-list entry
+names this section, and the suite goes red if the heading above is renamed and the entry is not.
+
 **If skipped:** the API container stops at start-up on the refusal and the club has no
 booking system until the reset is done. Deleting money rows by hand to get past it instead
 erases balances members believe they hold.
