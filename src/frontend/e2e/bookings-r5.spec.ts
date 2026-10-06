@@ -113,11 +113,18 @@ test.describe("§4.2 — the phone's week strip sticks", () => {
     await open(page, { invites: 3, games: 3, recent: 2 });
     await expect(page.locator("[data-day-strip][data-sticks]")).toHaveCount(1);
     const chrome = await page.evaluate(() => document.querySelector("main")!.getBoundingClientRect().top);
-    // Scroll the page to its end: the games go, the week stays, the court header sits under it.
-    await page.evaluate(() => { const m = document.querySelector("main")!; m.scrollTop = m.scrollHeight; });
+    // 2026-10 (Dean): the grid scrolls ITSELF and the page holds still (bar the few px a 280px
+    // grid floor can leave), so "while the grid is worked" is the grid's own scroller run to its
+    // end, and the page to whatever end it has: the week stays on screen, under the app bar.
+    await page.evaluate(() => {
+      const grid = document.querySelector<HTMLElement>("[data-grid-scroller]")!;
+      grid.scrollTop = grid.scrollHeight;
+      const m = document.querySelector("main")!; m.scrollTop = m.scrollHeight;
+    });
     await page.waitForTimeout(100);
     const strip = await box(page, "[data-day-strip]");
-    expect(Math.abs(strip.top - chrome)).toBeLessThanOrEqual(1);
+    expect(strip.top, "the week went under the app bar").toBeGreaterThanOrEqual(chrome - 1);
+    expect(strip.bottom, "the week is off the screen").toBeLessThanOrEqual(844);
     const header = await box(page, '[role="columnheader"][data-court-col="0"]');
     expect(header.top, "the court header is below the strip, not under it").toBeGreaterThanOrEqual(strip.bottom - 1);
     const tabBar = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height")) || 0);

@@ -125,20 +125,20 @@ test.describe("C6 — what a navigation does", () => {
    */
   test("retitles the document, announces the page and lands focus on its heading", async ({ page }) => {
     await openAdmin(page, "/admin/settings");
-    await expect(page).toHaveTitle("Settings — Crusaders Mainframe");
+    await expect(page).toHaveTitle("Settings — Crusaders Squash");
 
     // The primary nav is ONE list in both layouts (the phone's bottom bar, the desktop's top
     // bar), so the same locator works on both projects.
     await mainNav(page).getByRole("link", { name: "Wallet" }).click();
 
-    await expect(page).toHaveTitle("Wallet — Crusaders Mainframe");
+    await expect(page).toHaveTitle("Wallet — Crusaders Squash");
     await expect(page.getByTestId("route-announcer")).toHaveText("Wallet");
     await expect(page.locator("h1:focus")).toHaveCount(1);
     await expect(mainNav(page).getByRole("link", { name: "Wallet" })).toHaveAttribute("aria-current", "page");
 
     // Back, and the title follows: a browser-history entry is named after the title it had.
     await page.goBack();
-    await expect(page).toHaveTitle("Settings — Crusaders Mainframe");
+    await expect(page).toHaveTitle("Settings — Crusaders Squash");
   });
 
   /**
@@ -181,7 +181,7 @@ test.describe("R15 — where the old addresses go", () => {
   test("the old bookings address keeps its query on the way to /bookings", async ({ page }) => {
     await openMember(page, "/schedule?date=2099-01-01");
     await expect(page).toHaveURL(/\/bookings\?date=2099-01-01$/);
-    await expect(page).toHaveTitle("Bookings — Crusaders Mainframe");
+    await expect(page).toHaveTitle("Bookings — Crusaders Squash");
   });
 });
 

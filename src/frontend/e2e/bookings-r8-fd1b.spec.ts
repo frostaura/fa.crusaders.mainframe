@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
-import { bigText, fontsReady, sideways } from "./layoutKit";
+import { bigText, firstBookInView, fontsReady, sideways } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes, seat } from "./playersKit";
 import { celebrationFixture, myPlayFixture } from "./playKit";
 
@@ -50,7 +50,6 @@ function bookingRoutes(options: { admin?: boolean; wallet?: Record<string, unkno
 }
 
 const FIRST_BOOK = '[role="grid"] button[aria-label^="Book "]';
-const firstBookTop = (page: Page) => page.locator(FIRST_BOOK).first().evaluate((el) => el.getBoundingClientRect().top);
 const mainScrollTop = (page: Page) => page.evaluate(() => document.querySelector("main")!.scrollTop);
 
 /** Where focus is, and whether a sighted keyboard user can see it (below the app bar, above the fold). */
@@ -80,8 +79,10 @@ test.describe("X8-1 — §4.2's opening scroll and the route announcer's focus",
     await page.waitForSelector(FIRST_BOOK);
     // The announcer retries for a while; the page settles.
     await page.waitForTimeout(1200);
-    // Dean's §4.2 stands: the first Book cell on the first screen.
-    expect(await firstBookTop(page), "first Book cell's y at 390").toBeLessThanOrEqual(360);
+    // Dean's §4.2 stands: the first Book cell on the first screen — since 2026-10 by the grid's
+    // own scroller, the page holding still (`layoutKit.firstBookInView`).
+    const first = await firstBookInView(page);
+    expect(first.inScroller && first.onScreen, `first Book cell at y=${Math.round(first.top)}, not in view`).toBe(true);
     const focus = await focusFacts(page);
     expect(focus.visible, `focus is on a ${focus.tag} at y=${focus.top}, out of sight`).toBe(true);
     expect(focus.inStrip, "focus on the week the page opened at").toBe(true);
@@ -92,14 +93,15 @@ test.describe("X8-1 — §4.2's opening scroll and the route announcer's focus",
     expect((await focusFacts(page)).visible).toBe(true);
   });
 
-  test("a direct load leaves focus alone and still opens at the week", async ({ page }) => {
+  test("a direct load leaves focus alone and still opens with the first bookable row in view", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await signIn(page);
     await serveApi(page, bookingRoutes());
     await page.goto(`/bookings?date=${DAY}`);
     await page.waitForSelector(FIRST_BOOK);
     await page.waitForTimeout(600);
-    expect(await firstBookTop(page)).toBeLessThanOrEqual(360);
+    const first = await firstBookInView(page);
+    expect(first.inScroller && first.onScreen, `first Book cell at y=${Math.round(first.top)}, not in view`).toBe(true);
     expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
   });
 });

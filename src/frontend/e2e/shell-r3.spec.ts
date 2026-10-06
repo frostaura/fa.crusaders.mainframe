@@ -119,7 +119,7 @@ test("X-9 — a booking opened straight from a link names the booking in the tab
   const heading = page.locator("#main-content h1");
   await expect(heading).not.toHaveText(/^Booking$/);
   const name = (await heading.textContent())!.trim();
-  await expect(page).toHaveTitle(`${name} — Booking — Crusaders Mainframe`);
+  await expect(page).toHaveTitle(`${name} — Booking — Crusaders Squash`);
   await expect(heading).not.toBeFocused();
   await expect(page.getByTestId("route-announcer")).toHaveText("");
 });

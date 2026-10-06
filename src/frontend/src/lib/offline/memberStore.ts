@@ -48,15 +48,26 @@ function factory(): IDBFactory | null {
 }
 
 let opening: Promise<IDBDatabase | null> | null = null;
+/** Whether the open in flight may create the store (a write's) — a read's may not. */
+let openingCreates = false;
 
-function open(): Promise<IDBDatabase | null> {
-  if (opening) return opening;
+/**
+ * Opens the store. Only a WRITE may create it (`create`): a read on a phone with no store has
+ * nothing to find, and a read that raced a sign-out (a page still subscribing while the wipe ran)
+ * re-made an empty `crusaders-member-data` right after the wipe deleted it — the store was gone in
+ * substance and back in the browser profile by name (CI run 37495261815, flaky). Aborting the
+ * version-0 upgrade leaves no database behind.
+ */
+function open(create: boolean): Promise<IDBDatabase | null> {
+  // A write that meets a read's open in flight waits for it, and creates the store if it found none.
+  if (opening) return create && !openingCreates ? opening.then((db) => db ?? open(true)) : opening;
   const idb = factory();
   if (!idb) return Promise.resolve(null);
   const attempt = new Promise<IDBDatabase | null>((resolve) => {
     let request: IDBOpenDBRequest;
     try { request = idb.open(MEMBER_DATA_DB, VERSION); } catch { resolve(null); return; }
     request.onupgradeneeded = (event) => {
+      if (!create && !event.oldVersion) { request.transaction?.abort(); return; }
       const db = request.result;
       // P13: a version-1 store holds credit-shaped reads; drop it, never show it.
       if (event.oldVersion < 2 && db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
@@ -72,12 +83,13 @@ function open(): Promise<IDBDatabase | null> {
     request.onblocked = () => resolve(null);
   });
   opening = attempt;
+  openingCreates = create;
   void attempt.then((db) => { if (!db && opening === attempt) opening = null; });
   return attempt;
 }
 
 function run<T>(mode: IDBTransactionMode, work: (store: IDBObjectStore) => IDBRequest<T> | null): Promise<T | null> {
-  return open().then((db) => new Promise<T | null>((resolve) => {
+  return open(mode === "readwrite").then((db) => new Promise<T | null>((resolve) => {
     if (!db) { resolve(null); return; }
     try {
       const tx = db.transaction(STORE, mode);

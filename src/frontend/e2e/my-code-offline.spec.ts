@@ -494,8 +494,11 @@ test("the phone's copy is the member's alone: signing out deletes it", async ({ 
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect.poll(async () => (await storedReads(page))?.length ?? 0).toBe(0);
-  const names = await page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
-  expect(names).not.toContain("crusaders-member-data");
+  // Deleted, not just emptied — and deletion is asynchronous: the poll's own connection above can
+  // hold the delete for a beat. (A read racing the wipe once re-made the store by name; reads no
+  // longer create it — `memberStore.open`.)
+  await expect.poll(() => page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name)))
+    .not.toContain("crusaders-member-data");
   // (Offline after this the app itself is gone too: the sign-out purges the worker's caches —
   // `offline-shell.spec`'s business.)
 });

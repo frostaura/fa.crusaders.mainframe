@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
-import { bigText, fontsReady, sideways } from "./layoutKit";
+import { bigText, firstBookInView, fontsReady, sideways } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./playersKit";
 import { myPlayFixture } from "./playKit";
 
@@ -52,18 +52,22 @@ async function openBookings(page: Page, width: number, height: number, query = `
 }
 
 const FIRST_BOOK = '[role="grid"] button[aria-label^="Book "]';
-const firstBookTop = (page: Page) => page.locator(FIRST_BOOK).first().evaluate((el) => el.getBoundingClientRect().top);
 const mainScrollTop = (page: Page) => page.evaluate(() => document.querySelector("main")!.scrollTop);
 
 test.describe("§4.2 — on a phone Bookings opens with the first bookable row in view", () => {
   test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
 
-  test("at 390 the first Book cell is in the top part of the screen, nothing above it removed", async ({ page }) => {
+  // 2026-10 (Dean): the grid fills the room and scrolls ITSELF; the page no longer scrolls to the
+  // week. "In view" is now: the grid's own scroller opens at the first bookable row, and that row
+  // is on the first screen (y 527 at 390 × 844 with three games and invites above it; R7's page
+  // scroll had it at ~300).
+  test("at 390 the first Book cell is in view inside the grid's own scroller, nothing above it removed", async ({ page }) => {
     await openBookings(page, 390, 844);
-    const top = await firstBookTop(page);
-    test.info().annotations.push({ type: "first Book cell y at 390", description: String(Math.round(top)) });
-    // Measured before (R6/R7): 555–759 with the games strip, picker and court chips above it.
-    expect(top, "first Book cell's y at 390").toBeLessThanOrEqual(360);
+    const first = await firstBookInView(page);
+    test.info().annotations.push({ type: "first Book cell y at 390", description: String(Math.round(first.top)) });
+    expect(first.inScroller, "the first Book cell is outside the grid's scroller, or under its court header").toBe(true);
+    expect(first.onScreen, `the first Book cell at y=${Math.round(first.top)} is off the first screen`).toBe(true);
+    const top = first.top;
     expect(top, "below the app bar and the week").toBeGreaterThan(56);
     // Nothing removed: the games strip and the invites link are still on the page, above.
     await expect(page.locator("[data-upcoming]")).toHaveCount(1);
@@ -76,7 +80,10 @@ test.describe("§4.2 — on a phone Bookings opens with the first bookable row i
 
   test("without a date in the address the same holds (the club's today)", async ({ page }) => {
     await openBookings(page, 390, 844, "");
-    expect(await firstBookTop(page)).toBeLessThanOrEqual(360);
+    // Today the rows before now are drawn too, so this is the grid's own opening scroll at work.
+    const first = await firstBookInView(page);
+    expect(first.inScroller, "the grid did not open at the first bookable row").toBe(true);
+    expect(first.onScreen).toBe(true);
   });
 
   test("a re-read never scrolls the page again: the member's own scroll is kept", async ({ page }) => {

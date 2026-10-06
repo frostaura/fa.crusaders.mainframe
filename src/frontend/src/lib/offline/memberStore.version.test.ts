@@ -23,7 +23,7 @@ function fakeIndexedDb(oldVersion: number, opened: Opened[]) {
         close: () => undefined,
         onversionchange: null as unknown,
       };
-      const request = { result: db } as Record<string, unknown>;
+      const request = { result: db, transaction: { abort: () => actions.push("abort") } } as Record<string, unknown>;
       queueMicrotask(() => {
         (request.onupgradeneeded as (e: { oldVersion: number }) => void)?.({ oldVersion });
         (request.onsuccess as () => void)?.();
@@ -57,7 +57,15 @@ describe("the member's kept reads, after P13", () => {
     const opened: Opened[] = [];
     vi.stubGlobal("indexedDB", fakeIndexedDb(0, opened));
     const store = await import("./memberStore");
-    await store.readOne("u-1", "wallet");
+    await store.writeRead({ owner: "u-1", key: "wallet", at: Date.now(), value: {} });
     expect(opened[0].actions).toEqual(["create:reads"]);
+  });
+
+  it("a READ never creates it: one racing a sign-out's wipe re-made the deleted store by name", async () => {
+    const opened: Opened[] = [];
+    vi.stubGlobal("indexedDB", fakeIndexedDb(0, opened));
+    const store = await import("./memberStore");
+    expect(await store.readOne("u-1", "wallet")).toBeNull();
+    expect(opened[0].actions).toEqual(["abort"]);
   });
 });

@@ -100,3 +100,42 @@ export async function widthUsed(page: Page): Promise<number> {
 export async function fontsReady(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => null));
 }
+
+/** Where the Bookings grid's first bookable cell sits: on the screen, and inside the grid's own scroller. */
+export type FirstBook = {
+  /** The cell's top in the viewport. */
+  top: number;
+  /** Inside the scroller's box, below its sticky court header. */
+  inScroller: boolean;
+  /** Above the phone's tab bar (and any docked bar), so on the first screen. */
+  onScreen: boolean;
+  /** How far the grid's own scroller had to move to show it. */
+  gridScroll: number;
+  /** How far the PAGE (`<main>`) is scrolled. */
+  pageScroll: number;
+};
+
+/**
+ * §4.2 under the 2026-10 shell (Dean: the grid fills the room and scrolls ITSELF; the page holds
+ * still): "Bookings opens with the first bookable row in view" is now a fact about the grid's own
+ * scroller — it opens scrolled to that row, the row clear of the sticky court header — not about
+ * the page being scrolled to the week.
+ */
+export async function firstBookInView(page: Page, selector = '[role="grid"] button[aria-label^="Book "]'): Promise<FirstBook> {
+  return page.locator(selector).first().evaluate((cell) => {
+    const scroller = cell.closest<HTMLElement>("[data-grid-scroller]")!;
+    const header = scroller.querySelector<HTMLElement>("[data-court-col]");
+    const r = cell.getBoundingClientRect();
+    const s = scroller.getBoundingClientRect();
+    const root = getComputedStyle(document.documentElement);
+    const below = (parseFloat(root.getPropertyValue("--app-bottom-bar-height")) || 0) + (parseFloat(root.getPropertyValue("--context-bar-height")) || 0);
+    const headerBottom = header ? header.getBoundingClientRect().bottom : s.top;
+    return {
+      top: r.top,
+      inScroller: r.top >= headerBottom - 1 && r.bottom <= s.bottom + 1,
+      onScreen: r.top >= 0 && r.bottom <= window.innerHeight - below + 1,
+      gridScroll: scroller.scrollTop,
+      pageScroll: document.querySelector("main")!.scrollTop,
+    };
+  });
+}

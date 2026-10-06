@@ -230,8 +230,8 @@ test("a member who has opened the app once can open it again with no signal at a
 
     // The proof that the APP booted rather than just the HTML arriving: the document title is
     // set by `RouteAnnouncer` from JavaScript. The static `index.html` says "Crusaders
-    // Mainframe" and nothing else ever changes it.
-    await expect(cold).toHaveTitle(/— Crusaders Mainframe$/, { timeout: 15_000 });
+    // Squash Club — Durban North", which this pattern cannot match.
+    await expect(cold).toHaveTitle(/— Crusaders Squash$/, { timeout: 15_000 });
     const rendered = await cold.evaluate(() => document.getElementById("root")?.childElementCount ?? 0);
     expect(rendered, "the shell loaded but React never rendered into it").toBeGreaterThan(0);
     await cold.close();
@@ -292,7 +292,7 @@ test("a lapsed session drops what could be a member's, keeps the shell, and My C
       localStorage.setItem("crusaders.mainframe.token", "a.member.token");
     });
     await page.goto(`${origin}/my-code`);
-    await expect(page).toHaveTitle(/— Crusaders Mainframe$/, { timeout: 15_000 });
+    await expect(page).toHaveTitle(/— Crusaders Squash$/, { timeout: 15_000 });
 
     // The session lapses: the next check is refused, and so is the refresh cookie.
     mode.api = "lapsed";
@@ -310,7 +310,7 @@ test("a lapsed session drops what could be a member's, keeps the shell, and My C
       const cold = await context.newPage();
       await pinPhoneOffline(cold);
       await cold.goto(`${origin}/my-code`);
-      await expect(cold).toHaveTitle(/— Crusaders Mainframe$/, { timeout: 15_000 });
+      await expect(cold).toHaveTitle(/— Crusaders Squash$/, { timeout: 15_000 });
       await cold.close();
     } finally {
       await context.setOffline(false);
@@ -334,7 +334,7 @@ test("a navigation the network never answers opens from the cached shell in a fe
     const cold = await context.newPage();
     const started = Date.now();
     await cold.goto(`${origin}/my-code`, { waitUntil: "commit", timeout: 10_000 });
-    await expect(cold).toHaveTitle(/— Crusaders Mainframe$/, { timeout: 10_000 });
+    await expect(cold).toHaveTitle(/— Crusaders Squash$/, { timeout: 10_000 });
     expect(Date.now() - started, "the stalled navigation waited on the network").toBeLessThan(8_000);
     await cold.close();
   } finally {
