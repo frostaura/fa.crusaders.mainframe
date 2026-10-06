@@ -428,17 +428,19 @@ describe("play (lib/playApi.ts)", () => {
 
 describe("players at the desk (lib/playersApi.ts)", () => {
   const ADMIN = "Services/Players/PlayersAdminService.cs";
+  const SERVICE = "Services/Players/PlayersService.cs";
 
   it("add answers the organiser's own add", () => {
     expect(serverBody(ADMIN, "AddAsync")).toContain("return added;");
-    const SERVICE = "Services/Players/PlayersService.cs";
     reads(only(at(SERVICE, "AddSeatsAsync", "PlayerOutcome.Ok(")), F.addPlayersAnswer());
     reads(only(at(SERVICE, "AddSeatsAsync", "Select(a => ")), F.addedParticipant());
   });
 
   it("remove, accept, settle outside and collect", () => {
     reads(only(at(ADMIN, "WithReturnStateAsync", "PlayerOutcome.Ok(")), F.returnAnswer());
-    reads(only(at(ADMIN, "SaveAndSettleAsync", "PlayerOutcome.Ok(")), F.seatAnswer());
+    // R18 J18-2: the seat answer is built once, by PlayersService.AlreadyThere (a won race and a twin
+    // that found the seat already there answer alike).
+    reads(only(at(SERVICE, "AlreadyThere", "PlayerOutcome.Ok(")), F.seatAnswer());
     reads(only(at(ADMIN, "CollectAsync", "PlayerOutcome.Ok(")), F.collectAnswer());
   });
 });
