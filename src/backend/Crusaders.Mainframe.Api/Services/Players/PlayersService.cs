@@ -203,6 +203,7 @@ public sealed partial class PlayersService
         {
             if (game!.Live.Any(s => s.UserId == spec.UserId)) return PlayerOutcome.Refuse(409, PlayerErrors.AlreadyInBooking, new { user_id = spec.UserId });
         }
+        if (FullRefusal(game!, specs) is { } full) return full;
         if (!asAdmin && InviteLoopRefusal(game!, specs) is { } loop) return loop;
 
         var taken = game!.Live.Select(s => s.Seat).Append(1).ToList();
@@ -214,6 +215,24 @@ public sealed partial class PlayersService
         if (await DailyLimitRefusalAsync(game, specs, now, ct) is { } atLimit) return atLimit;
 
         return await AddSeatsAsync(new AddWork(game, req with { SplitMode = mode }, club?.ActorId ?? organiserId, now, bookingLock) { Club = club }, ct);
+    }
+
+    /// <summary>
+    /// R19 J19-5: no room is said as no room. Four live seats (the organiser's counts, written or not)
+    /// is <c>409 booking_full</c> — "This booking already has four players." — for the organiser and the
+    /// desk, member, guest or link alike; fewer seats left than players asked for is
+    /// <c>409 too_many_players</c> with <c>free_seats</c>. Both were <c>seat_taken</c> ("That seat was
+    /// taken a moment ago. Pick another."), which sent the organiser looking for a seat that does not
+    /// exist. A seat NAMED in the request that someone holds, with room elsewhere, is still
+    /// <c>seat_taken</c> (<see cref="PlanSeats"/>).
+    /// </summary>
+    private static PlayerOutcome? FullRefusal(Game game, IReadOnlyList<PlayerSpec> specs)
+    {
+        var free = BookingParticipant.MaxSeats - game.Live.Select(s => s.Seat).Append(1).Distinct().Count();
+        if (free <= 0) return PlayerOutcome.Refuse(409, PlayerErrors.BookingFull, new { max_players = BookingParticipant.MaxSeats });
+        return specs.Count > free
+            ? PlayerOutcome.Refuse(409, PlayerErrors.TooManyPlayers, new { max_players = BookingParticipant.MaxSeats - 1, free_seats = free })
+            : null;
     }
 
     /// <summary>
@@ -614,11 +633,10 @@ public sealed partial class PlayersService
         var mode = SplitModes.Normalise(req.Mode);
         if (mode is null) return PlayerOutcome.Refuse(400, SplitCalculator.InvalidMode, new { allowed = SplitModes.All });
 
-        var figures = new Dictionary<Guid, (int, decimal)>();
-        foreach (var s in req.Seats ?? [])
+        if (SplitFigures(game, req) is not { } figures)
         {
-            if (!game.Live.Any(l => l.Id == s.ParticipantId)) return PlayerOutcome.Refuse(400, PlayerErrors.SplitNeedsSeats, new { participant_id = s.ParticipantId });
-            figures[s.ParticipantId] = (s.Weight ?? 1, s.Amount ?? 0m);
+            var unknown = (req.Seats ?? []).First(s => !game.Live.Any(l => l.Id == s.ParticipantId)).ParticipantId;
+            return PlayerOutcome.Refuse(400, PlayerErrors.SplitNeedsSeats, new { participant_id = unknown });
         }
 
         var before = game.Live.ToDictionary(s => s.Id, s => s.ShareMinutes);
@@ -635,10 +653,59 @@ public sealed partial class PlayersService
                 _db, game.Booking, seat, game.Settings, $"split:{seat.Id:N}:{now.UtcTicks}", ct), game.Settings);
         }
 
-        if (await SaveAsync(ct) is { } conflict) return conflict;
+        if (await SaveAsync(ct) is { } conflict)
+        {
+            return conflict.Error == PlayerErrors.Conflict ? await SplitTwinAsync(bookingId, organiserId, req, ct) ?? conflict : conflict;
+        }
         // I4-5: the organiser's own split change — their receipts are born read. R14 E14-2: their act on the ledger too.
         await AfterAsync(game.Booking.Id, changed.Select(s => s.UserId!.Value), ct, new ReconcileOptions(organiserId) { OwnActionBy = organiserId });
-        return PlayerOutcome.Ok(new
+        return PlayerOutcome.Ok(SplitAnswer(game, mode));
+    }
+
+    /// <summary>The figures a split request names, by seat; null when it names a seat that is not live.</summary>
+    private static Dictionary<Guid, (int, decimal)>? SplitFigures(Game game, SplitRequest req)
+    {
+        var figures = new Dictionary<Guid, (int, decimal)>();
+        foreach (var s in req.Seats ?? [])
+        {
+            if (!game.Live.Any(l => l.Id == s.ParticipantId)) return null;
+            figures[s.ParticipantId] = (s.Weight ?? 1, s.Amount ?? 0m);
+        }
+        return figures;
+    }
+
+    /// <summary>
+    /// R19 J19-6: a re-split that lost its save to another write on the booking's seats. When the seats
+    /// already stand exactly where THIS request would put them — every live share, weight and the mode —
+    /// the winner was its twin (a double tap, a retried request): the same 200 and the same shares, and
+    /// nothing written, as R18's seat twins. Anything else (a different split, an accept, a removal) is
+    /// null, and the caller keeps <c>conflict_retry</c>.
+    /// </summary>
+    private async Task<PlayerOutcome?> SplitTwinAsync(Guid bookingId, Guid organiserId, SplitRequest req, CancellationToken ct)
+    {
+        try
+        {
+            var mode = SplitModes.Normalise(req.Mode)!;
+            var game = await LoadAsync(bookingId, ct);
+            if (OrganiserGate(game, organiserId, DateTimeOffset.UtcNow) is not null || game!.Organiser is null) return null;
+            if (SplitFigures(game, req) is not { } figures) return null;
+            var stood = game.Live.ToDictionary(s => s.Id, s => (s.ShareMinutes, s.ShareWeight, s.ConsentedMinutes));
+            var modeStood = game.Organiser.SplitMode == mode;
+            if (Resplit(game, mode, figures) is not null || !modeStood) return null;
+            var unmoved = game.Live.All(s => stood[s.Id] == (s.ShareMinutes, s.ShareWeight, s.ConsentedMinutes));
+            return unmoved ? PlayerOutcome.Ok(SplitAnswer(game, mode)) : null;
+        }
+        finally
+        {
+            // A look, never a write: whatever Resplit set on the tracked seats goes nowhere.
+            _db.ChangeTracker.Clear();
+        }
+    }
+
+    /// <summary>A re-split's answer: the mode and every live seat's share, weight and whether it asks for consent.</summary>
+    private static object SplitAnswer(Game game, string mode)
+    {
+        return new
         {
             booking_id = game.Booking.Id,
             split_mode = mode,
@@ -651,7 +718,7 @@ public sealed partial class PlayersService
                 // R16 J16-1: the one rule — a share the club settled by hand asks nothing.
                 needs_consent = s.Seat > 1 && PlayerNotices.NeedsConsent(game.Booking, s),
             }).ToList(),
-        });
+        };
     }
 
     // ------------------------------------------------------------------ plumbing

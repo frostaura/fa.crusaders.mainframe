@@ -23,8 +23,9 @@ public sealed record PartnerRefund(
 /// organiser's net refund off its <c>Owed</c>; a partner's refund is what they paid above that.
 /// (Today that is everything they paid unless the lights have been on, when it is nothing — the
 /// late-cancel penalty is the organiser's alone.) After a cancellation the same sum is taken from
-/// what each partner had paid BEFORE it, so a return that has to wait for cover (D11, returns) is
-/// still reported as owed back to them.
+/// what each partner had paid when the cancel took the booking — read off the ledger afterwards
+/// (R19 J19-4) — so a return that has to wait for cover (D11, returns) is still reported as owed
+/// back to them, and an accept that landed while the cancel was on its way is reported too.
 /// </para>
 /// </summary>
 public sealed class SplitCancelView
@@ -38,7 +39,10 @@ public sealed class SplitCancelView
         _db = db; _shares = shares; _settings = settings;
     }
 
-    /// <summary>What each accepted member partner has paid towards this booking, now.</summary>
+    /// <summary>
+    /// What each member partner has paid towards this booking, now. Not what a cancel's answer is
+    /// built from any more (R19 J19-4 — see <see cref="AfterAsync(Guid, CancellationToken)"/>).
+    /// </summary>
     public async Task<Dictionary<Guid, int>> PaidByPartnerAsync(Guid bookingId, CancellationToken ct)
     {
         var seats = await PartnerSeatsAsync(bookingId, ct);
@@ -79,22 +83,51 @@ public sealed class SplitCancelView
         return await NameAsync(seats, s => paidBefore[s.Id] - targetAfter[s.Id], ct);
     }
 
-    /// <summary>After the cancellation has settled: each partner's refund against what they had paid before it.</summary>
-    public async Task<List<PartnerRefund>> AfterAsync(Guid bookingId, Dictionary<Guid, int> paidBefore, CancellationToken ct)
+    /// <summary>
+    /// After the cancellation has settled: each partner's refund — what they had paid when the cancel
+    /// took the booking, less what the share rule leaves them now.
+    ///
+    /// <para>
+    /// <b>R19 J19-4: "what they had paid" is read off the ledger AFTER the fact, never off a snapshot
+    /// taken before the cancel.</b> A partner's accept that landed while the cancel was on its way (the
+    /// accept holds the booking row; the cancel's write waits for it) paid a share the snapshot never
+    /// saw, the cancel's reconcile sent it straight back, and the answer said <c>partner_refunds: []</c>
+    /// with a net that counted the partner's minutes as the organiser's. Now: paid at the cancel = what
+    /// is still paid in + every return posted from the cancellation's instant on
+    /// (<see cref="ShareLedger.ReturnedOfAsync"/>, the detail view's M4-4 rule). A collection can only
+    /// land before the cancel (a cancelled game collects nothing), so it is in the first term; a return
+    /// that has to wait for cover is still paid in, so it is still reported as owed back.
+    /// </para>
+    /// </summary>
+    public async Task<List<PartnerRefund>> AfterAsync(Guid bookingId, CancellationToken ct)
     {
         var booking = await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
-        if (booking is null || paidBefore.Count == 0) return [];
+        if (booking is null) return [];
 
         var seats = await PartnerSeatsAsync(bookingId, ct);
+        if (seats.Count == 0) return [];
         var owed = await _shares.OwedAsync(booking, ct);
         var settings = await _settings.GetAsync(ct);
-        var targets = new Dictionary<Guid, int>();
+        var refunds = new Dictionary<Guid, int>();
         foreach (var s in seats)
         {
-            var before = paidBefore.GetValueOrDefault(s.Id);
-            targets[s.Id] = ShareLedger.TargetFor(booking, s, owed, before, ShareLedger.IsClosed(booking, s, settings, DateTimeOffset.UtcNow));
+            var returned = booking.CancelledAt is { } at ? await ShareLedger.ReturnedOfAsync(_db, s, ct, at) : 0;
+            var paidAtCancel = await _shares.PaidAsync(s, ct) + returned;
+            var target = ShareLedger.TargetFor(booking, s, owed, paidAtCancel, ShareLedger.IsClosed(booking, s, settings, DateTimeOffset.UtcNow));
+            refunds[s.Id] = paidAtCancel - target;
         }
-        return await NameAsync(seats, s => paidBefore.GetValueOrDefault(s.Id) - targets[s.Id], ct);
+        return await NameAsync(seats, s => refunds[s.Id], ct);
+    }
+
+    /// <summary>
+    /// <see cref="AfterAsync(Guid, CancellationToken)"/> for a caller that still reads
+    /// <see cref="PaidByPartnerAsync"/> first (the bulk cancel). The pre-read is no longer consulted
+    /// (R19 J19-4): it is what missed an accept landing mid-cancel.
+    /// </summary>
+    public Task<List<PartnerRefund>> AfterAsync(Guid bookingId, IReadOnlyDictionary<Guid, int> paidBefore, CancellationToken ct)
+    {
+        _ = paidBefore;
+        return AfterAsync(bookingId, ct);
     }
 
     private Task<List<BookingParticipant>> PartnerSeatsAsync(Guid bookingId, CancellationToken ct) =>

@@ -83,16 +83,47 @@ public sealed partial class PlayersService
     /// theirs AND the consent on it still covers the share, and the share is still the figure the
     /// caller agreed to. A share raised between the two taps is a 409 with the current figure,
     /// never a stale 200 that reads as "you agreed to this".
+    ///
+    /// <para>
+    /// R19 J19-1: the winner need not have been an accept — the organiser's re-split or nudge, or the
+    /// desk, wrote the same seat between this accept's read and its save. The seat is read again as it
+    /// now stands (<see cref="AfterLostAcceptAsync"/>) and answered for what it is: closed only when it
+    /// really closed, never "this invite has closed" above an invite that is still open.
+    /// </para>
     /// </summary>
     internal async Task<PlayerOutcome> AlreadyAnsweredAsync(Guid seatId, Guid me, CancellationToken ct, int? expected = null)
     {
         var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seatId, ct);
-        if (seat?.UserId != me || seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.InviteClosed);
+        if (seat?.UserId != me || seat.Status != ParticipantStatus.Accepted) return await AfterLostAcceptAsync(seatId, me, expected, ct);
         if (seat.ConsentedMinutes < seat.ShareMinutes || (expected is { } e && seat.ShareMinutes > e))
         {
             return PlayerOutcome.Refuse(409, PlayerErrors.ShareChanged, new { share_minutes = seat.ShareMinutes });
         }
         return PlayerOutcome.Ok(await AnswerAsync(seat, ct));
+    }
+
+    /// <summary>
+    /// R19 J19-1: a lost accept on a seat that is not the caller's accepted seat. Gone, or somebody
+    /// else's now → <c>invite_closed</c> (a link seat another member claimed first); the game or the
+    /// seat closed → what the accept itself would answer now (<see cref="StandingRefusal"/>:
+    /// <c>booking_not_open</c>, <c>invite_closed</c>, …). Still open → <c>share_changed</c> with the
+    /// current figure when the share is not the one the partner was shown (up or down: their next tap
+    /// must be on the figure now on the sheet), else <c>conflict_retry</c> — the house answer to a
+    /// lost race (R18 J18-4), asked again and taken. Nothing was written: the save rolled back whole.
+    /// </summary>
+    private async Task<PlayerOutcome> AfterLostAcceptAsync(Guid seatId, Guid me, int? expected, CancellationToken ct)
+    {
+        var current = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seatId, ct);
+        var game = current is null ? null : await LoadAsync(current.BookingId, ct);
+        var seat = game?.Seats.FirstOrDefault(s => s.Id == seatId);
+        _db.ChangeTracker.Clear();
+        if (game is null || seat is null || (seat.UserId is { } owner && owner != me)) return PlayerOutcome.Refuse(409, PlayerErrors.InviteClosed);
+        if (StandingRefusal(game, seat, me, DateTimeOffset.UtcNow) is { } closed) return closed;
+        if (expected is { } shown && seat.ShareMinutes != shown)
+        {
+            return PlayerOutcome.Refuse(409, PlayerErrors.ShareChanged, new { share_minutes = seat.ShareMinutes });
+        }
+        return PlayerOutcome.Refuse(409, PlayerErrors.Conflict);
     }
 
     private async Task<PlayerOutcome> AcceptUnderLockAsync(AcceptAsk ask, CancellationToken ct)

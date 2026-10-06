@@ -112,8 +112,9 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         var response = await club.Client(f, club.Organiser).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players",
             new { players = new object[] { new { guestName = "Uncle Bob" } } });
 
+        // R19 J19-5: no room is "booking_full", not "that seat was taken" (a seat to pick does not exist).
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Equal(PlayerErrors.SeatTaken, (await JsonAsync(response)).GetProperty("error").GetString());
+        Assert.Equal(PlayerErrors.BookingFull, (await JsonAsync(response)).GetProperty("error").GetString());
 
         // And the database says so on its own, whatever the service believes.
         var extra = await Assert.ThrowsAsync<DbUpdateException>(() => club.InsertSeatAsync(
