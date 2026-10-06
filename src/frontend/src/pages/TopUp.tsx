@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { endpoints, phoneIsOffline, type MinutesShelf, type PayFastFormField, type ShelfPackage } from "../lib/api";
 import { isConnectionFailure } from "../lib/offline/useCachedRead";
 import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
@@ -171,6 +171,7 @@ function usePurchase(
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const inFlight = useRef(false);
+  const navigate = useNavigate();
   const shelfRef = useRef(shelf);
   useEffect(() => { shelfRef.current = shelf; }, [shelf]);
 
@@ -184,15 +185,17 @@ function usePurchase(
       const res = await endpoints.minutesPurchase(pkg.id, pkg.price_zar);
       // The way back (an invite, usually) must survive PayFast, whose return URLs are the server's.
       rememberTopUpReturn(res.purchase_id, returnTo);
-      postToGateway(res.redirect_url, res.form_fields);
-      // Stays pending: the page is leaving for PayFast.
+      // The demo club pays nobody: the purchase is already complete, and its result is an app page.
+      if (res.simulated) navigate(res.redirect_url);
+      else postToGateway(res.redirect_url, res.form_fields);
+      // Stays pending: the page is leaving for PayFast (or for the result).
       return;
     } catch (error) {
       setNotice(await refusalNotice(error, openBefore, setShelf, reload));
     }
     inFlight.current = false;
     setPending(false);
-  }, [returnTo, setShelf, reload]);
+  }, [returnTo, setShelf, reload, navigate]);
 
   return { run, pending, notice, clearNotice: () => setNotice(null) };
 }

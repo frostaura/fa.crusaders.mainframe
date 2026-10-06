@@ -12,6 +12,7 @@ import { walletHref } from "@/lib/walletLabel";
 import { Minutes } from "@/components/Minutes";
 import { NO_FIGURE_SPOKEN } from "@/lib/minutes";
 import { useChipBalance } from "./chipBalance";
+import { DemoPart } from "./demoChrome";
 import { useAuth } from "@/lib/useAuth";
 import {
   ADMIN_TOUR_PATH, GET_STARTED_PATH, GUIDE_LINK_LABEL, GUIDE_PATH, REPLAY_ADMIN_TOUR, REPLAY_WELCOME,
@@ -165,6 +166,7 @@ export function AccountMenu() {
             </Link>
           </DropdownMenuItem>
         ) : null}
+        {admin ? <DemoPart part="menu" /> : null}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Appearance</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={theme} onValueChange={(value) => { if (isThemeChoice(value)) setTheme(value); }}>

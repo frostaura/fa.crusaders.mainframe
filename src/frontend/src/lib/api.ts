@@ -1796,6 +1796,11 @@ export type PurchaseStart = {
   package: { id: string; name: string; minutes: number };
   /** The locked price — what PayFast is asked for. */
   amount_zar: number;
+  /**
+   * The demo club: no PayFast — the purchase is ALREADY completed and the minutes are on the
+   * ledger. `redirect_url` is then a relative app path (`/wallet/buy/<id>`) and `form_fields` empty.
+   */
+  simulated?: boolean;
 };
 
 /** `GET /api/v1/minutes/purchase/{id}` and its cancel return (§3.4). */

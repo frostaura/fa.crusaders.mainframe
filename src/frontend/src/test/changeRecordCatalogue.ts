@@ -478,6 +478,19 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
       rows: 57, truncated: false,
     },
   }),
+  // The demo club (AdminModeEndpoints): written into the REAL club's record, nothing stored either side.
+  row({
+    action: "demo.entered", area: "setting", headline: "Opened the demo club",
+    writer: "AdminModeEndpoints.SwitchAsync", before: null, after: null,
+  }),
+  row({
+    action: "demo.left", area: "setting", headline: "Came back from the demo club",
+    writer: "AdminModeEndpoints.SwitchAsync", before: null, after: null,
+  }),
+  row({
+    action: "demo.reset", area: "setting", headline: "Reset the demo club's made-up data",
+    writer: "AdminModeEndpoints.ResetAsync", before: null, after: null,
+  }),
   row({
     action: "webhook.created", area: "setting", headline: "Added a webhook — Court lights",
     writer: "WebhookEndpoints.StageChangeAsync", before: null,

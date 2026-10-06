@@ -209,8 +209,10 @@ export function DeviceApiKeyPanel() {
       </CardHeader>
 
       <CardContent className="flex flex-col gap-4 px-2 @[16rem]/keycard:px-4">
-        {failed !== null && (
-          <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">{keyReadFailure(failed)}</p>
+        {failed !== null && (isDemoClub(failed)
+          // The demo club: boards cannot connect to it, so there is no key — a fact, not a failure.
+          ? <p data-device-key-demo="" className="text-sm text-text-secondary">{DEMO_NO_KEY}</p>
+          : <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">{keyReadFailure(failed)}</p>
         )}
 
         {key && (
@@ -250,6 +252,11 @@ export function DeviceApiKeyPanel() {
   );
 }
 
+/** The demo club answers `409 demo_mode` for its device key: boards cannot connect to it. */
+function isDemoClub(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && err.code === "demo_mode";
+}
+
 /** Why the key could not be read — a rate limit is busy, not an API that lacks the route (R3 V-10). */
 function keyReadFailure(err: unknown): string {
   if (err instanceof ApiError && err.status === 429) {
@@ -257,6 +264,12 @@ function keyReadFailure(err: unknown): string {
   }
   return "Could not read the club's device key. Reload the page; if it keeps failing, the API is not serving it yet.";
 }
+
+/**
+ * The demo club's answer (`409 demo_mode`). Here rather than in `lib/demoModeCopy`, which is the
+ * admin's demo chunk: sharing it would split a chunk off and name it in every member's entry.
+ */
+const DEMO_NO_KEY = "Boards can't connect to the demo club, so it has no device key. Switch back to the live club to pair a board.";
 
 const KEY_ISSUED = "New key issued. The old one stopped working immediately — every board, court boxes and door gates alike, "
   + "has to be reflashed with this one before it can call in again.";

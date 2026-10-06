@@ -71,9 +71,10 @@ function buildId(emitted: string[], publicDir: string): string {
  * What a member's install does NOT fetch — precached last, once the worker is in control. The
  * desk's pages and its frame (`adminFrame.ts` — it was in the member set, 20 kB gzip, because the
  * entry names it lazily), and (R4, P4-6) the chart code: 124 kB gzip that only the wallet's
- * Activity tab and the desk's reports draw, which made up a fifth of a member's install.
+ * Activity tab and the desk's reports draw, which made up a fifth of a member's install. And the demo
+ * club's chrome (`demoMode.tsx`): the shell names it lazily, but only an admin ever loads it.
  */
-const DESK_PAGES = /\/src\/(?:pages\/(?:admin\/|monitoring\/|Admin[A-Z]|DevPrimitives|dev\/)|adminFrame\.ts$)/;
+const DESK_PAGES = /\/src\/(?:pages\/(?:admin\/|monitoring\/|Admin[A-Z]|DevPrimitives|dev\/)|adminFrame\.ts$|demoMode\.tsx$)/;
 /**
  * Chart code, by module: a shared chunk has no facade to test, so its modules are looked at. ONLY
  * the chart component and the chart library — R16 X16-1: the rule used to take every module under
@@ -159,9 +160,29 @@ function phosphorWeights(keep: readonly string[]): Plugin {
       const first = entries[0].index;
       const last = entries[5].index + entries[5][0].length;
       const kept = entries.filter((m) => keep.includes(m[1])).map((m) => m[0]);
-      return { code: code.slice(0, first) + kept.join(",") + code.slice(last), map: null };
+      return { code: sharedPaths(code.slice(0, first) + kept.join(",") + code.slice(last)), map: null };
     },
   };
+}
+
+/**
+ * Demo-mode lane (2026-10-06) — the `duotone` weight draws the `regular` outline again over its
+ * tinted shape, so every icon carried that path twice: 0.4–1.2 kB a glyph, about 0.5 kB of the entry
+ * paid for by the demo club's loader. A path string a module repeats is declared once, after its
+ * `import`, and named by each use; the elements are unchanged. Nothing to share: left as is.
+ */
+function sharedPaths(code: string): string {
+  const counts = new Map<string, number>();
+  for (const m of code.matchAll(/\bd: ("[^"]{24,}")/g)) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+  const repeated = [...counts].filter(([, n]) => n > 1).map(([path]) => path);
+  const head = code.indexOf("\n") + 1;
+  if (repeated.length === 0 || !code.startsWith("import ")) return code;
+  let body = code.slice(head);
+  const declared = repeated.map((path, i) => {
+    body = body.split(`d: ${path}`).join(`d: __sharedPath${i}`);
+    return `const __sharedPath${i} = ${path};\n`;
+  });
+  return code.slice(0, head) + declared.join("") + body;
 }
 
 /**
@@ -179,8 +200,10 @@ function chunkBudget(limitKb = 500): Plugin {
     // writeBundle, not generateBundle: it sees the final code Vite's own size report measures.
     writeBundle(_options, bundle) {
       const over = Object.values(bundle)
-        .filter((c) => c.type === "chunk" && c.code.length / 1000 > limitKb)
-        .map((c) => `${c.fileName} ${(c.type === "chunk" ? c.code.length / 1000 : 0).toFixed(1)} kB`);
+        // Bytes, as Vite's own report and warning count them — `code.length` counts UTF-16 units, and
+        // the entry's non-ASCII copy (dashes, quotes) made it pass at 499.8 while Vite warned at 500.3.
+        .filter((c) => c.type === "chunk" && Buffer.byteLength(c.code) / 1000 > limitKb)
+        .map((c) => `${c.fileName} ${(c.type === "chunk" ? Buffer.byteLength(c.code) / 1000 : 0).toFixed(1)} kB`);
       if (over.length > 0) this.error(`chunk budget ${limitKb} kB exceeded: ${over.join(", ")}`);
     },
   };

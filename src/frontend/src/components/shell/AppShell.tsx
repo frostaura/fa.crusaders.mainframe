@@ -12,6 +12,7 @@ import { CelebrationOverlay } from "../play/CelebrationOverlay";
 import { ShutDoorsBanner } from "../doors/ShutDoorsBanner";
 import { useDoorsChrome } from "../doors/useDoorsChrome";
 import { AccountMenu } from "./AccountMenu";
+import { DemoPart } from "./demoChrome";
 import { MinutesChip } from "./MinutesChip";
 import { CrestLink } from "./Crest";
 import { LANDING_PATH, PRIMARY_DESTINATIONS } from "./nav";
@@ -292,7 +293,7 @@ function useRememberedAdmin(confirmed: { userId: string; isAdmin: boolean } | nu
   return owner !== null && readLastAdmin() === owner;
 }
 
-/** The bar's one row: crest, the tabs (inline where there is room), the bell and the actions. */
+/** The bar's one row: crest, the tabs (inline where there is room), the bell and the actions; under it an admin's demo stripe. */
 function BarRow(props: {
   frame: ReturnType<typeof chromeFrame>;
   memberChrome: boolean;
@@ -330,7 +331,7 @@ function BarRow(props: {
         ) : null}
       </div>
     </div>
-    </>
+    {isAdmin ? <DemoPart part="stripe" /> : null}</>
   );
 }
 

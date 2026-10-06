@@ -3,12 +3,12 @@ import { ApiError, endpoints, endSessionGeneration, refreshIsOwed, refreshSessio
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 import { clearOfflineCache } from "./pwa";
 import { forgetLastKnown } from "./lastKnown";
-import { forgetClubZone } from "./clubZone";
 import { wipeMemberCode } from "./memberCode/keyStore";
 import { setDataOwner, setPersistGuard, wipeMemberData } from "./offline/queryCache";
 import { AuthContext, type AuthCtx, type AuthState, type SessionEnding } from "./useAuth";
 import { sessionCheckSent } from "./sessionCheck";
-import { clearLastIdentity, readLastIdentity, writeLastIdentity } from "./lastIdentity";
+import { readLastIdentity, writeLastIdentity } from "./lastIdentity";
+import { wipeSessionData } from "./sessionWipe";
 
 // Decode a JWT payload (best-effort — invalid tokens just return null).
 function decodeExp(token: string): number | null {
@@ -182,36 +182,6 @@ setPersistGuard((who) => tokenStore.get() !== null && readLastIdentity() === who
 setDataOwner(tokenStore.get() ? readLastIdentity() : null);
 
 /**
- * A session was given up: the id goes, and everything the page stored under it goes with it.
- *
- * <p>
- * Called from the sign-outs only — `logout` and "Sign out everywhere". It used to run on an
- * expiry too, on the argument that a shared club phone's session usually ends with nobody
- * pressing anything. The refresh cookie changed that argument (a session now lapses only after
- * 30 idle days or a server-side revocation), and the P7 decision settles the rest: only an
- * explicit sign-out wipes the member code's key (F4.1, see `endTakenAway`).
- * </p>
- *
- * <p>
- * It is the other half of `clearOfflineCache()`, not a duplicate of it. That purges the Cache
- * API; the member code page's last-known store is `localStorage`, which no cache purge touches,
- * and until D3 nothing ever cleared it because nothing ever rendered it while signed out.
- * </p>
- */
-function forgetIdentity(): void {
-  clearLastIdentity();
-  forgetLastKnown();
-  // D1 — the member code's key goes with the session (spec §10: "logout wipes the phone's key
-  // and does not rotate"). It is the one thing on this phone that can open a door for this
-  // member with no network, so a club phone handed to the next person must not keep it.
-  void wipeMemberCode();
-  // R3-3 — and the club goes too. The remembered zone is the CLUB's, not the member's, and a
-  // club-desk tablet is one browser profile shared by whoever holds it; a second club's admin
-  // signing in on it must not read the first club's midnight until their own payload lands.
-  forgetClubZone();
-}
-
-/**
  * The local half of every ending — `logout`, `signedOutEverywhere` and an expiry alike — so the
  * three can never wipe different things. A club phone is a shared device; the next person to
  * sign in must inherit nothing this browser stored while the last session was alive: the token,
@@ -221,13 +191,9 @@ function endLocally(): void {
   // C1 — first, so an exchange whose reply lands after this line is discarded, in every tab.
   endSessionGeneration(true);
   tokenStore.clear();
-  // Every cache but the offline shell (M5-1): the shell is no member's, and with it gone the next
-  // person could not open the app offline at all.
-  void clearOfflineCache();
-  // R4 wave B — the member's reads kept on the phone (`lib/offline`): sign-out and "sign out
-  // everywhere" leave nothing of them, in memory or in IndexedDB.
-  void wipeMemberData();
-  forgetIdentity();
+  // Every cache but the offline shell (M5-1), the member's reads kept on the phone (R4 wave B), and
+  // through `sessionWipe`'s `forgetIdentity` the code's key: sign-out leaves nothing of them, in memory or stored.
+  void wipeSessionData();
 }
 
 /**

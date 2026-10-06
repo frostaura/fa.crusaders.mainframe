@@ -322,6 +322,13 @@
       animation-name: none !important;
     }
   }
+
+  /*
+   * The demo club (admins only): the app bar's amber top edge while `DemoStripe` marks the
+   * document — the second cue beside the stripe's words. Here rather than as a class on the header,
+   * which would put it in every member's entry chunk.
+   */
+  html[data-demo-mode] [data-app-header] { border-top: 4px solid rgb(var(--color-warning-strong)); }
 }
 
 @layer utilities {
