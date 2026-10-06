@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import { UNSAFE_LocationContext, matchPath } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { useToast } from "@/components/toastContext";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { firstName } from "@/lib/playersNames";
 import { standingShares } from "@/lib/standingShares";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL, refusalReason } from "@/lib/bookingsCopy";
+import { CANCEL_ENDED, type CancelFrom } from "@/lib/cancelSheetCopy";
 import { BulkResults } from "./BulkResults";
 import { MoneyRows, SendingNote, SlotList, type MoneyRow, type SlotLine } from "./SheetParts";
 import { useRefusalInView } from "./useRefusalInView";
@@ -97,15 +99,36 @@ function useOptionalPush() {
 }
 
 /** Its own words — never the booking's "Nothing was booked" under a failed cancel (F1.2). */
-function failureSentence(error: unknown): string {
-  return error instanceof ApiError || error instanceof UnsureOutcome || error instanceof NotSent
+function failureSentence(error: unknown, from: CancelFrom): string {
+  const said = error instanceof ApiError || error instanceof UnsureOutcome || error instanceof NotSent
     ? describeBookingError(error, CANCEL_SHEET.fallback, { action: "cancel" })
     : describeFailure(error, { action: CANCEL_SHEET.failedAction });
+  // R19 L19-5 — a stale-screen refusal ends "The schedule behind this is up to date now."; what is
+  // reloaded behind the sheet (`onStale`) is the page it was opened from, which may not be one.
+  return said.replace(CANCEL_ENDED.behind.schedule, CANCEL_ENDED.behind[from]);
+}
+
+/**
+ * Where the sheet was opened, read off the route (R19 L19-5): a booking's own page
+ * (`/bookings/:id`, the member's and the desk's panel alike), a member's bookings at the desk, or
+ * the schedule — the one place a bare render (no router) can only be.
+ */
+function useCancelFrom(): CancelFrom {
+  // The context, not `useLocation` (which throws without a router) — ConfirmButton's way.
+  const located = useContext(UNSAFE_LocationContext) as { location?: { pathname?: string } } | null;
+  return cancelFromPath(located?.location?.pathname ?? "");
+}
+
+function cancelFromPath(path: string): CancelFrom {
+  if (matchPath("/admin/members/:userId/bookings", path)) return "memberBookings";
+  if (matchPath("/bookings/:bookingId", path) && !matchPath("/bookings/invites", path)) return "booking";
+  return "schedule";
 }
 
 function useCancelFlow(props: FlowProps) {
   const { bookings, isAdmin, onClose, onBusy } = props;
   const late = useLateLanding(props.open);
+  const from = useCancelFrom();
   const quotes = useCancelQuotes(bookings);
   const [waive, setWaive] = useState(false);
   const [reason, setReason] = useState("");
@@ -159,7 +182,7 @@ function useCancelFlow(props: FlowProps) {
       },
       failure: (error) => {
         if (provesStaleGrid(error)) props.onStale?.();
-        late.sayIfGone("danger", () => failureSentence(error));
+        late.sayIfGone("danger", () => failureSentence(error, from));
       },
     },
   );
@@ -183,7 +206,7 @@ function useCancelFlow(props: FlowProps) {
   };
 
   return {
-    quotes, waive, setWaive, reason, setReason, reasonNeeded, forOthers, single, refused, sendable: ended ? 0 : sendable.length, ended,
+    quotes, waive, setWaive, reason, setReason, reasonNeeded, forOthers, single, refused, sendable: ended ? 0 : sendable.length, ended, from,
     reasonMissing: reasonShown && reasonNeeded && reason.trim() === "",
     action, run, confirm,
   };
@@ -198,8 +221,10 @@ function CancelFlowView(props: FlowProps) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{CANCEL_SHEET.title(count)}</DialogTitle>
-        <DialogDescription>{CANCEL_SHEET.description(count)}</DialogDescription>
+        {/* R19 L19-5 — refused for good, the sheet stops asking "Cancel this booking? Here's what
+            goes back…": nothing goes back and nothing is being cancelled. It says what happened. */}
+        <DialogTitle>{flow.ended ? CANCEL_ENDED.title : CANCEL_SHEET.title(count)}</DialogTitle>
+        <DialogDescription>{flow.ended ? CANCEL_ENDED.description : CANCEL_SHEET.description(count)}</DialogDescription>
       </DialogHeader>
       <DialogBody className="pb-4">
         <div className="flex flex-col gap-4">
@@ -254,8 +279,8 @@ function CancelBody({ flow, bookings }: { flow: CancelFlow; bookings: GridBookin
   if (flow.ended) {
     return (
       <>
-        <SlotList lines={bookings.map((b) => lineFor(b, undefined, false))} label={CANCEL_SHEET.title(bookings.length)} refusedWord="" />
-        <RefusalAlert failed={failed} />
+        <SlotList lines={bookings.map((b) => lineFor(b, undefined, false))} label={CANCEL_ENDED.title} refusedWord="" />
+        <RefusalAlert failed={failed} from={flow.from} />
       </>
     );
   }
@@ -265,16 +290,16 @@ function CancelBody({ flow, bookings }: { flow: CancelFlow; bookings: GridBookin
         ? <SingleCancel flow={flow} booking={bookings[0]} quotes={quotes} />
         : <ManyCancel flow={flow} bookings={bookings} quotes={quotes} />}
       <WaiveAndReason flow={flow} bookings={bookings} quotes={quotes} />
-      <RefusalAlert failed={failed} />
+      <RefusalAlert failed={failed} from={flow.from} />
       <p className="text-sm text-text-secondary">{CANCEL_SHEET.finalLine}</p>
     </>
   );
 }
 
 /** The press's refusal, marked for {@link useRefusalInView} (R18 L18-2). */
-function RefusalAlert({ failed }: { failed: unknown }) {
+function RefusalAlert({ failed, from }: { failed: unknown; from: CancelFrom }) {
   if (!failed) return null;
-  return <Alert tone="danger" data-sheet-refusal="" tabIndex={-1}>{failureSentence(failed)}</Alert>;
+  return <Alert tone="danger" data-sheet-refusal="" tabIndex={-1}>{failureSentence(failed, from)}</Alert>;
 }
 
 function consequence(quote: CancellationQuote, waived: boolean, subject: string | null) {
