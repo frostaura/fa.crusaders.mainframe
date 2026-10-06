@@ -135,6 +135,9 @@ describe("the list", () => {
 });
 
 /** The phone's Back, and where the router is — inside the page's router. */
+// R19 — with a sheet open the probe is aria-hidden (Radix hides everything outside the dialog) and,
+// since the toast viewport became a live region beside it (X19-3), hidden on its own element, where an
+// accessible name computes to "". The phone's Back is not an accessible control: it is found by its text.
 function BackProbe() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -155,7 +158,7 @@ describe("Back with the accept sheet open (R1, F1.19's rule)", () => {
   it("closes the sheet and stays on Invites", async () => {
     openWithBack();
     await openSheet();
-    fireEvent.click(screen.getByRole("button", { name: "Phone back", hidden: true }));
+    fireEvent.click(screen.getByText("Phone back", { selector: "button" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByTestId("where")).toHaveTextContent("/bookings/invites");
     expect(await screen.findByRole("list", { name: INVITES_COPY.listLabel })).toBeInTheDocument();
@@ -571,7 +574,7 @@ describe("an answer on its way keeps the sheet open", () => {
 
     fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.cancel }));
     fireEvent.keyDown(sheet, { key: "Escape" });
-    fireEvent.click(screen.getByRole("button", { name: "Phone back", hidden: true }));
+    fireEvent.click(screen.getByText("Phone back", { selector: "button" }));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.getByRole("dialog", { name: INVITES_COPY.sheetTitle })).toBeInTheDocument();
     expect(screen.getByTestId("where")).toHaveTextContent("/bookings/invites");

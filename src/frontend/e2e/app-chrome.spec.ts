@@ -378,7 +378,8 @@ test.describe("B12 — the chrome at a large root font size", () => {
       text: (el as HTMLElement).innerText,
       clipped: el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().right > window.innerWidth,
     }));
-    expect(inMenu.text).toBe("0 min");
+    // R19 L19-3 — <Minutes> glues each figure to its unit (a no-break space); read as words.
+    expect(inMenu.text.replace(/\u00a0/g, " ")).toBe("0 min");
     expect(inMenu.clipped, "the balance is cut off in the menu").toBe(false);
   });
 });
@@ -424,15 +425,36 @@ test.describe("B13 — where a toast lands", () => {
   for (const rootPx of [16, 32]) {
     test(`sits above the tab bar at a ${rootPx} px root font`, async ({ page }) => {
       await page.setViewportSize({ width: 320, height: 568 });
-      await openAdmin(page, "/admin/settings", rootPx === 16 ? 0 : rootPx);
-
-      // P6 moved the courts (and the "Court name is required." toast this used to raise) to their
-      // own page, where a bad name is caught inside the sheet. The settings page's own toast now:
-      // change one door setting and save it.
-      await page.getByRole("button", { name: "Door gates" }).click();
-      await page.getByRole("spinbutton", { name: "Unlock time (seconds)" }).fill("5");
-      await page.getByRole("region", { name: "Unsaved settings" }).getByRole("button", { name: "Save changes" }).click();
-      const toast = page.getByRole("status").filter({ hasText: "Settings saved." });
+      // R19 X19-3 — a REAL toast. Settings now says "Settings saved." in its own save bar (a status
+      // region, not a toast), and `getByRole("status")` matched that bar, so this measured the bar.
+      // The minutes chip's money toast is raised by a wallet frame the test pushes.
+      await page.addInitScript(() => {
+        class FakeSource extends EventTarget {
+          readyState = 1; onopen: ((e: Event) => void) | null = null; onmessage: ((e: MessageEvent) => void) | null = null; onerror: ((e: Event) => void) | null = null;
+          constructor() {
+            super();
+            (window as unknown as { __streams: FakeSource[] }).__streams.push(this);
+            setTimeout(() => this.onopen?.(new Event("open")), 0);
+          }
+          close() { this.readyState = 2; }
+          push(frame: unknown) { this.dispatchEvent(new MessageEvent("balance", { data: JSON.stringify(frame) })); }
+        }
+        (window as unknown as { __streams: FakeSource[] }).__streams = [];
+        (window as unknown as { EventSource: unknown }).EventSource = FakeSource;
+      });
+      await signIn(page);
+      await serveApi(page, [{ method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } }, ...routes()]);
+      await page.goto("/admin/settings");
+      await expect(page.getByRole("button", { name: "Account menu" })).toBeVisible();
+      if (rootPx > 16) await page.addStyleTag({ content: `html { font-size: ${rootPx}px; }` });
+      await page.waitForFunction(() => (window as unknown as { __streams: unknown[] }).__streams.length > 0);
+      const push = (frame: unknown) => page.evaluate((f) => {
+        const open = (window as unknown as { __streams: { push: (x: unknown) => void; readyState: number }[] }).__streams.filter((x) => x.readyState === 1);
+        open[open.length - 1].push(f);
+      }, frame);
+      await push({ balance_minutes: 0 });
+      await push({ balance_minutes: 5, delta_minutes: 5, reason: "admin_adjustment" });
+      const toast = page.locator("[data-toast]").filter({ hasText: "5 minutes" });
       await expect(toast).toBeVisible();
       // Measured once it has ARRIVED: it animates in from 12 px below its resting place.
       await expect(toast).toHaveCSS("opacity", "1");

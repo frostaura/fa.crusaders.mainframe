@@ -108,7 +108,7 @@ const TONE_ICON: Record<ToastTone, Icon> = {
  * </p>
  */
 export const TOAST_VIEWPORT_CLASS = cn(
-  "pointer-events-none fixed inset-x-4 z-toast mx-auto flex max-w-md flex-col items-stretch gap-2",
+  "pointer-events-none fixed inset-x-[min(1rem,16px)] z-toast mx-auto flex max-w-md flex-col items-stretch gap-2",
   "bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px+var(--context-bar-height,0px))]",
   "sm:bottom-auto sm:left-auto sm:right-6 sm:top-[calc(var(--app-chrome-height,4rem)+12px)] sm:mx-0 sm:w-96",
 );
@@ -198,6 +198,8 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
   return (
     <div
       data-toast=""
+      // The shared affordance (a pressable surface looks pressable): a tap anywhere dismisses it.
+      data-interactive
       data-tone={toast.tone}
       onClick={dismiss}
       onMouseEnter={() => hold("hovered", true)}
@@ -205,8 +207,10 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
       onFocus={() => hold("focused", true)}
       onBlur={() => hold("focused", false)}
       className={cn(
-        "pointer-events-auto relative flex w-full select-none items-start gap-3 overflow-hidden",
-        "rounded-xl border border-border bg-bg-raised py-3 pl-5 pr-4 text-sm text-text-primary shadow-lg",
+        // R19 (B13, measured) — gutters, gaps and the dismiss button in PIXELS: in rem, at 320 / 200 %
+        // they left the words a 76px column and a one-sentence toast stood 410px tall over the page.
+        "pointer-events-auto relative flex w-full select-none items-start gap-[min(0.75rem,12px)] overflow-hidden",
+        "rounded-xl border border-border bg-bg-raised py-[min(0.75rem,12px)] pl-[min(1.25rem,20px)] pr-[min(1rem,16px)] text-sm text-text-primary shadow-lg",
         // `duration-enter` — the timing lives in the token layer; the removal timer below is
         // `durationMs + 250`, which clears the 220ms this resolves to.
         "transition-all duration-enter ease-out motion-reduce:transition-none",
@@ -232,8 +236,8 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
         className={cn(
           // 24px to the eye beside the words; the `after:` box makes it 44px to the finger without
           // growing the toast (the same trick as the `sm` / `icon-sm` buttons).
-          "relative -my-0.5 -mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-text-muted",
-          "after:absolute after:-inset-2.5 after:content-[''] hover:bg-bg-muted hover:text-text-primary",
+          "relative -my-0.5 -mr-[min(0.25rem,4px)] inline-flex size-[min(1.5rem,24px)] shrink-0 items-center justify-center rounded-md text-text-muted",
+          "after:absolute after:-inset-[10px] after:content-[''] hover:bg-bg-muted hover:text-text-primary",
           // The surface clips (`overflow-hidden`, for the tone bar's corners): the ring goes inside.
           "focus-visible:-outline-offset-2",
         )}
