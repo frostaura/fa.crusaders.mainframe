@@ -20,9 +20,8 @@ last_verified: 2026-10-06
 - **A write's plain 500 is an error, not silence** (X19-2, `unsureReasonOf`): reasons
   `busy | conflict | error | silent`; silent = NetworkError, abort, 502, 504 and a code-less 503
   (R17 pinned it). `unsureWords` builds an `error` twin; a hand-written pair falls back to
-  `LOST_REPLY.errorGeneric`. No "in a moment" for an error. `unsureCauseOf` stays three-way
-  (error → silent) only for the players hooks that index their own sentences — they move to
-  `unsureReasonOf` when their copy carries error words (asked R19).
+  `LOST_REPLY.errorGeneric`. No "in a moment" for an error. The players hooks moved too, and
+  `unsureCauseOf` is retired (FE19m, `decisions-frontend-member-r19.md`).
 - **Toasts are announced by a region that was there first** (X19-3): the viewport
   (`data-toast-viewport`, `aria-live="polite"`, additions text, NO role) is rendered by the
   provider at the root, empty; toasts (`data-toast`) are inserted into it with no role and no

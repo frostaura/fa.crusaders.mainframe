@@ -19,7 +19,7 @@ that needs a wire moved is the wrong fix.
   firmware complexity and flashing ceremony. Requests are still unsigned. **`devcrypto` regained
   SHA-256, HMAC, HKDF and base64url on 2026-09-23** for one narrower job — verifying the member
   code's OFF half offline ([`decisions-member-code.md`](decisions-member-code.md)) — not for
-  device auth, which stays one bearer key.
+  device auth (still one bearer key).
 - **The firmware tree is one PlatformIO project per device plus `shared/`** (2026-09-19).
   `timebase hal hal_fakes devcrypto fwversion devapi eventq roster` and the new `devlink` (heartbeat
   body + adopted interval, event-upload body, roster push, API breaker — lifted out of
@@ -42,8 +42,7 @@ that needs a wire moved is the wrong fix.
   holding the 16-column safe subset, so a 1602 swapped in degrades to a whole message rather than a
   lying one. The geometry is a compile-time constant (`[lcd]` in `court-box/platformio.ini`); the
   shared HAL's default, used by builds with no LCD flags, is still 16×2. Somebody must look at the
-  panel before a club box is flashed (go-live checklist). R10 D10-2 corrected the "driven as 16×2"
-  drift here and in two comments.
+  panel before a club box is flashed (go-live checklist).
 - **The legacy single-byte serial dialect is refused on the production Mega** (`LegacyDialect::
   Refuse`; the simulator opts in). The bare `A` closed a relay with no checksum on a UART that
   receives the ESP's 74880-baud boot banner at every reset — a phantom ninety-minute lighting with
@@ -56,15 +55,12 @@ that needs a wire moved is the wrong fix.
   `loop()` and with it the independent auto-off, leaving a court lit until someone pulled power; a
   stall now ends in a reset that opens every relay first. Whether the club's bootloader survives a
   watchdog reset is a bench check on the go-live list.
-- **Buttons are remappable from the admin panel**, as a **per-device override with the club map as
-  default**, validated against that box's own court count — one tenant-wide map validated against
-  every box made a fleet with mixed court counts unconfigurable.
+- **Buttons are remappable** as a **per-device override of the club map**, validated against that
+  box's own court count — one map validated against every box made mixed fleets unconfigurable.
 - **Every URL a box is handed is gateway-true**, rebuilt from `X-Forwarded-*` and trusted only from
   `Gateway:TrustedProxies`; an `https` advertised base URL **refuses to start**. The box fetches with
   a plain `WiFiClient` and has no heap for TLS, so an https base hands it a URL it can never open.
-- **Authentication runs before the rate limiter**, and the policy partitions per member. The Court
-  Code page refreshes on a timer for everyone who has it open, so behind the gateway the whole club
-  shared one bucket keyed on the proxy address — ten opens a minute took login club-wide.
-- **Gates are no longer parked** (2026-09-19) — one ESP32 per door, built on this contract
-  unchanged. Firmware decisions: [`decisions-door-gate.md`](decisions-door-gate.md); API and access
-  rules: [`decisions-gate.md`](decisions-gate.md).
+- **Authentication runs before the rate limiter**, and the policy partitions per member — behind the
+  gateway the whole club shared one bucket keyed on the proxy address. The device scheme is not the
+  default one, so device calls are keyed per BOARD by their own middleware (`decisions-backend-r17a.md`).
+- **Gates** (2026-09-19): one ESP32 per door on this contract unchanged — [`decisions-door-gate.md`](decisions-door-gate.md), [`decisions-gate.md`](decisions-gate.md).

@@ -21,7 +21,8 @@ Contract: C13-1…C13-7 (lane scratch contract, folded into this topic). Earlier
   zero is the coverage rule working (decisions-players-returns), not a missing return — fixtures that
   insert a charge without crediting the organiser see exactly that.
 - **Who cancelled is read from the record** (J13-6, E13-6, `BookingCancellation`): the `booking.cancelled`
-  audit row's actor (≠ booker ⇒ club) and `waive_reason` (the desk's required reason), or the
+  audit row's actor (≠ booker ⇒ club) and `waive_reason` (the desk's required reason; since R17 the
+  words are `reason`, read first — `decisions-backend-r17b.md`), or the
   displacement marker. Never written to `Booking.CancellationReason` (money discriminator). Members are
   told "the club", never the admin's name. Detail: `cancelled_by` / `cancel_cause` / `cancel_reason`.
 - **A member off the game is linked to their seat** (J13-3): `/bookings/{id}?seat={seat}` in share

@@ -12,6 +12,9 @@ gate failures: [`gotchas-env.md`](gotchas-env.md).
 
 - **`make complexity` prints its warning to stdout and exits 1** — piping it through `tail` loses
   the exit code and reports a red gate as green. That is how a failing gate reached CI. Read `$?`.
+  Without `src/iot/.venv` it cannot run at all; call lizard with the same flags (`python3 -m lizard
+  src/backend/Crusaders.Mainframe.Api -C 15 -L 200 -a 6 -W whitelizard.txt -x '*/Migrations/*' -x
+  '*/bin/*' -x '*/obj/*' -w`). The baseline is zero warnings, so anything reported is yours.
 - **lizard's `.tsx` lexer desyncs** on: a bare `<` in an object literal, odd bare apostrophes in JSX
   text, an inline object type in a generic argument, a `//` or `data-x=""` after a braced JSX prop,
   a JSX spread prop, a component whose name recurs as a closing tag, and (R4) a quote, a `[…]` class or a
@@ -25,7 +28,8 @@ gate failures: [`gotchas-env.md`](gotchas-env.md).
 - **lizard's C# parser mis-scopes any expression-bodied member whose body contains braces**
   (`=> new { … }`, `=> x switch { … }`, a property pattern), dumping the rest of the file into a
   `*global*` pseudo-function the length of the file — the gate trips naming no real function at line
-  0. The fix is a block body, not a whitelist entry; a method directly *after* an expression-bodied
+  0. Every "Block body for the lizard reason" comment in the tree is this (bisected 2026-09-22).
+  The fix is a block body, not a whitelist entry; a method directly *after* an expression-bodied
   private constructor misfiles identically. Placement, not content. **It is latent under 200 lines**
   (the `*global*` length is the file's), so it trips on whoever grows the file — round 3's webhook
   edit. A positional `record` with generic parameters counts each type argument as a parameter.
@@ -42,8 +46,7 @@ gate failures: [`gotchas-env.md`](gotchas-env.md).
 - **`git ls-files` only matches tracked files**, so a lint target built on it silently passes on new
   work (the iot target uses `-co --exclude-standard`); **`clang-format` is pinned** because its
   output varies by version and an OS build lets CI reject correctly-formatted code.
-- **`-Wswitch-enum` is not satisfied by a `default:` label** — it silences the one warning that
-  catches a new enum member; name every case and put the fallback after the brace.
+- **`-Wswitch-enum` is not satisfied by `default:`** — name every case, fallback after the brace.
 - **`dotnet format` runs in CI since P10** (a migration's BOM is `error CHARSET`; strip it). Locally
   run it as CI does — `--no-restore`: a failed restore also exits non-zero with NO finding, so a red
   run proves nothing until you read the output. API project only (Tests has ~700 findings).

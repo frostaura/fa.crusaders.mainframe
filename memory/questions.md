@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-questions
-description: "All founder-owned and none of them technical: PIN length (a 4-digit collision charges the wrong member), biometric vendor SDK, gate policy, revoked-card window, pricing beyond Crusaders, and whether the club goes live this quarter."
+description: "All founder-owned and none technical: PIN length (a 4-digit collision charges the wrong member), biometric SDK, gate policy, court-box rosters, walk-behind attendance, pricing beyond Crusaders."
 type: question
 last_verified: 2026-09-11
 ---
@@ -36,8 +36,10 @@ and none of it is blocked on engineering.
   suspended or a booking cancelled since the last push. A policy call, not a technical one.
 - **SaaS pricing from tenant #2 onward.** Crusaders is free; nothing else is decided.
 - **Crusaders' existing member-data migration** — to be settled with the committee.
-- **Does the club go live this quarter, or is the project formally parked with a date?** This is
-  the division's leading cash-engine candidate, so the answer is portfolio-relevant, not local.
+- **Should a partner who walks in behind a scanning player count as attended?** (play.md §14 Q4.)
+  Today yes — the founder's default since R2, kept in R19 — but only behind a PLAYER's scan; a
+  pay-for payer's scan counts for nobody ([`decisions-attendance-r19.md`](decisions-attendance-r19.md)).
+  "Own seat scan only" is the stricter reading; it changes stats, streaks and badges.
 - **Why does a private repo ship an MIT `LICENSE`?** Confirmed 2026-09-16: `LICENSE` is MIT and
   `README.md` says so, while this repo is private by the 2026-07-24 default
   ([`decisions.md`](decisions.md)). Not a contradiction under an opt-in OSS posture, but licensing

@@ -20,7 +20,8 @@ Tests: `liveBalanceOwnR18`, `detailR18`, `pickerR18`, `busyWordsR18`, `be18aCont
   `actor_name` or `cancelled_by: "club"`; a desk route can (an admin's own wallet). *Why:* the old
   window (any money write + 3 s) silenced a club adjustment 6/6. `expectSelf` covers only reasons a
   member's own act makes; reasonless frames keep the old window.
-- **Three unsure causes** — busy / conflict / silent via `lostReply.unsureCauseOf`; `unsureWords`
+- **Three unsure causes** (superseded in R19 by four — `error` for a plain 500 — through
+  `answerReasonOf`; `unsureCauseOf` is retired, `decisions-frontend-member-r19.md`) — busy / conflict / silent; `unsureWords`
   builds all three pairs, hand-written sentences carry `…Busy`/`…Conflict` twins. Busy is "The
   club's system was too busy to take this just now … in a moment", never "didn't answer".
 - **Narrow rows stack, by rem container queries** (L18-1): picker row `@container/row` 15rem, invite

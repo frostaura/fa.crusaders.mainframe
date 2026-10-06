@@ -1,15 +1,13 @@
 ---
 name: crusaders-mainframe-gotchas-build
-description: "Toolchain traps in both trees: src/iot is several PlatformIO projects on one venv, every arduino/ tree is GENERATED, both cores force gnu++11, GCC under UBSan will not fold an object address in a constexpr — and on the .NET side make complexity is unrunnable as written, lizard mis-parses expression-bodied switch members into a file-spanning *global*, and a stale migration Designer snapshot makes every later migration re-add columns."
+description: "Firmware toolchain traps: src/iot is several PlatformIO projects on one venv, every arduino/ tree is GENERATED, both cores force gnu++11, build_unflags strips every match, UBSan will not fold an address."
 type: gotcha
 last_verified: 2026-09-22
 ---
 
 # Gotchas — the firmware toolchain
 
-The gates that check this firmware have traps of their own:
-[`gotchas-gates.md`](gotchas-gates.md); the shared JSON scanner has its own:
-[`gotchas-json-scanner.md`](gotchas-json-scanner.md).
+Gate traps: [`gotchas-gates.md`](gotchas-gates.md); the JSON scanner's: [`gotchas-json-scanner.md`](gotchas-json-scanner.md).
 
 - **`pio` is always `-d <project>`, never `-d src/iot`** — several PlatformIO projects (`shared/`,
   `court-box/`) share one venv there. `IOT_PROJECTS` in the Makefile is the one place a third is
@@ -34,13 +32,11 @@ The gates that check this firmware have traps of their own:
   once — while `inline constexpr` VARIABLES survive as a GCC extension. **Only the arduino-cli
   compile in CI's `iot-build` catches this**, and it covers all three sketches.
 - **The mirror image, on the PlatformIO side:** the AVR builder appends `-std=gnu++11` *after*
-  `build_flags`, so `[common]`'s `-std=gnu++17` lost every time and nothing in `lib/` could compile
-  for the Mega. `build_unflags = -std=gnu++11` in `[env:court_mega]` is what lets ours win. It
-  stayed latent behind a broken coordinate — **one broken gate hides the next one behind it.**
-- **A PlatformIO library coordinate is `owner/name`, and two owners can publish the same name at the
-  same version.** `johnrickman/LiquidCrystal_I2C@1.1.4` is Arduino-Library-Manager-only and has
-  never been in the PlatformIO registry; `marcoschwartz/...@1.1.4` is the registry one, same API.
-  `pio pkg search <name>` is the check, and the reason sits in a comment beside the line.
+  `build_flags`, so `[common]`'s `-std=gnu++17` lost; `build_unflags = -std=gnu++11` in
+  `[env:court_mega]` lets ours win. Latent behind a broken coordinate — **one broken gate hides the next.**
+- **A PlatformIO coordinate is `owner/name`; two owners can publish one name at one version**
+  (`johnrickman/LiquidCrystal_I2C` is Library-Manager-only; `marcoschwartz/...` is the registry
+  one). `pio pkg search <name>` is the check.
 - **arduino-cli cores are pinned to match the PlatformIO platforms** (`arduino:avr@1.8.6`,
   `esp8266:esp8266@3.1.2` behind the esp8266 index URL); only one version of a core installs at a
   time. `court_mega` is byte-identical between the two toolchains; the bridge differs by tens of
@@ -66,34 +62,5 @@ The gates that check this firmware have traps of their own:
   builds, by luck: the fallback equals the intended value. The exporter mirrors the rule and fails
   if a name survives twice with different values.
 
-## The .NET gates — two traps that cost this lane hours
-
-- **`make complexity` is unrunnable as written on this machine**: the target invokes
-  `src/iot/.venv/bin/python`, which does not exist here. Run lizard directly with the SAME flags —
-  `python3 -m lizard src/backend/Crusaders.Mainframe.Api -C 15 -L 200 -a 6 -W whitelizard.txt
-  -x '*/Migrations/*' -x '*/bin/*' -x '*/obj/*' -w`. The baseline is genuinely **zero warnings**, so
-  anything it reports is yours (verified against `~/src/.crusaders-merge-main`, 2026-09-22).
-
-- **lizard's C# parser cannot follow an expression-bodied member whose value carries braces** —
-  `=> x switch { … }`, `=> new { … }`, `=> new() { … }`. It loses scope and emits a `*global*`
-  pseudo-function **spanning the whole FILE**, which then trips the `-L 200` FUNCTION-length gate on
-  any file longer than 200 lines. The warning names no method, so it reads as "this file is too
-  long" and invites a pointless split. **This is what every "Block body for the lizard reason in
-  `memory/gotchas.md`" comment in this tree is actually about**; the mechanism had never been
-  written down, so the workaround read as superstition and was reinvented by guessing. Cure: give
-  such a member a block body and `return` the switch. Bisected 2026-09-22; a one-class file with no
-  such member and 312 lines (`DoorAuditActions.cs`) is clean, and an otherwise identical one with a
-  `=> … switch` is not.
-
-- **The newest migration's `.Designer.cs` is the baseline every future migration diffs against, and
-  a merge can leave it stale.** `20260921190452_AddDeviceEventReceiptBootId.Designer.cs` was written
-  on a branch without `20260921185533_AddDoorTruthColumns`, so it was missing five columns and EVERY
-  migration scaffolded after it proposed to ADD them a second time — a duplicate-column failure
-  mid-chain on a fresh database, which only `ApiBoundaryTests.Migrations_apply_cleanly_to_a_fresh_database`
-  catches. **Read a newly scaffolded migration before committing it**; if it contains operations you
-  did not cause, delete those by hand. The drift ends at the first migration whose own designer
-  snapshot is complete (2026-09-22).
-
-- **`dotnet ef migrations add --no-build` scaffolds against the LAST BUILT assembly**, so it silently
-  produces an empty migration when the model has changed since. Worse, `migrations remove` then
-  rewrites the model snapshot from that same stale assembly. Never pass `--no-build` here.
+The .NET-side traps moved: lizard and `make complexity` to [`gotchas-gates.md`](gotchas-gates.md),
+migration scaffolding to [`gotchas-migrations.md`](gotchas-migrations.md).

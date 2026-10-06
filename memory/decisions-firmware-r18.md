@@ -7,10 +7,9 @@ last_verified: 2026-10-06
 
 # Live decisions: firmware, review round 18 (lane FW18, D18-2 to D18-4)
 
-- **Bridge is 2.2.8; Mega stays 2.0.0 (court_mega sketch byte-identical, not reflashed); door gate
-  is 1.1.2.** Supersedes the version line in [`decisions-firmware-r17.md`](decisions-firmware-r17.md).
-  The gate moved because the roster and step clock are SHARED libraries whose behaviour changed;
-  `test/e2e-device/gate_sim.py`'s DSIM check expects `1.1.2`.
+- **The gate moved to 1.1.2 here** because the roster and step clock are SHARED libraries whose
+  behaviour changed — a gate version follows its shared libraries' behaviour;
+  `test/e2e-device/gate_sim.py`'s DSIM check expects it. Bridge 2.2.8 is superseded by 2.2.9 (R19).
 - **THE RULE (D18-2): an AGE ("how old is it?") is observed on EVERY pass and LATCHES once past its
   bound; only a re-anchor clears it.** *Why:* every age is `tb::since`, a 32-bit difference, so one
   2^32 ms + 1 s old reads ONE SECOND old. No single reading can tell the two apart (the arguments

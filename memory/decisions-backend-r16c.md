@@ -11,8 +11,12 @@ last_verified: 2026-10-06
   unit PostgreSQL aborts with 40P01 or 40001 is run again, up to `Attempts` = 3, after a 5-20 ms
   jittered pause. *Why:* `ck_bookings_no_overlapping_slot` is re-checked on every booking INSERT and
   on any UPDATE that writes a new row version. An overlapping INSERT and UPDATE can each wait on the
-  other, and PostgreSQL then aborts one of them. FX16 found this on the walk-up, and every other
-  booking write had the same 500.
+  other, and PostgreSQL then aborts one of them. FX16 found this on the walk-up — identical retries
+  in flight: the winner's activation UPDATE re-checks the constraint while a twin's INSERT of the
+  same slot checks against that row — measured 1 in 36 loaded class runs, 0 in 80 standalone (only
+  under load on a warm host); after the fix 0 of 32 failed though real 40P01s hit 4 of them. The
+  `DeviceRateKey` middleware did not cause it, only shifted the timing by one round trip. Every
+  other booking write had the same 500. `R16WalkUpDeadlockHttpTests` raises a real 40P01.
 - **A retried unit is one whose writes all roll back together.** That means one `SaveChanges`, or
   one `PayerLock` transaction. *Why:* that is what makes double-charging impossible. Either the
   attempt committed, and is not retried, or nothing of it exists. Mail, events and outbox publishes
@@ -22,7 +26,8 @@ last_verified: 2026-10-06
   added or loaded are detached. *Why:* callers stage work that must commit WITH the unit. Examples
   are the booking row `CreateAsync` adds before `CommitAsync`, and the pay-for nonce row marked
   `Paid` plus its audit row. FX16's `ForgetFailedSaveAsync` (detach Added, reload Modified) would
-  have dropped those. It is still used only by the walk-up's outer loop.
+  have dropped those. It is still used only by the walk-up's outer loop, where it replaced a handler
+  that reloaded only the booking and left a light-state row Modified with values never saved.
 - **No retry inside somebody else's transaction**: if `CurrentTransaction` is open, the unit runs
   once. The abort also killed the caller's transaction, and only its owner can start it again.
   The provider is not Npgsql in the in-memory unit suites, and there the unit also runs once.

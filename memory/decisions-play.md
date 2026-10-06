@@ -11,7 +11,9 @@ Spec: `docs/specs/play.md` (P12). Built by two lanes and merged on `main-work` 2
 This is the why.
 
 - **Attendance is `CheckedInAt`, never a door scan**: a member attended when their own seat was
-  scanned, or the booking was checked in and they are a player of it. *Why:* one scan lights the
+  scanned, or the booking was checked in BY A PLAYER and they are a player of it (R19 E19-3: a
+  pay-for payer's scan is nobody's attendance; R17 J17-5: a cancelled booking is never attended —
+  [`decisions-attendance-r19.md`](decisions-attendance-r19.md)). *Why:* one scan lights the
   court for everybody; requiring each partner to scan would punish the ones who walked in behind.
 - **A result carries its own lineup (1v1 or 2v2), frozen per result.** *Why:* P11 seats a singles
   partner on seat 2 — team A — so seat teams would record team-mates playing each other.

@@ -55,6 +55,6 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   token resolves (TOO LONG lost the scan); `code_used` reads `CODE USED` at pay-for too (D9-2).
 - **Versions: bridge 2.2.9 and door 1.1.2 (R19 D19-1/2/3, see [`decisions-firmware-r19.md`](decisions-firmware-r19.md); 2.2.8 was R18 D18-2/3/4, 2.2.7/1.1.1 R17 D17-2/4, 2.2.6 R16 D16-2/3, 2.2.5 R15 D15-1), Mega 2.0.0 (never reflashed).** The bridge unflags
   `[common]`'s MINOR/PATCH by its own tokens; the Devices page showing these confirms a flash.
-- **Owed, and nobody but Dean can do the first:** flash the ESP8266 bridge and each door ESP32
-  (spec §8.1; the Mega is not touched); the PWA lane (enrol, WebCrypto, My Code). The backend
-  half landed on `be/p7-code` — see `decisions-member-code-backend.md`. Nothing has run on hardware.
+- **Owed, and only Dean can do it:** flash the ESP8266 bridge and each door ESP32 (spec §8.1; the
+  Mega is not touched) — the current order is in [`state.md`](state.md). No flash or hardware run
+  is recorded anywhere. Server half: `decisions-member-code-backend.md`.

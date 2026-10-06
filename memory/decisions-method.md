@@ -34,8 +34,10 @@ last_verified: 2026-09-11
   construction and only fail on Linux CI; others fail in wall-clock windows. Both are in
   [`gotchas.md`](gotchas.md), and the rule that follows is: reproduce a red run on the **base
   commit in a second worktree** before believing your diff caused it.
-- **Delivery is one branch, one PR** — agreed with the founder; do not split it. **Fix everything
-  found, related or not**, with adversarial rounds rather than a fixed number of passes.
+- **Delivery goes straight onto `main`** (founder, 2026-09-23 — it replaced "one branch, one PR"),
+  so every push runs CI's release half too. **Fix everything found, related or not**, with
+  adversarial rounds rather than a fixed number of passes — until the founder calls a stop (P10
+  stopped after round 19 short of two quiet rounds; [`state.md`](state.md)).
 - **The lint gate stays strict and the loader idiom carries per-site disables.** React-hooks errors
   were fixed for real where the rule caught genuine impurity; the recurring fetch-on-mount loader
   got `eslint-disable-next-line` with a stated reason at each site. *Why not a config downgrade:*

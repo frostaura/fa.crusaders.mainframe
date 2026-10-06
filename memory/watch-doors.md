@@ -36,7 +36,7 @@ was decided and why is [`decisions-door-gate.md`](decisions-door-gate.md) and
    booking's window. G3 narrowed the blast radius from both ends — such a board now mails nobody,
    and a club can hold at most 16 unacknowledged rows — but the roster itself is unchanged.
    *Should an auto-registered court box also get no roster?* Founder's call. It belongs in
-   [`questions.md`](questions.md), where the G2 lane was to record it — **check that it landed**.
+   [`questions.md`](questions.md), where it is recorded.
 4. **The DOOR half of this is closed; everything else still grows for ever.** Wave 1's
    `RetentionWorker` hard-deletes `gate.*`, `device.gate_open` and `device.unknown_scan` rows past
    `door_log_retention_days` (default 90), and the `gate_open`/`unknown_scan` receipts past
@@ -52,11 +52,7 @@ was decided and why is [`decisions-door-gate.md`](decisions-door-gate.md) and
    GIN index on `details_json` would buy nothing and cost write amplification on the hottest table
    in the product. The numbers are in `door-gate.md` §13. Revisit if a club's door outgrows a
    day's rows per page.
-5. **Republishing `docs/system-blueprint.html` to its hosted artifact is owed.** Both founder-
-   facing pages were regenerated on 2026-09-19 for the doors; the hosted copy is still the
-   2026-09-06 revision and knows nothing about them. Republish to the **same URL** recorded in
-   [`state.md`](state.md) so the link the founder holds stays good.
-6. **GitGuardian is red on PR #3 and is very probably wrong.** The value it objects to is a
+5. **GitGuardian is red on PR #3 and is very probably wrong.** The value it objects to is a
    **corpus fixture, not a credential**: a fake device API key beginning `k7Qz3mR9`, generated for
    the wire-protocol vectors and shared by the C++ and .NET suites. It lives in the two
    `cases.json` files under `src/contracts/device-protocol/`, that family's generator

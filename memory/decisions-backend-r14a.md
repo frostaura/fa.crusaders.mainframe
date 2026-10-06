@@ -25,7 +25,7 @@ last_verified: 2026-10-05
   every consumer a stale off for each historical row. The sweep's query is a seq scan before and after
   (no index on `EndsAt`/`LightsOffCuedAt`). If it ever matters, the fix is a partial index
   `WHERE "LightsOffCuedAt" IS NULL`, which needs a migration.
-- **Reversal on/off are a pair or nothing** (E14-4). `EmitReversedLightsOnAsync` decides under the
+- **Reversal on/off are a pair or nothing** (E14-4; narrowed by R15 D15-2, stamped by R16 E16-2). `EmitReversedLightsOnAsync` decides under the
   cue lock with `NextFreeAsync`. When a lit survivor holds the court at the restored end, no
   `lights_on` is sent and the booking's `LightsOffCuedAt` is stamped at or after `NoShowReversedAt`,
   so the attended-and-over pass owes no off. *Why:* that on, stamped back at the scan and arriving

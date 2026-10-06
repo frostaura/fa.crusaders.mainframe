@@ -21,6 +21,10 @@ the worker still caches NO member data. Code: `src/frontend/src/lib/offline/`.
 - **Stale-while-revalidate** (`useCachedRead`): a revisit or warm start draws the kept answer at
   once with its "as of", the club is asked behind it, and a read in flight is joined (one request
   per key — StrictMode's second mount joins too, so tests counting first reads changed).
+- **REVERSED in R15 (X15-3):** "You're offline" is said only when `navigator.onLine === false`; a
+  club that cannot be reached from a phone with a network is "Can't reach the club"
+  ([`decisions-frontend-member-r15.md`](decisions-frontend-member-r15.md)). The two bullets below
+  keep their structure (never blank, kept reads) under that wording.
 - **A failed refresh never blanks** — offline, 5xx or 429 alike (form-factor review: one 429 swapped a
   whole screen for "The club is busy"). `StaleNotice` says "You're offline" ONLY when the club was
   never reached — no network, or the read/session check got no answer (`DataOwner.unreachable`:

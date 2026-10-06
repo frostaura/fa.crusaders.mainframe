@@ -19,6 +19,12 @@ hold: `decisions-member-code-rotation.md`.
   *Why:* two concurrent requests with one code must not both act; a claim a 500 stranded read
   `code_used` to the member's own retry. Claims keyed by the box's nonce (`ClaimKey`) re-enter for
   the same device's identical retry — twin walk-up retries in flight were answered `code_used`.
+- **A claim that vanished is claimed again; a re-entered claim is held after the purchase** (R19
+  BE19L, `c1d12904`, `R19BusyWalkUpHttpTests`). *Why:* under a refused connection the maker gave its
+  use back while a twin's `ON CONFLICT DO NOTHING` had met the row, read it gone and said a false
+  `409 code_used`; `TryClaimAsync` now retries (3) for every claimant. A twin that re-entered and
+  bought after the give-back left a purchase with no use, so the code could buy again —
+  `HoldAgainAsync` re-claims it once the walk-up commits. Pay-for needs neither (nonce row first).
 - **Replays are checked before the use table** (walk-up reference, pay-for nonce): a box's retry gets the first answer.
 - **Evidence: the same board holding the use is the same act** (its fallback of an online grant,
   or its own re-upload after a failure) → a receipt; only another board is `reused`. *Why:* the

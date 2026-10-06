@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions
-description: "Product and economics: blueprint Rev 2 is the customer's word and outranks internal specs; credits are the unit of account; charge AT BOOKING supersedes charge-on-lights-on and still needs committee sign-off; PayFast replaced Peach."
+description: "Product and economics: blueprint Rev 2 is the customer's word on economics; whole minutes replaced credits (P13); charge AT BOOKING still needs committee sign-off; PayFast replaced Peach."
 type: decision
 last_verified: 2026-09-11
 ---
@@ -13,9 +13,12 @@ the current economics and supersedes anything older. **It is the customer's own 
 internal specs on economics** — a conflict is resolved in the blueprint's favour or escalated, never
 decided in the repo. Line-by-line reconciliation lives in `docs/specs/client-blueprint-deltas.md`.
 
-- **Credits are the unit of account, not rand.** R100 buys **160 credits (regular rate)** or **240
-  (the league group's rate)**. *Why:* the club wanted class-based value without class-based pricing visible on
-  the court. ZAR survives only on `PendingTopup` for reconciliation.
+- **Whole minutes are the unit of account, not rand — and no longer credits** (P13, 2026-10-01,
+  founder; contract `docs/specs/minutes-and-packages.md`). A booking costs exactly its playing
+  minutes; members buy admin-defined minute packages, with group discounts in rand
+  ([`decisions-topups.md`](decisions-topups.md), [`decisions-groups.md`](decisions-groups.md)).
+  This REPLACES Rev 2's credits (R100 → 160 regular / 240 league), which priced value by class;
+  the club was pre-launch, so no balance was converted. Rand lives only where money changed hands.
 - **No member classes since D2 (2026-09-23)** — groups carry rate and peak: [`decisions-groups.md`](decisions-groups.md).
 - **Charge at booking, not at lights-on.** A booking debits the full slot cost immediately; a
   no-show keeps a configurable penalty and refunds the rest. *Why:* it collapses hold-then-charge
@@ -25,8 +28,8 @@ decided in the repo. Line-by-line reconciliation lives in `docs/specs/client-blu
   ([`watch.md`](watch.md)). The ledger consequences are in
   [`decisions-settlement.md`](decisions-settlement.md).
 - **15-minute slices** (Crusaders moved 30 → 15) · **2-week booking horizon** · **1 hour per member
-  per day**, relaxed same-day when courts are free · **top-ups in R100 blocks, R1000 cap per
-  member**, admin credit unlimited · **unfunded accounts cannot book** (402).
+  per day**, relaxed same-day when courts are free · **unfunded accounts cannot book** (402). The R100
+  blocks and R1000 cap per member went with P13: packages have no cap (decisions-topups).
 - **Peak-hours exclusivity 16:00–19:00.** A member without peak priority takes a peak slot only
   inside the last hour before start and only if still empty; admins bypass.
 - **At-court payer override.** Another identified player presses "I'll pay"; the booking carries

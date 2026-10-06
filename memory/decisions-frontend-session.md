@@ -26,7 +26,8 @@ unit tests; each was wrong in the running app.
 - **Money-moving requests mark themselves in the API client, and the live balance treats any
   movement during one (or within 3 s after) as the member's own.** Movements they did not
   cause are worded by their ledger reason ("Sam paid you 20 min for their share of Court
-  1"); "the club" is said only for the club's own movements. **Why:** booking or accepting an
+  1"); "the club" is said only for the club's own movements. **Narrowed in R18 (X18-2):** a frame
+  is the member's own only when a write in flight makes its reason ([`decisions-frontend-member-r18.md`](decisions-frontend-member-r18.md)). **Why:** booking or accepting an
   invite produced "The club took 20 credits off your wallet" (pre-P13 wording) — wrong twice when the money
   went to a partner.
 - **A 401 trades the refresh cookie once (R1 F4.1, contract §1; server half in

@@ -56,5 +56,11 @@ last_verified: 2026-09-29
   `/me/invites` and `/me/notifications` now carry it. The browser zone is neither the club's
   nor UTC, so a zone-less screen cannot coincide with the right answer; spec processes run in
   UTC. An expectation built from a `lib/` formatter must pass `CLUB_ZONE` (`e2e/playersKit`).
+- **A club date formatted from a UTC instant is yesterday for the club's first hours** (R16 BE16d).
+  Four Night tests seeding a Johannesburg club sent `?day={clock.Now:yyyy-MM-dd}`; the trace reads
+  `?day=` as a CLUB date, so from 00:00 to 02:00 SAST they asked for yesterday and found nothing —
+  production was right. Rule: a test sending a club date (`?day=`, `?date=`, an occurrence date)
+  derives it in the club's zone (`MemberCodeClub.DayOf` via `DoorClock.LocalDateOf`); keep the
+  non-UTC fixture — clubs seeded at `"UTC"` are immune by construction, which is why it hid.
 - **Two racing requests read two clocks** (review round 1, B18): a walk-up retry whose `now` was read
   just BEFORE the winner's saw zero minutes left and was refused; any refusal now replays the nonce.

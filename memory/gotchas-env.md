@@ -1,13 +1,17 @@
 ---
 name: crusaders-mainframe-gotchas-env
-description: "This checkout sits on iCloud: MSBuild is denied copying appsettings into bin, iCloud fabricates numbered duplicates inside generated sketches, and a worktree under .claude/ inherits a hidden flag that makes .NET ignore appsettings.json."
+description: "This Mac and iCloud checkout: MSBuild denied copying appsettings, iCloud duplicates in generated sketches, hidden-flag worktrees, and sharded local runs exhausting one Postgres's max_connections."
 type: gotcha
 last_verified: 2026-09-19
 ---
 
 # Gotchas — this machine and this iCloud checkout
 
-Verified on the founder's Mac 2026-09-11: the system `python3` is below gcovr's 3.10 floor, `uv` and a system `dotnet` are present, and `src/iot/.venv/bin/pio` exists.
+- **Sharded local runs share ONE Postgres and its `max_connections` (100).** `make
+  test-integration-sharded SHARDS=3` runs ~30 classes at once, each with its own database and pool;
+  idle pools held the slots and tests failed `53300` → `503 service_busy`, reading as a product
+  regression (R19). Test pools now drop idle connections after 3 s — raise toward ~10 s if the suite
+  slows. CI is unaffected (one process per server). Detail: `decisions-backend-capacity.md`.
 - **A checkout under a dot-directory boots the API with no `appsettings.json`, and re-breaks
   mid-run.** Every file in a `.claude/worktrees/<name>` worktree inherits the BSD `hidden` flag from
   `.claude/`, and .NET's `PhysicalFileProvider` silently excludes hidden files — so the API dies on
@@ -47,21 +51,16 @@ Verified on the founder's Mac 2026-09-11: the system `python3` is below gcovr's 
   iCloud path — the sources carry the protected `com.apple.provenance` xattr, and MSBuild's copy is
   denied on *create* but succeeds on *overwrite*. Recovery: `cp` the two files into each project's
   `bin/Debug/net10.0/` once, then rerun. Plain `cp` and CI on ubuntu are unaffected.
-- **`make install` dies here on the system python.** `gcovr` needs ≥3.10 and the system `python3` is below that
-  floor (so is Xcode's), so the venv is created and the requirements install fails, leaving no `pio`.
-  Recovery: `rm -rf src/iot/.venv && uv venv --python 3.12 src/iot/.venv`, then install the pinned
-  requirements into it. CI uses setup-python 3.12 and is unaffected.
-- **`strict_compile.sh` RUNS on macOS now and still cannot PASS here.** The `mapfile` calls that made
-  it die instantly on macOS's bash 3.2 are gone (2026-09-19, plain `while read` loops), so it
-  compiles and reports — but Apple clang's `-Wunused-const-variable` is in its `-Wall` for C++ where
-  GCC's is not, so four *untouched* headers (`shared/lib/hal/{Button,Display,Relay,Store}.h`) fail
-  under `-Werror` on this Mac and nowhere else. Discharge the gate by running it and confirming those
-  four, and only those four, are the failures; **the CI `iot` job on GCC is the real gate.** Still do
-  not "fix" the headers for clang — that is not the compiler the flag set was calibrated on, and
-  `make lint-iot` is therefore red locally by design.
+- **`make install` dies here on the system python** (below gcovr's 3.10 floor, Xcode's too): the venv
+  is created, the requirements fail, no `pio`. Recovery: `rm -rf src/iot/.venv && uv venv --python
+  3.12 src/iot/.venv`, then install the pinned requirements. CI (setup-python 3.12) is unaffected.
+- **`strict_compile.sh` runs on macOS and still cannot PASS here**: Apple clang's
+  `-Wunused-const-variable` is in its C++ `-Wall` where GCC's is not, so four untouched headers
+  (`shared/lib/hal/{Button,Display,Relay,Store}.h`) fail `-Werror` on this Mac only. Discharge it by
+  confirming those four and only those four fail; **the CI `iot` job on GCC is the real gate.** Do
+  not "fix" the headers for clang — `make lint-iot` is red locally by design.
 - **The Docker CLI on this Mac wedges and never returns** — `ps`, `system df` and `exec` all hang
   indefinitely and have cost several agents real time. Nothing needs it: a test Postgres listens
   directly on **5439** (homebrew `psql` reaches it) and a throwaway Python SMTP sink on 1025 stands
-  in for MailHog. Kill a wedged `docker` process rather than waiting on it.
-- **Frontend `node_modules` on this path loses rollup's native optional dependency** (the build
-  fails on a missing `rollup/dist/native.js`). Recovery: `rm -rf node_modules && npm ci`.
+  in for MailHog. Kill a wedged `docker` process.
+- **`node_modules` here loses rollup's native optional dependency** (missing `rollup/dist/native.js`): `rm -rf node_modules && npm ci`.

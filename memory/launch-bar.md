@@ -20,10 +20,10 @@ along by a file that is re-measured every session.
 
 **Nothing instruments any of it.** There is no report, no dashboard and no query behind a single
 one of these numbers, so on the day somebody asks how launch is going the answer would have to be
-assembled by hand from the ledger and the audit trail. That is a deliberate gap rather than an
-oversight — the club is not live, and building a scoreboard for a system nobody is using yet is
-work that would be re-done — but it is the kind of gap that is discovered late, when the number is
-wanted this week.
+assembled by hand from the ledger and the audit trail. That was a deliberate gap while nothing
+was live — a scoreboard for a system nobody used would be re-done. A production stack has been up
+since 2026-09-19 ([`state.md`](state.md)), so it is now a debt: the kind discovered late, when the
+number is wanted this week.
 
 **A door gate contributes to none of these.** Walking through a door is not attendance
 ([`decisions-gate.md`](decisions-gate.md)), so entry traffic can never appear in the lights-on

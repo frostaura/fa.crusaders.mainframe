@@ -37,5 +37,11 @@ last_verified: 2026-10-05
 - **`malformed_body` has two kinds** (D16-5): read-anyway (invalid UTF-8, detail ends
   "invalid UTF-8 read as U+FFFD") gets its own title and words; dropped (not JSON, too large) says
   so. The detail line names what the board was sending; no U+FFFD/UTF-8/JSON on the page.
+- **The console keys `malformed_body` on the server's constants verbatim** (R16 FX16,
+  `lib/deviceFaultCopy.ts`): `DeviceBody.ReplacedDetail` / `NotJsonDetail`,
+  `DeviceEndpoints.VersionTooLongDetail`; `deviceFaultCopy.r16.test.ts` holds a copy of each, so a
+  server rewording fails it. The server's `HeadlineOf(code, detail)` is the title for every kind; the
+  client titles only a row with no headline or one filed before d151a964 (`legacy` in `BODY_FAULT`),
+  whose stored headline is the dropped one. Pre-fix details stay mapped so history reads without jargon.
 - Proof: `e2e/layout-r16-fe16s.spec.ts` (42 green, mobile + desktop; `FE16S_SWEEP=1` adds every
   route's loading state at 320 / 200 %, 26/31 clean — the rest are other lanes' files, asked).

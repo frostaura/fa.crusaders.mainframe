@@ -7,11 +7,9 @@ last_verified: 2026-10-06
 
 # Live decisions: firmware, review round 17 (lane FW17, D17-2 and D17-4)
 
-- **Bridge is 2.2.7; Mega stays 2.0.0 (not touched, not rebuilt into a new sketch); door gate is
-  1.1.1.** Supersedes the "bridge 2.2.6" and "gate stays 1.1.0" lines in
-  [`decisions-firmware-r16.md`](decisions-firmware-r16.md). The gate simulator now unflags
-  `[common]`'s `-DFW_VERSION_PATCH=0` and sets `=1` (a different token, so it survives), and
-  `test/e2e-device/gate_sim.py`'s DSIM check expects `1.1.1`.
+- **Versions** (2.2.7 / gate 1.1.1 this round) are superseded; current ones are in
+  [`decisions-firmware-r19.md`](decisions-firmware-r19.md). The gate unflags `[common]`'s
+  `-DFW_VERSION_PATCH=0` and sets its own (a different token, so it survives).
 - **THE RULE: a `tb::Deadline` that gates "may I yet?" must be observed on EVERY pass, not only
   by the step it gates.** *Why:* an armed Deadline more than 2^31 ms old reads as PENDING again
   (signed difference), for up to another 24.8 days. Each of these was looked at only when its own
