@@ -389,8 +389,15 @@ export type LiveBalance = {
    * </p>
    */
   refresh: (options?: { expectSelf?: boolean }) => Promise<void>;
-  /** Take a figure the server has just stated, without asking it again. */
-  apply: (minutes: number) => void;
+  /**
+   * Take a figure the server has just stated, without asking it again — unless a stream frame has
+   * arrived since the request that stated it was SENT (R17 J17-2, FE17x): the frame is then at
+   * least as new, and the answer is dropped. `sentAt` is {@link frameMark} taken at the send;
+   * absent, it is the mark when this tab's latest money-moving request went out.
+   */
+  apply: (minutes: number, options?: { sentAt?: number }) => void;
+  /** How many stream frames have arrived — read it when a request is SENT and hand it to `apply`. */
+  frameMark: () => number;
 };
 
 export function useLiveBalance({
@@ -459,9 +466,20 @@ export function useLiveBalance({
    * Applying it put an older figure over a newer one and raised "went up" when it had gone down.
    */
   const framesSeen = useRef(0);
+  /**
+   * R17 J17-2 (FE17x) — `framesSeen` when this tab's money-moving bracket opened: the mark a write's
+   * own answer (`apply` without `sentAt`) is judged by. A request starting while another is out, or
+   * inside the grace after one, keeps the EARLIER mark — a dropped answer is safe (the frames are
+   * the truth), a stale one put over a frame is the defect.
+   */
+  const bracketMark = useRef<number | null>(null);
   useEffect(() => {
     setMoneyRequestListener((phase) => {
-      if (phase === "start") { selfInFlight.current += 1; return; }
+      if (phase === "start") {
+        if (selfInFlight.current === 0 && Date.now() >= selfUntil.current) bracketMark.current = framesSeen.current;
+        selfInFlight.current += 1;
+        return;
+      }
       selfInFlight.current = Math.max(0, selfInFlight.current - 1);
       selfUntil.current = Date.now() + SELF_GRACE_MS;
     });
@@ -527,7 +545,13 @@ export function useLiveBalance({
     }
   }, [enabled, record]);
 
-  const apply = useCallback((minutes: number) => {
+  const apply = useCallback((minutes: number, options?: { sentAt?: number }) => {
+    // R17 J17-2 (FE17x) — a frame arrived after the request was sent: its figure is at least as new
+    // as this answer (the server publishes one after every commit, this one's included). Taking the
+    // answer put an older figure over it and measured a false movement against it. Nothing is
+    // flagged as our own either — a lingering flag would silence the next real movement.
+    const sent = options?.sentAt ?? bracketMark.current;
+    if (sent !== null && framesSeen.current !== sent) return;
     expectSelf.current = true;
     // A figure a booking answer stated carries no held split; the held and owed-back parts
     // cannot have moved (a booking neither receives nor returns a share), so spendable moves
@@ -539,6 +563,8 @@ export function useLiveBalance({
   const noteUnread = useCallback((count: number) => setUnreadCount(Math.max(0, count)), []);
 
   const clearDelta = useCallback(() => setDelta(null), []);
+
+  const frameMark = useCallback(() => framesSeen.current, []);
 
   // Initial read, and on the gate coming down. Kept separate from the stream effect: an HTTP
   // read is one round trip and a stream negotiation is several, and the member is looking at
@@ -721,5 +747,6 @@ export function useLiveBalance({
     clearDelta,
     refresh,
     apply,
+    frameMark,
   };
 }

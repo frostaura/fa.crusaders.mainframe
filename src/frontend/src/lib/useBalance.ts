@@ -41,8 +41,20 @@ export type BalanceState = {
    * It also marks the next movement as this tab's own, so the chip does not raise a toast
    * about a booking the member has already been told about.
    * </p>
+   *
+   * <p>
+   * R17 J17-2 (FE17x) — dropped when a stream frame has arrived since the request was SENT
+   * (`sentAt`, else the mark at this tab's latest money-moving request): the frame is the newer
+   * truth, and the answer put over it was a stale figure and a false movement.
+   * </p>
    */
-  apply: (balanceMinutes: number) => void;
+  apply: (balanceMinutes: number, options?: { sentAt?: number }) => void;
+  /**
+   * R17 J17-2 (FE17x) — how many stream frames have arrived. A read or write that will hand its
+   * answer to `apply` takes this when it SENDS and passes it as `sentAt`; an answer overtaken by a
+   * frame is then dropped rather than put over the newer figure.
+   */
+  frameMark: () => number;
 };
 
 export const BalanceContext = createContext<BalanceState | null>(null);

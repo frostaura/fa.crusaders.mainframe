@@ -61,6 +61,7 @@ export function BalanceProvider({ children, transport, policy }: {
         noteUnread: live.noteUnread,
         refresh: live.refresh,
         apply: live.apply,
+        frameMark: live.frameMark,
       }}
     >
       {children}

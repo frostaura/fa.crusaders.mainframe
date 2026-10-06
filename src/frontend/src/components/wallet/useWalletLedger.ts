@@ -74,9 +74,14 @@ export function useWalletLedger() {
     issued BEFORE that confirmation may be the older of the two and is left alone — the frame
     that overtook it has already asked for a fresh read below.
   */
-  const { apply, lastConfirmedAt, held: liveHeld, delta: streamDelta } = useBalance();
+  const { apply, frameMark, lastConfirmedAt, balance: liveNow, held: liveHeld, delta: streamDelta } = useBalance();
   const confirmedAt = useRef(lastConfirmedAt);
   useEffect(() => { confirmedAt.current = lastConfirmedAt; }, [lastConfirmedAt]);
+  /** R17 J17-2 (FE17x) — `load` itself, for the read again after an overtaken answer. */
+  const reread = useRef<((limit: number) => Promise<LedgerRow[] | null>) | null>(null);
+  /** R17 J17-2 (FE17x) — the provider's figure now, to tell an overtaken read that disagrees with it. */
+  const liveFigure = useRef(liveNow);
+  useEffect(() => { liveFigure.current = liveNow; }, [liveNow]);
   /** The figure this page last read, so the provider taking it does not trigger a re-read of it. */
   const lastRead = useRef<number | null>(null);
 
@@ -95,9 +100,7 @@ export function useWalletLedger() {
     setBusy(true);
     const issuedAt = Date.now();
     try {
-      const data = limit === WALLET_PAGE_SIZE
-        ? await fetchQuery(who, memberReads.wallet.key, memberReads.wallet.load, { reuseWithinMs: join ? JOIN_MS : 0 })
-        : await endpoints.walletWithShareBookings(limit, 0);
+      const { data, sentAt } = await readPage(who, limit, join, frameMark);
       setStale(false);
       setUnreachable(false);
       setRows(data.entries);
@@ -108,7 +111,12 @@ export function useWalletLedger() {
       setError(null);
       setReadAt(Date.now());
       lastRead.current = data.balance_minutes;
-      if ((confirmedAt.current ?? -Infinity) < issuedAt) apply(data.balance_minutes);
+      // R17 J17-2 (FE17x) — only a read this page SENT, with no frame since, may be handed over. A
+      // joined read (sent by someone else, when is unknown) or an overtaken one is older than the
+      // frame; and when its figure disagrees with the live one, its rows are too — ask again.
+      const fresh = sentAt !== null && frameMark() === sentAt;
+      if (fresh && (confirmedAt.current ?? -Infinity) < issuedAt) apply(data.balance_minutes, { sentAt });
+      else if (!fresh && liveFigure.current !== null && liveFigure.current !== data.balance_minutes) void reread.current?.(limit);
       return data.entries;
     } catch (err) {
       // The thrown value whole, so the failure sentence can say WHY and the retry can be
@@ -121,7 +129,8 @@ export function useWalletLedger() {
     } finally {
       setBusy(false);
     }
-  }, [apply, who]);
+  }, [apply, frameMark, who]);
+  useEffect(() => { reread.current = load; }, [load]);
 
   useEffect(() => {
     // A live figure this page has just read (and handed over) is not news; re-reading it would
@@ -157,6 +166,18 @@ export function useWalletLedger() {
     return { ...fromKept(kept.value as WalletResponse, live.balance, liveHeld, countUp), busy, error, readAt: kept.at, stale, offline: unreachable, load };
   }
   return { rows, shareBookings, cardBalance, total, busy, error, readAt, stale: stale && rows !== null, offline: unreachable, balance, painted: countUp ?? balance, load, held };
+}
+
+/**
+ * R17 J17-2 (FE17x) — one page of the wallet, and the frame mark when it was SENT. `sentAt` is null
+ * when the read joined one already out (or kept a moment ago): nobody here knows when it was sent.
+ */
+async function readPage(who: string | null, limit: number, join: boolean, frameMark: () => number): Promise<{ data: WalletResponse; sentAt: number | null }> {
+  let sentAt: number | null = null;
+  const send = () => { sentAt = frameMark(); return memberReads.wallet.load(); };
+  if (limit !== WALLET_PAGE_SIZE) { sentAt = frameMark(); return { data: await endpoints.walletWithShareBookings(limit, 0), sentAt }; }
+  const data = await fetchQuery(who, memberReads.wallet.key, send, { reuseWithinMs: join ? JOIN_MS : 0 });
+  return { data, sentAt };
 }
 
 /**

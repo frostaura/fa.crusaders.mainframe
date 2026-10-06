@@ -15,8 +15,8 @@ Night seat-act kinds). Tests: `liveBalanceR17`, `splitEffectsR17`, `quotaSlotsR1
 
 - **A wallet read is tagged with the frames seen when it was SENT** (J17-2). An answer that finds a
   frame arrived since is dropped (`framesSeen` in `useLiveBalance`); unnamed twins count. *Why:* a
-  slow focus read overwrote a newer frame and toasted "went up" when it went down. `apply()` (a
-  booking answer's balance) is not tagged — same class, not seen.
+  slow focus read overwrote a newer frame and toasted "went up" when it went down. `apply()` follows
+  the same rule since FE17x (below).
 - **Namesakes escalate as a group** (L17-2): own line → "Member since 6 Oct 2026" (club date, string
   maths, never a zone) → "· ref K7Q2". `namesakeDetails(rows, base)` per rendered list; a unique name
   keeps its short line. The painted line is `keepFiguresWhole`d; the description stays heard plain.
@@ -42,3 +42,15 @@ Night seat-act kinds). Tests: `liveBalanceR17`, `splitEffectsR17`, `quotaSlotsR1
 - **conflict_retry on players surfaces** goes through FE17s's `unsureSentence` conflict pair (invite
   accept/decline, share link `linkUnsure`).
 - Night: six seat-act kinds and `court.checked_in` are never folded (each is one person's story).
+
+## Write answers follow the frames too (FE17x, J17-2 follow-through)
+
+- **`apply(minutes, { sentAt? })` drops an answer overtaken by any frame** (unnamed twins count).
+  `sentAt` is `frameMark()` taken at the SEND; absent, the mark when this tab's money-moving bracket
+  opened (an overlapping request or one inside `SELF_GRACE_MS` keeps the earlier mark). A dropped
+  answer sets no `expectSelf`. *Why:* the server publishes a frame after every commit, ours too, so
+  a frame since the send is at least as new; no re-read — the stream's silence detector covers a
+  dead stream. Tests: `liveBalanceWritesR17`, `walletOvertakenR17`.
+- **The wallet page hands over only a read it SENT with no frame since.** `fetchQuery` joins reads
+  already out (route early read, its own earlier load) whose send time is unknown — those are never
+  applied, and if their figure disagrees with the live one the page reads again so rows match the card.
