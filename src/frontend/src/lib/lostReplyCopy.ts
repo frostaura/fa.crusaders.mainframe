@@ -18,6 +18,16 @@ const conflictChecked = (stillTrue: string) => `${CONFLICT_LEAD()}, so we checke
 const conflictUnchecked = (whether: string, lookAt = "the page") =>
   `${CONFLICT_LEAD()} and we couldn't check either, so we can't tell whether ${whether}. Refresh ${lookAt} before trying again.`;
 
+/**
+ * R18 (BE18s) — the lead of every `503 service_busy` sentence: the club answered, too busy to take
+ * the write (every database connection in use) — not silent, not down; the wait is a moment.
+ */
+export const BUSY_LEAD = "The club's system was too busy to take this just now";
+
+const busyChecked = (stillTrue: string) => `${BUSY_LEAD}, so we checked: ${stillTrue} — nothing changed. Try again in a moment.`;
+const busyUnchecked = (whether: string, lookAt = "the page") =>
+  `${BUSY_LEAD} and we couldn't check either, so we can't tell whether ${whether}. Refresh ${lookAt} before trying again in a moment.`;
+
 export const LOST_REPLY = {
   proven: (done: string) => `${done} The club's reply didn't arrive, so we checked its record.`,
   checked: (stillTrue: string) => `The club didn't answer, so we checked: ${stillTrue} — nothing changed. Try again in a moment.`,
@@ -25,6 +35,13 @@ export const LOST_REPLY = {
     `The club didn't answer and we couldn't check either, so we can't tell whether ${whether}. Refresh ${lookAt} before trying again.`,
   conflictChecked,
   conflictUnchecked,
+  busyChecked,
+  busyUnchecked,
+  /** R18 — for a hand-written pair that carries no busy words of its own. */
+  busyGeneric: {
+    checked: `${BUSY_LEAD}, so we checked: it is as it was — nothing changed. Try again in a moment.`,
+    unchecked: busyUnchecked("it went through"),
+  },
   /** For a hand-written pair that carries no conflict words of its own. */
   conflictGeneric: {
     checked: `${CONFLICT_LEAD()}, so we checked: it is as it was — nothing changed. Try again now.`,
@@ -38,5 +55,6 @@ export function unsureWords(stillTrue: string, whether: string, lookAt?: string)
     checked: LOST_REPLY.checked(stillTrue),
     unchecked: LOST_REPLY.unchecked(whether, lookAt),
     conflict: { checked: conflictChecked(stillTrue), unchecked: conflictUnchecked(whether, lookAt) },
+    busy: { checked: busyChecked(stillTrue), unchecked: busyUnchecked(whether, lookAt) },
   };
 }

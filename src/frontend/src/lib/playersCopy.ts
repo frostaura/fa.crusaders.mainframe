@@ -6,7 +6,7 @@ import { minutesSpoken } from "./minutes";
 import { SOMEONE } from "./playersNames";
 import { BUY_MINUTES_ACTION } from "./gridCopy";
 import { unsureSentence, type UnsureWords } from "./lostReply";
-import { LOST_REPLY, unsureWords } from "./lostReplyCopy";
+import { BUSY_LEAD, LOST_REPLY, unsureWords } from "./lostReplyCopy";
 
 /**
  * Every word the players feature says (P11, D11–D13): the BookSheet's Players and Split steps,
@@ -630,7 +630,12 @@ export const PLAYERS_UNSURE = {
   decline: unsureWords("you're still invited", "your answer went through"),
   nudge: (name: string) =>
     `The club didn't answer, so we can't tell whether the reminder reached ${name}. Give it a few minutes before reminding them again — they may already have it.`,
+  /** R18 — the reminder, when the club answered `503 service_busy`. */
+  nudgeBusy: (name: string) =>
+    `${BUSY_LEAD}, so we can't tell whether the reminder reached ${name}. Give it a few minutes before reminding them again — they may already have it.`,
   link: "The club didn't answer, so we can't tell whether a new link was made — if it was, the old link has stopped working. Make a new link to get one you can share.",
+  /** R18 — the same, when the club answered `503 service_busy`. */
+  linkBusy: `${BUSY_LEAD}, so we can't tell whether a new link was made — if it was, the old link has stopped working. Make a new link in a moment to get one you can share.`,
   /** R17 X17-1 — the same, when the club answered `503 conflict_retry`. */
   linkConflict: "Someone else was changing this booking at the same moment, so we can't tell whether a new link was made — if it was, the old link has stopped working. Make a new link to get one you can share.",
   /** The admin's god-mode act on a seat, and the admin's add. */
@@ -644,8 +649,14 @@ export const PLAYERS_UNSURE = {
   /** R18 X18-1 — the same, after a `503 conflict_retry`. */
   privacyConflict: (label: string) =>
     `Your settings were being changed somewhere else at the same moment and we couldn't check either, so we can't tell whether "${label}" changed. Refresh the page to see.`,
+  /** R18 — the same, after a `503 service_busy`. */
+  privacyBusy: (label: string) =>
+    `${BUSY_LEAD} and we couldn't check either, so we can't tell whether "${label}" changed. Refresh the page in a moment to see.`,
   star: (name: string) =>
     `The club didn't answer, so we can't tell whether the star on ${name} changed. Close this and open it again to see.`,
+  /** R18 — the same, after a `503 service_busy`. */
+  starBusy: (name: string) =>
+    `${BUSY_LEAD}, so we can't tell whether the star on ${name} changed. Close this and open it again in a moment to see.`,
   /** R18 X18-1 — the same, after a `503 conflict_retry`. */
   starConflict: (name: string) =>
     `Your favourites were being changed somewhere else at the same moment, so we can't tell whether the star on ${name} changed. Close this and open it again to see.`,
@@ -1182,6 +1193,11 @@ export const INVITE_UNSURE = {
     checked: "Someone else was changing this game at the same moment, so we checked your invite: you're not on this game yet — nothing was taken. Try again now.",
     unchecked: "Someone else was changing this game at the same moment and your invite couldn't be checked either, so we can't tell whether you're in. Check your bookings and your wallet before trying again.",
   },
+  /** R18 — the club answered `503 service_busy`: too busy to take the accept just then. */
+  busy: {
+    checked: `${BUSY_LEAD}, so we checked your invite: you're not on this game yet — nothing was taken. Try again in a moment.`,
+    unchecked: `${BUSY_LEAD} and your invite couldn't be checked either, so we can't tell whether you're in. Check your bookings and your wallet before trying again in a moment.`,
+  },
   provenNote: "The club's reply didn't arrive, so we checked your invite — you're in. Your wallet is being re-read.",
   /** R3 I-3 — the decline landed although its reply was lost. */
   declineProvenNote: "The club's reply didn't arrive, so we checked your invite — your answer went through.",
@@ -1190,6 +1206,8 @@ export const INVITE_UNSURE = {
 export const INVITE_REFUSAL: Record<string, string> = {
   player_previously_removed: "You were taken off this game, so you can't rejoin it. Talk to whoever booked it.",
   already_in_booking: "You're already on this game.",
+  /** R18 J18-5 (BE18a) — an accept (or a decline) on a game the club or organiser cancelled. */
+  booking_not_open: "This game has been cancelled, so there's nothing to answer — nothing was taken from your wallet.",
 };
 
 /* ═══════════════════════════════════ INBOX ═══════════════════════════════════ */

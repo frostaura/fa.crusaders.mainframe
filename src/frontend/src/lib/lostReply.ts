@@ -1,5 +1,6 @@
 import { UnsureOutcome, isConflictRetry, outcomeUnknown } from "./bookingOutcome";
 import { LOST_REPLY } from "./lostReplyCopy";
+import { ApiError } from "./api";
 
 /**
  * A write whose reply was lost, read back before anything is said (review round 3, lane F2).
@@ -57,12 +58,29 @@ export type UnsurePair = { checked: string; unchecked: string };
  * `503 conflict_retry` — someone else was changing the same thing — built by `unsureWords`; a
  * hand-written pair without it gets {@link LOST_REPLY}'s generic conflict pair, never "didn't answer".
  */
-export type UnsureWords = UnsurePair & { conflict?: UnsurePair };
+export type UnsureWords = UnsurePair & { conflict?: UnsurePair; busy?: UnsurePair };
+
+/**
+ * Why an outcome is unknown, as the sentence must say it: the club too busy to take it (R18
+ * `503 service_busy`), someone else changing the same thing (R17 `503 conflict_retry`), or silence.
+ */
+export type UnsureCause = "busy" | "conflict" | "silent";
+
+export function unsureCauseOf(error: UnsureOutcome): UnsureCause {
+  if (isServiceBusy(error.original)) return "busy";
+  return isConflictRetry(error.original) ? "conflict" : "silent";
+}
+
+/** R18 (BE18s) — `503 { error: "service_busy" }`: the club answered, too busy for a moment. */
+export function isServiceBusy(e: unknown): boolean {
+  return e instanceof ApiError && e.code === "service_busy";
+}
 
 /** The sentence for an {@link UnsureOutcome}, or null for anything else (a refusal says itself). */
 export function unsureSentence(error: unknown, words: UnsureWords): string | null {
   if (!(error instanceof UnsureOutcome)) return null;
-  const pair = isConflictRetry(error.original) ? words.conflict ?? LOST_REPLY.conflictGeneric : words;
+  const cause = unsureCauseOf(error);
+  const pair = cause === "busy" ? words.busy ?? LOST_REPLY.busyGeneric : cause === "conflict" ? words.conflict ?? LOST_REPLY.conflictGeneric : words;
   return error.checked ? pair.checked : pair.unchecked;
 }
 

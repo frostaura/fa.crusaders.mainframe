@@ -29,7 +29,7 @@ export function movementSentence(amount: number, reason: string | undefined, par
   const up = amount > 0;
   const said: Said = {
     minutes, up, split: splitParts(parts), by: scanner(who.checkedInBy), where: sharePlace(who.place), whereAt: placeAt(who.place), other: namedOther(parts),
-    byClub: /^the club$/i.test(who.actorName?.trim() ?? ""),
+    byClub: /^the club$/i.test(who.actorName?.trim() ?? ""), byYou: who.checkedInByYou === true,
   };
   const caused = reason ? causedSentence(reason, said, parts, who) : null;
   // `mixed` without its rows, and anything unknown: true whoever caused it.
@@ -202,6 +202,8 @@ type Said = {
   other: string | null;
   /** R17 E17-1 — the frame says the club acted (`actor_name: "The club"`): a booking the desk made. */
   byClub: boolean;
+  /** R18 E18-2 — the frame's `checked_in_by_you`: the reader's own scan. */
+  byYou: boolean;
 };
 
 /** "Dan Splitter checked in, so …" or this member's own "… — you were checked in after all". */
@@ -225,6 +227,8 @@ function noShowReversedLead(s: Said): string {
 
 /** R16 E16-3 — "Pat had already checked in" when the frame names them; "it had started" when not. */
 function startedBecause(s: Said): string {
+  // R18 E18-2 — the reader's own scan is "you", never their own first name or "it had started".
+  if (s.byYou) return "you had already checked in";
   return s.by ? `${s.by} had already checked in` : "it had started";
 }
 

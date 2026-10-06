@@ -36,3 +36,24 @@ describe("the chip flyout's held note (R18 E18-12)", () => {
     expect(flyoutHeldNote("1 h 15 min", false)).toBe("1 h 15 min freed");
   });
 });
+
+/**
+ * R18 E18-2 (BE18a) — the partner's `cancelled_share_stands` frame now names who had checked in:
+ * `checked_in_by_name` (someone else's scan) or `checked_in_by_you` (their own) — said as the
+ * organiser's `cancelled_no_refund` toast says it.
+ */
+describe("a started game's club cancel names who had checked in (R18 E18-2)", () => {
+  it("the partner's own scan: 'you had already checked in'", () => {
+    expect(movementSentence(0, "cancelled_share_stands", undefined, { checkedInByYou: true, place: PLACE }))
+      .toMatch(/^The club cancelled Court 2 · .* — you had already checked in, so your share stands\.$/);
+  });
+
+  it("someone else's scan: by first name", () => {
+    expect(movementSentence(0, "cancelled_share_stands", undefined, { checkedInBy: "Sam Petersen" }))
+      .toBe("The club cancelled your game — Sam had already checked in, so your share stands.");
+  });
+
+  it("the organiser's frame says the same of their own scan", () => {
+    expect(movementSentence(0, "cancelled_no_refund", undefined, { checkedInByYou: true })).toMatch(/you had already checked in, so nothing was refunded/);
+  });
+});

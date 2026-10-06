@@ -99,6 +99,8 @@ export const RESULT_CARD = {
   windowClosed: "It's too late to record a result for this game.",
   /** R2 F2-8 — invited players are listed on the booking but do not count until they say yes. */
   notEnoughPlayers: "A result needs at least one other player to have said yes to this game.",
+  /** R18 J18-1 (BE18a) — a cancelled game has no result to record, edit or confirm. */
+  cancelled: "This game was cancelled, so it has no result to record or confirm.",
   recordUntil: (when: string) => `You can record it until ${when}.`,
   waitingFor: (names: string, when: string | null) => (when
     ? `Waiting for ${names} to confirm · confirms itself ${when}`
@@ -151,6 +153,7 @@ export function notRecordableLine(reason: NotRecordableReason | null): string | 
   if (reason === "not_started") return RESULT_CARD.notStarted;
   if (reason === "window_closed") return RESULT_CARD.windowClosed;
   if (reason === "not_enough_players") return RESULT_CARD.notEnoughPlayers;
+  if (reason === "cancelled") return RESULT_CARD.cancelled;
   return null;
 }
 

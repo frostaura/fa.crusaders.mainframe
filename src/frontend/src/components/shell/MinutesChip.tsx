@@ -105,7 +105,7 @@ function useClubMovementToast() {
     if (delta.source !== "club") return;
     const sayAs = (amount: number, parts: BalancePart[] | undefined) => (text: string) =>
       toast.push({ tone: toneOf(amount, parts), text, durationMs: MONEY_TOAST_MS });
-    const who = { cancelledBy: delta.cancelledBy, checkedInBy: delta.checkedInBy, place: delta.place, actorName: delta.actorName };
+    const who = { cancelledBy: delta.cancelledBy, checkedInBy: delta.checkedInBy, place: delta.place, actorName: delta.actorName, checkedInByYou: delta.checkedInByYou };
     const held = pending.current;
     if (held && delta.reason === "share_transfer") {
       // R12 X12-1 — the refund's share rows, an older server's second frame: one sentence, the net.

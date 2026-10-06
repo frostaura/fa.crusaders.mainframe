@@ -191,6 +191,8 @@ export type MovementWho = {
   place?: SharePlace;
   /** R17 E17-1 — the frame's `actor_name`: "The club" on a booking the desk made for this member. */
   actorName?: string;
+  /** R18 E18-2 — the frame's `checked_in_by_you`: this member's own scan checked the game in. */
+  checkedInByYou?: boolean;
 };
 
 /**
