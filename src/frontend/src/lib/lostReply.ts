@@ -58,17 +58,44 @@ export type UnsurePair = { checked: string; unchecked: string };
  * `503 conflict_retry` — someone else was changing the same thing — built by `unsureWords`; a
  * hand-written pair without it gets {@link LOST_REPLY}'s generic conflict pair, never "didn't answer".
  */
-export type UnsureWords = UnsurePair & { conflict?: UnsurePair; busy?: UnsurePair };
+export type UnsureWords = UnsurePair & { conflict?: UnsurePair; busy?: UnsurePair; error?: UnsurePair };
 
 /**
  * Why an outcome is unknown, as the sentence must say it: the club too busy to take it (R18
- * `503 service_busy`), someone else changing the same thing (R17 `503 conflict_retry`), or silence.
+ * `503 service_busy`), someone else changing the same thing (R17 `503 conflict_retry`), the club's
+ * system answering with an error (R19 X19-2: a plain 500), or silence.
+ */
+export type UnsureReason = "busy" | "conflict" | "error" | "silent";
+
+/**
+ * The three-way cause the players hooks index their own sentences by (`{ busy, conflict, silent }`).
+ * <b>Transitional (R19 X19-2):</b> an `error` is folded into `silent` here only so those callers keep
+ * compiling until they carry an error sentence of their own and move to {@link unsureReasonOf} — the
+ * ask is in the R19 FE19x report. Every `unsureSentence` caller already says the error.
  */
 export type UnsureCause = "busy" | "conflict" | "silent";
 
 export function unsureCauseOf(error: UnsureOutcome): UnsureCause {
-  if (isServiceBusy(error.original)) return "busy";
-  return isConflictRetry(error.original) ? "conflict" : "silent";
+  const reason = unsureReasonOf(error);
+  return reason === "error" ? "silent" : reason;
+}
+
+/**
+ * R19 X19-2 — "didn't answer" is true only when NOTHING answered: the connection failed, the request
+ * timed out or was torn (`NetworkError`, an abort), or the gateway in front of the club's system said
+ * the system did not answer it — 502, 504, and a 503 carrying no code of the club's own (down or
+ * restarting, as `describeFailure` words it; R17 pinned it as silence). Any other 5xx is the club's
+ * system answering — with an error — and a 500 said as silence sent a member to "try again in a
+ * moment" over a fault that will not pass.
+ */
+const SILENT_STATUSES = new Set([502, 503, 504]);
+
+export function unsureReasonOf(error: UnsureOutcome): UnsureReason {
+  const original = error.original;
+  if (isServiceBusy(original)) return "busy";
+  if (isConflictRetry(original)) return "conflict";
+  if (original instanceof ApiError && original.status >= 500 && !SILENT_STATUSES.has(original.status)) return "error";
+  return "silent";
 }
 
 /** R18 (BE18s) — `503 { error: "service_busy" }`: the club answered, too busy for a moment. */
@@ -79,9 +106,16 @@ export function isServiceBusy(e: unknown): boolean {
 /** The sentence for an {@link UnsureOutcome}, or null for anything else (a refusal says itself). */
 export function unsureSentence(error: unknown, words: UnsureWords): string | null {
   if (!(error instanceof UnsureOutcome)) return null;
-  const cause = unsureCauseOf(error);
-  const pair = cause === "busy" ? words.busy ?? LOST_REPLY.busyGeneric : cause === "conflict" ? words.conflict ?? LOST_REPLY.conflictGeneric : words;
+  const pair = pairFor(unsureReasonOf(error), words);
   return error.checked ? pair.checked : pair.unchecked;
+}
+
+/** The pair a reason is said in — the screen's own twin when it has one, the generic one when not. */
+function pairFor(reason: UnsureReason, words: UnsureWords): UnsurePair {
+  if (reason === "busy") return words.busy ?? LOST_REPLY.busyGeneric;
+  if (reason === "conflict") return words.conflict ?? LOST_REPLY.conflictGeneric;
+  if (reason === "error") return words.error ?? LOST_REPLY.errorGeneric;
+  return words;
 }
 
 export { UnsureOutcome, isConflictRetry, outcomeUnknown };

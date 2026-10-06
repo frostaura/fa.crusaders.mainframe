@@ -28,6 +28,18 @@ const busyChecked = (stillTrue: string) => `${BUSY_LEAD}, so we checked: ${still
 const busyUnchecked = (whether: string, lookAt = "the page") =>
   `${BUSY_LEAD} and we couldn't check either, so we can't tell whether ${whether}. Refresh ${lookAt} before trying again in a moment.`;
 
+/**
+ * R19 X19-2 — the lead of every sentence for a write the club's system answered with an error (a
+ * plain 500): it DID answer, so never "didn't answer"; whether the write landed before the error is
+ * still unknown, so it is read back like any other 5xx. No promise of "a moment" — an error is not
+ * a busy spell.
+ */
+export const ERROR_LEAD = "The club's system hit an error";
+
+const errorChecked = (stillTrue: string) => `${ERROR_LEAD}, so we checked: ${stillTrue} — nothing changed. Try again, and tell the club committee if it keeps happening.`;
+const errorUnchecked = (whether: string, lookAt = "the page") =>
+  `${ERROR_LEAD} and we couldn't check either, so we can't tell whether ${whether}. Refresh ${lookAt} before trying again.`;
+
 export const LOST_REPLY = {
   proven: (done: string) => `${done} The club's reply didn't arrive, so we checked its record.`,
   checked: (stillTrue: string) => `The club didn't answer, so we checked: ${stillTrue} — nothing changed. Try again in a moment.`,
@@ -37,6 +49,13 @@ export const LOST_REPLY = {
   conflictUnchecked,
   busyChecked,
   busyUnchecked,
+  errorChecked,
+  errorUnchecked,
+  /** R19 — for a hand-written pair that carries no error words of its own. */
+  errorGeneric: {
+    checked: errorChecked("it is as it was"),
+    unchecked: errorUnchecked("it went through"),
+  },
   /** R18 — for a hand-written pair that carries no busy words of its own. */
   busyGeneric: {
     checked: `${BUSY_LEAD}, so we checked: it is as it was — nothing changed. Try again in a moment.`,
@@ -56,5 +75,6 @@ export function unsureWords(stillTrue: string, whether: string, lookAt?: string)
     unchecked: LOST_REPLY.unchecked(whether, lookAt),
     conflict: { checked: conflictChecked(stillTrue), unchecked: conflictUnchecked(whether, lookAt) },
     busy: { checked: busyChecked(stillTrue), unchecked: busyUnchecked(whether, lookAt) },
+    error: { checked: errorChecked(stillTrue), unchecked: errorUnchecked(whether, lookAt) },
   };
 }
