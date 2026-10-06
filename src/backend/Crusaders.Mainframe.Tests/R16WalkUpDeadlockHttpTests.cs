@@ -93,13 +93,39 @@ public sealed class R16WalkUpDeadlockHttpTests(PostgresFixture pg) : IClassFixtu
             {
                 var code = club.Code(buyer);
                 var nonce = $"d3d3d3d3d3d3d3{c}{court}";
-                var answers = await Task.WhenAll(Enumerable.Range(0, 12).Select(_ => device.SendAsync(club.WalkUp(code, court, nonce))));
-                Assert.All(answers, a => Assert.Equal(HttpStatusCode.OK, a.StatusCode));
+                var answers = await Task.WhenAll(Enumerable.Range(0, 12).Select(_ => AnsweredAsABoxRetriesAsync(device, () => club.WalkUp(code, court, nonce))));
+                var said = await Task.WhenAll(answers.Select(async a => $"{(int)a.StatusCode} {await a.Content.ReadAsStringAsync()}"));
+                Assert.All(said, s => Assert.StartsWith("200 ", s, StringComparison.Ordinal));
                 await AssertOnePurchaseLitAsync(app, club, buyer);
             }
             Assert.Equal(2, await club.UsesAsync(app, MemberCodeUseClass.Money));
         }
     }
+
+    /// <summary>
+    /// R19 BE19L: what a box does with <c>503 service_busy</c> — the API got no database connection,
+    /// nothing ran — keep the event and ask again after <c>Retry-After</c>. In the sharded run the
+    /// server's slots were full of other classes' idle pools and 10 of 12 walk-ups were refused a
+    /// connection before they did anything, a fault in nothing this class tests. Only that answer
+    /// is asked again, at most <see cref="BusyRetries"/> times: a <c>conflict_retry</c> — the lost race
+    /// R16 exists to absorb server-side — is still a failure here, and so is every other answer.
+    /// </summary>
+    private static async Task<HttpResponseMessage> AnsweredAsABoxRetriesAsync(HttpClient device, Func<HttpRequestMessage> request)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var answer = await device.SendAsync(request());
+            if (attempt == BusyRetries || answer.StatusCode != HttpStatusCode.ServiceUnavailable) return answer;
+            var body = await answer.Content.ReadAsStringAsync();
+            if (!body.Contains($"\"{DatabasePool.ServiceBusy}\"", StringComparison.Ordinal)) return answer;
+            var wait = answer.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(DatabasePool.RetryAfterSeconds);
+            answer.Dispose();
+            await Task.Delay(wait);
+        }
+    }
+
+    /// <summary>How many times a refused walk-up is asked again: a box backs off for longer than this suite waits.</summary>
+    private const int BusyRetries = 5;
 
     private static async Task AssertOnePurchaseLitAsync(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app, MemberCodeClub club)
     {

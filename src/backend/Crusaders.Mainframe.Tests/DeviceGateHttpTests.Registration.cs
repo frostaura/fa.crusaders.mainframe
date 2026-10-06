@@ -443,25 +443,18 @@ public abstract partial class DeviceGateHttpTests
             await using var holder = new Npgsql.NpgsqlConnection(_pg.ConnectionString);
             await holder.OpenAsync();
             await using var hold = await holder.BeginTransactionAsync();
+            var lockKey = PayerLock.KeyFor(club.TenantId, Guid.Empty);
             await using (var take = new Npgsql.NpgsqlCommand("SELECT pg_advisory_xact_lock(@k)", holder, hold))
             {
-                take.Parameters.AddWithValue("k", PayerLock.KeyFor(club.TenantId, Guid.Empty));
+                take.Parameters.AddWithValue("k", lockKey);
                 await take.ExecuteNonQueryAsync();
             }
 
-            var inFlight = Enumerable.Range(0, attempts)
-                .Select(_ => client.SendAsync(Heartbeat(club.Key, NewMac(), DeviceKinds.Gate)))
-                .ToList();
-            for (var i = 0; i < 600; i++)
-            {
-                await using var waiting = new Npgsql.NpgsqlCommand(
-                    "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted", holder);
-                if ((long)(await waiting.ExecuteScalarAsync())! >= attempts) break;
-                await Task.Delay(100);
-            }
+            var flood = new LockQueue(client, club.Key, attempts);
+            await flood.QueueAllAsync(holder, lockKey);
             await hold.CommitAsync();
 
-            var answers = await Task.WhenAll(inFlight);
+            var answers = await Task.WhenAll(flood.InFlight);
             var admitted = answers.Count(r => r.StatusCode == HttpStatusCode.OK);
 
             using var scope = factory.Services.CreateScope();
@@ -474,6 +467,86 @@ public abstract partial class DeviceGateHttpTests
                 r => Assert.Equal(HttpStatusCode.Conflict, r.StatusCode));
 
             foreach (var answer in answers) answer.Dispose();
+        }
+
+        /// <summary>
+        /// R19 BE19L: the flood behind <see cref="Boards_all_queued_on_the_lock_at_once_still_stop_at_the_cap"/>,
+        /// queued on the club's registration lock the way real boards would get there.
+        ///
+        /// <para>
+        /// <b>Why not just count waiters.</b> The test once fired every board and polled
+        /// <c>pg_locks</c> — every advisory waiter on the SERVER, not this lock's — for up to 60 s.
+        /// In the sharded run the server's slots were full of other classes' idle pools, so four
+        /// boards were refused a connection (<c>503 service_busy</c>) before they ever reached the
+        /// lock; the count never got there, the poll ran its whole minute, the 28 that had queued
+        /// passed their 30 s command timeout meanwhile, and the test reported "0 rows, expected 16"
+        /// — a fault in nothing it tests. Now: only THIS lock's waiters in this database count; a
+        /// board refused for want of a connection asks again after its <c>Retry-After</c>, as a box
+        /// does; ANY other answer while the lock is held fails at once (the lock did not hold that
+        /// board); and a queue that is not complete in <see cref="Deadline"/> — well inside the
+        /// command timeout — fails saying how far it got, never as a wrong row count.
+        /// </para>
+        /// </summary>
+        private sealed class LockQueue(HttpClient client, string key, int boards)
+        {
+            /// <summary>How long every board gets to be queued on the lock: under the API's 30 s command timeout.</summary>
+            private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(20);
+
+            private readonly string[] _macs = [.. Enumerable.Range(0, boards).Select(_ => NewMac())];
+            private readonly DateTime?[] _askAgainAt = new DateTime?[boards];
+            private readonly List<string> _refusals = [];
+
+            public List<Task<HttpResponseMessage>> InFlight { get; } = [];
+
+            public async Task QueueAllAsync(Npgsql.NpgsqlConnection holder, long lockKey)
+            {
+                foreach (var mac in _macs) InFlight.Add(client.SendAsync(Heartbeat(key, mac, DeviceKinds.Gate)));
+
+                var giveUpAt = DateTime.UtcNow + Deadline;
+                long queued = 0;
+                while (DateTime.UtcNow < giveUpAt)
+                {
+                    for (var i = 0; i < boards; i++) await AskAgainIfRefusedAsync(i);
+                    queued = await WaitersAsync(holder, lockKey);
+                    if (queued == boards) return;
+                    await Task.Delay(100);
+                }
+
+                Assert.Fail($"only {queued} of {boards} boards were ever queued on the registration lock in " +
+                    $"{Deadline.TotalSeconds} s; refused on the way: {(_refusals.Count == 0 ? "none" : string.Join(" | ", _refusals))}");
+            }
+
+            /// <summary>A board answered while the lock is held: 503 service_busy asks again after Retry-After; anything else fails the test.</summary>
+            private async Task AskAgainIfRefusedAsync(int board)
+            {
+                if (!InFlight[board].IsCompleted) return;
+                if (_askAgainAt[board] is { } at)
+                {
+                    if (DateTime.UtcNow < at) return;
+                    _askAgainAt[board] = null;
+                    InFlight[board] = client.SendAsync(Heartbeat(key, _macs[board], DeviceKinds.Gate));
+                    return;
+                }
+
+                using var answer = await InFlight[board];
+                var body = await answer.Content.ReadAsStringAsync();
+                Assert.True(answer.StatusCode == HttpStatusCode.ServiceUnavailable && body.Contains($"\"{DatabasePool.ServiceBusy}\"", StringComparison.Ordinal),
+                    $"a board was answered {(int)answer.StatusCode} {body} while the registration lock was held — the lock did not hold it");
+                var wait = answer.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(DatabasePool.RetryAfterSeconds);
+                _refusals.Add($"{(int)answer.StatusCode} {body} Retry-After {wait.TotalSeconds} s");
+                _askAgainAt[board] = DateTime.UtcNow + wait;
+            }
+
+            /// <summary>Requests parked on THIS advisory lock, in this database (a bigint key is classid:objid).</summary>
+            private static async Task<long> WaitersAsync(Npgsql.NpgsqlConnection holder, long lockKey)
+            {
+                await using var waiting = new Npgsql.NpgsqlCommand(
+                    "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1 " +
+                    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) " +
+                    "AND ((classid::bigint << 32) | objid::bigint) = @k", holder);
+                waiting.Parameters.AddWithValue("k", lockKey);
+                return (long)(await waiting.ExecuteScalarAsync())!;
+            }
         }
 
         /// <summary>Every answer that was neither OK nor the cap's 409, with its body — for a failure message.</summary>
