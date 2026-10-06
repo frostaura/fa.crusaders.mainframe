@@ -21,16 +21,25 @@ import { cn } from "@/lib/utils";
  * </p>
  */
 /**
- * R4 (V4-11): the badge's box grows with the text only to 28px and never rises more than 10px
+ * R4 (V4-11): the badge's box grows with the text only so far and never rises more than 10px
  * above the glyph — its normal-text overhang. At 200 % text a 1.25rem badge hung 20px above a
  * 1.25rem glyph and was cut by the top of the screen; growing the bell's own box instead made the
  * top bar 99px taller (B12 allows 45). A style, since utilities outside `ui/` may not use
  * arbitrary lengths.
+ *
+ * R19 L19-8 — and it never leaves the bell's own 44px box sideways. Hung from the glyph's corner
+ * (`left: 2/3`) with type and padding in rem, "9+" was 46px wide at 200 % and lay 31px over the
+ * minutes chip (15px over the avatar on a phone). Its RIGHT edge is now the bell's edge — half of
+ * (44px − the glyph) past the glyph, whatever the text size — and type, padding and height have
+ * pixel ceilings, so "9+" is at most ~28px of a 44px bell, clear of every neighbour's tap area.
  */
 const BADGE_BOX = {
   top: "max(-0.625rem, -10px)",
-  height: "min(1.25rem, 28px)",
-  minWidth: "min(1.25rem, 28px)",
+  right: "calc((100% - 44px) / 2)",
+  height: "min(1.25rem, 22px)",
+  minWidth: "min(1.25rem, 22px)",
+  fontSize: "min(0.75rem, 15px)",
+  paddingInline: "min(0.25rem, 4px)",
 } as const;
 
 export function NotificationBell({ className }: { className?: string }) {
@@ -67,8 +76,8 @@ export function NotificationBell({ className }: { className?: string }) {
             aria-hidden="true"
             data-unread-badge=""
             className={cn(
-              "absolute left-2/3 inline-flex items-center justify-center rounded-full px-1",
-              "bg-danger-solid text-xs font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
+              "absolute inline-flex items-center justify-center rounded-full",
+              "bg-danger-solid font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
             )}
             style={BADGE_BOX}
           >
