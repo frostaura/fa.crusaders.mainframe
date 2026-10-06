@@ -340,11 +340,16 @@ export const BOOK_SHEET = {
     return `${held} of ${total} held`;
   },
   noneBookedTitle: "Nothing was booked",
+  /**
+   * R19 J19-2 — the viewer's own line follows their live wallet (the chip), so "now" stays true.
+   * Another member's wallet is not live on this screen: their figure is the booking answer's, and
+   * says so ("after this booking") rather than "now", which a later movement would falsify.
+   */
   balanceLine: (after: number, forName: string | null) =>
-    forName ? `${forName}'s balance is now ${signedMinutes(after)}.` : `Your balance is now ${signedMinutes(after)}.`,
+    forName ? `${forName}'s balance after this booking: ${signedMinutes(after)}.` : `Your balance is now ${signedMinutes(after)}.`,
   /** The same concept as Confirm's "Available after" (F1.3) — what is left to SPEND. */
   availableLine: (after: number, forName: string | null) =>
-    forName ? `${forName} now has ${signedMinutes(after)} to spend.` : `You now have ${signedMinutes(after)} to spend.`,
+    forName ? `${forName} has ${signedMinutes(after)} to spend after this booking.` : `You now have ${signedMinutes(after)} to spend.`,
   /** F1.1 — the club's reply was lost; the outcome was read off the schedule. */
   provenNote: "The club's reply didn't arrive, so this was read off the schedule. Your wallet is being re-read.",
   /** R19 — by why the answer was unsure: one that arrived (an error, busy, a clash) is said as what it said. */
@@ -413,7 +418,8 @@ export const REFUSAL_REASON: Record<string, string> = {
   booking_not_found: "That booking is no longer there.",
   already_started: "It has already started.",
   /** R15 D15-5 — a member's own checked-in booking: only the club may cancel it now. */
-  already_checked_in: "You've checked in to it — only the club can cancel it now.",
+  /** R19 J19-3 — subject-free: a partner's scan checks a booking in too, and this row cannot say whose. */
+  already_checked_in: "It's been checked in to — only the club can cancel it now.",
   already_cancelled: "Was already cancelled.",
   /** R17 E17-6 / J17-7 (BE17b) — the desk's cancel of a booking already cancelled. */
   booking_not_open: "Was already cancelled.",
@@ -473,10 +479,23 @@ export const CANCEL_SHEET = {
     return `Cancelling now is free — nothing is kept: ${sharesBack(partners)}, and the rest goes back to ${balance}.`;
   },
   late: (pct: number) => `This is inside the late-cancellation window, so ${pct}% is kept as a penalty.`,
+  /**
+   * R19 J19-3 — `name` is whoever's own scan lit the court (the booking record says), not the
+   * organiser by default: a partner scanned alone and the desk read "Thandi has already checked in".
+   */
   checkedIn: (name: string | null) =>
     (name
       ? `${name} has already checked in and the lights have been on, so nothing is refunded.`
       : "You've already checked in and the lights have been on, so nothing is refunded."),
+  /** R19 J19-3 — the record does not say who scanned (a payer lit it, or it would not read): nobody named. */
+  checkedInSomeone: "Someone has already checked in and the lights have been on, so nothing is refunded.",
+  /**
+   * R19 J19-3 — a member's own booking, refused once checked in, says who did: "You've" only when
+   * the organiser's own scan lit it, a partner by name, nobody when the record does not say.
+   */
+  refusedCheckedIn: (name: string | null, you: boolean) =>
+    `${you ? "You've" : `${name ?? "Someone"} has`} checked in to this booking, so it can't be cancelled — `
+    + "the court is yours until it ends. If something's wrong, speak to the club.",
   nothingBack: "Nothing back — the lights had been on",
   finalLine: "Cancelling can't be undone. Booking again is a new booking.",
 

@@ -12,12 +12,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { focusFirstComplaint } from "@/components/members/saleFocus";
 import { ApiError, type CancellationQuote } from "@/lib/api";
 import { ADMIN_CANCEL } from "@/lib/adminCancelCopy";
-import { ALREADY_CHECKED_IN_TEXT, cancellationOutcome, describeBookingError, endsCancel, provesStaleGrid } from "@/lib/bookingErrors";
+import { cancellationOutcome, describeBookingError, endsCancel, provesStaleGrid } from "@/lib/bookingErrors";
 import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
-import { playersEndpoints, type BookingDetail } from "@/lib/playersApi";
-import { firstName } from "@/lib/playersNames";
-import { standingShares } from "@/lib/standingShares";
+import { playersEndpoints } from "@/lib/playersApi";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL, refusalReason } from "@/lib/bookingsCopy";
 import { CANCEL_ENDED, type CancelFrom } from "@/lib/cancelSheetCopy";
@@ -29,6 +27,9 @@ import {
   type CancelRun, type QuoteMap,
 } from "./cancelFlow";
 import type { GridBooking } from "./types";
+import {
+  RECORD_FAILED, RECORD_PENDING, checkedInName, checkedInRecordOf, type CheckedInRecord, type RecordFor,
+} from "./checkedInBy";
 import { useLateLanding, useSendingGuard } from "./useSendingGuard";
 
 /**
@@ -151,6 +152,10 @@ function useCancelFlow(props: FlowProps) {
   const readyQuotes = quotes.state.status === "ready" ? quotes.state.quotes : null;
   const refused = (b: GridBooking) => !(isAdmin && !b.mine) && readyQuotes?.get(b.bookingId)?.checkedIn === true;
   const sendable = bookings.filter((b) => !refused(b));
+  // R19 J19-3 — a checked-in booking's record says WHO checked in (the quote does not), and on the
+  // club's cancel which paid shares stand (R16 J16-7). Read once, for the sheet and the toast.
+  const only = single ? bookings[0] : null;
+  const record = useCheckedInRecord(only?.bookingId ?? "", only !== null && readyQuotes?.get(only.bookingId)?.checkedIn === true);
   // R4 A4-4: an admin cancelling somebody else's booking always says why — the member is told,
   // and it goes on the club's change record (the API refuses it without, 400 reason_required).
   const reasonNeeded = forOthers;
@@ -176,8 +181,8 @@ function useCancelFlow(props: FlowProps) {
           return;
         }
         const [b] = bookings;
-        const who = b.mine ? null : b.memberFirstName ?? "the member";
-        push?.({ tone: "success", text: cancellationOutcome(result.single.refunded, result.single.penalty, who, result.single.split, result.single.answered) });
+        const s = result.single;
+        push?.({ tone: "success", text: cancellationOutcome(s.refunded, s.penalty, toastSubject(b, s.refunded, s.penalty, record), s.split, s.answered) });
         onClose();
       },
       failure: (error) => {
@@ -206,13 +211,43 @@ function useCancelFlow(props: FlowProps) {
   };
 
   return {
-    quotes, waive, setWaive, reason, setReason, reasonNeeded, forOthers, single, refused, sendable: ended ? 0 : sendable.length, ended, from,
+    quotes, waive, setWaive, reason, setReason, reasonNeeded, forOthers, single, refused, sendable: ended ? 0 : sendable.length, ended, from, record,
     reasonMissing: reasonShown && reasonNeeded && reason.trim() === "",
     action, run, confirm,
   };
 }
 
 type CancelFlow = ReturnType<typeof useCancelFlow>;
+
+/**
+ * Whose name the toast's sentence carries: the organiser's, whose minutes moved — except when nothing
+ * came back because somebody had checked in, when `cancellationOutcome` says "<name> had already
+ * checked in": then whoever the record says scanned, or nobody ("the lights had already been on").
+ */
+function toastSubject(b: GridBooking, refunded: number | null, penalty: number | null, record: CheckedInRecord): string | null {
+  if (b.mine) return null;
+  const nothingBack = refunded !== null && penalty !== null && refunded <= 0 && penalty <= 0;
+  if (!nothingBack) return b.memberFirstName ?? "the member";
+  return checkedInName(record, b.memberFirstName, false).name;
+}
+
+/**
+ * R19 J19-3 (R16 J16-7) — the booking record, read only when the quote says somebody checked in:
+ * pending until it answers, failed when it will not. Never claims anything it did not read.
+ */
+function useCheckedInRecord(bookingId: string, wanted: boolean): CheckedInRecord {
+  const [read, setRead] = useState<RecordFor | null>(null);
+  useEffect(() => {
+    if (!wanted) return undefined;
+    let live = true;
+    const keep = (record: CheckedInRecord) => {
+      if (live) setRead({ id: bookingId, record });
+    };
+    playersEndpoints.detail(bookingId).then((d) => keep(checkedInRecordOf(d)), () => keep(RECORD_FAILED));
+    return () => { live = false; };
+  }, [bookingId, wanted]);
+  return read?.id === bookingId ? read.record : RECORD_PENDING;
+}
 
 function CancelFlowView(props: FlowProps) {
   const flow = useCancelFlow(props);
@@ -303,7 +338,6 @@ function RefusalAlert({ failed, from }: { failed: unknown; from: CancelFrom }) {
 }
 
 function consequence(quote: CancellationQuote, waived: boolean, subject: string | null) {
-  if (quote.checkedIn) return { tone: "danger" as const, text: CANCEL_SHEET.checkedIn(subject) };
   if (quote.penaltyMinutes > 0 && !waived) return { tone: "warning" as const, text: CANCEL_SHEET.late(quote.penaltyPct) };
   // R14 J14-6 — a split booking's partners get their shares back; "every minute" would be false.
   return { tone: "success" as const, text: CANCEL_SHEET.free(subject, partnerNames(quote, waived)) };
@@ -335,10 +369,11 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
   const loading = flow.quotes.state.status === "loading";
   const waived = flow.forOthers && flow.waive;
   const subject = booking.mine ? null : booking.memberFirstName ?? "This member";
-  const said = quote && flow.refused(booking)
-    ? { tone: "warning" as const, text: ALREADY_CHECKED_IN_TEXT }
+  const refused = flow.refused(booking);
+  const said = quote?.checkedIn
+    ? checkedInSaid(flow.record, booking, subject, refused)
     : quote ? consequence(quote, waived, subject) : null;
-  const sharesWanted = Boolean(quote?.checkedIn) && flow.forOthers && !flow.refused(booking);
+  const sharesWanted = Boolean(quote?.checkedIn) && flow.forOthers && !refused;
   return (
     <>
       <SlotList lines={[lineFor(booking, undefined, false)]} label={CANCEL_SHEET.title(1)} refusedWord="" />
@@ -347,43 +382,34 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
       {said ? <Alert tone={said.tone} live="polite">{said.text}</Alert> : null}
       {loading || quote ? <MoneyRows rows={singleMoney(quote, waived, subject)} label={CANCEL_SHEET.totalBack} /> : null}
       <SplitNote quote={quote} waived={waived} subject={subject} />
-      <SharesStand bookingId={booking.bookingId} wanted={sharesWanted} organiser={booking.memberFirstName} />
+      {sharesWanted ? <SharesStand record={flow.record} organiser={booking.memberFirstName} /> : null}
     </>
   );
 }
 
 /**
+ * R19 J19-3 — who checked in, named off the booking record, never the organiser by default: a partner
+ * who scanned alone is named; nobody is while the record is on its way (the sentence waits, so it is
+ * announced once), when it will not read, or when it does not say (`checkedInSomeone`). A member's
+ * own booking is refused (R15 D15-5) in the same terms — "You've" only for their own scan.
+ */
+function checkedInSaid(record: CheckedInRecord, booking: GridBooking, subject: string | null, refused: boolean) {
+  if (record.status === "pending") return null;
+  const by = checkedInName(record, subject, booking.mine);
+  if (refused) return { tone: "warning" as const, text: CANCEL_SHEET.refusedCheckedIn(by.name, by.you) };
+  const named = by.you || by.name !== null;
+  return { tone: "danger" as const, text: named ? CANCEL_SHEET.checkedIn(by.name) : CANCEL_SHEET.checkedInSomeone };
+}
+
+/**
  * R16 J16-7 — who keeps a paid share when the club cancels a session somebody checked in to, by the
  * booking page panel's rule (standingShares). The quote lists no partner refunds then, so the
- * booking record says who stands: read only on such a cancel, null until read and on a failed read,
- * when the sheet claims nothing about the shares.
+ * booking record says who stands; the sheet claims nothing about the shares until it has read it.
  */
-function standingReadOf(bookingId: string, d: BookingDetail) {
-  const organiser = d.organiser.name?.trim() ? firstName(d.organiser.name) : null;
-  return { id: bookingId, shares: standingShares(d), organiser };
-}
-
-type StandingRead = ReturnType<typeof standingReadOf>;
-
-function useStandingShares(bookingId: string, wanted: boolean): StandingRead | null {
-  const [read, setRead] = useState<StandingRead | null>(null);
-  useEffect(() => {
-    if (!wanted) return undefined;
-    let live = true;
-    const keep = (d: BookingDetail) => {
-      if (live) setRead(standingReadOf(bookingId, d));
-    };
-    playersEndpoints.detail(bookingId).then(keep, () => undefined);
-    return () => { live = false; };
-  }, [bookingId, wanted]);
-  return wanted && read?.id === bookingId ? read : null;
-}
-
-function SharesStand({ bookingId, wanted, organiser }: { bookingId: string; wanted: boolean; organiser: string | null }) {
-  const read = useStandingShares(bookingId, wanted);
-  if (!read || read.shares.length === 0) return null;
+function SharesStand({ record, organiser }: { record: CheckedInRecord; organiser: string | null }) {
+  if (record.status !== "read" || record.shares.length === 0) return null;
   // Polite: a standing fact about this cancel, landing a beat after the quote's own alert.
-  return <Alert tone="info" live="polite">{ADMIN_CANCEL.sharesStand(read.shares, read.organiser ?? organiser ?? ADMIN_CANCEL.nobody)}</Alert>;
+  return <Alert tone="info" live="polite">{ADMIN_CANCEL.sharesStand(record.shares, record.organiser ?? organiser ?? ADMIN_CANCEL.nobody)}</Alert>;
 }
 
 /** F1.13 — why "Back to you" (or "Back to Thandi", R13 J13-5) is less than was paid on a split booking. */

@@ -6,6 +6,7 @@ import { ToastProvider } from "@/components/Toast";
 import { stubFetch } from "@/test/harness";
 import { CANCEL_SHEET, refusalReason } from "@/lib/bookingsCopy";
 import { ALREADY_CHECKED_IN_TEXT } from "@/lib/bookingErrors";
+import { detail, seat } from "@/components/players/__tests__/detailKit";
 import { CancelSheet, type CancelSheetProps } from "../CancelSheet";
 import type { GridBooking } from "../types";
 
@@ -29,6 +30,15 @@ const quote = (id: string, checkedIn: boolean) => ({
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+/** R19 J19-3 — the record of a booking the organiser's own scan lit (their seat, at the booking's instant). */
+const LIT = "2030-09-09T15:58:00Z";
+const litByOrganiser = (id: string) => ({
+  path: `/api/v1/bookings/${id}`,
+  body: detail({ booking_id: id, players: [seat({ checked_in_at: LIT })], attendance: { checked_in_at: LIT, players_checked_in: 1 } }),
+});
+/** The member's own refusal when their own scan lit it: the 409's own words (R15 D15-5). */
+const OWN_REFUSAL = CANCEL_SHEET.refusedCheckedIn(null, true);
+
 function Providers({ children }: { children: ReactNode }) {
   return <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>;
 }
@@ -39,19 +49,20 @@ function open(props: Partial<CancelSheetProps>) {
 
 describe("R15 D15-5 — the grid's sheet refuses a checked-in member cancel up front", () => {
   it("one checked-in booking: the refusal in words, and no Cancel to press", async () => {
-    const stub = stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote("bk-1", true) }]);
+    const stub = stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote("bk-1", true) }, litByOrganiser("bk-1")]);
     open({});
     const dialog = screen.getByRole("dialog");
-    expect(await within(dialog).findByText(ALREADY_CHECKED_IN_TEXT)).toBeInTheDocument();
+    expect(OWN_REFUSAL).toBe(ALREADY_CHECKED_IN_TEXT);
+    expect(await within(dialog).findByText(OWN_REFUSAL)).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: CANCEL_SHEET.confirm(1) })).toBeNull();
     expect(within(dialog).getByRole("button", { name: CANCEL_SHEET.keep(1) })).toBeInTheDocument();
     expect(stub.calls.some((c) => c.method === "POST")).toBe(false);
   });
 
   it("an admin's OWN checked-in booking (the member route) is refused too", async () => {
-    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote("bk-1", true) }]);
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote("bk-1", true) }, litByOrganiser("bk-1")]);
     open({ isAdmin: true });
-    expect(await screen.findByText(ALREADY_CHECKED_IN_TEXT)).toBeInTheDocument();
+    expect(await screen.findByText(OWN_REFUSAL)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: CANCEL_SHEET.confirm(1) })).toBeNull();
   });
 
@@ -74,7 +85,7 @@ describe("R15 D15-5 — the grid's sheet refuses a checked-in member cancel up f
   });
 
   it("the club (an admin, a member's booking) is not refused", async () => {
-    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote("bk-1", true) }]);
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote("bk-1", true) }, litByOrganiser("bk-1")]);
     open({ isAdmin: true, bookings: [{ ...MINE, mine: false, memberFirstName: "Thandi" }] });
     expect(await screen.findByText(CANCEL_SHEET.checkedIn("Thandi"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) })).toBeInTheDocument();

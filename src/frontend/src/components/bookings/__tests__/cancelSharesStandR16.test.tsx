@@ -28,7 +28,8 @@ const quote = (checkedIn: boolean) => ({
   bookingId: ID, amountChargedMinutes: 60, refundMinutes: checkedIn ? 0 : 60, penaltyMinutes: 0, penaltyPct: 30,
   penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn, alreadyStarted: true,
 });
-const ORGANISER = seat({ user_id: "u-sam", name: "Sam Petersen" });
+// R19 J19-3 — Sam's own scan lit the court (his seat stamped at the booking's instant), so he is named.
+const ORGANISER = seat({ user_id: "u-sam", name: "Sam Petersen", checked_in_at: "2030-09-09T15:58:00Z" });
 const partner = (name: string, paid: number, over: Record<string, unknown> = {}) =>
   seat({ ...ALEX_SEAT, participant_id: `p-${name}`, user_id: `u-${name}`, seat: 2, team: "A", name, status: "accepted", consented_minutes: 15, share_minutes: 15, paid_minutes: paid, ...over });
 const record = (players: ReturnType<typeof seat>[]) => adminView({
@@ -90,7 +91,8 @@ describe("R16 J16-7 — the admin cancel sheet says the partners' shares stand",
   it("the record will not read: the sheet still offers the cancel and claims nothing about shares", async () => {
     stubFetch([{ path: `/api/v1/bookings/${ID}/cancellation-quote`, body: quote(true) }]);
     open();
-    expect(await screen.findByText(CANCEL_SHEET.checkedIn("Sam"))).toBeInTheDocument();
+    // R19 J19-3 — nor about who checked in: nobody is named.
+    expect(await screen.findByText(CANCEL_SHEET.checkedInSomeone)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) })).toBeInTheDocument();
     expect(screen.getByRole("dialog").textContent).not.toMatch(/shares stand/);
   });

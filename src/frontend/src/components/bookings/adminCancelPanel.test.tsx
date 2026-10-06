@@ -23,10 +23,12 @@ function quote(over: Record<string, unknown> = {}) {
   };
 }
 
-function serveAdmin(q: unknown) {
+function serveAdmin(q: unknown, record?: unknown) {
   signIn({ isAdmin: true });
   return stubFetch([
     { path: `${DETAIL_PATH}/cancellation-quote`, body: q },
+    // R19 J19-3 — the sheet reads the record of a checked-in booking for who scanned.
+    ...(record ? [{ path: DETAIL_PATH, body: record }] : []),
     { method: "POST", path: `/api/v1/admin/bookings/${BOOKING}/cancel`, body: { refunded_minutes: 0, penalty_minutes: 0 } },
   ]);
 }
@@ -34,8 +36,12 @@ function serveAdmin(q: unknown) {
 describe("R15 J15-2 — Cancel booking on the admin's booking page", () => {
   it("cancels a started, checked-in session through the admin route, naming that nothing is refunded", async () => {
     const reload = vi.fn();
-    const fetches = serveAdmin(quote());
-    const started = adminView({ attendance: { ...adminView().attendance, checked_in_at: "2026-09-30T15:58:00Z", players_checked_in: 2 } });
+    // R19 J19-3 — Sam's own scan lit the court: his seat is stamped at the booking's instant.
+    const started = adminView({
+      players: adminView().players.map((p) => (p.user_id === adminView().organiser.user_id ? { ...p, checked_in_at: "2026-09-30T15:58:00Z" } : p)),
+      attendance: { ...adminView().attendance, checked_in_at: "2026-09-30T15:58:00Z", players_checked_in: 2 },
+    });
+    const fetches = serveAdmin(quote(), started);
     renderPage(<AdminCancelPanel detail={started} reload={reload} now={STARTED_NOW} />);
 
     expect(screen.getByText(ADMIN_CANCEL.started("Sam Petersen"))).toBeInTheDocument();

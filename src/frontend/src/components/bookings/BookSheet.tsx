@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useId, useRef } from "react";
+import { Suspense, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { Button } from "@/components/ui/button";
@@ -108,6 +108,7 @@ function useSpendable(given: number | null): Spendable {
 
 function BookFlowView(props: ViewProps) {
   const wallet = useSpendable(props.balanceMinutes);
+  const frameMark = useBalance().frameMark;
   const flow = useBookFlow({
     ...props, balanceMinutes: props.isAdmin ? props.balanceMinutes : wallet.spendable, held: wallet.held,
     // R7 X7-2 — a refusal for want of minutes: the chip is read again, so it says what the sheet does.
@@ -131,6 +132,8 @@ function BookFlowView(props: ViewProps) {
     el.focus({ preventScroll: true });
   }, [flow.stepIndex, flow.run]);
 
+  const sentMark = useSentMark(flow.busy, flow.run !== null, frameMark);
+
   const title = flow.hold ? BOOK_SHEET.holdTitle(flow.count) : BOOK_SHEET.title(flow.count);
   return (
     <>
@@ -148,7 +151,7 @@ function BookFlowView(props: ViewProps) {
             card) has no minimum height, so a height-capped grid squashed it instead of scrolling. */}
         <div className="flex flex-col gap-4">
           {flow.run
-            ? <ResultView flow={flow} />
+            ? <ResultView flow={flow} sentMark={sentMark} />
             : <StepView flow={flow} isAdmin={props.isAdmin} reasonId={reasonId} actorUserId={props.actorUserId} terms={props.cancelTerms} />}
         </div>
       </DialogBody>
@@ -303,8 +306,49 @@ function QuoteProblem({ flow }: { flow: BookFlow }) {
 
 /* ─────────────────────────────── the result ─────────────────────────────── */
 
-function ResultView({ flow }: { flow: BookFlow }) {
+/**
+ * R19 J19-2 — the wallet stream's frame count as this booking was SENT: kept current on every render
+ * before the send (a frame re-renders the sheet), frozen while it is on its way and after it lands.
+ * A frame landing inside the request — before the sheet next renders — counts as newer, as it does
+ * for `apply`. A frame counted after it is at least as new as the booking's own answer.
+ */
+function useSentMark(busy: boolean, landed: boolean, frameMark: () => number): number {
+  const [mark, setMark] = useState(frameMark);
+  const now = frameMark();
+  if (!busy && !landed && mark !== now) setMark(now);
+  return mark;
+}
+
+/**
+ * R19 J19-2 — "Your balance is now X" was the booking answer's figure for as long as the sheet
+ * stayed open, so a club adjustment landing just after it left the line 9 minutes behind the chip.
+ * The Done line follows the live wallet — the chip's own figure: spendable when anything is held,
+ * else the balance — once the live figure has caught up with this booking: the page handed the
+ * answer to the wallet (it equals `balanceAfter`), or a stream frame newer than the send arrived
+ * (the newer truth `apply` yields to, R17 J17-2). Until then — and whenever no page hands the answer
+ * over — the answer's own figure, as before. Only the viewer's own wallet is live here.
+ */
+function useOwnFigureNow(balanceAfter: number | null, own: boolean, sentMark: number) {
+  const live = useBalance();
+  const newerFrame = live.frameMark() > sentMark;
+  const caughtUp = own && balanceAfter !== null && (live.balance === balanceAfter || newerFrame);
+  const [following, setFollowing] = useState(false);
+  if (caughtUp && !following) setFollowing(true);
+  if (!(following || caughtUp) || live.balance === null) return null;
+  const held = live.held;
+  const parted = Boolean(held && (held.held > 0 || held.owedBack > 0));
+  return { minutes: parted && held ? held.spendable : live.balance, spend: parted };
+}
+
+/** The Done line's sentence: live for the viewer's own wallet once caught up, else the answer's. */
+function doneLine(after: number, reserved: number, forName: string | null, live: ReturnType<typeof useOwnFigureNow>): string {
+  if (live) return live.spend ? BOOK_SHEET.availableLine(live.minutes, null) : BOOK_SHEET.balanceLine(live.minutes, null);
+  return reserved > 0 ? BOOK_SHEET.availableLine(after, forName) : BOOK_SHEET.balanceLine(after, forName);
+}
+
+function ResultView({ flow, sentMark }: { flow: BookFlow; sentMark: number }) {
   const run = flow.run;
+  const live = useOwnFigureNow(run?.balanceAfter ?? null, flow.who.kind === "self", sentMark);
   if (!run) return null;
   // In grid slots, like the title — "All 3 booked" under a bar that ticked three.
   const booked = slotCount(run.booked);
@@ -323,9 +367,7 @@ function ResultView({ flow }: { flow: BookFlow }) {
         <span className="grid gap-0.5">
           <span className="text-base font-semibold text-text-primary">{heading}</span>
           {after !== null && !run.hold ? (
-            <span className="text-sm text-text-secondary">
-              {flow.reserved > 0 ? BOOK_SHEET.availableLine(after, forName) : BOOK_SHEET.balanceLine(after, forName)}
-            </span>
+            <span className="text-sm text-text-secondary">{doneLine(after, flow.reserved, forName, live)}</span>
           ) : null}
         </span>
       </div>

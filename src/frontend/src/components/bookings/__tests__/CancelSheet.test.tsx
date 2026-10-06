@@ -6,6 +6,7 @@ import { ToastProvider } from "@/components/Toast";
 import { refuse, stubFetch, type StubCall } from "@/test/harness";
 import { CANCEL_SHEET, RESULTS_LABEL, RESULT_WORD } from "@/lib/bookingsCopy";
 import { cancellationOutcome } from "@/lib/bookingErrors";
+import { adminView, seat } from "@/components/players/__tests__/detailKit";
 import { CancelSheet, type CancelSheetProps } from "../CancelSheet";
 import type { GridBooking } from "../types";
 
@@ -83,7 +84,16 @@ describe("CancelSheet — a member's own booking", () => {
 
   it("says nothing comes back once the lights have been on (the club's own booking)", async () => {
     // R15 D15-5 — a MEMBER is refused up front once checked in (CancelSheet.r15.test); the club is not.
-    stubFetch([{ path: "/api/v1/bookings/bk-2/cancellation-quote", body: quote({ bookingId: "bk-2", refundMinutes: 0, checkedIn: true }) }]);
+    // R19 J19-3 — the record says whose scan lit it (Thandi's own seat, at the booking's instant).
+    const lit = "2030-09-09T15:58:00Z";
+    stubFetch([
+      { path: "/api/v1/bookings/bk-2/cancellation-quote", body: quote({ bookingId: "bk-2", refundMinutes: 0, checkedIn: true }) },
+      { path: "/api/v1/bookings/bk-2", body: adminView({
+        booking_id: "bk-2", organiser: { user_id: "u-thandi", name: "Thandi Mokoena", photo_url: null },
+        players: [seat({ user_id: "u-thandi", name: "Thandi Mokoena", checked_in_at: lit })],
+        attendance: { checked_in_at: lit, players_checked_in: 1 },
+      }) },
+    ]);
     open({ isAdmin: true, bookings: [THANDI] });
     expect(await screen.findByText(CANCEL_SHEET.checkedIn("Thandi"))).toBeTruthy();
     expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack("Thandi")}0 min`);

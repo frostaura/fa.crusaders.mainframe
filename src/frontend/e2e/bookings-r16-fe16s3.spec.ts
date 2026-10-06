@@ -22,19 +22,22 @@ const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString(
 
 function startedSplit(partners: { id: string; name: string; paid: number }[]) {
   const base = detailFixture();
+  // R19 J19-3 — Sam's own scan lit the court: his seat is stamped at the booking's instant, which is
+  // how the sheet knows to name him (a partner's lone scan names the partner).
+  const lit = minutesAgo(22);
   return {
     ...base,
     starts_at: minutesAgo(20), ends_at: minutesAgo(-25), sold_ends_at: minutesAgo(-25),
     viewer: { role: "admin", participant_id: null },
     organiser: PEOPLE.sam,
     players: [
-      seat({ user_id: SAM, name: PEOPLE.sam.name }),
+      seat({ user_id: SAM, name: PEOPLE.sam.name, checked_in_at: lit }),
       ...partners.map((p, i) => seat({
         participant_id: `p0000000-0000-0000-0000-00000000001${i}`, seat: i + 2, kind: "member", user_id: p.id, name: p.name,
         status: "accepted", consented_minutes: p.paid, paid_minutes: p.paid, target_minutes: p.paid,
       })),
     ],
-    attendance: { checked_in_at: minutesAgo(22), players_checked_in: 1 },
+    attendance: { checked_in_at: lit, players_checked_in: 1 },
     permissions: { ...(base.permissions as object), can_invite: false, can_change_split: false, can_cancel: false },
   };
 }
