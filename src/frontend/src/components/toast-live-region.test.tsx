@@ -21,6 +21,11 @@ function Raise({ text }: { text: string }) {
   return <button type="button" onClick={() => toast.push({ text })}>Raise</button>;
 }
 
+/** The toasts on screen (R19 X19-3: a toast is no longer a live region of its own). */
+function toasts(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>("[data-toast]")];
+}
+
 /** Everything in the document that a screen reader would treat as a live region. */
 function liveRegions(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>('[aria-live], [role="status"], [role="alert"], [role="log"]')];
@@ -38,8 +43,11 @@ describe("the toast viewport", () => {
       const nested = regions.filter((other) => other !== region && region.contains(other));
       expect(nested, `${region.outerHTML.slice(0, 80)} holds another live region`).toHaveLength(0);
     }
-    // And the one that remains is the toast itself, which is what carries the words.
-    expect(screen.getByRole("status")).toHaveTextContent("Download started.");
+    // R19 X19-3: the one that remains is the viewport — there, empty, before the toast — and the
+    // toast's words arrive inside it.
+    expect(regions).toHaveLength(1);
+    expect(regions[0]).toHaveAttribute("data-toast-viewport");
+    expect(regions[0]).toHaveTextContent("Download started.");
   });
 
   /**
@@ -74,12 +82,12 @@ describe("the toast viewport", () => {
     render(<ToastProvider><Raiser /></ToastProvider>);
     act(() => { screen.getByRole("button", { name: "Raise" }).click(); });
 
-    const toast = screen.getByRole("status");
+    const [toast] = toasts();
     expect(toast.className).toContain("bg-bg-raised");
     expect(toast.className).toContain("shadow-lg");
     expect(toast.querySelector("[data-toast-bar]")!.className).toContain("bg-success-strong");
-    const mark = toast.querySelector("svg")!;
-    expect(mark).toHaveAttribute("aria-hidden", "true");
+    // Every mark is decoration, the tone's and the dismiss button's ×.
+    for (const mark of toast.querySelectorAll("svg")) expect(mark).toHaveAttribute("aria-hidden", "true");
     // The mark adds nothing to what is said: the words are the whole announcement.
     expect(toast).toHaveTextContent(/^Saved\.$/);
   });
@@ -112,11 +120,12 @@ describe("the toast viewport", () => {
     render(<ToastProvider><Raiser /></ToastProvider>);
 
     act(() => { screen.getByRole("button", { name: "Failed, unknown" }).click(); });
-    expect(screen.getByRole("status")).toHaveTextContent("Could not shut that door.");
-    expect(screen.getByRole("status")).not.toHaveTextContent(NOTHING_CHANGED);
+    expect(toasts()[0]).toHaveTextContent("Could not shut that door.");
+    expect(toasts()[0]).not.toHaveTextContent(NOTHING_CHANGED);
 
     act(() => { screen.getByRole("button", { name: "Failed, unchanged" }).click(); });
-    const said = screen.getAllByRole("status").map((n) => n.textContent ?? "");
-    expect(said.some((text) => text.includes(`Could not shut that door.${NOTHING_CHANGED}`))).toBe(true);
+    const said = toasts().map((n) => n.textContent ?? "");
+    // Two sentences when read out, not "door.Nothing" (R19 X19-3 — the words are what is announced).
+    expect(said.some((text) => text.includes(`Could not shut that door. ${NOTHING_CHANGED}`))).toBe(true);
   });
 });

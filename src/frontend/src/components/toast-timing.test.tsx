@@ -18,7 +18,12 @@ function Raise({ text, durationMs }: { text: string; durationMs?: number }) {
 function raise(text: string, durationMs?: number) {
   render(<ToastProvider><Raise text={text} durationMs={durationMs} /></ToastProvider>);
   act(() => { screen.getByRole("button", { name: "Raise" }).click(); });
-  return screen.getByRole("status");
+  return shown()!;
+}
+
+/** The toast on screen, or null (R19 X19-3: a toast is found by `data-toast`, not as a live region). */
+function shown(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-toast]");
 }
 
 /** Advance time in small steps so the enter frame and every timer run as they would. */
@@ -33,9 +38,9 @@ describe("a toast's time on screen", () => {
   it("still leaves on its own after about 4 s when it is short", () => {
     raise("Saved.");
     wait(3_900);
-    expect(screen.queryByRole("status")).toBeInTheDocument();
+    expect(shown()).toBeInTheDocument();
     wait(600);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(shown()).not.toBeInTheDocument();
   });
 
   it("stays while the pointer rests on it, and counts on from where it stopped", () => {
@@ -43,23 +48,24 @@ describe("a toast's time on screen", () => {
     wait(2_000);
     fireEvent.mouseEnter(toast);
     wait(20_000);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(shown()).toBeInTheDocument();
     fireEvent.mouseLeave(toast);
     wait(1_500);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(shown()).toBeInTheDocument();
     wait(1_000);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(shown()).not.toBeInTheDocument();
   });
 
-  it("stays while it holds the keyboard's focus", () => {
+  it("stays while its dismiss button holds the keyboard's focus", () => {
     const toast = raise("Saved.");
+    const dismiss = toast.querySelector("button")!;
     wait(1_000);
-    fireEvent.focus(toast);
+    fireEvent.focus(dismiss);
     wait(30_000);
-    expect(screen.getByRole("status")).toBeInTheDocument();
-    fireEvent.blur(toast);
+    expect(shown()).toBeInTheDocument();
+    fireEvent.blur(dismiss);
     wait(3_500);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(shown()).not.toBeInTheDocument();
   });
 
   it("gives a long explanation the time it takes to read", () => {
@@ -67,14 +73,14 @@ describe("a toast's time on screen", () => {
     expect(toastReadingMs(long)).toBeGreaterThan(8_000);
     raise(long);
     wait(6_000);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(shown()).toBeInTheDocument();
     wait(toastReadingMs(long));
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(shown()).not.toBeInTheDocument();
   });
 
   it("keeps a toast asked to stay until it is dismissed", () => {
     raise("Offline.", 0);
     wait(60_000);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(shown()).toBeInTheDocument();
   });
 });

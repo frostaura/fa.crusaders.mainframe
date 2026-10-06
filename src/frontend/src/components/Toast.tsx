@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
-import { CheckCircle, Info, Warning, WarningCircle, type Icon } from "./ui/icons";
+import { CheckCircle, Info, Warning, WarningCircle, X, type Icon } from "./ui/icons";
 import { toastReadingMs } from "./toastTiming";
 import { ToastContext, type ToastContextValue } from "./toastContext";
 
@@ -23,6 +23,9 @@ type ToastItem = {
  * device ones cannot each invent their own near-miss of it.
  */
 export const NOTHING_CHANGED = "Nothing changed.";
+
+/** The toast's own words that are not a call site's (R19 X19-3: its dismiss button's name). */
+export const TOAST_COPY = { dismiss: "Dismiss" } as const;
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -117,15 +120,18 @@ function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: 
    * explanation a member got for a refusal read as greyed-out background chrome.
    *
    * <p>
-   * <b>C10 — no `aria-live` here, because each toast already is one.</b> This container once
-   * carried `aria-live="polite"` AND every toast inside it `role="status"` — the same live region
-   * nested in itself — and a screen reader announced the download toast twice. One live
-   * ancestor per toast, and the toast is the better place for it: it is the thing that arrives,
-   * and it keeps announcing correctly wherever the viewport is moved.
+   * <b>R19 X19-3 — THIS is the live region, and it is there, empty, from the first frame.</b>
+   * NVDA and JAWS announce what CHANGES inside a live region they already know about; a toast that
+   * arrived as its own pre-filled `role="status"` (its text overridden by an `aria-label`) was a
+   * region they met already full, and may say nothing about. The viewport is rendered by the
+   * provider at the app's root before any toast exists; each toast is inserted into it and carries
+   * no live role of its own. Still exactly one live ancestor per toast (C10 — nesting a status in
+   * a live container is what announced the download toast twice), now the one that was waiting.
+   * Polite, additions only: a toast leaving is not news.
    * </p>
    */
   return (
-    <div data-toast-viewport className={TOAST_VIEWPORT_CLASS}>
+    <div data-toast-viewport aria-live="polite" aria-relevant="additions text" className={TOAST_VIEWPORT_CLASS}>
       {toasts.map((t) => (
         <ToastView key={t.id} toast={t} onDismiss={onDismiss} />
       ))}
@@ -183,19 +189,17 @@ function useToastClock(toast: ToastItem, onDismiss: (id: number) => void) {
 function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: number) => void }) {
   const { visible, leave: dismiss, hold } = useToastClock(toast, onDismiss);
   const Mark = TONE_ICON[toast.tone];
+  const wordsId = `toast-words-${toast.id}`;
 
-  // Dismissed by tapping it, so it is pressable without a mouse too: `tabIndex={0}`, Enter and
-  // Space, and `data-interactive` for the shared affordance layer in index.css. `role="status"`
-  // stays — announcing itself is a different job from being pressable.
+  // Dismissed by tapping anywhere on it (a pointer's convenience), and by its own button — the
+  // keyboard's and the screen reader's way, named "Dismiss" and described by the toast's words
+  // (R19 X19-3). The surface itself is no longer a live region or a labelled control: its words
+  // are what the viewport's live region announces, unaltered.
   return (
     <div
-      role="status"
-      data-interactive
+      data-toast=""
       data-tone={toast.tone}
-      tabIndex={0}
-      aria-label={`${toast.text} — dismiss`}
       onClick={dismiss}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dismiss(); } }}
       onMouseEnter={() => hold("hovered", true)}
       onMouseLeave={() => hold("hovered", false)}
       onFocus={() => hold("focused", true)}
@@ -211,13 +215,31 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
     >
       <span aria-hidden="true" data-toast-bar className={cn("absolute inset-y-0 left-0 w-1", TONE_BAR[toast.tone])} />
       <Mark size={20} aria-hidden="true" className={cn("shrink-0", TONE_INK[toast.tone])} />
-      <span className="min-w-0 flex-1 break-words font-medium">
+      <span id={wordsId} className="min-w-0 flex-1 break-words font-medium">
         {toast.text}
         {/* R3-28 — the second fact, in the same breath as the first. "It did not work" leaves an
             admin looking at a status line they can no longer trust; "and nothing changed" is the
-            sentence that lets them stop looking. Its own line, so a call site cannot half-say it. */}
-        {toast.unchanged && <span className="mt-0.5 block font-normal text-text-secondary">{NOTHING_CHANGED}</span>}
+            sentence that lets them stop looking. Its own line, so a call site cannot half-say it.
+            A space before it, so the announced words read as two sentences, not "done.Nothing". */}
+        {toast.unchanged && <span className="mt-0.5 block font-normal text-text-secondary">{` ${NOTHING_CHANGED}`}</span>}
       </span>
+      <button
+        type="button"
+        data-interactive
+        aria-label={TOAST_COPY.dismiss}
+        aria-describedby={wordsId}
+        onClick={(e) => { e.stopPropagation(); dismiss(); }}
+        className={cn(
+          // 24px to the eye beside the words; the `after:` box makes it 44px to the finger without
+          // growing the toast (the same trick as the `sm` / `icon-sm` buttons).
+          "relative -my-0.5 -mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-text-muted",
+          "after:absolute after:-inset-2.5 after:content-[''] hover:bg-bg-muted hover:text-text-primary",
+          // The surface clips (`overflow-hidden`, for the tone bar's corners): the ring goes inside.
+          "focus-visible:-outline-offset-2",
+        )}
+      >
+        <X size={16} aria-hidden="true" />
+      </button>
     </div>
   );
 }

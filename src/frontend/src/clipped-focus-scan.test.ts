@@ -56,7 +56,6 @@ const CLIPS_NO_RING: ReadonlyArray<readonly [file: string, fragment: string, why
   ["components/AuthShell.tsx", "@container/band", "the sign-in band: crest and words, no control"],
   ["components/AuthShell.tsx", "overflow-hidden rounded-2xl border border-border bg-bg-surface", "the sign-in card: its form sits in a child padded py-6 / 20-32px a side"],
   ["components/PhotoPicker.tsx", "size-16 shrink-0", "the photo preview: an image, no control"],
-  ["components/Toast.tsx", "role=\"status\"", "the toast is itself the only control (tabIndex 0); nothing focusable inside it"],
   ["components/bookings/BookingGrid.tsx", "relative z-base overflow-hidden", "its one child is the grid's ScrollArea, which insets every ring inside it"],
   ["components/member-code/CodePreview.tsx", "aria-hidden=\"true\"", "a decorative preview, aria-hidden"],
   ["components/members/MembersTable.tsx", "<TableHead", "the sort button sits inside ui/table's container, which insets every ring ([&_:focus-visible]:-outline-offset-2)"],
