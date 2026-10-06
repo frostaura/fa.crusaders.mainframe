@@ -72,6 +72,14 @@ public sealed class TestWebAppFactoryIsolationTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
-        Assert.Equal(database.ConnectionString, db.Database.GetConnectionString());
+        // R18 BE18s: the API caps its pool (Database:MaxPoolSize, default 40) by adding Maximum Pool
+        // Size to the string it was given, so the factory's string is the clone's own string plus
+        // that cap — never another database's.
+        var carried = new Npgsql.NpgsqlConnectionStringBuilder(db.Database.GetConnectionString());
+        var given = new Npgsql.NpgsqlConnectionStringBuilder(database.ConnectionString);
+        Assert.Equal(40, carried.MaxPoolSize);
+        carried.Remove("Maximum Pool Size");
+        given.Remove("Maximum Pool Size");
+        Assert.Equal(given.ConnectionString, carried.ConnectionString);
     }
 }
