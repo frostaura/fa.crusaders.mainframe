@@ -282,6 +282,21 @@ public static class AdminNotices
         };
     }
 
+    /// <summary>A member deleted by an administrator. One per account: a second delete of the same account stages nothing new.</summary>
+    public static AdminNotice MemberDeleted(Guid userId, Guid actorId, MemberDeletedPayload payload)
+    {
+        return new AdminNotice(
+            AdminEventCatalogue.MemberDeleted,
+            $"{AdminEventCatalogue.MemberDeleted}:{userId:N}",
+            payload,
+            $"Member deleted — {payload.SubjectName}",
+            "/admin/monitoring/changes")
+        {
+            ActorUserId = actorId,
+            SubjectUserId = userId,
+        };
+    }
+
     /// <summary>
     /// A code a board accepted offline that the server cannot reproduce (member-code §7). One
     /// notice per event: the dedupe key is the board's boot and sequence, so a re-upload of the same

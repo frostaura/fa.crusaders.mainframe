@@ -332,7 +332,9 @@ public static class AdminMembersList
         }
 
         var q = db.Memberships.AsNoTracking().AsQueryable();
+        // A deleted member is on no list unless it is asked for by name (?status=Deleted).
         if (Enum.TryParse<MembershipStatus>(query.Status, true, out var s)) q = q.Where(m => m.Status == s);
+        else q = q.Where(m => m.Status != MembershipStatus.Deleted);
         var take = Math.Clamp(query.Limit ?? 50, 1, 200);
         var page = paged ? Page(q, after).Take(take + 1) : q.OrderBy(m => m.CreatedAt);
         var rows = await RowsAsync(page, db, inherent, ct);

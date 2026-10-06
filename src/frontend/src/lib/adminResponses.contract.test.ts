@@ -261,6 +261,12 @@ describe("one member (memberDetailApi)", () => {
   it("granting or revoking admin rights", () => {
     exact(only(ok("Endpoints/AdminRoleEndpoints.cs", "Answer")), F.adminRoleResult());
   });
+
+  it("deleting a member: the preview and the answer", () => {
+    const DELETE = "Endpoints/AdminMemberDeleteEndpoints.cs";
+    exact(only(ok(DELETE, "PreviewAsync")), F.memberDeletePreview());
+    exact(only(ok(DELETE, "Answer")), F.memberDeleteResult());
+  });
 });
 
 describe("bookings at the desk (lib/api.ts)", () => {

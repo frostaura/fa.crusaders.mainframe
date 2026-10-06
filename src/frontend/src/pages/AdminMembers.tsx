@@ -77,7 +77,8 @@ export default function AdminMembersPage() {
   const countable = countableRows(list);
   const counts = useMemo(() => statusCounts(countable), [countable]);
   const rows = useMemo(() => visibleRows(list.members ?? [], status, query, sort), [list.members, status, query, sort]);
-  const split = useMemo(() => ({ listHref: filters.listHref }), [filters.listHref]);
+  const reload = list.load;
+  const split = useMemo(() => ({ listHref: filters.listHref, onMemberDeleted: () => void reload() }), [filters.listHref, reload]);
 
   const handlers: RowActionHandlers = {
     approve: lifecycle.approve,
@@ -92,6 +93,7 @@ export default function AdminMembersPage() {
     suspend: (member) => setDialog({ kind: "suspend", member }),
     reactivate: (member) => setDialog({ kind: "reactivate", member }),
     adminRole: (member) => setDialog({ kind: "adminRole", member }),
+    deleteMember: (member) => setDialog({ kind: "delete", member }),
     fingerprintCount: (member) => prints.byUser[member.user_id]?.templates.length ?? 0,
   };
 
@@ -222,6 +224,7 @@ function MemberOverlays(props: OverlayProps) {
         readFingerprints={prints.read}
         // The row takes what the SERVER answered, once it has (R5 G) — a role is never optimistic.
         onRoleChanged={(r) => list.setMembers((rows) => patchRow(rows, r.user_id, { is_admin: r.is_admin, admin_source: r.admin_source }))}
+        onMemberDeleted={() => list.load()}
       />
       {assigning ? (
         <GroupAssign

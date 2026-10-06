@@ -61,6 +61,10 @@ public sealed record OverdraftPayload(
 
 public sealed record AdminRolePayload(string SubjectName, string ActorName, bool Granted, string? Reason);
 
+/// <summary>A member deleted by an administrator: who, by whom, why, and what it did to the books.</summary>
+public sealed record MemberDeletedPayload(
+    string SubjectName, string ActorName, string Reason, bool KeptHistory, int BookingsCancelled, int WrittenOffMinutes);
+
 public sealed record ForgeryPayload(string DeviceCode, string? MemberName, string Detail);
 
 public sealed record CodesCapabilityLostPayload(Guid DeviceId, string DeviceName, string DeviceCode, string? FirmwareVersion, string Phase);
@@ -113,6 +117,7 @@ public static class AdminEventCatalogue
     public const string AdminRoleChanged = "admin.role_changed";
     public const string CodeForgerySuspected = "code.forgery_suspected";
     public const string CodesCapabilityLost = "device.codes_capability_lost";
+    public const string MemberDeleted = "member.deleted";
 
     /// <summary>How the payloads are written and read. Snake_case, invariant, no indentation.</summary>
     public static readonly JsonSerializerOptions Json = new()
@@ -152,6 +157,8 @@ public static class AdminEventCatalogue
             Security: true),
         new(CodesCapabilityLost, "A board stopped reading member codes",
             "After the club switched to member codes, a board reported firmware that does not check them offline."),
+        new(MemberDeleted, "Deleted members",
+            "Another administrator deleted a member's account."),
     ];
 
     private static readonly Dictionary<string, AdminEventKind> ByKind =
@@ -196,6 +203,7 @@ public static class AdminEventCatalogue
         [AdminRoleChanged] = ComposeAdminRole,
         [CodeForgerySuspected] = ComposeForgery,
         [CodesCapabilityLost] = ComposeCodesCapabilityLost,
+        [MemberDeleted] = ComposeMemberDeleted,
     };
 
     /// <summary>The baseline wording, unchanged: this is the registration notice that used to be sent directly.</summary>
@@ -295,6 +303,21 @@ public static class AdminEventCatalogue
         return p.Granted
             ? EmailTemplates.AdminRoleGranted(c.Club, c.To, change)
             : EmailTemplates.AdminRoleRevoked(c.Club, c.To, change);
+    }
+
+    private static EmailMessage ComposeMemberDeleted(AdminMailContext c)
+    {
+        var p = c.Payload<MemberDeletedPayload>();
+        return EmailTemplates.AdminMemberDeletedNotice(c.Club, c.To, new MemberDeletedNotice
+        {
+            SubjectName = p.SubjectName,
+            ActorName = p.ActorName,
+            Reason = p.Reason,
+            KeptHistory = p.KeptHistory,
+            BookingsCancelled = p.BookingsCancelled,
+            WrittenOffMinutes = p.WrittenOffMinutes,
+            ConsoleUrl = c.ConsoleUrl,
+        });
     }
 
     private static EmailMessage ComposeForgery(AdminMailContext c)

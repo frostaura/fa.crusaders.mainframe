@@ -100,6 +100,14 @@ public static class AdminChangeActions
     public const string MemberPasswordReset = "member.password_reset";
 
     /// <summary>
+    /// A member's account deleted by the club. One with history is erased in place — the name,
+    /// address, photo and every credential wiped, the rows kept so the books still balance — and one
+    /// without is removed outright. The row keeps the name the club knew them by, because this
+    /// record is where "who was deleted, by whom and why" is answered afterwards. Carries the reason.
+    /// </summary>
+    public const string MemberDeleted = "member.deleted";
+
+    /// <summary>
     /// The desk reset a member's rotating code — every code their phone could show is dead, every
     /// session ended, passkeys removed unless kept (member-code §10). Review round 1, B6: it wrote
     /// nothing here, so "who signed me out?" had no answer. Carries the desk's reason.
@@ -202,7 +210,7 @@ public static class AdminChangeActions
         BookingPlayerAdded, BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
         MinutesAdjusted, PackageSold, PackageCreated, PackageUpdated, PackageArchived,
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
-        MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
+        MemberApproved, MemberRejected, MemberSuspended, MemberReactivated, MemberDeleted,
         MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported, WebhookCreated, WebhookDeleted,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
@@ -217,7 +225,7 @@ public static class AdminChangeActions
     public static readonly string[] ReasonRequired =
     [
         BookingsBulkCancelled, BookingCancelledByAdmin, BookingBlockLifted, ScheduleEnded, ScheduleOccurrenceSkipped,
-        MinutesAdjusted, PackageSold, GroupArchived, MemberSuspended, MemberRejected, CourtDeactivated,
+        MinutesAdjusted, PackageSold, GroupArchived, MemberSuspended, MemberRejected, MemberDeleted, CourtDeactivated,
         DeviceDeleted, MemberAdminRevoked, MemberAdminGranted, MemberCodeReset,
         BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
         PlayResultVoided, PlayResultUpheld,
@@ -244,7 +252,7 @@ public static class AdminChangeActions
                 or PackageCreated or PackageUpdated or PackageArchived => AdminChangeAreas.Money,
             GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged
                 or GroupDeleted => AdminChangeAreas.Group,
-            MemberApproved or MemberRejected or MemberSuspended
+            MemberApproved or MemberRejected or MemberSuspended or MemberDeleted
                 or MemberReactivated or MemberPasswordReset or MemberCodeReset or MemberTraceViewed
                 or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
@@ -307,6 +315,7 @@ public static class AdminChangeActions
             MemberRejected => $"Rejected an applicant{of}",
             MemberSuspended => $"Suspended a member{of}",
             MemberReactivated => $"Reactivated a member{of}",
+            MemberDeleted => $"Deleted a member{of}",
             MemberPasswordReset => $"Gave a member a temporary password{of}",
             MemberCodeReset => $"Reset a member's code and signed them out everywhere{of}",
             MemberTraceViewed => $"Looked at one member's activity{of}",

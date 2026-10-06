@@ -252,6 +252,7 @@ export const ACCOUNT_EVENT_WORDS: Readonly<Record<string, string | null>> = {
   "member.rejected": "Their application was turned down",
   "member.suspended": "Their membership was suspended",
   "member.reactivated": "Their membership was reactivated",
+  "member.deleted": "Their account was deleted",
   "member.admin_granted": "Made an administrator",
   "member.admin_revoked": "Administrator rights removed",
   "user.admin_granted": "Made an administrator",

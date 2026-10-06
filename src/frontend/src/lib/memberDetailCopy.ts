@@ -61,6 +61,7 @@ export const STATUS_WORD: Record<string, string> = {
   Active: "Active",
   Rejected: "Rejected",
   Suspended: "Suspended",
+  Deleted: "Deleted",
 };
 
 export function statusTone(status: string | null): "success" | "warning" | "danger" | "neutral" {
@@ -207,7 +208,7 @@ export const OVERVIEW_COPY = {
  * R7 L7-16 — the ACCOUNT's own switch (`users.status`: "active" | "suspended"), said as a word on
  * the Overview's Account card; the raw code "active" sat there beside worded facts.
  */
-const ACCOUNT_STATUS_WORD: Record<string, string> = { active: "Active", suspended: "Suspended" };
+const ACCOUNT_STATUS_WORD: Record<string, string> = { active: "Active", suspended: "Suspended", deleted: "Deleted" };
 
 export function accountStatusWord(status: string): string {
   const known = ACCOUNT_STATUS_WORD[status];

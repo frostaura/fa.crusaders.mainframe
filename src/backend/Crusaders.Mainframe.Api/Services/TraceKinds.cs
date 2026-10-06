@@ -509,6 +509,9 @@ public static class TraceKinds
     public const string AccountRejected = "account.rejected";
     public const string AccountSuspended = "account.suspended";
     public const string AccountReactivated = "account.reactivated";
+
+    /// <summary>The club deleted the account: erased in place, the history kept under "Deleted member".</summary>
+    public const string AccountDeleted = "account.deleted";
     public const string AccountMadeAdmin = "account.made_admin";
     public const string AccountAdminRemoved = "account.admin_removed";
     public const string AccountCodeReset = "account.code_reset";
@@ -570,7 +573,7 @@ public static class TraceKinds
         LightsOn, LightsOff, LightsRestored,
         WalletToppedUp, WalletToppedUpAtTheDesk, WalletSpent, WalletRefunded, WalletPenalised,
         WalletAdjustedByAdmin, WalletReversed, WalletShareMoved,
-        AccountApplied, AccountApproved, AccountRejected, AccountSuspended, AccountReactivated,
+        AccountApplied, AccountApproved, AccountRejected, AccountSuspended, AccountReactivated, AccountDeleted,
         AccountMadeAdmin, AccountAdminRemoved, AccountCodeReset, AccountPasskeysRemoved,
         AccountPasswordChanged, AccountPasswordReset, AccountGroupsChanged, AccountCodeSetUp,
         AccountPinSet, AccountPinSetForThem, AccountPinCleared, AccountFingerprintEnrolled, AccountAdminInherited,
@@ -792,6 +795,7 @@ public static class TraceKinds
             "member.rejected" => AccountRejected,
             "member.suspended" => AccountSuspended,
             "member.reactivated" => AccountReactivated,
+            "member.deleted" => AccountDeleted,
             "user.admin_granted" => AccountMadeAdmin,
             "user.admin_revoked" => AccountAdminRemoved,
             "member_code.rotated" => AccountCodeReset,
@@ -1320,6 +1324,7 @@ public static class TraceKinds
             AccountRejected => $"{Who(facts)} turned their application down",
             AccountSuspended => $"{Who(facts)} suspended their membership",
             AccountReactivated => $"{Who(facts)} reactivated their membership",
+            AccountDeleted => $"{Who(facts)} deleted their account",
             AccountMadeAdmin => $"{Who(facts)} made them an administrator",
             AccountAdminRemoved => $"{Who(facts)} removed their administrator rights",
             AccountCodeReset => "Their member code was changed and their sessions ended",

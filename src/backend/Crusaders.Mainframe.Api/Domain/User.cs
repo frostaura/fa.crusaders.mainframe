@@ -37,7 +37,7 @@ public sealed class User : ITenantScoped
 
     public bool IsAdmin { get; set; }
     public bool IsPlatformAdmin { get; set; }
-    public string Status { get; set; } = "active"; // active | suspended
+    public string Status { get; set; } = "active"; // active | suspended | deleted — see Services.UserStatuses
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }

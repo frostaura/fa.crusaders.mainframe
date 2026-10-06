@@ -7,8 +7,8 @@ import type {
 } from "../lib/adminApi";
 import { shelfPackage } from "./minutesFixtures";
 import type {
-  AdminRoleResult, FingerprintEnrolment, MemberBookingRow, MemberBookingsPage, MemberDetail, MemberDoorRow,
-  MemberDoorsPage,
+  AdminRoleResult, FingerprintEnrolment, MemberBookingRow, MemberBookingsPage, MemberDeletePreview, MemberDeleteResult,
+  MemberDetail, MemberDoorRow, MemberDoorsPage,
 } from "../lib/memberDetailApi";
 import type {
   AdminBookingQuote, AdminBulkQuote, AdminBulkQuoteItem, AdminCourt, AdminDevice, AdminDoorDevice,
@@ -390,6 +390,21 @@ export function memberDoorRow(): MemberDoorRow {
 
 export function adminRoleResult(): AdminRoleResult {
   return { user_id: ID, is_admin: true, admin_source: "granted", changed: true };
+}
+
+/** What deleting a member would do: erased, one booking refunded, 75 minutes left to write off. */
+export function memberDeletePreview(overrides: Partial<MemberDeletePreview> = {}): MemberDeletePreview {
+  return {
+    user_id: ID, mode: "erase", already_deleted: false, refusal: null, future_bookings: 1, partner_games: 0,
+    open_purchases: 0, balance_minutes: 45, write_off_minutes: 75, member_told: true, ...overrides,
+  };
+}
+
+export function memberDeleteResult(overrides: Partial<MemberDeleteResult> = {}): MemberDeleteResult {
+  return {
+    deleted: true, user_id: ID, mode: "erase", already_deleted: false, bookings_cancelled: 1, seats_given_up: 0,
+    purchases_closed: 0, written_off_minutes: 75, member_notified: true, ...overrides,
+  };
 }
 
 /* ─────────────────────────────── bookings at the desk (lib/api.ts) ─────────────────────────────── */

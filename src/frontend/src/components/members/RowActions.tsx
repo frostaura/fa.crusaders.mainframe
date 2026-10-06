@@ -5,7 +5,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   ArrowCounterClockwise, CalendarBlank, CheckCircle, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, HourglassMedium, Key,
-  Prohibit, QrCode, Lock, Plus, ShieldCheck, ShieldWarning, UserCircle, UsersThree,
+  Prohibit, QrCode, Lock, Plus, ShieldCheck, ShieldWarning, Trash, UserCircle, UsersThree,
 } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
 import { ASSIGN_COPY } from "@/lib/groupsCopy";
@@ -13,6 +13,7 @@ import { ACTIONS_COPY, ADMIN_ROLE_COPY } from "@/lib/memberDetailCopy";
 import {
   ROW_ACTIONS as COPY, SUSPENDED_NOTE, bookForHref, memberHref, nightHref,
 } from "@/lib/membersCopy";
+import { DELETE_MEMBER_COPY } from "@/lib/deleteMemberCopy";
 import { FEATURES } from "@/lib/features";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,8 @@ export type RowActionHandlers = {
    * Access tab opens (`AdminRoleDialog`); which of the two is the row's own `is_admin`.
    */
   adminRole: (m: MemberRow) => void;
+  /** Opens the delete confirm (`DeleteMemberDialog`) — offered for every member, last in the ⋯. */
+  deleteMember: (m: MemberRow) => void;
   /** How many fingerprints the member has, for the menu's wording. */
   fingerprintCount: (m: MemberRow) => number;
 };
@@ -137,6 +140,10 @@ function MemberMenu({ row, handlers, compact }: { row: MemberRow; handlers: RowA
         )}
         <AdminRoleItem row={row} handlers={handlers} />
         <StandingItems row={row} handlers={handlers} />
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="danger" data-delete-member-item="" onSelect={() => handlers.deleteMember(row)}>
+          <Trash size={16} aria-hidden="true" />{DELETE_MEMBER_COPY.menu}
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

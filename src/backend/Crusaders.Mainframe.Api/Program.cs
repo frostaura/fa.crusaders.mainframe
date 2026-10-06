@@ -509,6 +509,9 @@ builder.Services.AddScoped<UserPreferencesService>();
 // R20 — granting and revoking a member's admin rights. The mail every such change sends goes
 // through the admin notice outbox below, staged in the same save as the change.
 builder.Services.AddScoped<AdminRoleService>();
+builder.Services.AddScoped<MemberDeletionService>();
+builder.Services.AddScoped<MemberDeletionService.AccessEnders>();
+builder.Services.AddSingleton<MemberPhotoFiles>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
@@ -762,6 +765,7 @@ app.MapAdminChangeEndpoints();
 app.MapAdminNotificationEndpoints();
 app.MapAdminMemberTraceEndpoints();
 app.MapAdminMemberDetailEndpoints();
+app.MapAdminMemberDeleteEndpoints();
 app.MapAdminMemberGroupsEndpoint();
 app.MapAdminMemberDoorEndpoints();
 app.MapAdminBulkBookingEndpoints();

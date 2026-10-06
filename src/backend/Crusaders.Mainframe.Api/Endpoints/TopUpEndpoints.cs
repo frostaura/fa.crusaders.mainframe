@@ -619,6 +619,13 @@ public static partial class TopUpEndpoints
         /// Reopenable like the cancel return.
         /// </summary>
         public const string Expired = "expired";
+
+        /// <summary>
+        /// The club deleted the member while the checkout was open. Our word, so — like the two
+        /// above — a signed COMPLETE that arrives later still credits the minutes: money that moved
+        /// is on the ledger whatever happened to the account, and the club refunds it by hand.
+        /// </summary>
+        public const string MemberDeleted = "member_deleted";
     }
 
 }

@@ -979,6 +979,7 @@ public class AdminNotificationTests
             [AdminEventCatalogue.AdminRoleChanged] = new AdminRolePayload("A", "B", true, null),
             [AdminEventCatalogue.CodeForgerySuspected] = new ForgeryPayload("box-1", null, "detail"),
             [AdminEventCatalogue.CodesCapabilityLost] = new CodesCapabilityLostPayload(Guid.NewGuid(), "Box", "box-1", "2.0.0", "v1"),
+            [AdminEventCatalogue.MemberDeleted] = new MemberDeletedPayload("A", "B", "moved away", true, 1, 30),
         };
 
         Assert.Equal(AdminEventCatalogue.All.Count, AdminEventCatalogue.All.Select(k => k.Kind).Distinct().Count());

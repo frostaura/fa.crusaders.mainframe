@@ -18,6 +18,8 @@ import { createContext, useContext } from "react";
 export type MembersSplit = {
   /** The list's URL with the filters the admin left it on: `/admin/members?status=PendingApproval`. */
   listHref: string;
+  /** A member deleted from their record: the list reads the club again, so they leave it too. */
+  onMemberDeleted?: () => void;
 };
 
 export const MembersSplitContext = createContext<MembersSplit | null>(null);

@@ -91,6 +91,17 @@ internal static class EmailCatalogue
             ConsoleUrl = ConsoleUrl,
         };
 
+        var memberDeleted = new MemberDeletedNotice
+        {
+            SubjectName = "Thandi Mokoena",
+            ActorName = "Jason Fourie",
+            Reason = "Moved away and asked us to remove her account.",
+            KeptHistory = true,
+            BookingsCancelled = 2,
+            WrittenOffMinutes = 75,
+            ConsoleUrl = ConsoleUrl,
+        };
+
         return
         [
             ("VerifyEmail", EmailTemplates.VerifyEmail(club, to, LinkUrl)),
@@ -141,6 +152,10 @@ internal static class EmailCatalogue
             ("AdminRoleRevokedNoReason", EmailTemplates.AdminRoleRevoked(club, to, adminRevoked with { Reason = null })),
             ("AdminRoleChangedNotice", EmailTemplates.AdminRoleChangedNotice(club, to, adminGranted)),
             ("AdminRoleChangedNoticeRevoked", EmailTemplates.AdminRoleChangedNotice(club, to, adminRevoked)),
+            ("MemberAccountDeleted", EmailTemplates.MemberAccountDeleted(club, to, memberDeleted)),
+            ("MemberAccountDeletedNothingOwed", EmailTemplates.MemberAccountDeleted(club, to, memberDeleted with { BookingsCancelled = 0, WrittenOffMinutes = 0 })),
+            ("AdminMemberDeletedNotice", EmailTemplates.AdminMemberDeletedNotice(club, to, memberDeleted)),
+            ("AdminMemberDeletedNoticeRemoved", EmailTemplates.AdminMemberDeletedNotice(club, to, memberDeleted with { KeptHistory = false, BookingsCancelled = 0, WrittenOffMinutes = 0 })),
 
             // R23's admin notices — everything the notifier sends that nothing sent before it.
             ("AdminApplicationsWaiting", EmailTemplates.AdminApplicationsWaiting(club, to, new ApplicationsWaiting(3, "Jason Fourie", 31, ConsoleUrl))),

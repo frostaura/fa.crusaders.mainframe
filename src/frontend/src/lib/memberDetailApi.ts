@@ -30,7 +30,7 @@ function qs(o: Record<string, string | number | boolean | undefined | null>): st
 /* ─────────────────────────────── shapes ─────────────────────────────── */
 
 /** The MEMBERSHIP's status, exactly as the members list spells it; null with no membership row. */
-export type MembershipStatus = "PendingApproval" | "Active" | "Rejected" | "Suspended";
+export type MembershipStatus = "PendingApproval" | "Active" | "Rejected" | "Suspended" | "Deleted";
 
 /**
  * Where a person's admin rights come from. `config` is an address in the server's own
@@ -162,6 +162,36 @@ export type AdminRoleResult = {
   changed: boolean;
 };
 
+/** What deleting a member would do, read before the confirm (`AdminMemberDeleteEndpoints.PreviewAsync`). */
+export type MemberDeletePreview = {
+  user_id: string;
+  /** `erase` keeps their history under "Deleted member"; `remove` deletes every row of theirs. */
+  mode: "erase" | "remove";
+  already_deleted: boolean;
+  /** Why the club may not delete them, as the delete's own 409 code; null when it may. */
+  refusal: string | null;
+  future_bookings: number;
+  partner_games: number;
+  open_purchases: number;
+  balance_minutes: number;
+  /** What is left once the refunds post — what the admin must agree to write off. 0: nothing. */
+  write_off_minutes: number;
+  member_told: boolean;
+};
+
+/** The delete's answer (`AdminMemberDeleteEndpoints.Answer`). */
+export type MemberDeleteResult = {
+  deleted: boolean;
+  user_id: string;
+  mode: "erase" | "remove";
+  already_deleted: boolean;
+  bookings_cancelled: number;
+  seats_given_up: number;
+  purchases_closed: number;
+  written_off_minutes: number;
+  member_notified: boolean;
+};
+
 /* ─────────────────────────────── files ─────────────────────────────── */
 
 export type CsvFile = { blob: Blob; filename: string };
@@ -237,6 +267,19 @@ export const memberDetailEndpoints = {
       ...(body.reason ? { reason: body.reason } : {}),
       ...(body.confirmSelf ? { confirm_self: true } : {}),
     }),
+};
+
+export const memberDeleteEndpoints = {
+  /** What deleting this member would do now. Changes nothing. */
+  preview: (userId: string) => api.get<MemberDeletePreview>(`${base(userId)}/delete-preview`),
+
+  /**
+   * Deletes the member. `reason` is required (400 `reason_required`); a balance left after the
+   * refunds is written off only with `confirmBalanceWriteOff` (else 409 `balance_write_off_required`
+   * with `balance_minutes`). Idempotent: an erased member answers `already_deleted`.
+   */
+  remove: (userId: string, body: { reason: string; confirmBalanceWriteOff: boolean }) =>
+    api.del<MemberDeleteResult>(base(userId), { reason: body.reason, confirmBalanceWriteOff: body.confirmBalanceWriteOff }),
 };
 
 function doorQuery(f: MemberDoorFilters): string {

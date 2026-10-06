@@ -45,7 +45,19 @@ public static partial class TopUpEndpoints
     /// </summary>
     internal static bool IsReopenable(PendingTopup p)
         => p.Status == TopUpStatus.Cancelled
-           && p.FailureReason is FailureCodes.CancelledAtReturn or FailureCodes.Expired;
+           && p.FailureReason is FailureCodes.CancelledAtReturn or FailureCodes.Expired or FailureCodes.MemberDeleted;
+
+    /// <summary>Closes every checkout the member still has open, as the club deleting them (reopenable). Answers how many.</summary>
+    internal static Task<int> CloseForDeletedMemberAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return db.PendingTopups
+            .Where(p => p.UserId == userId && p.Status == TopUpStatus.Pending)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(p => p.Status, TopUpStatus.Cancelled)
+                .SetProperty(p => p.FailureReason, FailureCodes.MemberDeleted)
+                .SetProperty(p => p.CompletedAt, now), ct);
+    }
 
     /// <summary>The instant before which a still-Pending row is no longer an open checkout.</summary>
     internal static DateTimeOffset PendingCutoff(DateTimeOffset now) => now - PendingLifetime;

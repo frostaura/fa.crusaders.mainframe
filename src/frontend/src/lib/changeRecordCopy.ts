@@ -81,6 +81,10 @@ const FIELD_LABEL: Record<string, string> = {
   is_admin: "Admin rights",
   must_change_password: "Must choose a new password",
   passkeys_removed: "Passkeys removed",
+  // A member deleted (2026-10-06): whether their history stayed, and what the delete did to the books.
+  kept_history: "Bookings and minutes kept as “Deleted member”",
+  bookings_cancelled: "Bookings cancelled and refunded",
+  written_off_minutes: "Written off their balance",
   seat: "Seat",
   court: "Court",
   starts_at: "Starts",
@@ -131,6 +135,7 @@ const STATE_WORDS: Record<string, string> = {
   active: "Active",
   rejected: "Turned down",
   suspended: "Suspended",
+  deleted: "Deleted",
   pending: "Waiting to be confirmed",
   confirmed: "Confirmed",
   disputed: "Disputed",

@@ -6,6 +6,13 @@ public enum MembershipStatus
     Active = 1,
     Rejected = 2,
     Suspended = 3,
+
+    /// <summary>
+    /// Deleted by the club with its history kept: the person's name, address, photo and credentials
+    /// are wiped and the rows stay so the books balance. Terminal — nothing reactivates it, and every
+    /// list hides it unless asked for it by name. See <c>Services.MemberDeletion</c>.
+    /// </summary>
+    Deleted = 4,
 }
 
 /// <summary>

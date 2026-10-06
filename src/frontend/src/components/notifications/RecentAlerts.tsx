@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DotSeparated } from "@/components/ui/dot-separated";
 import {
-  Bell, CaretRight, Clock, Coins, Door, Receipt, Repeat, ShieldCheck, ShieldWarning, UserPlus, Warning,
+  Bell, CaretRight, Clock, Coins, Door, Receipt, Repeat, ShieldCheck, ShieldWarning, UserMinus, UserPlus, Warning,
   WebhooksLogo, WifiHigh, WifiSlash, type Icon,
 } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -48,6 +48,7 @@ const KIND_ICON: Record<string, Icon> = {
   "booking.overdraft_authorised": Coins,
   "admin.role_changed": ShieldCheck,
   "code.forgery_suspected": ShieldWarning,
+  "member.deleted": UserMinus,
 };
 
 export function RecentAlerts({ feed, shown }: {

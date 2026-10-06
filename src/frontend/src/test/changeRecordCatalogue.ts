@@ -397,6 +397,16 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     writer: "MemberApprovalService.StageChangeAsync", before: { status: "suspended" }, after: { status: "active" },
   }),
   row({
+    action: "member.deleted", area: "member", headline: "Deleted a member — Thandi Mokoena",
+    writer: "MemberDeletionService.StageRecordsAsync", before: { status: "active" },
+    after: { status: "deleted", kept_history: true, bookings_cancelled: 2, written_off_minutes: 75 },
+  }),
+  row({
+    variant: "removed outright", action: "member.deleted", area: "member", headline: "Deleted a member — Pat Applicant",
+    writer: "MemberDeletionService.StageRecordsAsync", before: { status: "pending_approval" },
+    after: { status: "deleted", kept_history: false, bookings_cancelled: 0, written_off_minutes: 0 },
+  }),
+  row({
     action: "member.password_reset", area: "member", headline: "Gave a member a temporary password — Thandi Mokoena",
     writer: "AdminMemberEndpoints (reset password)", before: null, after: { must_change_password: true },
   }),

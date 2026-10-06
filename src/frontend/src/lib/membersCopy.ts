@@ -98,6 +98,7 @@ export function statusLabel(status: string): string {
     case "Active": return "Active";
     case "Suspended": return "Suspended";
     case "Rejected": return "Rejected";
+    case "Deleted": return "Deleted";
     default: return status;
   }
 }

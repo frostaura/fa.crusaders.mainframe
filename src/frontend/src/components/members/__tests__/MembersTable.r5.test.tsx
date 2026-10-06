@@ -23,7 +23,7 @@ function row(i: number, groups: { id: string; name: string }[] = []): MemberRow 
 function handlers(): RowActionHandlers {
   return {
     approve: vi.fn(), reject: vi.fn(), sell: vi.fn(), adjust: vi.fn(), fingerprints: vi.fn(), reset: vi.fn(), resetCode: vi.fn(),
-    resend: vi.fn(), changeGroups: vi.fn(), suspend: vi.fn(), reactivate: vi.fn(), adminRole: vi.fn(), fingerprintCount: () => 0,
+    resend: vi.fn(), changeGroups: vi.fn(), suspend: vi.fn(), reactivate: vi.fn(), adminRole: vi.fn(), deleteMember: vi.fn(), fingerprintCount: () => 0,
   };
 }
 

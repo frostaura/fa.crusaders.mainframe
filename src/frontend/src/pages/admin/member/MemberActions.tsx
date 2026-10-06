@@ -1,16 +1,20 @@
 import { useRef, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { ActionsMenu, type ActionsMenuItem } from "@/components/admin/ActionsMenu";
 import { useResetMemberCodeConfirm } from "@/components/member-code/useResetMemberCodeConfirm";
 import { useToast } from "@/components/toastContext";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { ArrowCounterClockwise, Envelope, HourglassMedium, Key, Lock, Prohibit, ShieldCheck, ShieldWarning, UserMinus, UserPlus } from "@/components/ui/icons";
+import { ArrowCounterClockwise, Envelope, HourglassMedium, Key, Lock, Prohibit, ShieldCheck, ShieldWarning, Trash, UserMinus, UserPlus } from "@/components/ui/icons";
 import { Textarea } from "@/components/ui/textarea";
 import { endpoints } from "@/lib/api";
 import { ACTIONS_COPY as COPY, ADMIN_ROLE_COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
 import type { AdminRoleResult, MemberDetail } from "@/lib/memberDetailApi";
 import { AdminRoleDialog } from "@/components/members/AdminRoleDialog";
+import { DeleteMemberDialog } from "@/components/members/DeleteMemberDialog";
+import { useMembersSplit } from "@/components/members/membersSplit";
+import { DELETE_MEMBER_COPY } from "@/lib/deleteMemberCopy";
 import { adminRoleOffer } from "@/components/members/adminRoleOffer";
 import { transitionTruth } from "@/components/members/lostTransition";
 import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
@@ -153,6 +157,7 @@ export function MemberActions(props: ActionsProps) {
   const toast = useToast();
   const lifecycle = menuLifecycle(detail.status, useLifecycleItems(props));
   const role = useRoleItem(props);
+  const removal = useDeleteItem(props);
   const anchor = useRef<HTMLSpanElement>(null);
 
   const resend: ActionsMenuItem | null = detail.email_verified ? null : {
@@ -171,7 +176,7 @@ export function MemberActions(props: ActionsProps) {
   return (
     // `contents`: the wrapper is only there to find the ⋯ again, for the role dialog's focus return.
     <span ref={anchor} data-member-actions="" className="contents">
-      <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[adjust, resend, role.item, resetCode, ...lifecycle]} />
+      <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[adjust, resend, role.item, resetCode, ...lifecycle, removal.item]} />
       {role.attempt ? (
         <AdminRoleDialog
           key={role.attempt.n}
@@ -184,8 +189,41 @@ export function MemberActions(props: ActionsProps) {
           onChanged={props.onRole}
         />
       ) : null}
+      {removal.attempt ? (
+        <DeleteMemberDialog
+          key={removal.attempt}
+          userId={detail.user_id}
+          name={name}
+          open={removal.open}
+          onOpenChange={removal.setOpen}
+          returnFocus={() => anchor.current?.querySelector("button")}
+          onDeleted={removal.done}
+        />
+      ) : null}
     </span>
   );
+}
+
+/**
+ * Delete member, last in the ⋯ and in the danger ink (Dean, 2026-10-06: "should be able to delete
+ * an account, not just suspend it"). Absent for an account with no membership — the bootstrap
+ * administrator — and for one already deleted. After the delete the record is gone from the club's
+ * lists, so the page goes back to Members, which reads the club again.
+ */
+function useDeleteItem({ detail }: ActionsProps) {
+  const [attempt, setAttempt] = useState(0);
+  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const split = useMembersSplit();
+  const offered = detail.membership_id !== null && detail.status !== "Deleted";
+  const item: ActionsMenuItem | null = offered
+    ? { label: DELETE_MEMBER_COPY.menu, icon: <Trash aria-hidden="true" />, danger: true, onSelect: () => { setAttempt((n) => n + 1); setOpen(true); } }
+    : null;
+  const done = () => {
+    split?.onMemberDeleted?.();
+    navigate(split?.listHref ?? MEMBER_COPY.backTo);
+  };
+  return { item, attempt, open, setOpen, done };
 }
 
 /**
