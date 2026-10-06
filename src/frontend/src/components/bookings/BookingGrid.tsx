@@ -1,11 +1,12 @@
-import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, type FocusEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CaretDown } from "@/components/ui/icons";
 import { FILL_ROOM_VAR, useFillHeight } from "@/components/ui/use-fill-height";
 import type { ScheduleCourt, ScheduleSlot } from "../../lib/api";
 import { cn } from "../../lib/utils";
-import { isSlotHead, peakRestricted, slotAt, type TimeSlice } from "../../lib/scheduleGrid";
+import { isSlotHead, slotAt, type TimeSlice } from "../../lib/scheduleGrid";
+import { cellFactsOf, LAND_AT_END, landingRow, rowBookable } from "../../lib/gridLanding";
 import { selectionKey } from "../../lib/gridSelection";
 import { ScrollArea } from "../ScrollArea";
 import { BOOKINGS_COPY, CELL_TEXT, courtChipLabel, sliceLengthLine } from "../../lib/bookingsCopy";
@@ -64,9 +65,9 @@ export function BookingBoard(props: BoardProps) {
   const { ctx, timeSlices, collapsedRows, earlierLabel, onExpandEarlier, pastThresholdMs } = props;
   const { day } = ctx;
   const firstLive = firstLiveIndex(timeSlices, collapsedRows, pastThresholdMs);
-  const { scroller, gridRef, chips } = useBoardScroll(firstLive, `${day.date}|${collapsedRows}`, day.courts.length);
-  // The grid fills what is left under the page's controls and scrolls itself; the page holds still.
-  useFillHeight(scroller, PAGE_BOTTOM_PX);
+  const landing = () => landingRow(timeSlices, collapsedRows, pastThresholdMs, Date.now(), day.sliceMinutes,
+    (i) => rowBookable(day, ctx.rules, props.slotsByCourt, timeSlices[i], pastThresholdMs, props.peakNowMs));
+  const { scroller, gridRef, chips } = useBoardScroll(landing, collapsedRows, day.date, day.courts.length);
   const interactions = useGridInteractions({
     gridRef, selection: ctx.selection, rowCount: timeSlices.length, colCount: day.courts.length,
     firstRow: collapsedRows, initialRow: firstLive < 0 ? collapsedRows : firstLive, resetKey: day.date,
@@ -174,6 +175,23 @@ function scrollerStyle(selecting: boolean): CSSProperties {
   };
 }
 
+/**
+ * The scrollTop that puts `row` one row below the sticky court header: the row before it shows
+ * whole under the header (and the 4px row gap its backdrop covers). The first row shown — or the
+ * "Earlier today" disclosure above it — is simply the top.
+ */
+function landingScrollTop(box: HTMLElement, grid: HTMLElement, row: number, firstRow: number): number {
+  if (row === LAND_AT_END) return box.scrollHeight;
+  if (row <= firstRow) return 0;
+  const before = grid.querySelector<HTMLElement>(`[data-time-row="${row - 1}"]`);
+  const header = grid.querySelector<HTMLElement>("[data-court-col]");
+  if (!before) return 0;
+  return Math.max(0, before.offsetTop - (header?.offsetHeight ?? 0) - ROW_GAP_PX);
+}
+
+/** `gap-y-1` between the grid's rows. */
+const ROW_GAP_PX = 4;
+
 function firstLiveIndex(slices: TimeSlice[], from: number, pastThresholdMs: number): number {
   return slices.findIndex((t, i) => i >= from && Date.parse(t.utc) > pastThresholdMs);
 }
@@ -235,7 +253,6 @@ type RowsProps = Pick<BoardProps, "ctx" | "slotsByCourt" | "timeSlices" | "pastT
 };
 
 const NOTHING_HOLDING: ReadonlySet<string> = new Set();
-const DAY_MS = 86_400_000;
 
 /**
  * The day's rows. Memoised against the board's own churn — the roving stop moves one cell, a
@@ -245,14 +262,12 @@ const DAY_MS = 86_400_000;
 const GridRows = memo(function GridRows(props: RowsProps) {
   const { ctx, slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, collapsedRows, stopRow, stopCol, lineOf, holding } = props;
   const { day } = ctx;
-  // R5 — the club's rolling window: a slot further out than now + N days is refused on Book.
-  const openUntilMs = day.advanceBookingDays > 0 ? peakNowMs + day.advanceBookingDays * DAY_MS : Infinity;
   return (
     <>
       {timeSlices.map((t, rowIndex) => {
         if (rowIndex < collapsedRows) return null;
         const cellStartMs = Date.parse(t.utc);
-        const isPast = cellStartMs <= pastThresholdMs;
+        const facts = cellFactsOf(day, t, pastThresholdMs, peakNowMs);
         const line = lineOf(rowIndex);
         return (
           <div key={t.utc} role="row" style={{ display: "contents" }}>
@@ -276,11 +291,7 @@ const GridRows = memo(function GridRows(props: RowsProps) {
                   isHead={slot ? isSlotHead(slot, cellStartMs, day.sliceMinutes, rowIndex === collapsedRows) : false}
                   rowsLeft={timeSlices.length - rowIndex}
                   holding={!slot && holding.has(selectionKey(c.id, t.utc))}
-                  facts={{
-                    minuteOfDay: t.minuteOfDay, sliceMinutes: day.sliceMinutes, isPast, outOfHours: t.outOfHours,
-                    peakRestricted: peakRestricted(day, t.minuteOfDay, cellStartMs, peakNowMs),
-                    notYetOpen: cellStartMs > openUntilMs,
-                  }}
+                  facts={facts}
                 />
               );
             })}
@@ -324,26 +335,33 @@ function NowLine(props: { timeSlices: TimeSlice[]; fromRow: number; lineOf: (row
 }
 
 /**
- * The scroller's two jobs: open on the first row that has not started, one row back, once per
- * day (D3-B01 — it opened 3 670px above the first bookable slot); and, on a phone whose courts do
- * not all fit, drive the court chips — measured, never a breakpoint guess, with the chip for the
- * court at the left edge reading as current.
+ * The scroller's two jobs: open with the first row this viewer can BOOK at its top, one row of
+ * context above it (`lib/gridLanding`; D3-B01 — it opened 3 670px above the first bookable slot;
+ * Dean, 2026-10 — late in the day it opened on a screen of locked rows), once per day shown;
+ * and, on a phone whose courts do not all fit, drive the court chips — measured, never a
+ * breakpoint guess, with the chip for the court at the left edge reading as current.
+ *
+ * <p>
+ * <b>Once per day, never again.</b> The landing is keyed on the day alone: a refetch, a live
+ * update, the clock moving the past rows or "Earlier today" opening never moves the scroller —
+ * one that jerks back while somebody reads the evening is worse than one that never moved.
+ * Instant, in a layout effect, so the grid is never painted at its top first and then jumps.
+ * </p>
  */
-function useBoardScroll(firstLive: number, key: string, courts: number) {
+function useBoardScroll(landing: () => number, collapsedRows: number, day: string, courts: number) {
   const scroller = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const target = useRef(firstLive);
-  // Latest value for the seeding effect, which deliberately does NOT re-run when the clock moves
-  // the first live row: a scroller that jerks back to "now" while somebody reads the evening is
-  // worse than one that never moved.
-  useEffect(() => { target.current = firstLive; });
-  useEffect(() => {
+  // The grid fills what is left under the page's controls and scrolls itself; the page holds
+  // still. Measured BEFORE the landing below, so the row is placed in the scroller's real height.
+  useFillHeight(scroller, PAGE_BOTTOM_PX);
+  const latest = useRef({ landing, collapsedRows });
+  useLayoutEffect(() => { latest.current = { landing, collapsedRows }; });
+  useLayoutEffect(() => {
     const box = scroller.current;
-    const row = gridRef.current?.querySelector<HTMLElement>(`[data-time-row="${target.current}"]`);
-    const header = gridRef.current?.querySelector<HTMLElement>("[data-court-col]");
-    if (!box || !row) return;
-    box.scrollTop = Math.max(0, row.offsetTop - (header?.offsetHeight ?? 0) - (row.offsetHeight + 4));
-  }, [key]);
+    const grid = gridRef.current;
+    if (!box || !grid) return;
+    box.scrollTop = landingScrollTop(box, grid, latest.current.landing(), latest.current.collapsedRows);
+  }, [day]);
 
   const [overflow, setOverflow] = useState(false);
   const [active, setActive] = useState(0);
