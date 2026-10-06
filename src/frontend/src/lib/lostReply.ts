@@ -1,4 +1,5 @@
-import { UnsureOutcome, outcomeUnknown } from "./bookingOutcome";
+import { UnsureOutcome, isConflictRetry, outcomeUnknown } from "./bookingOutcome";
+import { LOST_REPLY } from "./lostReplyCopy";
 
 /**
  * A write whose reply was lost, read back before anything is said (review round 3, lane F2).
@@ -49,12 +50,20 @@ export async function writeOrReadBack<T>(
 }
 
 /** The two sentences an unknown outcome is said in: after a look that worked, and after one that did not. */
-export type UnsureWords = { checked: string; unchecked: string };
+export type UnsurePair = { checked: string; unchecked: string };
+
+/**
+ * An unknown outcome's words. `conflict` (R17 X17-1) is the same pair for a write the club answered
+ * `503 conflict_retry` — someone else was changing the same thing — built by `unsureWords`; a
+ * hand-written pair without it gets {@link LOST_REPLY}'s generic conflict pair, never "didn't answer".
+ */
+export type UnsureWords = UnsurePair & { conflict?: UnsurePair };
 
 /** The sentence for an {@link UnsureOutcome}, or null for anything else (a refusal says itself). */
 export function unsureSentence(error: unknown, words: UnsureWords): string | null {
   if (!(error instanceof UnsureOutcome)) return null;
-  return error.checked ? words.checked : words.unchecked;
+  const pair = isConflictRetry(error.original) ? words.conflict ?? LOST_REPLY.conflictGeneric : words;
+  return error.checked ? pair.checked : pair.unchecked;
 }
 
-export { UnsureOutcome, outcomeUnknown };
+export { UnsureOutcome, isConflictRetry, outcomeUnknown };

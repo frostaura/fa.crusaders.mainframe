@@ -50,7 +50,7 @@ const CROSS_CUTTING: Record<string, string> = {
  * screens word their 409 of the same name).
  */
 export const CONFLICT_RETRY_CAUSE =
-  "someone else was changing the same thing at that exact moment. Try again in a second.";
+  "someone else was changing the same thing at that exact moment. Try again now.";
 
 /**
  * Puts what the member was trying to do in front of why it failed.

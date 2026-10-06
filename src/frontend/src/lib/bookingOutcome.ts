@@ -29,6 +29,16 @@ export function outcomeUnknown(e: unknown): boolean {
 }
 
 /**
+ * R17 X17-1 — `503 { error: "conflict_retry" }`: the club DID answer, to say another change to the
+ * same thing landed at the same instant and this one gave way. It is still read back (a batch may
+ * have landed some items first, so it stays an unknown outcome), but the sentence after the look
+ * must say why — "someone else was changing it", "try again now" — never "the club didn't answer".
+ */
+export function isConflictRetry(e: unknown): boolean {
+  return e instanceof ApiError && e.code === "conflict_retry";
+}
+
+/**
  * The unanswered write, after the day was re-read. `checked` is whether that re-read worked:
  * false means the sheet cannot tell and must say so, true means the schedule showed the write
  * had NOT landed.

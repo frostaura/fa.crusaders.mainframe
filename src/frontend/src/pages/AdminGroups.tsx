@@ -606,7 +606,7 @@ function GroupMembersPanel({ group, clubMembers, timezone, onChanged, onChangeGr
     } catch (err) {
       if (err instanceof UnsureOutcome) {
         setResult(null);
-        setAddNote({ tone: "danger", text: err.checked ? ADD_LOST.checked(group.name) : ADD_LOST.unchecked(group.name) });
+        setAddNote({ tone: "danger", text: unsureSentence(err, ADD_LOST.words(group.name)) ?? "" });
         void read();
         return;
       }

@@ -812,13 +812,13 @@ describe("a group write whose reply was lost", () => {
   it("says nothing changed when the group does not have them", async () => {
     open([OFF_PEAK], lostAdd(false));
     await addThandi();
-    expect(await screen.findByText(ADD_LOST.checked("Off-peak"))).toBeInTheDocument();
+    expect(await screen.findByText(ADD_LOST.words("Off-peak").checked)).toBeInTheDocument();
   });
 
   it("says it cannot tell when the group cannot be read either", async () => {
     open([OFF_PEAK], lostAdd(true, false));
     await addThandi();
-    expect(await screen.findByText(ADD_LOST.unchecked("Off-peak"))).toBeInTheDocument();
+    expect(await screen.findByText(ADD_LOST.words("Off-peak").unchecked)).toBeInTheDocument();
   });
 
   /** R4 carry-over: the sheet's save performs, then the reply dies; the list is read back. */

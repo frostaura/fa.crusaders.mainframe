@@ -212,9 +212,10 @@ async function refusalNotice(
     const now = await endpoints.minutesPackages();
     setShelf(now);
     const started = now.open_checkouts.some((c) => !openBefore.has(c.id));
+    if (refusal.conflict) return { tone: "warning", text: started ? BUY_SAID.conflictStarted : BUY_SAID.conflictNothing };
     return { tone: "warning", text: started ? BUY_SAID.lostStarted : BUY_SAID.lostNothing };
   } catch {
-    return { tone: "danger", text: BUY_SAID.lostUnknown };
+    return { tone: "danger", text: refusal.conflict ? BUY_SAID.conflictUnknown : BUY_SAID.lostUnknown };
   }
 }
 

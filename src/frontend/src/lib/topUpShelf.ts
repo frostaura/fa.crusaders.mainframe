@@ -1,5 +1,5 @@
 import { ApiError, OfflineError, type MinutesShelf, type ShelfPackage } from "./api";
-import { outcomeUnknown } from "./lostReply";
+import { isConflictRetry, outcomeUnknown } from "./lostReply";
 import { minutesSpoken } from "./minutes";
 import { savesWords } from "./packagesCopy";
 import { formatMoney } from "./utils";
@@ -151,6 +151,10 @@ export const BUY_SAID = {
   lostStarted: "The reply got lost, so the club's record was checked: a purchase was started but we couldn't take you to PayFast. Nothing was charged — cancel it below, then try again.",
   lostNothing: "The reply got lost, so the club's record was checked: nothing was started and nothing was charged. Try again.",
   lostUnknown: "The reply got lost and the club couldn't be checked either. Nothing was charged on this page — look at the list below in a moment before trying again.",
+  /** R17 X17-1 — the club answered conflict_retry: it answered, someone else was changing your purchases. */
+  conflictStarted: "Someone else was changing your purchases at the same moment, so the club's record was checked: a purchase was started but we couldn't take you to PayFast. Nothing was charged — cancel it below, then try again.",
+  conflictNothing: "Someone else was changing your purchases at the same moment, so the club's record was checked: nothing was started and nothing was charged. Try again now.",
+  conflictUnknown: "Someone else was changing your purchases at the same moment and the club couldn't be checked either. Nothing was charged on this page — look at the list below before trying again.",
 } as const;
 
 /** How a press of Continue ended, when it did not end at PayFast. */
@@ -158,7 +162,7 @@ export type BuyRefusal =
   | { kind: "price_changed"; restated: ShelfPackage }
   | { kind: "unavailable" }
   | { kind: "sentence"; text: string }
-  | { kind: "unknown" };
+  | { kind: "unknown"; conflict: boolean };
 
 function codeOf(error: unknown): string | null {
   if (!(error instanceof ApiError) || typeof error.payload !== "object" || error.payload === null) return null;
@@ -195,6 +199,6 @@ export function buyRefusal(error: unknown): BuyRefusal {
   }
   if (code === "package_unavailable") return { kind: "unavailable" };
   if (code && SENTENCE_BY_CODE[code]) return { kind: "sentence", text: SENTENCE_BY_CODE[code] };
-  if (outcomeUnknown(error)) return { kind: "unknown" };
+  if (outcomeUnknown(error)) return { kind: "unknown", conflict: isConflictRetry(error) };
   return { kind: "sentence", text: BUY_SAID.failed };
 }

@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { endpoints, type ScheduleDay } from "./api";
 import { describeBookingError, provesStaleGrid } from "./bookingErrors";
-import { goneFrom, outcomeUnknown } from "./bookingOutcome";
+import { goneFrom, isConflictRetry, outcomeUnknown } from "./bookingOutcome";
 
 /**
  * Lifting a club hold from the grid — the one slot-ending action that stays on the grid itself.
@@ -34,16 +34,20 @@ export const HOLD_LIFT_UNANSWERED = "The club's system didn't answer, so we chec
 /** No answer, and the day could not be read either. */
 export const HOLD_LIFT_UNKNOWN = "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether the hold was lifted. Refresh the schedule before trying again.";
 
+/** R17 X17-1 — the same two, for a lift the club answered conflict_retry: it answered, someone else was changing it. */
+export const HOLD_LIFT_CONFLICT = "Someone else was changing that hold at the same moment, so we checked the schedule: the hold is still there. Try again now.";
+export const HOLD_LIFT_CONFLICT_UNKNOWN = "Someone else was changing that hold at the same moment and the schedule couldn't be read either, so we can't tell whether the hold was lifted. Refresh the schedule before trying again.";
+
 /**
  * What a lift with no answer did, read off the day (R3 lost-reply audit): gone is lifted — the
  * reply was lost, not the lift — and a hold still there, or a day that would not load, is said so.
  * It used to put the hold back and say "Couldn't lift that hold" about a lift that had landed.
  */
-async function readBack(blockId: string, reconcile: Args["reconcile"]): Promise<{ lifted: boolean; text: string }> {
+async function readBack(blockId: string, reconcile: Args["reconcile"], conflict: boolean): Promise<{ lifted: boolean; known: boolean; text: string }> {
   const day = await reconcile();
-  if (!day) return { lifted: false, text: HOLD_LIFT_UNKNOWN };
-  if (goneFrom(day, blockId)) return { lifted: true, text: HOLD_LIFTED };
-  return { lifted: false, text: HOLD_LIFT_UNANSWERED };
+  if (!day) return { lifted: false, known: false, text: conflict ? HOLD_LIFT_CONFLICT_UNKNOWN : HOLD_LIFT_UNKNOWN };
+  if (goneFrom(day, blockId)) return { lifted: true, known: true, text: HOLD_LIFTED };
+  return { lifted: false, known: true, text: conflict ? HOLD_LIFT_CONFLICT : HOLD_LIFT_UNANSWERED };
 }
 
 export function useHoldLift({ day, setDay, reconcile, toast }: Args) {
@@ -63,8 +67,8 @@ export function useHoldLift({ day, setDay, reconcile, toast }: Args) {
     } catch (err) {
       if (outcomeUnknown(err)) {
         // The read-back redraws the day itself; only an unreadable day needs the hold put back.
-        const seen = await readBack(blockId, reconcile);
-        if (seen.text === HOLD_LIFT_UNKNOWN) putBack();
+        const seen = await readBack(blockId, reconcile, isConflictRetry(err));
+        if (!seen.known) putBack();
         toast.push({ tone: seen.lifted ? "success" : "danger", text: seen.text });
         return;
       }

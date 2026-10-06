@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { endpoints, type BulkCancelResponse, type CancellationQuote } from "@/lib/api";
 import { adminEndpoints } from "@/lib/adminApi";
 import { clubClock } from "@/lib/clubClock";
-import { UnsureOutcome, goneFrom, outcomeUnknown, type Reread } from "@/lib/bookingOutcome";
+import { UnsureOutcome, goneFrom, isConflictRetry, outcomeUnknown, type Reread } from "@/lib/bookingOutcome";
+import { CONFLICT_RETRY_ROW } from "@/lib/bookingErrors";
 import { splitCancelOf, type PartnerRefund, type SplitCancel } from "@/lib/bookingsApi";
 import { CANCEL_SHEET, cancelRowOutcome, refusalReason, RESULT_WORD, splitRowOutcome } from "@/lib/bookingsCopy";
 import { clubDayLabel, newIdempotencyKey } from "./bookFlow";
@@ -208,8 +209,10 @@ function fromBulk(res: BulkCancelResponse, bookings: readonly GridBooking[], req
  * The rows the schedule proves for bookings whose cancel went unanswered: gone is cancelled
  * (the reply with the figures was lost), still there is not, and a failed look says it cannot
  * tell. Never "couldn't cancel" about a booking the club had cancelled and refunded (F1.1).
+ * R17 X17-1 — an item the club answered conflict_retry says someone else was changing it, not
+ * that the club didn't answer (`conflicted`).
  */
-async function proveCancels(unsure: readonly GridBooking[], reread: Reread | undefined) {
+async function proveCancels(unsure: readonly GridBooking[], reread: Reread | undefined, conflicted: ReadonlySet<string>) {
   const day = reread ? await reread() : null;
   const rows = new Map<string, BulkResultRow>();
   const gone: string[] = [];
@@ -218,7 +221,10 @@ async function proveCancels(unsure: readonly GridBooking[], reread: Reread | und
       gone.push(b.bookingId);
       rows.set(b.bookingId, okRow(b, null, null));
     } else {
-      rows.set(b.bookingId, { ...failedRow(b, null), detail: day ? CANCEL_SHEET.unsureStillThere : CANCEL_SHEET.unsureRow });
+      const words = conflicted.has(b.bookingId)
+        ? { stillThere: CONFLICT_RETRY_ROW.stillThere, unread: CONFLICT_RETRY_ROW.unread }
+        : { stillThere: CANCEL_SHEET.unsureStillThere, unread: CANCEL_SHEET.unsureRow };
+      rows.set(b.bookingId, { ...failedRow(b, null), detail: day ? words.stillThere : words.unread });
     }
   }
   return { rows, gone };
@@ -233,6 +239,7 @@ async function cancelInTurn(req: CancelRequest): Promise<CancelRun> {
   const rows: BulkResultRow[] = [];
   const cancelledIds: string[] = [];
   const unsure: GridBooking[] = [];
+  const conflicted = new Set<string>();
   for (const b of req.bookings) {
     try {
       const r = await cancelOne(b, req);
@@ -240,11 +247,12 @@ async function cancelInTurn(req: CancelRequest): Promise<CancelRun> {
       cancelledIds.push(b.bookingId);
     } catch (error) {
       if (outcomeUnknown(error)) unsure.push(b);
+      if (isConflictRetry(error)) conflicted.add(b.bookingId);
       rows.push(failedRow(b, codeOf(error)));
     }
   }
   if (unsure.length === 0) return { rows, cancelledIds, single: null };
-  const proven = await proveCancels(unsure, req.reread);
+  const proven = await proveCancels(unsure, req.reread, conflicted);
   return {
     rows: rows.map((r) => proven.rows.get(r.key) ?? r),
     cancelledIds: [...cancelledIds, ...proven.gone],
@@ -278,7 +286,8 @@ async function cancelAsDesk(req: CancelRequest): Promise<CancelRun> {
     return fromBulk(res, bookings, req);
   } catch (error) {
     if (!outcomeUnknown(error)) throw error;
-    const proven = await proveCancels(bookings, req.reread);
+    const conflicted = new Set(isConflictRetry(error) ? bookings.map((b) => b.bookingId) : []);
+    const proven = await proveCancels(bookings, req.reread, conflicted);
     return { rows: bookings.map((b) => proven.rows.get(b.bookingId)!), cancelledIds: proven.gone, single: null };
   }
 }

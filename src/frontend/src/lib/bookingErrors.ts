@@ -1,5 +1,5 @@
 import { ApiError } from "./api";
-import { NotSent, UnsureOutcome } from "./bookingOutcome";
+import { NotSent, UnsureOutcome, isConflictRetry } from "./bookingOutcome";
 import type { SplitCancel } from "./bookingsApi";
 import { minutesSpoken } from "./minutes";
 import { rateLimitedSentence } from "./errors";
@@ -37,7 +37,35 @@ import { rateLimitedSentence } from "./errors";
 export const ALREADY_CHECKED_IN_TEXT =
   "You've checked in to this booking, so it can't be cancelled — the court is yours until it ends. If something's wrong, speak to the club.";
 
+/**
+ * R17 E17-6 / J17-7 — the club's cancel of a booking that is not open (409; it was a 404 "no longer
+ * there", which sent the desk looking for a booking that was right where it was): already cancelled
+ * (`booking_not_open`), or played, missed or a hold (`not_cancellable` with its `status`).
+ */
+export const CANCEL_REFUSAL_TEXT = {
+  alreadyCancelled: "That booking was already cancelled — nothing more moved. The schedule behind this is up to date now.",
+  completed: "That booking has been played, so it can't be cancelled.",
+  no_show: "That booking was marked a no-show, so it can't be cancelled.",
+  blocked: "That's a club hold, not a booking, so it can't be cancelled — lift the hold instead.",
+  other: "That booking isn't open any more, so it can't be cancelled. The schedule behind this is up to date now.",
+} as const;
+
+function describeNotCancellable(err: ApiError): string {
+  const status = err.detail("status");
+  return typeof status === "string" && (status === "completed" || status === "no_show" || status === "blocked")
+    ? CANCEL_REFUSAL_TEXT[status]
+    : CANCEL_REFUSAL_TEXT.other;
+}
+
+/** The sentence for either refusal, or null for anything else (the conflict panel's per-row words). */
+export function cancelRefusal(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  if (err.code === "booking_not_open") return CANCEL_REFUSAL_TEXT.alreadyCancelled;
+  return err.code === "not_cancellable" ? describeNotCancellable(err) : null;
+}
+
 const BOOKING_ERROR_TEXT: Record<string, string> = {
+  booking_not_open: CANCEL_REFUSAL_TEXT.alreadyCancelled,
   past_time: "That slot has already started — pick a later one.",
   /**
    * Only an admin booking ON BEHALF of somebody reaches this: a member meets the club's
@@ -126,6 +154,28 @@ export const UNSURE_TEXT: Record<BookingAction, { checked: string; unchecked: st
     unchecked: "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether it was cancelled. Check the schedule and your wallet before trying again.",
   },
 };
+
+/**
+ * R17 X17-1 — the same two outcomes for a write the club answered `503 conflict_retry`: it DID
+ * answer, so "didn't answer" was false, and "in a minute" was the wrong wait — the clash is over
+ * the moment the answer arrives. Chosen by `describeBookingError` off `UnsureOutcome.original`.
+ */
+export const CONFLICT_UNSURE_TEXT: Record<BookingAction, { checked: string; unchecked: string }> = {
+  book: {
+    checked: "Someone else was changing that court at the same moment, so we checked the schedule: the slot is still free — nothing was booked and no minutes were taken. Try again now.",
+    unchecked: "Someone else was changing that court at the same moment and the schedule couldn't be read either, so we can't tell whether this was booked. Check the schedule and your wallet before trying again.",
+  },
+  cancel: {
+    checked: "Someone else was changing that booking at the same moment, so we checked the schedule: the booking is still there — nothing was cancelled and no minutes moved. Try again now.",
+    unchecked: "Someone else was changing that booking at the same moment and the schedule couldn't be read either, so we can't tell whether it was cancelled. Check the schedule and your wallet before trying again.",
+  },
+};
+
+/** R17 X17-1 — a bulk-cancel row whose item was answered conflict_retry, after the day was read back. */
+export const CONFLICT_RETRY_ROW = {
+  stillThere: "Someone else was changing it at the same moment, and it's still on the schedule — try again now.",
+  unread: "Someone else was changing it at the same moment — check the schedule.",
+} as const;
 
 /** R3 I-4 — offline before sending: certain that nothing happened, and said so. */
 export const NOT_SENT_TEXT: Record<BookingAction, string> = {
@@ -315,6 +365,7 @@ const FIGURED: Record<string, (e: ApiError, context: BookingErrorContext) => str
   no_time_available: () => "There's no free time on that court right now.",
   group_window: (e, context) => describeGroupWindow(e, context.forName),
   no_bookable_window: (e, context) => describeGroupWindow(e, context.forName),
+  not_cancellable: describeNotCancellable,
 };
 
 /** Who the booking is for and what was being done — both change the sentence. */
@@ -336,7 +387,10 @@ function serverSentence(e: ApiError, action: BookingAction): string {
 export function describeBookingError(e: unknown, fallback: string, context: BookingErrorContext = {}): string {
   const action = context.action ?? "book";
   if (e instanceof NotSent) return NOT_SENT_TEXT[action];
-  if (e instanceof UnsureOutcome) return e.checked ? UNSURE_TEXT[action].checked : UNSURE_TEXT[action].unchecked;
+  if (e instanceof UnsureOutcome) {
+    const words = isConflictRetry(e.original) ? CONFLICT_UNSURE_TEXT[action] : UNSURE_TEXT[action];
+    return e.checked ? words.checked : words.unchecked;
+  }
   if (!(e instanceof ApiError)) return fallback;
 
   // A lapsed or missing session reaches here as 401 (the client's own handler signs the
@@ -382,6 +436,8 @@ const STALE_GRID_CODES = new Set([
   "slot_taken", "court_not_found", "duplicate_request",
   "out_of_hours", "past_time", "too_far_ahead",
   "booking_not_found", "block_not_found",
+  // R17 — the desk's cancel of a booking that is not open: the grid still drew it as cancellable.
+  "booking_not_open", "not_cancellable",
 ]);
 
 export function provesStaleGrid(e: unknown): boolean {

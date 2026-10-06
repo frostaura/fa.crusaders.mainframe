@@ -1,5 +1,5 @@
 import { ApiError, endpoints, OfflineError, type OpenCheckout, type PurchaseStatus } from "./api";
-import { writeOrReadBack, UnsureOutcome } from "./lostReply";
+import { writeOrReadBack, UnsureOutcome, isConflictRetry } from "./lostReply";
 import { clubClock } from "./clubClock";
 import { minutesSpoken } from "./minutes";
 import { formatMoney } from "./utils";
@@ -52,6 +52,9 @@ export const CANCEL_SAID = {
   lostLanded: "The reply got lost, so the club's record was checked: the purchase is cancelled and nothing was charged.",
   lostStillWaiting: "The reply got lost, so the club's record was checked: this purchase is still waiting and nothing was cancelled. Try again.",
   lostUnknown: "The reply got lost and the club couldn't be checked either, so we can't say yet whether this was cancelled. Look again in a moment before trying again.",
+  /** R17 X17-1 — the club answered conflict_retry: someone else was changing the purchase. */
+  conflictStillWaiting: "Someone else was changing this purchase at the same moment, so the club's record was checked: it is still waiting and nothing was cancelled. Try again now.",
+  conflictUnknown: "Someone else was changing this purchase at the same moment and the club couldn't be checked either, so we can't say yet whether this was cancelled. Look again before trying again.",
   offline: "Cancelling needs a connection. Nothing was sent — try again when you're back online.",
   missing: "The club can't find that purchase on your account any more. The list has been refreshed.",
   failed: "The club couldn't cancel that purchase just now. Nothing was changed — try again in a moment.",
@@ -84,7 +87,10 @@ export function cancelledSentence(result: CancelResult): string {
 /** The sentence for a cancel that threw. */
 export function cancelFailedSentence(error: unknown): string {
   if (error instanceof OfflineError) return CANCEL_SAID.offline;
-  if (error instanceof UnsureOutcome) return error.checked ? CANCEL_SAID.lostStillWaiting : CANCEL_SAID.lostUnknown;
+  if (error instanceof UnsureOutcome) {
+    if (isConflictRetry(error.original)) return error.checked ? CANCEL_SAID.conflictStillWaiting : CANCEL_SAID.conflictUnknown;
+    return error.checked ? CANCEL_SAID.lostStillWaiting : CANCEL_SAID.lostUnknown;
+  }
   if (error instanceof ApiError && error.status === 404) return CANCEL_SAID.missing;
   return CANCEL_SAID.failed;
 }

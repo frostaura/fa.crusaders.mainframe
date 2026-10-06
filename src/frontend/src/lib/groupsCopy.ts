@@ -517,8 +517,8 @@ export function addResultHeading(result: GroupAddResult): string {
 /** The note beside a result the reply of which was lost and the members list was read instead. */
 export const ADD_LOST = {
   proven: "The club's reply didn't arrive, so we checked who is in the group now.",
-  checked: (name: string) => `The club didn't answer, so we checked: nobody new is in ${name} — nothing changed. Try again in a moment.`,
-  unchecked: (name: string) => `The club didn't answer and we couldn't check either, so we can't tell whether they were added to ${name}. Refresh the group before trying again.`,
+  /** Said through `unsureSentence`, so a conflict_retry reads as a clash, not silence (R17 X17-1). */
+  words: (name: string) => unsureWords(`nobody new is in ${name}`, `they were added to ${name}`, "the group"),
 } as const;
 
 const ADD_FAILURE_REASONS: Record<string, string> = {
