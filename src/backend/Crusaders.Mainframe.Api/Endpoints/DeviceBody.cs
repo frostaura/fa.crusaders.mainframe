@@ -198,7 +198,7 @@ public static partial class DeviceBody
         {
             var named = BoardsNamed(ctx, bytes);
             var device = named.Count == 1 ? await DeviceOfAsync(ctx, named[0]) : null;
-            var said = named.Count > 1 ? $"{detail} (boards named: {string.Join(", ", named)})" : detail;
+            var said = named.Count > 1 ? $"{detail}{BoardsNamedPrefix}{string.Join(", ", named)})" : detail;
             ctx.RequestServices.GetRequiredService<DeviceFaultSink>().MalformedBody(name, said, device);
         }
         catch (Exception ex)
@@ -206,6 +206,16 @@ public static partial class DeviceBody
             ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(DeviceBody))
                 .LogWarning(ex, "Could not file a malformed device body on {Route}", name);
         }
+    }
+
+    /// <summary>R19 D19-4: what opens the board list a multi-board fault's detail ends with — " (boards named: a, b)".</summary>
+    internal const string BoardsNamedPrefix = " (boards named: ";
+
+    /// <summary>A fault's detail with any trailing board list taken off — what a headline is matched on.</summary>
+    public static string WithoutBoards(string detail)
+    {
+        var at = detail.LastIndexOf(BoardsNamedPrefix, StringComparison.Ordinal);
+        return at >= 0 && detail.EndsWith(')') ? detail[..at] : detail;
     }
 
     /// <summary>The most boards a fault's detail lists; a body naming more is not a board talking.</summary>

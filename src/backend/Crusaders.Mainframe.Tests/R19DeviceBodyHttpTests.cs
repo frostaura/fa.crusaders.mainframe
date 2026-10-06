@@ -118,4 +118,38 @@ public sealed class R19DeviceBodyHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(board.Id, fault.DeviceId);
         Assert.Equal("heartbeat: " + (twice ? DeviceBody.TwoBoardsDetail : DeviceBody.NotJsonDetail), fault.Detail);
     }
+
+    /// <summary>
+    /// The headline the monitoring list and the CSV serve follows the detail with the board list taken off:
+    /// a two-boards row has its own true headline (it was read; nothing in it was used), a read-anyway row
+    /// keeps its read-anyway headline whatever boards it names, and an unreadable one stays unreadable.
+    /// </summary>
+    [Theory]
+    [InlineData(DeviceBody.TwoBoardsDetail, false, DeviceErrorCodes.MalformedBodyTwoBoardsHeadline)]
+    [InlineData(DeviceBody.TwoBoardsDetail, true, DeviceErrorCodes.MalformedBodyTwoBoardsHeadline)]
+    [InlineData(DeviceBody.ReplacedDetail, true, DeviceErrorCodes.MalformedBodyReadAnywayHeadline)]
+    [InlineData(DeviceBody.ReplacedDetail, false, DeviceErrorCodes.MalformedBodyReadAnywayHeadline)]
+    [InlineData(DeviceBody.NotJsonDetail, true, "A board sent something the server could not read")]
+    public void A_malformed_body_headline_reads_the_detail_without_its_board_list(string detail, bool boards, string headline)
+    {
+        var stored = "heartbeat: " + detail + (boards ? " (boards named: 5ccf7f1a2b3c, 5ccf7f1a2b3d)" : "");
+        Assert.Equal(headline, DeviceErrorCodes.HeadlineOf(DeviceErrorCodes.MalformedBody, stored));
+    }
+
+    /// <summary>Over HTTP: the two-boards row's headline on the admin monitoring list.</summary>
+    [SkippableFact]
+    public async Task A_two_boards_row_is_headlined_as_two_boards_on_the_monitoring_list()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        var r = await RigAsync("r19bhl");
+        await using var _ = r.App;
+        var json = "{\"mac\":\"" + r.Club.BoxMac + "\",\"uptime_ms\":1000,\"mac\":\"" + r.Club.DoorMac + "\"}";
+        Assert.Equal(HttpStatusCode.BadRequest, await PostRawAsync(r, json));
+        Assert.Single(await MalformedFaultsAsync(r));
+
+        var admin = r.Club.Member(r.App, r.Club.AdminId, "admin");
+        using var doc = JsonDocument.Parse(await admin.GetStringAsync("/api/v1/admin/monitoring/errors"));
+        var row = doc.RootElement.GetProperty("rows").EnumerateArray().Single(e => e.GetProperty("code").GetString() == DeviceErrorCodes.MalformedBody);
+        Assert.Equal(DeviceErrorCodes.MalformedBodyTwoBoardsHeadline, row.GetProperty("headline").GetString());
+    }
 }

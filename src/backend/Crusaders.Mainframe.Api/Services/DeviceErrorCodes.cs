@@ -180,8 +180,12 @@ public static class DeviceErrorCodes
         // R16 D16-5: malformed_body is filed for a message that could not be read at all (dropped) AND
         // for one read anyway — a few characters replaced, or a version too long to keep — whose rest
         // WAS used. "Could not read" is false for the second, so its headline follows the detail.
-        if (code == MalformedBody && detail is { } d)
+        // R19 D19-4: matched on the detail with the board list a multi-board row carries taken off, and a
+        // two-boards row has its own headline — it was read, and refused, not "could not be read".
+        if (code == MalformedBody && detail is { } full)
         {
+            var d = Endpoints.DeviceBody.WithoutBoards(full);
+            if (d.EndsWith(Endpoints.DeviceBody.TwoBoardsDetail, StringComparison.Ordinal)) return MalformedBodyTwoBoardsHeadline;
             if (d.EndsWith(Endpoints.DeviceBody.ReplacedDetail, StringComparison.Ordinal)) return MalformedBodyReadAnywayHeadline;
             if (d.EndsWith(Endpoints.DeviceEndpoints.VersionTooLongDetail, StringComparison.Ordinal)) return MalformedBodyVersionHeadline;
         }
@@ -190,6 +194,9 @@ public static class DeviceErrorCodes
 
     /// <summary>R16 D16-5: the headline of a <see cref="MalformedBody"/> row whose message was read with some characters replaced.</summary>
     public const string MalformedBodyReadAnywayHeadline = "A board sent a message with a few unreadable characters, and the rest was used";
+
+    /// <summary>R19 D19-4: the headline of a <see cref="MalformedBody"/> row for a message naming more than one board — it was read, and refused.</summary>
+    public const string MalformedBodyTwoBoardsHeadline = "A message named more than one board, so nothing in it was used";
 
     /// <summary>R16 D16-5: the headline of a <see cref="MalformedBody"/> row for a version too long to keep.</summary>
     public const string MalformedBodyVersionHeadline = "A board reported a version too long to keep, and the rest of its check-in was used";

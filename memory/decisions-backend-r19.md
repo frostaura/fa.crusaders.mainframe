@@ -21,7 +21,10 @@ last_verified: 2026-10-06
 - Console: the two-board detail is not in `deviceFaultCopy.ts`'s `BODY_FAULT` table, so it renders as the raw
   detail (as R18's `TwoBoardsDetail` already did). A cut body naming two boards no longer maps to the
   "dropped" explanation line for the same reason.
-- Tests: `R19DeviceBodyHttpTests` (8 two-board shapes red before the fix; 4 one-board controls).
+- **Headline follows the detail without the board list:** `DeviceErrorCodes.HeadlineOf` matches on
+  `DeviceBody.WithoutBoards(detail)`; a two-boards row reads `MalformedBodyTwoBoardsHeadline` ("A message named more
+  than one board, so nothing in it was used" — the console's title). Was "could not read" for a row that was read.
+- Tests: `R19DeviceBodyHttpTests` (8 two-board shapes red before the fix; 4 one-board controls; headline cases).
 
 - **One restore per boot (E19-1).** The box's `restored_relays` is set once per boot and rides EVERY later beat
   unchanged (bridge `applyRestore`, `gRestoreDone`); the server read any `> 0` as a confirmation, so a steady box
