@@ -30,7 +30,7 @@ Earlier: `decisions-frontend-member-r18.md`. Tests: `MinutesChip.r19`, `Notifica
   through `keepFiguresWhole`. *Why not in copy:* tests build expected strings with the copy
   functions and the DOM normaliser folds U+00A0 only on the DOM side. A link named by glued text
   gets `aria-label` with the plain words (the inbox row). Exact `textContent` asserts normalise
-  U+00A0. `components/Minutes.tsx` and `MoneyPanel` were asked of the integrator (not FE19m's).
+  U+00A0. `<Minutes>` itself glues its paint (the root), and the money panel's deadline lines.
 - **A failed read names its cause** (L19-7, X19-1.4): Upcoming/Recent games keep the read's error
   and `GamesReadFailed` says the lead then `describeFailure(error)` (busy, 429 with its seconds,
   clash, server error). The booking page's READ uses `PLAYERS_READ_REFUSAL` (read codes only):
@@ -48,3 +48,9 @@ Earlier: `decisions-frontend-member-r18.md`. Tests: `MinutesChip.r19`, `Notifica
 - **Tests read a toast as `[data-toast]` / `[data-toast-viewport]`** (X19-3 made the viewport the
   one polite region; a toast has no role). Wallet suites count `[role=status], [data-toast]` so a
   page's own status region still counts against "said once".
+- **A proven write says what the answer was** (R19): `Landed.answered` / `ProvenBy` (false | the
+  reason, truthy as the old flag was) reach `LOST_REPLY.proven(done, why)` and the notes built the
+  same way — "…hit an error, but we checked its record: it went through"; only silence says "the
+  reply didn't arrive". *Why:* after X19-2 a 500 is an answer; the proven sentence still denied it.
+- **Toast gutters are pixel-capped** (B13): rem gutters + the dismiss button made a one-sentence
+  toast 410px tall at 320 / 200 %. B13 measures a real toast, raised by a pushed wallet frame.
