@@ -138,8 +138,13 @@ export function ledgerTypeLabel(type: string): string {
  * filtered to the member is the list of bookings money has moved on — which is the
  * list an adjustment could be compensating for. A no-show penalty row is the usual
  * pick, and that is exactly the case the field exists for.
+ *
+ * `label` names a row: the bare type by default; the Adjust dialog passes the ledger page's
+ * category (R18 E18-9), so a penalty given BACK reads "No-show penalty returned", not as the penalty.
  */
-export function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
+export function recentBookingsFrom(
+  rows: LedgerRow[], label: (row: LedgerRow) => string = (row) => ledgerTypeLabel(row.type),
+): RecentBooking[] {
   const seen = new Set<string>();
   const out: RecentBooking[] = [];
   for (const row of rows) {
@@ -148,7 +153,7 @@ export function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
     seen.add(id);
     // The one short club date, in the club's calendar ("Thu 1 Oct 2026", never "01 Oct").
     const when = clubShortDate(row.at, undefined, { year: true });
-    out.push({ id, label: `${when} · ${ledgerTypeLabel(row.type)} ${minutesSpoken(row.amountMinutes)} · ${id.slice(0, 8)}` });
+    out.push({ id, label: `${when} · ${label(row)} ${minutesSpoken(row.amountMinutes)} · ${id.slice(0, 8)}` });
   }
   return out;
 }

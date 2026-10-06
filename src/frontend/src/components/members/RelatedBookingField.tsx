@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { endpoints } from "@/lib/api";
 import { OTHER_BOOKING, recentBookingsFrom, type RecentBooking } from "@/lib/deskLedger";
+import { ledgerCategory } from "@/lib/ledgerCopy";
 import { RELATED_BOOKING as COPY } from "@/lib/membersCopy";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { InfoPopover } from "@/components/ui/info-popover";
@@ -49,7 +50,8 @@ export function RelatedBookingField(
     let cancelled = false;
     // Best effort: the field degrades to "type the ID" if the ledger cannot be read.
     endpoints.adminLedger({ userId, limit: 50 })
-      .then((rows) => { if (!cancelled) setRecent(recentBookingsFrom(rows)); })
+      // R18 E18-9 — each row in the ledger page's own words: a returned penalty says "returned".
+      .then((rows) => { if (!cancelled) setRecent(recentBookingsFrom(rows, ledgerCategory)); })
       .catch(() => { if (!cancelled) setRecent([]); });
     return () => { cancelled = true; };
   }, [userId]);
