@@ -35,9 +35,10 @@ import { rateLimitedSentence } from "./errors";
 /**
  * R15 D15-5 — a member's own booking once they have checked in: the 409 `already_checked_in`, and
  * the grid's cancel sheet saying it up front off the quote's `checkedIn` (so it is never reached).
+ * R19 J19-3: subject-free — the 409 carries no scanner, and a partner's scan checks the booking in too.
  */
 export const ALREADY_CHECKED_IN_TEXT =
-  "You've checked in to this booking, so it can't be cancelled — the court is yours until it ends. If something's wrong, speak to the club.";
+  "This booking has been checked in to, so it can't be cancelled — the court is yours until it ends. If something's wrong, speak to the club.";
 
 /**
  * R17 E17-6 / J17-7 — the club's cancel of a booking that is not open (409; it was a 404 "no longer

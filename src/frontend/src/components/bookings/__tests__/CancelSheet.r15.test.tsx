@@ -52,7 +52,8 @@ describe("R15 D15-5 — the grid's sheet refuses a checked-in member cancel up f
     const stub = stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote("bk-1", true) }, litByOrganiser("bk-1")]);
     open({});
     const dialog = screen.getByRole("dialog");
-    expect(OWN_REFUSAL).toBe(ALREADY_CHECKED_IN_TEXT);
+    // R19 J19-3: the 409 carries no scanner, so its words name nobody (a partner may have scanned).
+    expect(ALREADY_CHECKED_IN_TEXT).not.toMatch(/\bYou('ve| have)\b/);
     expect(await within(dialog).findByText(OWN_REFUSAL)).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: CANCEL_SHEET.confirm(1) })).toBeNull();
     expect(within(dialog).getByRole("button", { name: CANCEL_SHEET.keep(1) })).toBeInTheDocument();
