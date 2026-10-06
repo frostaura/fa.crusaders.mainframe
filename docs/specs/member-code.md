@@ -638,7 +638,11 @@ inside the §4.2 bound, the glass shows `ScanAgain` instead — `SCAN AGAIN` / `
 `PRICE CHANGED` / `Press court again` here and the walk-up's `TOO LONG` / `TRY LESS TIME` — are held
 exactly like `PRESS AGAIN`: the scan and the Mega's window for the choice window (which is why
 `PayForPriceChanged` counts down the choice window, not the revert one), or `SCAN AGAIN` when that
-no longer fits. When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
+no longer fits. **No screen with court cells counts down past the scan's remaining life** (bridge
+2.2.9, R19): its hold is capped at the whole seconds of scan memory left, and with under a second
+left the court cells give way to `SCAN WHEN READY`; then the Mega reverts to its idle screen. The
+bridge stages **every** row of a screen, empty ones included, because the Mega commits every staged
+row and a row left unstaged showed the previous screen's words. When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
 `!LCD` lines ahead of the `!ON`. **Everything reaches the Mega through `!ROW`/`!SHOW`/`!LCD`/`!ON`
 /`!AUTH` — frames the Mega already speaks.** Nothing about the serial dialect changes.
 

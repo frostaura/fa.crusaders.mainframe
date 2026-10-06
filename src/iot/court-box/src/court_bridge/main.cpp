@@ -551,13 +551,19 @@ bool sendToMega(const proto::Frame& frame) {
 /// A row that is empty is not sent: the Mega clears the staging area on
 /// `!SHOW`, so an omitted row is a blank row and a frame saved on a 9600 link.
 void sendScreen(const bridgelogic::Screen& screen) {
-  for (uint8_t row = 0U; row < proto::kMaxRows; ++row) {
-    if (screen.rows[row][0] == '\0') {
-      continue;
-    }
-    static_cast<void>(sendToMega(proto::Frame::row(row, screen.rows[row])));
+  // EVERY row, empty ones included: the Mega commits every staged row, and a
+  // skipped one showed the previous screen's words (R19).
+  for (size_t i = 0U; i < bridgelogic::kScreenFrameCount; ++i) {
+    static_cast<void>(sendToMega(bridgelogic::screenFrame(screen, i)));
   }
-  static_cast<void>(sendToMega(proto::Frame::show(screen.holdSeconds, screen.flags)));
+}
+
+/// The screen for `id` with the tenant's holds, and never inviting a court
+/// press past the remembered scan's life (R19): a club whose revert window is
+/// longer than its scan memory used to count the court cells down on a scan
+/// that had already lapsed.
+bridgelogic::Screen screenNow(bridgelogic::ScreenId id, const bridgelogic::ScreenFacts& facts) {
+  return bridgelogic::screenFor(id, facts, gLcdSettings, gScan.remainingMs(gClock.nowMs()));
 }
 
 /// The facts every screen is built from that only this file knows: the live
@@ -570,7 +576,7 @@ bridgelogic::ScreenFacts screenFacts(uint32_t nowMs) {
 }
 
 void showScreen(bridgelogic::ScreenId id, uint32_t nowMs) {
-  sendScreen(bridgelogic::screenFor(id, screenFacts(nowMs), gLcdSettings));
+  sendScreen(screenNow(id, screenFacts(nowMs)));
 }
 
 /// `!IDLE` — what the Mega's own landing screen's status row says.
@@ -1169,7 +1175,7 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     // lose, so the member watches it go rather than finding out afterwards.
     bridgelogic::ScreenFacts facts = screenFacts(nowMs);
     facts.court = gPad.selectedCourt();
-    sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::ChooseTime, facts, gLcdSettings));
+    sendScreen(screenNow(bridgelogic::ScreenId::ChooseTime, facts));
     return;
   }
   case court::PadResult::Requested:
@@ -1494,8 +1500,7 @@ bridgelogic::ScreenFacts payForFacts(uint8_t relay, const char* amountLabel, uin
 /// so a press after an undecided answer retries the SAME payment.
 void confirmPayFor() {
   const uint8_t relay = gPayFor.relay();
-  sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForWorking, screenFacts(gClock.nowMs()),
-                                    gLcdSettings));
+  sendScreen(screenNow(bridgelogic::ScreenId::PayForWorking, screenFacts(gClock.nowMs())));
 
   bridgelogic::PayForRequest request;
   request.mac = gMacHex;
@@ -1536,7 +1541,7 @@ void confirmPayFor() {
     // a court somebody is playing on.
     gPayFor.arm(relay, gPayFor.courtNumber(), gPayFor.amountLabel(), gLcdSettings.choiceMs, nowMs);
     gPad.clear();
-    sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
+    sendScreen(screenNow(answer.screen, facts));
     return;
   }
   gPayFor.clear();
@@ -1551,7 +1556,7 @@ void confirmPayFor() {
       // scan's age, SCAN AGAIN is on the glass instead (R19).
       return;
     }
-    sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
+    sendScreen(screenNow(answer.screen, facts));
     if (answer.spendsScan) {
       // `code_used` / `not_recognised`: the code buys nothing more here (D8-1).
       forgetScan();
@@ -1559,8 +1564,7 @@ void confirmPayFor() {
     return;
   }
 
-  const bridgelogic::Screen paid =
-      bridgelogic::screenFor(bridgelogic::ScreenId::PayForPaid, facts, gLcdSettings);
+  const bridgelogic::Screen paid = screenNow(bridgelogic::ScreenId::PayForPaid, facts);
   if (answer.grantedSeconds > 0U && relay < gCourtCount && relay < bridgelogic::kStateCourts &&
       !gHeld[relay].held) {
     // Paid for a booking nobody had started: the server granted what is left
@@ -1622,15 +1626,14 @@ void armPayForQuote(uint8_t relay, const bridgelogic::PayForAnswer& answer, uint
     return;
   }
   applyAuth(gAuth.afterPayForQuote(now));
-  sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForQuote,
-                                    payForFacts(relay, answer.amountLabel, now), gLcdSettings));
+  sendScreen(screenNow(bridgelogic::ScreenId::PayForQuote, payForFacts(relay, answer.amountLabel, now)));
 }
 
 /// Asks the server what paying for `relay` would cost. True when the press was
 /// answered as a pay-for — quoted or refused — and false when it is the walk-up
 /// court choice after all.
 bool quotePayFor(uint8_t relay, uint32_t nowMs) {
-  sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForWorking, screenFacts(nowMs), gLcdSettings));
+  sendScreen(screenNow(bridgelogic::ScreenId::PayForWorking, screenFacts(nowMs)));
   bridgelogic::PayForRequest request;
   request.mac = gMacHex;
   request.token = gLastScan;
@@ -1670,8 +1673,7 @@ bool quotePayFor(uint8_t relay, uint32_t nowMs) {
       // age, and then SCAN AGAIN is already on the glass (D19-2).
       return true;
     }
-    sendScreen(
-        bridgelogic::screenFor(answer.screen, payForFacts(relay, answer.amountLabel, now), gLcdSettings));
+    sendScreen(screenNow(answer.screen, payForFacts(relay, answer.amountLabel, now)));
     if (answer.spendsScan) {
       // `code_used` / `not_recognised`: the code buys nothing more here — not
       // this court, and not a walk-up on the next press (D8-1).

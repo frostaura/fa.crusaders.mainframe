@@ -62,6 +62,9 @@ constexpr HoldClass holdClassFor(uint16_t holdSeconds) {
                     : (holdSeconds == kWaitSeconds ? HoldClass::Wait : HoldClass::Revert));
 }
 
+/// The action row of a screen whose court press the scan can no longer honour.
+constexpr char kScanWhenReady[] = "SCAN WHEN READY";
+
 constexpr RowSpec kBlank = {"", RowArg::None, ""};
 
 /// EVERY SCREEN THIS BOX CAN PAINT, in one place, indexed by ScreenId.
@@ -602,6 +605,43 @@ Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettin
     seconds = proto::kShowHoldMaxSeconds;
   }
   screen.holdSeconds = static_cast<uint16_t>(seconds);
+  return screen;
+}
+
+proto::Frame screenFrame(const Screen& screen, size_t index) {
+  if (index < proto::kMaxRows) {
+    // EMPTY rows too: an unstaged row keeps the last screen's words.
+    return proto::Frame::row(static_cast<uint8_t>(index), screen.rows[index]);
+  }
+  return proto::Frame::show(screen.holdSeconds, screen.flags);
+}
+
+bool invitesCourtPress(ScreenId id) {
+  return static_cast<size_t>(id) < kScreenCount &&
+         kScreenSpecs[static_cast<size_t>(id)].rows[proto::kMaxRows - 1U].arg == RowArg::CourtCells;
+}
+
+Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings,
+                 uint32_t scanLeftMs) {
+  Screen screen = screenFor(id, facts, settings);
+  if (!invitesCourtPress(id)) {
+    return screen;
+  }
+  // WHOLE seconds, rounded down: the countdown may end before the scan, never
+  // after it.
+  const uint32_t left = scanLeftMs / 1000UL;
+  if (left < proto::kShowHoldMinSeconds) {
+    // Not one second of scan left — or none at all. The verdict still reads;
+    // the court press it would invite cannot be honoured, so the action row
+    // asks for the one thing that works instead.
+    snprintf(screen.rows[proto::kMaxRows - 1U], sizeof(screen.rows[proto::kMaxRows - 1U]), "%s",
+             kScanWhenReady);
+    screen.holdSeconds = proto::kShowHoldMinSeconds;
+    return screen;
+  }
+  if (left < screen.holdSeconds) {
+    screen.holdSeconds = static_cast<uint16_t>(left);
+  }
   return screen;
 }
 

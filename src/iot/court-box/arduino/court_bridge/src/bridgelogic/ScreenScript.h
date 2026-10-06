@@ -125,7 +125,8 @@ inline constexpr size_t kActionCellCols = 4U;
 inline constexpr uint8_t kCourtCellsFrom = 0U;
 inline constexpr uint8_t kDurationCellsFrom = 4U;
 
-/// One screen, as the bridge stages it: `!ROW` per non-empty row, then `!SHOW`.
+/// One screen, as the bridge stages it: `!ROW` for EVERY row, then `!SHOW`
+/// (screenFrame).
 struct Screen {
   char rows[proto::kMaxRows][court::kLineLen + 1U];
   /// Clamped by the wire anyway — proto::kShowHoldMinSeconds..MaxSeconds — and
@@ -319,6 +320,34 @@ Screen screenFor(ScreenId id, const ScreenFacts& facts);
 /// stands in front of, because that is how a screen outlives the reset that
 /// call can end in.
 Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings);
+
+/// Frame `index` of the kScreenFrameCount that put `screen` on the glass: a
+/// `!ROW` for EVERY row — an empty row included — then the `!SHOW`. One at a
+/// time rather than an array, so the bridge's stack holds one frame, not five.
+///
+/// Every row, because the Mega commits every STAGED row on `!SHOW` and a row
+/// nobody restaged keeps the previous screen's words (R19). The bridge used
+/// to skip empty rows, so `ONE MOMENT / Buying your time` stood over `Press
+/// a black button` left behind by CHOOSE TIME.
+inline constexpr size_t kScreenFrameCount = proto::kMaxRows + 1U;
+proto::Frame screenFrame(const Screen& screen, size_t index);
+
+/// Whether `id`'s action row is the court cells: a screen that asks for a
+/// court press, which only does anything while the scan behind it is
+/// remembered.
+bool invitesCourtPress(ScreenId id);
+
+/// The same screen, never inviting a court press past the scan's remaining
+/// life (R19). `scanLeftMs` is the remembered scan's time left
+/// (bridgelogic::ScanMemory::remainingMs). A screen with court cells holds at
+/// most the whole seconds of it — the countdown ends no later than the scan,
+/// and the Mega then reverts to its idle screen — and with less than one
+/// second left the court cells give way to `SCAN WHEN READY` and the verdict
+/// reads for the wire's minimum hold. A club whose `lcd_revert_seconds` is longer than its
+/// `scan_memory_seconds` used to see `Or buy time here` and the court cells
+/// counting down long after a court press could buy anything.
+Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings,
+                 uint32_t scanLeftMs);
 
 /// Renders one action row: four cells of kActionCellCols columns, taken from
 /// physical buttons `from`..`from+3` of `map`. A SelectCourt cell renders its

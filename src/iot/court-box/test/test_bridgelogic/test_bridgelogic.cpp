@@ -23,6 +23,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unity.h>
 
@@ -2352,6 +2353,81 @@ void test_pay_for_only_price_changed_invites_another_press() {
   TEST_ASSERT_FALSE(bridgelogic::onPayForQuote(200U, split, len(split), 2).invitesPress);
 }
 
+/// R19. A screen with court cells asks for a court press, and a court press
+/// buys nothing once the scan behind it lapses. With `lcd_revert_seconds`
+/// (60) longer than `scan_memory_seconds` (20), NO BOOKING / SLOT ENDED / COURT
+/// IN USE / NO TIME / PURCHASE ENDED counted the court cells down for 60 s on a
+/// scan that had 12 s left. The invitation now ends no later than the scan.
+void test_a_court_press_invitation_never_outlives_the_scan() {
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts;
+  facts.buttons = &map;
+  devlink::LcdSettings settings;
+  settings.revertMs = 60000UL;
+  settings.choiceMs = 20000UL;
+  settings.scanMemoryMs = 20000UL;
+
+  const bridgelogic::ScreenId inviting[] = {
+      bridgelogic::ScreenId::NoBooking,     bridgelogic::ScreenId::SlotEnded,
+      bridgelogic::ScreenId::CourtInUse,    bridgelogic::ScreenId::NoTimeAvailable,
+      bridgelogic::ScreenId::PurchaseEnded, bridgelogic::ScreenId::PayForPriceChanged,
+      bridgelogic::ScreenId::PayForQuote,   bridgelogic::ScreenId::Busy,
+      bridgelogic::ScreenId::CardNoBooking,
+  };
+  for (const bridgelogic::ScreenId id : inviting) {
+    TEST_ASSERT_TRUE(bridgelogic::invitesCourtPress(id));
+    const bridgelogic::Screen full = bridgelogic::screenFor(id, facts, settings);
+    // 12.9 s of scan left: the countdown is at most twelve whole seconds.
+    const bridgelogic::Screen capped = bridgelogic::screenFor(id, facts, settings, 12900UL);
+    char label[48] = {};
+    snprintf(label, sizeof(label), "screen %u: %s", static_cast<unsigned>(id), full.rows[0]);
+    TEST_ASSERT_TRUE_MESSAGE(capped.holdSeconds <= 12U, label);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(full.rows[0], capped.rows[0], label);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(full.rows[3], capped.rows[3], label);
+    // Plenty left: nothing changes.
+    const bridgelogic::Screen roomy = bridgelogic::screenFor(id, facts, settings, 300000UL);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(full.holdSeconds, roomy.holdSeconds, label);
+    // Under a second left, or no scan at all: the verdict reads, the court
+    // cells give way to the one instruction that works.
+    const bridgelogic::Screen spent = bridgelogic::screenFor(id, facts, settings, 400UL);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(proto::kShowHoldMinSeconds, spent.holdSeconds, label);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("SCAN WHEN READY", spent.rows[3], label);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(full.rows[0], spent.rows[0], label);
+  }
+
+  // A screen that invites no court press keeps its whole hold.
+  const bridgelogic::ScreenId reading[] = {bridgelogic::ScreenId::CodeUsed, bridgelogic::ScreenId::SeeTheDesk,
+                                           bridgelogic::ScreenId::ScanAgain,
+                                           bridgelogic::ScreenId::ChooseTime};
+  for (const bridgelogic::ScreenId id : reading) {
+    TEST_ASSERT_FALSE(bridgelogic::invitesCourtPress(id));
+    TEST_ASSERT_EQUAL_UINT16(bridgelogic::screenFor(id, facts, settings).holdSeconds,
+                             bridgelogic::screenFor(id, facts, settings, 400UL).holdSeconds);
+  }
+}
+
+/// R19. The Mega commits every STAGED row on `!SHOW`, and a row nobody
+/// restaged keeps the last screen's words (test_courtlogic pins that). The
+/// bridge skipped empty rows, so ONE MOMENT / Buying your time stood over
+/// CHOOSE TIME's "Press a black button". Every row goes out, empty ones too.
+void test_a_screen_stages_every_row_including_the_empty_ones() {
+  bridgelogic::ScreenFacts facts;
+  const bridgelogic::ScreenId withBlanks[] = {
+      bridgelogic::ScreenId::OneMoment, bridgelogic::ScreenId::PayForWorking,
+      bridgelogic::ScreenId::CheckingCode, bridgelogic::ScreenId::PayForNothingToPay};
+  for (const bridgelogic::ScreenId id : withBlanks) {
+    const bridgelogic::Screen screen = bridgelogic::screenFor(id, facts);
+    TEST_ASSERT_EQUAL_size_t(proto::kMaxRows + 1U, bridgelogic::kScreenFrameCount);
+    for (uint8_t row = 0U; row < proto::kMaxRows; ++row) {
+      const proto::Frame frame = bridgelogic::screenFrame(screen, row);
+      TEST_ASSERT_TRUE_MESSAGE(frame.verb() == proto::Verb::Row, screen.rows[0]);
+      TEST_ASSERT_EQUAL_UINT32(row, static_cast<uint32_t>(atoi(frame.arg(0))));
+      TEST_ASSERT_EQUAL_STRING(screen.rows[row], frame.arg(1));
+    }
+    TEST_ASSERT_TRUE(bridgelogic::screenFrame(screen, proto::kMaxRows).verb() == proto::Verb::Show);
+  }
+}
+
 void test_auth_policy_a_refused_scan_cannot_release_any_court() {
   // THE #4/#14 PIN, half one. NOT RECOGNISED, then COURT B, then OFF used to
   // darken court B mid-match, repeatable every thirty seconds by anyone with
@@ -3876,6 +3952,8 @@ int main(int, char**) {
   RUN_TEST(test_scan_again_names_a_rescan_never_a_press);
   RUN_TEST(test_walk_up_only_too_long_invites_another_press);
   RUN_TEST(test_pay_for_only_price_changed_invites_another_press);
+  RUN_TEST(test_a_court_press_invitation_never_outlives_the_scan);
+  RUN_TEST(test_a_screen_stages_every_row_including_the_empty_ones);
   RUN_TEST(test_auth_policy_a_recognised_refusal_arms_for_a_walk_up_but_releases_nothing);
   RUN_TEST(test_auth_policy_the_member_whose_scan_lit_b_can_release_b_and_only_b);
   RUN_TEST(test_session_and_walkup_say_whether_the_scan_was_recognised);

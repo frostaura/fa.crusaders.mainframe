@@ -7,8 +7,7 @@ last_verified: 2026-10-06
 
 # Live decisions: firmware, review round 19 (lane FW19, D19-1 to D19-3, D19-5)
 
-- **Bridge is 2.2.9; Mega stays 2.0.0 (court_mega sketch byte-identical, not reflashed); door gate
-  stays 1.1.2** (no shared library changed). Supersedes the version line in
+- **Bridge 2.2.9; Mega 2.0.0 (sketch byte-identical); door 1.1.2.** Supersedes the version line in
   [`decisions-firmware-r18.md`](decisions-firmware-r18.md).
 - **THE RULE: the remembered scan is ONE object, `bridgelogic::ScanMemory`, and main.cpp never
   arms a scan deadline by hand.** *Why:* three call sites armed it by three rules and they
@@ -28,27 +27,34 @@ last_verified: 2026-10-06
     outlive is a lie on the glass; a press the server refuses is worse.
   - The 5 s margin covers the pass between the loop's expiry check and the body that carries the
     age (presses are drained after the check) plus a heartbeat not yet adopted. A SHORTER setting
-    adopted later clamps a held scan into the new bound at once (`setLimits(…, now)`); a longer one
-    never extends it.
+    adopted later clamps a held scan into the new bound at once (`setLimits(…, now)`).
   - A hold checks `remembered()`, NOT `!expired()`: the answer arrives after a blocking HTTP call
     and a scan that lapsed DURING it was alive at the press; the age bound is what limits it.
-  - The walk-up path holds BEFORE `applyOutcome` paints BUSY, so SCAN AGAIN is never preceded by a
-    flashed press invitation; the confirm path holds before re-arming the quote.
+  - Every path holds BEFORE it paints the invitation, so SCAN AGAIN never follows a flashed one.
   - `forgetScan()` now also clears the pay-for quote: a quote behind a forgotten scan is a confirm
     on nobody's code. *Cost accepted:* the old "scan memory + choice from the scan" bound on the
     quote is gone; re-quotes by a passer-by are bounded by the ceiling instead (at defaults, two
     questions after the scan's own 30 s, then SCAN AGAIN).
-- Red first: the five ScanMemory tests ran against a verbatim port of main.cpp's three old rules
-  and failed (outlived 20 s memory; scan forgotten under the quote; quote cut 115 s to 20; hold past
-  the bound; shorter settings ignored), then green on every clock base and six setting pairs.
-- **D19-5 (spec only):** §9.1 now says only a 404 (any status not 200/0/429/5xx) or an unreadable
-  200 falls back to the walk-up choice; 0 is NO CONNECTION and 429/5xx BUSY — as the code has done
-  since R18 D18-3. §4.2 records the ScanMemory bound.
+- Red first throughout: ScanMemory tests against a verbatim port of the old rules; flags, hold
+  class, cap and row-staging tests failed before each change.
+- **D19-5 (spec only):** §9.1: only a 404 (any status not 200/0/429/5xx) or an unreadable 200
+  falls back to the walk-up choice; 0 is NO CONNECTION, 429/5xx BUSY (as since R18 D18-3).
 - **Every press invitation is held the same way.** A decided refusal whose words ask for another
   press on the same scan — the walk-up's `TOO LONG` / `TRY LESS TIME` (`WalkUpResult::invitesPress`)
   and `PRICE CHANGED` / `Press court again` (`PayForAnswer::invitesPress`) — goes through the same
   `holdForPressAgain` as BUSY: scan and Mega window held for the choice window, or SCAN AGAIN.
   `PayForPriceChanged` now counts down the CHOICE window, not the revert one. *Why:* both used to
   leave the scan where it was, so the press they asked for could land on a forgotten scan; and a
-  revert countdown may be set longer than any hold the server bound allows. Red first: both
-  `invitesPress` tests and the hold-class assert failed before the flags and the class changed.
+  revert countdown may be set longer than any hold the server bound allows.
+- **A court-press invitation never outlives the scan** (`screenFor(id, facts, settings, scanLeftMs)`,
+  via main.cpp's `screenNow`): a screen whose action row is the court cells holds at most the whole
+  seconds of scan left; under one second, the cells become `SCAN WHEN READY`. *Why:* a club may set
+  `lcd_revert_seconds` above `scan_memory_seconds`. Today only `SlotEnded` (pay-for `ended`) among
+  NO BOOKING / SLOT ENDED / COURT IN USE / NO TIME / PURCHASE ENDED is painted — activation and
+  walk-up refusals are legacy two-line `!LCD` with no cells — but the cap covers every cell screen.
+- **The bridge stages every row, empty ones too** (`bridgelogic::screenFrame`). *Why:* the Mega
+  commits every staged row on `!SHOW` and an unstaged row keeps the last screen's text (pinned in
+  test_courtlogic): ONE MOMENT read `Press a black button` left by CHOOSE TIME.
+- **Recorded, not fixable from the bridge:** the Mega holds a legacy two-line `!LCD` (TOO LONG / TRY
+  LESS TIME) for its compile-time `LCD_REVERT_MS` (10 s). With `lcd_choice_seconds` below 10 the line
+  can outlast the scan hold; no countdown, and a late press buys nothing. Mega is off-limits.

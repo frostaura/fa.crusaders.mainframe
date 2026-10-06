@@ -1270,6 +1270,35 @@ void test_box_a_screen_is_committed_in_one_piece(void) {
   TEST_ASSERT_EQUAL_STRING("READY IN 4 s       4", b.display.row(3U));
 }
 
+/// R19 (bridge side). The Mega COMMITS every staged row on `!SHOW`, and a row
+/// nobody restaged keeps the previous screen's text. The bridge skipped empty
+/// rows, so ONE MOMENT after CHOOSE TIME read "Press a black button" under
+/// "Buying your time". An EMPTY `!ROW` survives the wire and blanks the row,
+/// which is what the bridge now sends for every row it means to leave blank.
+void test_box_an_empty_row_blanks_what_the_last_screen_staged(void) {
+  Box b(kBaseMid);
+  feedFrame(b.bridge, proto::Frame::row(0U, "COURT A"));
+  feedFrame(b.bridge, proto::Frame::row(2U, "Press a black button"));
+  b.step(kBaseMid + 1U);
+  feedFrame(b.bridge, proto::Frame::show(20U, 0U));
+  b.step(kBaseMid + 2U);
+  TEST_ASSERT_EQUAL_STRING(padded("Press a black button"), b.display.row(2U));
+
+  feedFrame(b.bridge, proto::Frame::row(0U, "ONE MOMENT"));
+  b.step(kBaseMid + 3U);
+  feedFrame(b.bridge, proto::Frame::show(6U, 0U));
+  b.step(kBaseMid + 4U);
+  // Not restaged: the old words stay. This is the Mega's contract, unchanged.
+  TEST_ASSERT_EQUAL_STRING(padded("Press a black button"), b.display.row(2U));
+
+  feedFrame(b.bridge, proto::Frame::row(0U, "ONE MOMENT"));
+  feedFrame(b.bridge, proto::Frame::row(2U, ""));
+  b.step(kBaseMid + 5U);
+  feedFrame(b.bridge, proto::Frame::show(6U, 0U));
+  b.step(kBaseMid + 6U);
+  TEST_ASSERT_EQUAL_STRING(padded(""), b.display.row(2U));
+}
+
 void test_box_a_countdown_never_eats_the_action_rows_last_character(void) {
   Box b(kBaseMid);
 
@@ -1421,6 +1450,7 @@ int main(int, char**) {
   RUN_TEST(test_box_the_action_row_says_which_thing_is_missing);
   RUN_TEST(test_box_an_untrusted_clock_is_blank_not_stale);
   RUN_TEST(test_box_a_screen_is_committed_in_one_piece);
+  RUN_TEST(test_box_an_empty_row_blanks_what_the_last_screen_staged);
   RUN_TEST(test_box_a_countdown_never_eats_the_action_rows_last_character);
   RUN_TEST(test_box_a_scan_pre_empts_a_screen_that_is_still_counting_down);
   RUN_TEST(test_box_an_oversize_scan_is_reported_not_only_counted);
