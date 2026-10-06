@@ -12,7 +12,7 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 ///
 /// <para>
 /// <b>It rides the 403 that already exists and adds no new refusal.</b> A door out of service
-/// is answered <c>403</c> on all five <c>/api/v1/device/*</c> routes, and
+/// is answered <c>403</c> on every <c>/api/v1/device/*</c> route, and
 /// <c>DeviceForbiddenMeansOutOfServiceTests</c> pins in both directions that a 403 on that
 /// surface can mean nothing else. Nothing here touches that route group; this is <c>N</c>
 /// rows of <c>Enabled = false</c> in one unit of work.

@@ -1223,7 +1223,7 @@ public static partial class EmailTemplates
     /// It exists because of one sentence the outage notice makes and this one cannot: that the
     /// box uploads its record when it reconnects and the booking settles as attended. That
     /// reversal is real while the board is in service. A board an admin has taken out of service
-    /// is refused on all five device routes, so nothing it is holding will ever be accepted and
+    /// is refused on every device route, so nothing it is holding will ever be accepted and
     /// the settlement cannot be reversed by the box. Repeating the promise here would tell a
     /// member who did get onto the court to wait for a correction that is not coming, and send
     /// them to the desk a week later instead of today.

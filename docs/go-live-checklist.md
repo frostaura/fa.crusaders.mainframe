@@ -47,8 +47,8 @@ stack. Only a real push to `main` builds anything; `workflow_dispatch` does not.
 
 - [x] `DOCKERHUB_USERNAME` — set 2026-09-05
 - [x] `DOCKERHUB_TOKEN` — set 2026-09-05
-- [ ] One real push to `main` completed, with the six image jobs green and three `:latest`
-      manifests visible on Docker Hub.
+- [x] One real push to `main` completed, with the six image jobs green and three `:latest`
+      manifests visible on Docker Hub — run 35434498116, 2026-09-19 (commit `29284e14`).
 - [ ] A manual redeploy of the club stack performed once, end to end, and written down.
 
 Delete any `PORTAINER_URL`, `PORTAINER_TOKEN`, `PORTAINER_STACK_ID`, `PORTAINER_ENDPOINT_ID`
