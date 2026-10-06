@@ -180,8 +180,21 @@ function capSentence(e: ApiError): string {
   return "Saying yes would take you past your daily limit on court.";
 }
 
+/**
+ * R19 J19-5 (BE19j) — `409 too_many_players {free_seats}`: fewer seats are free than players were
+ * asked for (somebody took one since the page was read). Said with the figure; the `400` (more than
+ * three asked for at all) carries no `free_seats` and keeps the plain limit.
+ */
+function freeSeatsSentence(e: ApiError): string | null {
+  const free = numberDetail(e, "free_seats");
+  if (free === null || free < 1) return null;
+  const one = free === 1;
+  return `Only ${free} seat${one ? " is" : "s are"} still free on this booking — add ${free} player${one ? "" : "s"}, or fewer.`;
+}
+
 function withFigures(e: ApiError, timezone?: string): string | null {
   switch (e.code) {
+    case "too_many_players": return freeSeatsSentence(e);
     case "share_changed": {
       const share = numberDetail(e, "share_minutes");
       return share === null
