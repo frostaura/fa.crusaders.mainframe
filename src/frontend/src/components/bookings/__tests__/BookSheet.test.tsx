@@ -270,10 +270,10 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     expect(BOOK_SHEET.memberLabel).toBe("Member to book for");
   });
 
-  it("is a stepper: Slots with Book as, then Confirm — Cancel first, Back after", async () => {
+  it("is a stepper: Slots with Book as, Players for their own booking, then Confirm — Cancel first, Back after", async () => {
     stubFetch([]);
     open({ isAdmin: true, members });
-    expect(screen.getByRole("list", { name: "Progress" })).toHaveTextContent(BOOK_SHEET.stepOf(1, 2, BOOK_SHEET.steps.slots));
+    expect(screen.getByRole("list", { name: "Progress" })).toHaveTextContent(BOOK_SHEET.stepOf(1, 3, BOOK_SHEET.steps.slots));
     const group = await screen.findByRole("radiogroup", { name: BOOK_SHEET.bookAs });
     expect(within(group).getAllByRole("radio").map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
     expect(screen.getByRole("button", { name: BOOK_SHEET.cancel })).toBeTruthy();
@@ -337,6 +337,9 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_minutes: 200, balance_after_minutes: 140, overdraws: false, owed_back_minutes: 16 }) }]);
     open({ isAdmin: true, members });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    // An admin booking as themselves passes the member's Players step ("Just me") on the way.
+    fireEvent.click(await screen.findByRole("radio", { name: BOOK_PLAYERS.justMe }));
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     expect(await screen.findByText(owedBackQuoteLine(16, null))).toBeTruthy();
     expect(screen.queryByText(GOD_MODE.title)).toBeNull();
   });
@@ -344,6 +347,9 @@ describe("BookSheet — an admin (R19 god mode)", () => {
   it("P11: a quote with nothing owed back shows no owed-back line", async () => {
     stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_minutes: 200, balance_after_minutes: 140, overdraws: false }) }]);
     open({ isAdmin: true, members });
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    // An admin booking as themselves passes the member's Players step ("Just me") on the way.
+    fireEvent.click(await screen.findByRole("radio", { name: BOOK_PLAYERS.justMe }));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     await screen.findByRole("button", { name: BOOK_SHEET.primary(S1, 60, null) });
     expect(document.querySelector("[data-owed-back-line]")).toBeNull();
@@ -356,6 +362,9 @@ describe("BookSheet — an admin (R19 god mode)", () => {
       { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "bk-9", balance_after_minutes: 140 } },
     ]);
     open({ isAdmin: true, members });
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    // An admin booking as themselves passes the member's Players step ("Just me") on the way.
+    fireEvent.click(await screen.findByRole("radio", { name: BOOK_PLAYERS.justMe }));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     const book = await screen.findByRole("button", { name: BOOK_SHEET.primary(S1, 60, null) });
     expect(screen.queryByText(GOD_MODE.title)).toBeNull();
@@ -438,6 +447,9 @@ describe("BookSheet — an admin (R19 god mode)", () => {
   it("shows a quote refusal in words, and offers no book button — and no retry that would be refused again", async () => {
     stubFetch([{ path: "/api/v1/admin/bookings/quote", body: refuse(409, { error: "slot_taken" }) }]);
     open({ isAdmin: true, members });
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    // An admin booking as themselves passes the member's Players step ("Just me") on the way.
+    fireEvent.click(await screen.findByRole("radio", { name: BOOK_PLAYERS.justMe }));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/Someone just took that slot/);
     // R2 F1-4: a 4xx refusal is the answer; asking again gets it again.

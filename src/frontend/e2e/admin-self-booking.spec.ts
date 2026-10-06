@@ -99,6 +99,8 @@ test("an admin books their own court below zero — told first, sent once, with 
   const sheet = await openFirstFreeSlot(page);
   await expect(sheet.getByRole("radio", { name: BOOK_SHEET.asSelf })).toHaveAttribute("aria-checked", "true");
   await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
+  // Booking as themselves, the admin passes the member's Players step ("Just me") on the way.
+  await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
 
   await expect(sheet.getByText(GOD_MODE.body(null, -40))).toBeVisible();
   await pastTheStepGuard(page);
@@ -147,6 +149,7 @@ test("no notice and no flag when the quote says the payer can cover it", async (
   ]));
 
   const sheet = await openFirstFreeSlot(page);
+  await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
   await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
   const book = sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 50, null) });
   await expect(book).toBeVisible();

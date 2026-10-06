@@ -311,6 +311,8 @@ export function useBookFlow(input: BookFlowInput) {
   const late = useLateLanding(input.sheetOpen);
 
   const members = useSheetMembers(isAdmin, input.members, actorUserId);
+  // An admin booking for a member or holding a court has no players: they are the organiser's to seat.
+  const forOther = isAdmin && who.kind !== "self";
 
   const onEdit = gate.whenIdle(() => {
     // A different game is a different request: never let a retry of the last one reuse its key.
@@ -318,9 +320,9 @@ export function useBookFlow(input: BookFlowInput) {
     action.reset();
   });
   const players = usePlayersStep({
-    enabled: !isAdmin, prices: slots.map((s) => s.priceMinutes), step: stepId, onEdit: () => onEdit(),
+    enabled: !forOther, prices: slots.map((s) => s.priceMinutes), step: stepId, onEdit: () => onEdit(),
   });
-  const steps = useMemo(() => stepsFor({ isAdmin, paying: players.paying }), [isAdmin, players.paying]);
+  const steps = useMemo(() => stepsFor({ isAdmin, forOther, paying: players.paying }), [isAdmin, forOther, players.paying]);
   const step: StepId = steps.includes(stepId) ? stepId : steps[steps.length - 1];
   const stepIndex = steps.indexOf(step);
   const confirming = step === "confirm";
@@ -346,7 +348,7 @@ export function useBookFlow(input: BookFlowInput) {
       input.onSending?.(sendable);
       return placeBooking({
         slots: sendable, who, isAdmin, actorUserId, idempotencyKey: key, allowNegativeBalance, face,
-        players: isAdmin ? null : players.payload,
+        players: players.payload,
       }).catch((error: unknown) => recoverBooking(error, sendable, who, face, input.reread));
     },
     {
@@ -453,7 +455,8 @@ export function useBookFlow(input: BookFlowInput) {
     who, setWho, problem: showProblem ? whoProblem(who) : null,
     members, memberName,
     quote, ready, sendable, lines, money, primary, short,
-    godMode: ready?.overdraws ? { name: memberName, balanceAfter: ready.after, owedBack: ready.owedBack } : null,
+    // God mode is the admin route's; the player route refuses an overdraft, so its notice would promise what Book cannot do.
+    godMode: ready?.overdraws && !(isAdmin && players.payload) ? { name: memberName, balanceAfter: ready.after, owedBack: ready.owedBack } : null,
     action, run,
     next, back, submit, face, timezone,
     /** A write is on its way: nothing may leave the sheet or change what it sends (R4 I4-1). */

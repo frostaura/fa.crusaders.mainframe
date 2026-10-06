@@ -44,14 +44,19 @@ export function whoProblem(who: BookAs): "member" | "hold" | null {
  * <p>
  * <b>P11 (D11).</b> A MEMBER picks their players, then — only when somebody is being asked for a
  * share (a member or an open link seat; a guest pays nothing and is not a head) — how to split
- * the cost. An ADMIN keeps Slots → Confirm: "Book as" is their decision, and players are added
- * afterwards from the booking's own page, where the desk's god-mode add lives.
+ * the cost. An ADMIN starts with Slots, where "Book as" is decided. Booking as THEMSELVES they get
+ * the same Players and Split steps a member does, so the desk can try the partner and split
+ * mechanics; booking for another member or holding a court (`forOther`) they keep Slots → Confirm,
+ * because the players routes seat the CALLER as organiser — players for someone else's booking
+ * are added afterwards from the booking's own page, where the desk's god-mode add lives.
  * </p>
  */
 export type StepId = "slots" | "players" | "split" | "confirm";
 
 type StepContext = {
   isAdmin: boolean;
+  /** An admin's "Book as" is a member or a hold, not themselves: there is no organiser to seat players for. */
+  forOther?: boolean;
   /** Somebody on the booking is asked for a share. */
   paying?: boolean;
 };
@@ -61,8 +66,8 @@ const STEP_ORDER: readonly StepId[] = ["slots", "players", "split", "confirm"];
 const APPLIES: Record<StepId, (ctx: StepContext) => boolean> = {
   // The only decision on it is the admin's "Book as"; a member's slots are listed on Confirm.
   slots: (ctx) => ctx.isAdmin,
-  players: (ctx) => !ctx.isAdmin,
-  split: (ctx) => !ctx.isAdmin && Boolean(ctx.paying),
+  players: (ctx) => !ctx.forOther,
+  split: (ctx) => !ctx.forOther && Boolean(ctx.paying),
   confirm: () => true,
 };
 
@@ -319,7 +324,7 @@ export type BookRequest = {
   /** God mode (R19): sent when the quote said `overdraws`, or on "Book the rest anyway". */
   allowNegativeBalance: boolean;
   face: Face;
-  /** A member's players (D11). Null or absent: the routes a booking always took, unchanged. */
+  /** The booker's players (D11) — a member's, or an admin's own. Null or absent: the routes a booking always took, unchanged. */
   players?: PlayersPayload | null;
 };
 
@@ -368,6 +373,10 @@ async function holdAsAdmin(req: BookRequest, label: string): Promise<BookRun> {
 async function bookAsAdmin(req: BookRequest): Promise<BookRun> {
   const { slots, who, face } = req;
   if (who.kind === "hold") return holdAsAdmin(req, who.label.trim());
+  // The admin's own booking with players goes the member's route: it seats the caller as organiser.
+  // That route has no god mode (the club refuses an overdraft there), so one that would overdraw
+  // is refused with the figures, as it is for a member.
+  if (who.kind === "self" && req.players) return bookWithPlayers(req, req.players);
   const memberId = who.kind === "member" ? who.userId : null;
   const payer = memberId ?? req.actorUserId;
   if (slots.length === 1 && payer) {
