@@ -11,6 +11,7 @@ import { PrintSheet } from "../components/doors/PrintSheet";
 import { DOORS_READ_FAILED, describePowerLoss, doorDisplayName } from "../lib/doorsCopy";
 import { clubDate } from "../lib/clubClock";
 import { UNNAMED_GATE } from "../lib/gateCopy";
+import { APP_NAME } from "../lib/routeAnnouncer";
 import { withDoorsBoundary } from "../components/doors/withDoorsBoundary";
 import { doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings } from "../lib/api";
 
@@ -170,13 +171,13 @@ function AdminDoorsCardPageBody() {
           {`${describePowerLoss(door.power_loss_behaviour).toUpperCase()} — this is a property of the lock, not of the app.`}
         </CardBlock>
         <CardBlock title="If this door is not working">
-          Check its power and the club WiFi, then open Doors in the Crusaders app.
+          {`Check its power and the club WiFi, then open Doors in the ${APP_NAME} app.`}
         </CardBlock>
         <CardBlock title="Club contact">
           {contact || "No club contact is recorded. Ask at the club."}
         </CardBlock>
         <p className="mt-6 text-xs">
-          {`Printed ${printedOn} from Crusaders Mainframe. Check it is still right.`}
+          {`Printed ${printedOn} from ${APP_NAME}. Check it is still right.`}
         </p>
       </PrintSheet>
     </PageShell>
