@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The public pages only (src/lib/seoHead.ts INDEXABLE_PATHS); seo-posture.test.ts holds them equal. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://crusaders.frostaura.net/</loc></url>
+  <url><loc>https://crusaders.frostaura.net/login</loc></url>
+  <url><loc>https://crusaders.frostaura.net/register</loc></url>
+  <url><loc>https://crusaders.frostaura.net/forgot-password</loc></url>
+  <url><loc>https://crusaders.frostaura.net/how-it-works</loc></url>
+</urlset>

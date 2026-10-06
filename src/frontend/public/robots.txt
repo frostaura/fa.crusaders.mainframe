@@ -1,0 +1,27 @@
+# Crusaders Squash. Only the club's public page and the ways in are for search engines.
+# Everything else is a signed-in members' app, and invite links (/j/) carry a private token.
+# Held to src/lib/seoHead.ts by seo-posture.test.ts.
+User-agent: *
+Allow: /$
+Allow: /login$
+Allow: /register$
+Allow: /forgot-password$
+Allow: /how-it-works$
+Disallow: /j/
+Disallow: /invites/
+Disallow: /api/
+Disallow: /admin
+Disallow: /uploads/
+Disallow: /verify-email/
+Disallow: /reset-password/
+Disallow: /welcome/
+Disallow: /my-code
+Disallow: /bookings
+Disallow: /inbox
+Disallow: /wallet
+Disallow: /profile
+Disallow: /change-password
+Disallow: /get-started
+Disallow: /healthz
+
+Sitemap: https://crusaders.frostaura.net/sitemap.xml

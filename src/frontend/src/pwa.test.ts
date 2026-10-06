@@ -51,7 +51,7 @@ describe("installable", () => {
 
   it("ships every icon the manifest names, as a real PNG", () => {
     for (const icon of manifest.icons) {
-      const bytes = readFileSync(resolve(root, "public", icon.src.replace(/^\//, "")));
+      const bytes = readFileSync(resolve(root, "public", icon.src.replace(/^\//, "").replace(/\?.*$/, "")));
       // The PNG signature. A committed placeholder — an SVG renamed, an empty file — passes a
       // "does the file exist" check and fails on a phone.
       expect(bytes.subarray(0, 8).toString("hex"), `${icon.src} is not a PNG`).toBe("89504e470d0a1a0a");

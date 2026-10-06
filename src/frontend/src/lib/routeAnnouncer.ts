@@ -20,8 +20,11 @@
  * </p>
  */
 
-/** The product, as the tab suffix. Not the club: a tenant's own name is not in the bundle. */
-export const APP_NAME = "Crusaders Mainframe";
+/**
+ * The tab suffix: the club members know, not the software's internal name ("Crusaders Mainframe").
+ * The header, the home page and the manifest say the same; one club is served per deployment.
+ */
+export const APP_NAME = "Crusaders Squash";
 
 /**
  * Every route in `App.tsx`, in the order it is matched.

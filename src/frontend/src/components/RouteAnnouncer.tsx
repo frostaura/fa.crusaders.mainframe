@@ -5,6 +5,7 @@ import {
   routePageName, routeTitle,
 } from "../lib/routeAnnouncer";
 import { resetStandingAnnouncements } from "../lib/announce";
+import { syncSeoHead } from "../lib/seoHead";
 
 /**
  * What happens when this app changes page. (C6, and the shell half of C15 / D9)
@@ -73,6 +74,7 @@ export function RouteAnnouncer() {
     // no-op there, and a route that arrives by any means has its name in the tab.
     const name = routePageName(location.pathname);
     document.title = routeTitle(location.pathname);
+    syncSeoHead(location.pathname);
 
     const initial = location.key === firstKey.current;
     const pathChanged = location.pathname !== lastPathname.current;

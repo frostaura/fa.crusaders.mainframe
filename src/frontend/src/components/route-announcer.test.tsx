@@ -71,16 +71,16 @@ describe("per-route document titles", () => {
   });
 
   it("names the new map for what each page is", () => {
-    expect(routeTitle("/my-code")).toBe("My Code — Crusaders Mainframe");
-    expect(routeTitle("/bookings")).toBe("Bookings — Crusaders Mainframe");
+    expect(routeTitle("/my-code")).toBe("My Code — Crusaders Squash");
+    expect(routeTitle("/bookings")).toBe("Bookings — Crusaders Squash");
     // P3: the rail's label wins — the title an admin hears is the word they just clicked.
-    expect(routeTitle("/admin")).toBe("Overview — Crusaders Mainframe");
-    expect(routeTitle("/admin/transactions")).toBe("Transactions — Crusaders Mainframe");
-    expect(routeTitle("/admin/reports")).toBe("Reports — Crusaders Mainframe");
-    expect(routeTitle("/wallet/activity")).toBe("Wallet activity — Crusaders Mainframe");
-    expect(routeTitle("/admin/monitoring/devices")).toBe("Boards — Crusaders Mainframe");
+    expect(routeTitle("/admin")).toBe("Overview — Crusaders Squash");
+    expect(routeTitle("/admin/transactions")).toBe("Transactions — Crusaders Squash");
+    expect(routeTitle("/admin/reports")).toBe("Reports — Crusaders Squash");
+    expect(routeTitle("/wallet/activity")).toBe("Wallet activity — Crusaders Squash");
+    expect(routeTitle("/admin/monitoring/devices")).toBe("Boards — Crusaders Squash");
     // P6 — the courts left Settings for a page of their own.
-    expect(routeTitle("/admin/courts")).toBe("Courts — Crusaders Mainframe");
+    expect(routeTitle("/admin/courts")).toBe("Courts — Crusaders Squash");
   });
 
   /**
@@ -89,12 +89,12 @@ describe("per-route document titles", () => {
    * never read as a word, and "/admin/members/abc" must not fall through to the 404's name.
    */
   it("names a member's page and each of its tabs", () => {
-    expect(routeTitle("/admin/members/2c9f")).toBe("Member — Crusaders Mainframe");
-    expect(routeTitle("/admin/members/2c9f/wallet")).toBe("Member wallet & ledger — Crusaders Mainframe");
-    expect(routeTitle("/admin/members/2c9f/bookings")).toBe("Member bookings — Crusaders Mainframe");
-    expect(routeTitle("/admin/members/2c9f/doors")).toBe("Member door history — Crusaders Mainframe");
-    expect(routeTitle("/admin/members/2c9f/night")).toBe("Member's night — Crusaders Mainframe");
-    expect(routeTitle("/admin/members/2c9f/access")).toBe("Member sign-in & biometrics — Crusaders Mainframe");
+    expect(routeTitle("/admin/members/2c9f")).toBe("Member — Crusaders Squash");
+    expect(routeTitle("/admin/members/2c9f/wallet")).toBe("Member wallet & ledger — Crusaders Squash");
+    expect(routeTitle("/admin/members/2c9f/bookings")).toBe("Member bookings — Crusaders Squash");
+    expect(routeTitle("/admin/members/2c9f/doors")).toBe("Member door history — Crusaders Squash");
+    expect(routeTitle("/admin/members/2c9f/night")).toBe("Member's night — Crusaders Squash");
+    expect(routeTitle("/admin/members/2c9f/access")).toBe("Member sign-in & biometrics — Crusaders Squash");
   });
 
   /**
@@ -106,19 +106,19 @@ describe("per-route document titles", () => {
    */
   it("announces every admin destination by its rail label", () => {
     const mismatched = ADMIN_NAV_ITEMS
-      .filter((item) => routeTitle(item.path) !== `${item.label} — Crusaders Mainframe`)
+      .filter((item) => routeTitle(item.path) !== `${item.label} — Crusaders Squash`)
       .map((item) => `${item.path}: rail "${item.label}" vs "${routeTitle(item.path)}"`);
     expect(mismatched).toEqual([]);
   });
 
   it("puts the page first and the product second, and names an unknown path honestly", () => {
-    expect(routeTitle("/admin/doors")).toBe("Doors — Crusaders Mainframe");
+    expect(routeTitle("/admin/doors")).toBe("Doors — Crusaders Squash");
     // Declaration order is documentation; specificity is what decides. `/admin/doors/log`
     // must not be read as a door id, which is the same trap the router's own table carries
     // a comment about.
-    expect(routeTitle("/admin/doors/log")).toBe("Door log — Crusaders Mainframe");
-    expect(routeTitle("/admin/doors/2c9f/card")).toBe("Door card — Crusaders Mainframe");
-    expect(routeTitle("/nothing/here")).toBe("Page not found — Crusaders Mainframe");
+    expect(routeTitle("/admin/doors/log")).toBe("Door log — Crusaders Squash");
+    expect(routeTitle("/admin/doors/2c9f/card")).toBe("Door card — Crusaders Squash");
+    expect(routeTitle("/nothing/here")).toBe("Page not found — Crusaders Squash");
   });
 });
 
@@ -131,7 +131,7 @@ describe("RouteAnnouncer", () => {
       </MemoryRouter>,
     );
 
-    expect(document.title).toBe("Bookings — Crusaders Mainframe");
+    expect(document.title).toBe("Bookings — Crusaders Squash");
     // A first paint is a real page load: the browser has already announced the document and
     // put focus at the top of it. Saying it again is a second announcement of something that
     // just happened.
@@ -153,7 +153,7 @@ describe("RouteAnnouncer", () => {
 
     act(() => { screen.getByRole("button", { name: "Go" }).click(); });
 
-    await waitFor(() => expect(document.title).toBe("Doors — Crusaders Mainframe"));
+    await waitFor(() => expect(document.title).toBe("Doors — Crusaders Squash"));
     expect(screen.getByTestId("route-announcer").textContent).toBe("Doors");
     const heading = screen.getByRole("heading", { name: "Doors" });
     expect(heading).toHaveFocus();
@@ -204,7 +204,7 @@ describe("RouteAnnouncer", () => {
     act(() => { field.focus(); });
     act(() => { screen.getByRole("button", { name: "Go" }).click(); });
 
-    await waitFor(() => expect(document.title).toBe("Door log — Crusaders Mainframe"));
+    await waitFor(() => expect(document.title).toBe("Door log — Crusaders Squash"));
     expect(field).toHaveFocus();
     // And it is still theirs a second later — the retry below must not turn "not now" into
     // "in a hundred milliseconds".
@@ -296,7 +296,7 @@ describe("RouteAnnouncer", () => {
     expect(heading).not.toHaveFocus();
     expect(go).toHaveFocus();
     // The title is still right — it is derived from the path, which has not moved.
-    expect(document.title).toBe("Door log — Crusaders Mainframe");
+    expect(document.title).toBe("Door log — Crusaders Squash");
   });
 
   it("still announces when the path moves, filter or no filter", async () => {
@@ -387,7 +387,7 @@ describe("a heading replaced after focus landed (F4.6)", () => {
     renderMember();
     await waitFor(() => expect(screen.getByTestId("route-announcer").textContent).toBe("Member"));
     act(() => { screen.getByRole("button", { name: "finish reading" }).click(); });
-    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Mainframe"));
+    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Squash"));
     expect(screen.getByTestId("route-announcer").textContent).toBe("Thandi Probe — Member");
   });
 
@@ -413,7 +413,7 @@ describe("a heading replaced after focus landed (F4.6)", () => {
     );
     act(() => { screen.getByRole("button", { name: "Go" }).click(); });
     await waitFor(() => expect(screen.getByRole("heading", { name: "Your wallet" })).toHaveFocus());
-    expect(document.title).toBe("Wallet — Crusaders Mainframe");
+    expect(document.title).toBe("Wallet — Crusaders Squash");
   });
 });
 
@@ -448,7 +448,7 @@ describe("a heading renamed in place after focus landed (F4-10)", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Booking" })).toHaveFocus());
     act(() => { screen.getByRole("button", { name: "finish reading" }).click(); });
 
-    await waitFor(() => expect(document.title).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking — Crusaders Mainframe"));
+    await waitFor(() => expect(document.title).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking — Crusaders Squash"));
     expect(screen.getByTestId("route-announcer").textContent).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking");
   });
 });
@@ -559,7 +559,7 @@ describe("the ring on programmatically focused elements (D13)", () => {
 
 /**
  * X-9 (review round 3) — a DIRECT load of a record's page (an emailed deep link, a reload) kept
- * the generic title "Booking — Crusaders Mainframe": the first-paint branch returned before the
+ * the generic title "Booking — Crusaders Squash": the first-paint branch returned before the
  * record was named, so only a navigation inside the app ever titled it. A first paint still says
  * nothing and moves nothing; it titles the tab once the heading names the record.
  */
@@ -572,9 +572,9 @@ describe("a record's page opened directly (X-9)", () => {
         <Routes><Route path="/bookings/:bookingId" element={<SameHeadingRenamed />} /></Routes>
       </MemoryRouter>,
     );
-    expect(document.title).toBe("Booking — Crusaders Mainframe");
+    expect(document.title).toBe("Booking — Crusaders Squash");
     act(() => { screen.getByRole("button", { name: "finish reading" }).click(); });
-    await waitFor(() => expect(document.title).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking — Crusaders Mainframe"));
+    await waitFor(() => expect(document.title).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking — Crusaders Squash"));
     expect(screen.getByTestId("route-announcer").textContent).toBe("");
     expect(screen.getByRole("heading", { name: "Court 1 · Thu 1 Oct, 10:15" })).not.toHaveFocus();
   });
@@ -589,7 +589,7 @@ describe("a record's page opened directly (X-9)", () => {
     );
     const finish = screen.getByRole("button", { name: "finish reading" });
     act(() => { finish.click(); });
-    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Mainframe"));
+    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Squash"));
     expect(screen.getByTestId("route-announcer").textContent).toBe("");
     expect(screen.getByRole("heading", { name: "Thandi Probe" })).not.toHaveFocus();
   });
@@ -601,7 +601,7 @@ describe("a record's page opened directly (X-9)", () => {
         <Routes><Route path="/admin/members/:userId" element={<Page title="Thandi Probe" />} /></Routes>
       </MemoryRouter>,
     );
-    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Mainframe"));
+    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Squash"));
     expect(screen.getByTestId("route-announcer").textContent).toBe("");
     expect(screen.getByRole("heading", { name: "Thandi Probe" })).not.toHaveFocus();
   });
