@@ -70,10 +70,17 @@ public sealed class BookingScheduleService
             ? await _db.BookingScheduleExceptions.AsNoTracking().Where(x => x.ScheduleId == id).ToListAsync(ct)
             : [];
 
-        var occurrences = ScheduleOccurrences
+        // Only what MaterialiseAsync will actually write: an occurrence that has started is never
+        // written, so nothing on it can be in its way. Checking those dates is what wedged an admin
+        // (2026-10-06): a series starting today or earlier reported the no-shows and played games
+        // on its past dates — settled rows no cancel can clear — and refused the create for good.
+        var now = DateTimeOffset.UtcNow;
+        var skip = spec.SkipDates ?? [];
+        var writable = ScheduleOccurrences
             .Expand(rule, exceptions, zone, from is { } f && f > spec.StartDate ? f : spec.StartDate, horizon)
-            .Where(o => o.Status != ScheduleOccurrenceStatus.Skipped)
+            .Where(o => o.Status != ScheduleOccurrenceStatus.Skipped && o.StartsAt > now)
             .ToList();
+        var occurrences = writable.Where(o => !skip.Contains(o.Date)).ToList();
 
         var conflicts = await ConflictsAsync(occurrences, spec.CourtIds, excludeScheduleId, actorId, ct);
 
@@ -82,7 +89,8 @@ public sealed class BookingScheduleService
             First: occurrences.Count == 0 ? null : occurrences[0].Date,
             Last: occurrences.Count == 0 ? null : occurrences[^1].Date,
             RowsToCreate: occurrences.Count * spec.CourtIds.Count,
-            Conflicts: conflicts);
+            Conflicts: conflicts,
+            LeftOut: writable.Where(o => skip.Contains(o.Date)).Select(o => o.Date).ToList());
     }
 
     /// <summary>
@@ -169,7 +177,13 @@ public sealed class BookingScheduleService
             // A quote is null when the row is not cancellable through the money path — a block,
             // or a booking somebody has already checked into. Zero is the truth there: lifting a
             // block refunds nothing, and nothing is owed once the lights have been on.
-            WouldRefundMinutes: quote is null ? 0 : quote.RefundMinutes);
+            WouldRefundMinutes: quote is null ? 0 : quote.RefundMinutes,
+
+            // The admin cancel route's own test (BookingService.CancelOnceAsync): only an open
+            // member booking. A no-show or a played game is settled and answers 409
+            // not_cancellable, so the screen offers leaving the date out instead of a cancel the
+            // server will refuse. Holds are excluded too — they are not this panel's to cancel.
+            Cancellable: clash.Status == BookingStatus.Booked && clash.UserId is not null && clash.ScheduleId is null);
     }
 
     private async Task<Dictionary<Guid, string>> ScheduleLabelsAsync(

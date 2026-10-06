@@ -8,12 +8,13 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// <summary>
 /// What an admin sent when they described a repeating booking. Times as <c>HH:mm</c> and days as
 /// the three-letter keys <c>OperatingHours</c> already uses, because a club that learned the
-/// vocabulary on its opening hours should not learn a second one here.
+/// vocabulary on its opening hours should not learn a second one here. <c>skipDates</c> are the
+/// dates to leave out (preview and create only) — see <see cref="ScheduleSpec"/>.
 /// </summary>
 public sealed record ScheduleRequest(
     string? Name, string? Label, IReadOnlyList<string>? Days, string? Start, string? End,
     DateOnly? StartDate, DateOnly? EndDate, short IntervalWeeks = 1,
-    IReadOnlyList<Guid>? Courts = null);
+    IReadOnlyList<Guid>? Courts = null, IReadOnlyList<DateOnly>? SkipDates = null);
 
 /// <summary>
 /// Turns a <see cref="ScheduleRequest"/> into a <see cref="ScheduleSpec"/>, or into the one
@@ -41,6 +42,9 @@ public static class ScheduleRequestParsing
     public const string LimitReached = "schedule_limit_reached";
     public const string Conflicts = "schedule_conflicts";
     public const string OccurrenceInPast = "occurrence_in_past";
+
+    /// <summary>The reason a date left out on creation carries — the club's words, not a code.</summary>
+    public const string LeftOutReason = "Left out when this repeating booking was created: the court was already taken.";
     public const string NotFound = "schedule_not_found";
 
     private const int MinNameLength = 2;
@@ -80,7 +84,7 @@ public static class ScheduleRequestParsing
 
         return (new ScheduleSpec(
             name!, label!, mask, start!.Value, end!.Value, startDate, req.EndDate,
-            req.IntervalWeeks, courts), null);
+            req.IntervalWeeks, courts, req.SkipDates?.ToHashSet()), null);
     }
 
     /// <summary>

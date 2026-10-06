@@ -153,9 +153,17 @@ public sealed class AdminBulkBookingService
                 : label with { Status = BulkCancelStatuses.AlreadyCancelled };
         }
 
-        if (booking.Status != BookingStatus.Booked)
+        if (booking.Status == BookingStatus.Cancelled)
         {
             return label with { Status = BulkCancelStatuses.AlreadyCancelled };
+        }
+
+        // A no-show or a game already played is settled and still holds its court. Reporting it
+        // "already cancelled" told the console the court was free, and the console counted it a
+        // success; it is a failure the admin has to read, and the rest of the batch carries on.
+        if (booking.Status != BookingStatus.Booked)
+        {
+            return label with { Status = BulkCancelStatuses.Failed, Error = Endpoints.BookingEndpoints.NotCancellable };
         }
 
         // Review round 5 (A5-2): each booking the batch cancels is on the record about its member,

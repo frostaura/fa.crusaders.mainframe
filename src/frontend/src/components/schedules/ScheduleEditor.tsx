@@ -15,6 +15,7 @@ import {
   CHECK_FAILED, CHECK_STALE, CREATE_LABEL, checkLabel, checkingLabel, consequenceLine,
   courtsPhrase, daysPhrase, nothingInTheWay, scheduleCodes, weekdayPlural,
 } from "../../lib/scheduleCopy";
+import { LeftOutDates } from "./LeftOutDates";
 import {
   clubToday, enumerateOccurrences, slotsPerOccurrence, validateRule,
 } from "../../lib/scheduleRules";
@@ -101,6 +102,8 @@ export function ScheduleEditor({
   const [endDate, setEndDate] = useState("");
   const [intervalWeeks, setIntervalWeeks] = useState(1);
   const [courtIds, setCourtIds] = useState<string[]>([]);
+  /** Dates the admin chose to leave out — the way past a conflict nobody can cancel. */
+  const [skipDates, setSkipDates] = useState<string[]>([]);
 
   // --- Prerequisites: which courts exist, and how this club's grid is cut up -------------
   //
@@ -148,7 +151,8 @@ export function ScheduleEditor({
   const body = useMemo<ScheduleBody>(() => ({
     name: name.trim(), label: label.trim(), days, start, end,
     startDate, endDate: endDate || null, intervalWeeks, courts: courtIds,
-  }), [name, label, days, start, end, startDate, endDate, intervalWeeks, courtIds]);
+    ...(skipDates.length > 0 ? { skipDates } : {}),
+  }), [name, label, days, start, end, startDate, endDate, intervalWeeks, courtIds, skipDates]);
 
   const signature = JSON.stringify(body);
 
@@ -202,6 +206,31 @@ export function ScheduleEditor({
       setCheck({ kind: "failed", error: err });
     }
   }
+
+  /**
+   * Leaves dates out (or puts them back) and checks again at once — the sentence changed, so the
+   * old check is about a different series. The panel stays up while it runs rather than giving
+   * way to "checking", so a list of what was just cancelled is not taken off the screen with it.
+   */
+  const [leaving, setLeaving] = useState(false);
+  async function changeSkipDates(next: string[]) {
+    // An absent key and `undefined` serialise alike, so the signature matches the memo's body.
+    const nextBody: ScheduleBody = { ...body, skipDates: next.length > 0 ? next : undefined };
+    setSkipDates(next);
+    setLeaving(true);
+    setCreateError(null);
+    try {
+      const preview = await adminEndpoints.schedulePreview(nextBody);
+      setClearedSomething(false);
+      setCheck({ kind: "checked", preview, signature: JSON.stringify(nextBody) });
+    } catch (err) {
+      setCheck({ kind: "failed", error: err });
+    } finally {
+      setLeaving(false);
+    }
+  }
+  const leaveOut = (dates: string[]) => changeSkipDates([...new Set([...skipDates, ...dates])].sort());
+  const putBack = (date: string) => changeSkipDates(skipDates.filter((d) => d !== date));
 
   async function create() {
     setCreating(true);
@@ -333,6 +362,10 @@ export function ScheduleEditor({
             })}
           </p>
 
+          {skipDates.length > 0 && (
+            <LeftOutDates dates={skipDates} busy={leaving} onPutBack={putBack} />
+          )}
+
           {refusals.length > 0 && (
             <Alert tone="warning" live="polite" announceKey="schedule-rule-refusal">
               {codes[refusals[0].code] ?? "That sentence cannot be used yet."}
@@ -378,6 +411,7 @@ export function ScheduleEditor({
                 conflicts={conflicts}
                 timezone={timezone}
                 onCleared={() => setClearedSomething(true)}
+                leave={{ onLeaveOut: leaveOut, leaving }}
               />
             )}
 

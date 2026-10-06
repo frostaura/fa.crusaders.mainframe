@@ -543,6 +543,12 @@ export type ScheduleBody = {
    * `AdminSchedules.test.tsx` now reads the C# record so the two cannot drift apart again.
    */
   courts: string[];
+  /**
+   * Dates to leave out — preview and create only. The way past court-time nobody can cancel (a
+   * no-show, a game already played): each date the rule produces is recorded on the new series as
+   * skipped, with a reason. Sent only when there are some.
+   */
+  skipDates?: string[];
 };
 
 /**
@@ -584,6 +590,12 @@ export type ScheduleConflict = {
    * the figure the cancellation will actually pay.
    */
   would_refund_minutes?: number | null;
+  /**
+   * Whether the admin cancel route would take it: only an open member booking. A no-show or a game
+   * already played is settled, and a hold is not the conflict panel's to cancel — those dates are
+   * left out instead. Absent from an older API, where the panel falls back to `kind`.
+   */
+  cancellable?: boolean | null;
 };
 
 export type SchedulePreview = {
@@ -594,6 +606,8 @@ export type SchedulePreview = {
   /** The club's cap on rows one change may write (`schedule_max_rows_per_change`). */
   max_rows?: number;
   conflicts: ScheduleConflict[];
+  /** The `skipDates` the rule really produces — the dates a create records as skipped. */
+  left_out?: string[];
 };
 
 export type ScheduleRow = {

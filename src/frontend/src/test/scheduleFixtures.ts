@@ -144,6 +144,7 @@ export function conflictFixture(overrides: Partial<ScheduleConflict> = {}): Sche
     member_name: "Thandi Mokoena",
     amount_minutes: 36,
     would_refund_minutes: 36,
+    cancellable: true,
     ...overrides,
   };
 }
@@ -155,6 +156,7 @@ export function previewFixture(overrides: Partial<SchedulePreview> = {}): Schedu
     last: "2026-12-15",
     rows_to_create: 33,
     conflicts: [],
+    left_out: [],
     ...overrides,
   };
 }

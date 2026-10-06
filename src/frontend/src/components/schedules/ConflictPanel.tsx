@@ -9,7 +9,8 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 import { BatchResultList, type BatchResultRow } from "./BatchResultList";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
-  CONFLICT_REASON, NOTHING_CHANGED_YET, clearAllDescription, clearAllLabel, conflictRefundPhrase, conflictRefundedLine, conflictsHeadline,
+  CONFLICT_REASON, NOTHING_CHANGED_YET, UNCLEARABLE_EXPLAINER, canCancelConflict, clearAllDescription, clearAllLabel,
+  conflictRefundPhrase, conflictRefundedLine, conflictsHeadline, leaveOutAllLabel, leaveOutLabel, unclearableLine,
 } from "../../lib/scheduleCopy";
 import { describeFailure } from "../../lib/errors";
 import { cancelRefusal } from "../../lib/bookingErrors";
@@ -43,6 +44,15 @@ import { adminEndpoints, type ScheduleConflict } from "../../lib/adminApi";
  * booking at a time and reports the outcome of each — which is the behaviour a partial bulk
  * endpoint has anyway, so the screen above it does not change when the wire arrives.
  * </p>
+ *
+ * <p>
+ * <b>Every row has a way forward, and says which (2026-10-06).</b> A no-show or a game already
+ * played is settled — the cancel route refuses it — and a hold is not this panel's to cancel. Those
+ * rows used to sit in the list with nothing that could clear them, and the admin was stuck. Now each
+ * row says what it is ("No-show on Tue 13 Oct — can't be cancelled") and offers leaving its date out,
+ * which the server records on the new series as a skipped date. Leaving a date out is not the
+ * rejected "hold with holes": the whole date goes, deliberately, and stays visible on the series.
+ * </p>
  */
 
 /** The total that would go back — or null the moment ONE quote is missing. */
@@ -63,29 +73,99 @@ function conflictLabel(conflict: ScheduleConflict, timezone?: string): string {
   return `${court}, ${clubDayAndClock(conflict.starts_at, timezone)} — ${who}`;
 }
 
-/** The rows a table needs, and the rows a result list needs, from one place. */
-function cancellableIds(conflicts: readonly ScheduleConflict[]): ScheduleConflict[] {
-  // A conflict against another schedule's rows has no member booking to cancel — D2 §11.4
-  // calls two league nights on one court a configuration error, and cancelling somebody
-  // else's season from inside this panel is not the fix for it.
-  return conflicts.filter((c) => !!c.booking_id && c.kind !== "schedule" && c.kind !== "block");
+/** Each date once, in the order the list shows them. */
+function datesOf(conflicts: readonly ScheduleConflict[]): string[] {
+  return [...new Set(conflicts.map((c) => c.occurrence_date))];
+}
+
+type LeaveOut = {
+  /** Leaves these dates out of the series and checks again. */
+  onLeaveOut: (dates: string[]) => void;
+  /** A leave-out's check is in flight. */
+  leaving: boolean;
+};
+
+/** What each row is, and what can be done about it — a cancel's refund, or why there is none. */
+function ConflictTable({
+  conflicts, timezone, leave,
+}: { conflicts: ScheduleConflict[]; timezone?: string; leave: LeaveOut }) {
+  return (
+    <div className="rounded-lg border border-border">
+      <Table className="min-w-max" label="Bookings in the way">
+        <TableCaption className="sr-only">
+          {`The ${conflicts.length} bookings that stand in the way of this hold`}
+        </TableCaption>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">When</TableHead>
+            <TableHead scope="col">Court</TableHead>
+            <TableHead scope="col">Whose</TableHead>
+            <TableHead scope="col">What can be done</TableHead>
+            <TableHead scope="col"><span className="sr-only">Leave the date out</span></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {conflicts.map((conflict, index) => (
+            <TableRow key={conflict.booking_id ?? `${conflict.occurrence_date}-${conflict.court_id}-${index}`} className="align-top">
+              <TableCell>{clubDayAndClock(conflict.starts_at, timezone)}</TableCell>
+              <TableCell>{conflict.court_name ?? "—"}</TableCell>
+              <TableCell>{conflict.member_name ?? conflict.label ?? "A club hold"}</TableCell>
+              <TableCell className={canCancelConflict(conflict) ? "text-text-secondary" : "text-warning-strong"}>
+                {canCancelConflict(conflict) ? conflictRefundPhrase(conflict) : unclearableLine(conflict)}
+              </TableCell>
+              <TableCell>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={leave.leaving}
+                  onClick={() => leave.onLeaveOut([conflict.occurrence_date])}
+                >
+                  {leaveOutLabel(conflict.occurrence_date)}
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** The rows nobody can cancel, and the one way past all of them at once. */
+function UnclearableNotice({ dates, leave }: { dates: string[]; leave: LeaveOut }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-bg-muted p-4">
+      <p className="text-sm text-text-secondary">{UNCLEARABLE_EXPLAINER}</p>
+      <Button
+        variant="outline"
+        className="self-start"
+        pending={leave.leaving}
+        onClick={() => leave.onLeaveOut(dates)}
+      >
+        {leaveOutAllLabel(dates.length)}
+      </Button>
+    </div>
+  );
 }
 
 export function ConflictPanel({
-  conflicts, timezone, onCleared,
+  conflicts, timezone, onCleared, leave,
 }: {
   conflicts: ScheduleConflict[];
   timezone?: string;
   /** Called once anything has actually been cancelled: the check above is now stale. */
   onCleared: () => void;
+  leave: LeaveOut;
 }) {
   const [reason, setReason] = useState("");
   const [results, setResults] = useState<BatchResultRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const cancellable = cancellableIds(conflicts);
-  const others = conflicts.length - cancellable.length;
+  // A conflict against another schedule's rows, a hold, a no-show or a played game has no open
+  // member booking to cancel — those dates are left out instead (canCancelConflict).
+  const cancellable = conflicts.filter(canCancelConflict);
+  const unclearableDates = datesOf(conflicts.filter((c) => !canCancelConflict(c)));
   const total = knownRefundTotal(cancellable);
   const reasonGiven = reason.trim().length > 0;
   // R17 X17-7 — a press without a reason opens nothing: the field says why and takes the keyboard,
@@ -142,42 +222,13 @@ export function ConflictPanel({
         <strong>{conflictsHeadline(conflicts.length)}</strong>{" "}
         <strong>{NOTHING_CHANGED_YET}</strong>{" "}
         {"Nothing can be held on those courts at those times until these are dealt with — "}
-        {"there is no way to create a hold over a booking somebody paid for."}
+        {"there is no way to create a hold over a booking somebody paid for. "}
+        {"Cancel a member's booking to free its court, or leave its date out."}
       </Alert>
 
-      <div className="rounded-lg border border-border">
-        <Table className="min-w-max" label="Bookings in the way">
-          <TableCaption className="sr-only">
-            {`The ${conflicts.length} bookings that stand in the way of this hold`}
-          </TableCaption>
-          <TableHeader>
-            <TableRow>
-              <TableHead scope="col">When</TableHead>
-              <TableHead scope="col">Court</TableHead>
-              <TableHead scope="col">Whose</TableHead>
-              <TableHead scope="col">What would go back</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {conflicts.map((conflict, index) => (
-              <TableRow key={conflict.booking_id ?? `${conflict.occurrence_date}-${conflict.court_id}-${index}`} className="align-top">
-                <TableCell>{clubDayAndClock(conflict.starts_at, timezone)}</TableCell>
-                <TableCell>{conflict.court_name ?? "—"}</TableCell>
-                <TableCell>{conflict.member_name ?? conflict.label ?? "A club hold"}</TableCell>
-                <TableCell className="text-text-secondary">{conflictRefundPhrase(conflict)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <ConflictTable conflicts={conflicts} timezone={timezone} leave={leave} />
 
-      {others > 0 && (
-        <Alert tone="info" live="polite">
-          {`${others} of these ${others === 1 ? "is" : "are"} another club hold, not a member's booking. `}
-          {"Those are not cancelled from here — two holds on one court at one time is a "}
-          {"configuration mistake, so change this sentence or end the other repeating booking first."}
-        </Alert>
-      )}
+      {unclearableDates.length > 0 && <UnclearableNotice dates={unclearableDates} leave={leave} />}
 
       {cancellable.length > 0 && (
         <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-4">

@@ -19,7 +19,7 @@ const conflict = (n: number): ScheduleConflict => ({
 });
 
 function panel(count: number) {
-  render(<ConflictPanel conflicts={Array.from({ length: count }, (_, i) => conflict(i + 1))} timezone="Africa/Johannesburg" onCleared={vi.fn()} />);
+  render(<ConflictPanel conflicts={Array.from({ length: count }, (_, i) => conflict(i + 1))} timezone="Africa/Johannesburg" onCleared={vi.fn()} leave={{ onLeaveOut: vi.fn(), leaving: false }} />);
   return screen.getByRole("textbox", { name: /reason/i });
 }
 

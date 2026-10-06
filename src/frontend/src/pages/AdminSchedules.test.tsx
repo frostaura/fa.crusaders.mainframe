@@ -504,6 +504,84 @@ describe("creating one", () => {
     expect(screen.queryByRole("button", { name: "Create the hold" })).not.toBeInTheDocument();
   });
 
+  it("never wedges on a no-show in the way: it says so, and leaving its date out lets the series through", async () => {
+    // 2026-10-06 (Dean): a no-show can't be cancelled, so a panel that only offered cancelling
+    // left the admin stuck for good. The row says what it is and the date can be left out.
+    const noShow = conflictFixture({
+      occurrence_date: "2026-10-13", booking_id: "b-noshow", status: "no_show", cancellable: false, would_refund_minutes: 0,
+    });
+    const stub = stubFetch([
+      ...sessionRoutes(),
+      { path: SCHEDULES, body: { schedules: [] } },
+      ...editorPrerequisiteRoutes(),
+      {
+        method: "POST",
+        path: `${SCHEDULES}/preview`,
+        respond: (req) => ((req.body as { skipDates?: string[] }).skipDates?.includes("2026-10-13")
+          ? previewFixture({ occurrences: 10, left_out: ["2026-10-13"] })
+          : previewFixture({ conflicts: [noShow] })),
+      },
+      { method: "POST", path: SCHEDULES, status: 201, body: scheduleCreateResponse() },
+    ]);
+    renderPage(<AdminSchedulesPage />);
+    await screen.findByText(LIST_EMPTY_TITLE);
+    await openEditor();
+    await screen.findByRole("heading", { name: "A new repeating booking" });
+    await fillTheSentence();
+    await userEvent.click(screen.getByRole("button", { name: "Check 11 Tuesdays" }));
+
+    expect(await screen.findByText("No-show on Tue 13 Oct — can't be cancelled.")).toBeInTheDocument();
+    // Nothing to cancel, so no cancel control promising a refund the server would refuse.
+    expect(screen.queryByRole("button", { name: /^Cancel \d+ booking/ })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Leave out the date that can't be cleared" }));
+
+    const create = await screen.findByRole("button", { name: "Create the hold" });
+    const leftOut = screen.getByRole("region", { name: "Left out of this repeating booking" });
+    expect(within(leftOut).getByText("Tue 13 Oct")).toBeInTheDocument();
+    expect(within(leftOut).getByRole("button", { name: "Put Tue 13 Oct back" })).toBeInTheDocument();
+
+    await userEvent.click(create);
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path === SCHEDULES)).toBe(true));
+    const sent = stub.calls.find((c) => c.method === "POST" && c.path === SCHEDULES);
+    expect((sent?.body as { skipDates?: string[] }).skipDates).toEqual(["2026-10-13"]);
+  });
+
+  it("counts only the cancellable rows on the cancel, and offers leaving out the rest", async () => {
+    stubFetch([
+      ...sessionRoutes(),
+      { path: SCHEDULES, body: { schedules: [] } },
+      ...editorPrerequisiteRoutes(),
+      {
+        method: "POST",
+        path: `${SCHEDULES}/preview`,
+        body: previewFixture({
+          conflicts: [
+            conflictFixture({ cancellable: true }),
+            conflictFixture({
+              occurrence_date: "2026-10-20", booking_id: "b-played", status: "completed", cancellable: false,
+              starts_at: "2026-10-20T16:00:00.000Z", would_refund_minutes: 0,
+            }),
+          ],
+        }),
+      },
+    ]);
+    renderPage(<AdminSchedulesPage />);
+    await screen.findByText(LIST_EMPTY_TITLE);
+    await openEditor();
+    await screen.findByRole("heading", { name: "A new repeating booking" });
+    await fillTheSentence();
+    await userEvent.click(screen.getByRole("button", { name: "Check 11 Tuesdays" }));
+
+    expect(await screen.findByText("Already played on Tue 20 Oct — can't be cancelled.")).toBeInTheDocument();
+    expect(screen.getByText("36 minutes would go back to Thandi Mokoena.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cancel 1 booking and refund 36 minutes in full/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Leave out the date that can't be cleared" })).toBeInTheDocument();
+    // Every row has its own way forward.
+    expect(screen.getByRole("button", { name: "Leave out Tue 13 Oct" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Leave out Tue 20 Oct" })).toBeInTheDocument();
+  });
+
   it("refuses to check a sentence the server would certainly refuse, and says why", async () => {
     // The misaligned-time case this used to pin ("18:05" on a 15-minute club) cannot be entered
     // any more: the time fields offer slice-aligned options only (P3, R7 — never free-typed).

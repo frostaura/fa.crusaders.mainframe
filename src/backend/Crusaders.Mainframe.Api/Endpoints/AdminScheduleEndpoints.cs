@@ -175,6 +175,7 @@ public static class AdminScheduleEndpoints
             SubjectId: row.Id,
             SubjectLabel: row.Name,
             After: Snapshot(spec)), ct);
+        await LeaveOutAsync(row, preview.LeftOut, actorId, deps, ct);
         await db.SaveChangesAsync(ct);
 
         // Materialised synchronously as well as by the worker, so the admin sees the result of
@@ -427,6 +428,44 @@ public static class AdminScheduleEndpoints
         });
     }
 
+    /// <summary>
+    /// The dates the admin left out on creation, each recorded as a skipped date exactly as a
+    /// later "skip this date" would be — on the series, with a reason, and on the record.
+    ///
+    /// <para>
+    /// This is how a conflict nobody can cancel is resolved: a no-show or a game already played
+    /// holds its court and is settled, so the date is given up deliberately rather than the
+    /// series being refused for good. Only dates the rule really produces arrive here
+    /// (<see cref="SchedulePreview.LeftOut"/>), so nothing is recorded about a date the series
+    /// never had.
+    /// </para>
+    /// </summary>
+    private static async Task LeaveOutAsync(
+        BookingSchedule row, IReadOnlyList<DateOnly> dates, Guid actorId, ScheduleDeps deps, CancellationToken ct)
+    {
+        foreach (var date in dates)
+        {
+            deps.Db.BookingScheduleExceptions.Add(new BookingScheduleException
+            {
+                TenantId = row.TenantId,
+                ScheduleId = row.Id,
+                OccurrenceDate = date,
+                Kind = ScheduleExceptionKind.Skipped,
+                Reason = ScheduleRequestParsing.LeftOutReason,
+                CreatedByUserId = actorId,
+            });
+
+            await deps.Recorder.StageAsync(new AdminChange(
+                Action: AdminChangeActions.ScheduleOccurrenceSkipped,
+                ActorUserId: actorId,
+                SubjectKind: AdminChangeSubjects.Schedule,
+                SubjectId: row.Id,
+                SubjectLabel: row.Name,
+                Reason: ScheduleRequestParsing.LeftOutReason,
+                After: new { occurrence_date = date.ToString("yyyy-MM-dd") }), ct);
+        }
+    }
+
     // ------------------------------------------------------------------ shared
 
     /// <summary>
@@ -559,6 +598,7 @@ public static class AdminScheduleEndpoints
             rows_to_create = preview.RowsToCreate,
             max_rows = ScheduleSettings.MaxRowsPerChange(view),
             conflicts = preview.Conflicts.Select(ProjectConflict).ToList(),
+            left_out = preview.LeftOut,
         };
     }
 
@@ -583,6 +623,7 @@ public static class AdminScheduleEndpoints
             member_name = c.MemberName,
             amount_minutes = c.AmountMinutes,
             would_refund_minutes = c.WouldRefundMinutes,
+            cancellable = c.Cancellable,
         };
     }
 

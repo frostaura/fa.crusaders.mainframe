@@ -286,6 +286,52 @@ export function conflictRefundedLine(refundedMinutes: number): string {
   return `${minutesSpoken(refundedMinutes)} went back in full.`;
 }
 
+/**
+ * Whether the conflict panel may cancel this row: the server's own `cancellable` when it says, else
+ * the older rule — a member's booking, never a hold. A no-show or a played game is never one.
+ */
+export function canCancelConflict(conflict: Pick<ScheduleConflict, "cancellable" | "booking_id" | "kind" | "status">): boolean {
+  if (typeof conflict.cancellable === "boolean") return conflict.cancellable;
+  if (conflict.status === "no_show" || conflict.status === "completed") return false;
+  return !!conflict.booking_id && conflict.kind !== "schedule" && conflict.kind !== "block";
+}
+
+/**
+ * What a row that cannot be cancelled IS, named from the admin's side — "No-show on Tue 13 Oct —
+ * can't be cancelled." — so the row never looks like one more booking to refund.
+ */
+export function unclearableLine(conflict: Pick<ScheduleConflict, "status" | "kind" | "label" | "occurrence_date">): string {
+  const day = clubDateShort(conflict.occurrence_date);
+  const named = conflict.label ? ` “${conflict.label}”` : "";
+  if (conflict.status === "no_show") return `No-show on ${day} — can't be cancelled.`;
+  if (conflict.status === "completed") return `Already played on ${day} — can't be cancelled.`;
+  if (conflict.kind === "schedule") return `Another repeating booking${named} holds ${day} — it isn't cancelled from here.`;
+  if (conflict.kind === "block") return `A club hold${named} on ${day} — it isn't cancelled from here.`;
+  return `Can't be cancelled from here.`;
+}
+
+/** The way past one row: give up that date of the series. */
+export function leaveOutLabel(date: string): string {
+  return `Leave out ${clubDateShort(date)}`;
+}
+
+/** The way past every row nobody can cancel, at once. */
+export function leaveOutAllLabel(dates: number): string {
+  return dates === 1 ? "Leave out the date that can't be cleared" : `Leave out the ${dates} dates that can't be cleared`;
+}
+
+export const UNCLEARABLE_EXPLAINER =
+  "Some of these can't be cancelled — a no-show or a game already played has settled, and a club hold isn't cancelled from here. Leave those dates out and the rest can be held. A left-out date stays on the repeating booking as skipped.";
+
+export const LEFT_OUT_HEADING = "Left out of this repeating booking";
+
+export const PUT_BACK = "Put back";
+
+/** The undo beside one left-out date, as its accessible name. */
+export function putBackLabel(date: string): string {
+  return `Put ${clubDateShort(date)} back`;
+}
+
 /** The "cancel them all" confirm's body — with the total when every quote is known, without it when one is not. */
 export function clearAllDescription(count: number, totalMinutes: number | null): string {
   const bookings = `${count} member booking${count === 1 ? "" : "s"}`;
