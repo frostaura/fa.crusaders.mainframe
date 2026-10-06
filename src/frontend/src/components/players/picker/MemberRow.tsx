@@ -12,6 +12,7 @@ import { useAsyncAction } from "@/lib/useAsyncAction";
 import { cn } from "@/lib/utils";
 import type { Favourites } from "./usePickerReads";
 import { namesakeDetail } from "./namesake";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 
 /**
  * One member in a picker list: the pick (photo, name, a line under it) and, beside it, the star.
@@ -54,7 +55,8 @@ export function MemberRow(props: MemberRowProps) {
         </Avatar>
         <span className="grid grid-cols-[minmax(0,1fr)] min-w-0 flex-1 gap-0.5">
           <span className="truncate text-sm font-semibold text-text-primary">{member.name}</span>
-          {detail ? <span id={detailId} className="break-words text-xs text-text-secondary">{detail}</span> : null}
+          {/* R17 (CI class) — "6 Oct 2026" never splits its figure from its unit; the paint is glued. */}
+          {detail ? <span id={detailId} className="break-words text-xs text-text-secondary">{keepFiguresWhole(detail)}</span> : null}
         </span>
         {added ? <Badge tone="neutral">{PICKER.added}</Badge> : <Plus size={16} aria-hidden="true" className="shrink-0 text-accent-strong" />}
       </button>

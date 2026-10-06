@@ -8,6 +8,7 @@ import type { PublicMember, RecentPartner } from "@/lib/playersApi";
 import { clubShortDate } from "@/lib/clubClock";
 import { PICKER, playersRefusal } from "@/lib/playersCopy";
 import { MemberRow, MemberRowsSkeleton } from "./MemberRow";
+import { namesakeDetails } from "./namesake";
 import { MIN_QUERY, useDirectory, type useRecent, type Favourites } from "./usePickerReads";
 
 /**
@@ -30,6 +31,8 @@ function codesFor(error: unknown): Record<string, string> | undefined {
 export function FavouritesTab(props: MemberTabProps) {
   const { favourites, excluded, onPick } = props;
   const { state } = favourites;
+  // R17 L17-2 — two rows in one list never share a line.
+  const lines = namesakeDetails(favourites.listed);
   return (
     <StateBlock
       loading={state.status === "loading"}
@@ -45,7 +48,7 @@ export function FavouritesTab(props: MemberTabProps) {
     >
       <ul aria-label={PICKER.favourites} className="grid grid-cols-[minmax(0,1fr)] gap-1">
         {favourites.listed.map((m) => (
-          <MemberRow key={m.user_id} member={m} added={excluded.has(m.user_id)} favourites={favourites} onPick={onPick} />
+          <MemberRow key={m.user_id} member={m} detail={lines.get(m.user_id) ?? undefined} added={excluded.has(m.user_id)} favourites={favourites} onPick={onPick} />
         ))}
       </ul>
     </StateBlock>
@@ -64,6 +67,7 @@ export function RecentTab(props: MemberTabProps & { recent: ReturnType<typeof us
   const { favourites, excluded, onPick, recent } = props;
   const { state } = recent;
   const rows = state.status === "ready" ? state.data : [];
+  const lines = namesakeDetails(rows, recentDetail);
   return (
     <StateBlock
       loading={state.status === "loading"}
@@ -80,7 +84,7 @@ export function RecentTab(props: MemberTabProps & { recent: ReturnType<typeof us
       <ul aria-label={PICKER.recent} className="grid grid-cols-[minmax(0,1fr)] gap-1">
         {rows.map((p) => (
           <MemberRow
-            key={p.user_id} member={p} detail={recentDetail(p)}
+            key={p.user_id} member={p} detail={lines.get(p.user_id) ?? undefined}
             added={excluded.has(p.user_id)} favourites={favourites} onPick={onPick}
           />
         ))}
@@ -107,6 +111,7 @@ export function MembersTab(props: MemberTabProps) {
   const { state } = search;
   const short = query.trim().length < MIN_QUERY;
   const rows = state.status === "ready" ? state.data : [];
+  const lines = namesakeDetails(rows);
   const resultsId = useId();
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
@@ -145,7 +150,7 @@ export function MembersTab(props: MemberTabProps) {
           >
             <ul aria-label={PICKER.members} className="grid grid-cols-[minmax(0,1fr)] gap-1">
               {rows.map((m) => (
-                <MemberRow key={m.user_id} member={m} added={excluded.has(m.user_id)} favourites={favourites} onPick={onPick} />
+                <MemberRow key={m.user_id} member={m} detail={lines.get(m.user_id) ?? undefined} added={excluded.has(m.user_id)} favourites={favourites} onPick={onPick} />
               ))}
             </ul>
           </StateBlock>

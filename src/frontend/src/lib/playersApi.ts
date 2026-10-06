@@ -44,12 +44,18 @@ export type PublicMember = {
   user_id: string; name: string; photo_url: string | null;
   /**
    * R16 J16-3 (BE16b) — what tells two namesakes apart, and all a member may be told: games the
-   * caller and this member both played, the latest one's start, and when they joined (YYYY-MM-DD).
+   * caller and this member both played, the latest one's start, and when they joined (YYYY-MM-DD,
+   * the CLUB's date since R17 — BE17c; it was the UTC date).
    * On the directory and favourites (recent: `member_since`). Absent from an older API.
    */
   played_with_you?: number;
   last_played_with_you_at?: string | null;
   member_since?: string | null;
+  /**
+   * R17 L17-2 (BE17c) — a short, stable, non-identifying club ref ("K7Q2"), the last step that tells
+   * namesakes apart. Not the membership number. On the three picker lists; absent from an older API.
+   */
+  member_ref?: string | null;
 };
 
 /* ─────────────────────────────── requests ─────────────────────────────── */

@@ -309,6 +309,8 @@ export const PICKER = {
    */
   playedWithYou: (games: number) => (games === 1 ? "Played with you once" : `Played with you ${games} times`),
   memberSince: (monthYear: string) => `Member since ${monthYear}`,
+  /** R17 L17-2 — the last step between namesakes: the member's short club ref (BE17c `member_ref`). */
+  memberRef: (ref: string) => `ref ${ref}`,
   searchLabel: "Search members",
   searchPlaceholder: "Their name",
   searchHint: "Type at least two letters of their name.",

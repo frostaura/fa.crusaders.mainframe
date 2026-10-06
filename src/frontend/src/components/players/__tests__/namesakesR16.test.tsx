@@ -22,7 +22,8 @@ const PIA_B = { user_id: "pia-b", name: "Pia van Partner", photo_url: null, play
 const PIA_C = { user_id: "pia-c", name: "Pia van Partner", photo_url: null, played_with_you: 1, last_played_with_you_at: "2026-09-01T16:00:00Z", member_since: "2023-09-30" };
 
 function description(el: Element): string {
-  return (el.getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent ?? "").join(" ").trim();
+  // R17 — the painted line keeps a figure with its unit (a no-break space); heard as a plain space.
+  return (el.getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent ?? "").join(" ").replace(/\u00a0/g, " ").trim();
 }
 
 describe("the member's partner picker tells namesakes apart (R16 J16-3)", () => {
