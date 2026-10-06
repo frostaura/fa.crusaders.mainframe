@@ -475,8 +475,10 @@ function isSessionEnded(status: number, hadToken: boolean, payload: unknown): bo
  */
 const MONEY_PATHS = ["/api/v1/bookings", "/api/v1/invites/", "/api/v1/admin/bookings", "/api/v1/admin/minutes/", "/api/v1/minutes/purchase"];
 export type MoneyRequestPhase = "start" | "end";
-let moneyRequestListener: ((phase: MoneyRequestPhase) => void) | null = null;
-export function setMoneyRequestListener(fn: ((phase: MoneyRequestPhase) => void) | null) { moneyRequestListener = fn; }
+/** R18 X18-2 — which write it was; the SAME object is handed to its "start" and its "end". */
+export type MoneyWrite = { method: string; path: string };
+let moneyRequestListener: ((phase: MoneyRequestPhase, write: MoneyWrite) => void) | null = null;
+export function setMoneyRequestListener(fn: ((phase: MoneyRequestPhase, write: MoneyWrite) => void) | null) { moneyRequestListener = fn; }
 
 function movesMoney(method: string, path: string): boolean {
   return method !== "GET" && MONEY_PATHS.some((p) => path.startsWith(p));
@@ -485,9 +487,10 @@ function movesMoney(method: string, path: string): boolean {
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   if (!movesMoney(method, path)) return send<T>(method, path, body);
   const listener = moneyRequestListener;
-  listener?.("start");
+  const write: MoneyWrite = { method, path };
+  listener?.("start", write);
   noteWalletMoved();
-  try { return await send<T>(method, path, body); } finally { noteWalletMoved(); listener?.("end"); }
+  try { return await send<T>(method, path, body); } finally { noteWalletMoved(); listener?.("end", write); }
 }
 
 /* ─────────────────────────────── one wallet read, shared ─────────────────────────────── */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, endpoints, noteWalletMoved, setMoneyRequestListener, STREAM_SILENCE_MS, tokenStore } from "./api";
+import { ApiError, endpoints, noteWalletMoved, setMoneyRequestListener, STREAM_SILENCE_MS, tokenStore, type MoneyWrite } from "./api";
 import { heldPartsOf, type HeldPart } from "./bookingsApi";
 
 /** The chip reads a balance, not a ledger: one row is the smallest page the wallet serves. */
@@ -273,6 +273,46 @@ export const LIVE_BALANCE_POLICY = {
  */
 export const SELF_GRACE_MS = 3_000;
 
+/**
+ * R18 X18-2 — the frame reasons each kind of this tab's writes makes on its own wallet. A frame is
+ * the member's own only when a write in flight (or inside {@link SELF_GRACE_MS} of settling) makes
+ * it: an admin adjusting the wallet 0.8 s after the member booked was silenced by a window any
+ * money-moving request opened.
+ */
+const SHARE_MOVES = ["share_transfer", "share_set_aside", "mixed"];
+const CANCEL_MOVES = ["cancellation_refund", "penalty", CANCELLED_NO_REFUND, ...SHARE_MOVES];
+const OWN_REASONS: [RegExp, string[]][] = [
+  [/^\/api\/v1\/admin\/minutes\/.*\/adjust$/, ["admin_adjustment"]],
+  [/^\/api\/v1\/admin\/minutes\/.*\/sell$/, ["admin_top_up"]],
+  [/^\/api\/v1\/minutes\/purchase/, ["top_up"]],
+  [/\/cancel$|\/bulk-cancel$/, CANCEL_MOVES],
+  [/\/(players|split)(\/|$)|^\/api\/v1\/invites\//, SHARE_MOVES],
+  [/^\/api\/v1\/(admin\/)?bookings/, ["booking_charge"]],
+];
+/** Every reason a member's own act (not a desk route) can make — what an `expectSelf` flag may cover. */
+const MEMBER_REASONS = new Set(["top_up", "booking_charge", ...CANCEL_MOVES]);
+
+/** Nobody else acted in this frame: no other player named, not a club cancel. */
+function byThisMember(frame: BalanceFrame): boolean {
+  return !frame.actor_name?.trim() && frame.cancelled_by !== "club";
+}
+
+/**
+ * Does this write make this frame? A member-route write never makes a frame another player or the
+ * club acted in; a desk route can (an admin's own wallet, said as "The club"). A frame with no
+ * reason (an older API) matches any write, as before.
+ */
+export function writeMakes(write: MoneyWrite, frame: BalanceFrame): boolean {
+  if (!frame.reason) return true;
+  const reasons = OWN_REASONS.find(([pattern]) => pattern.test(write.path))?.[1];
+  if (!reasons?.includes(frame.reason)) return false;
+  return write.path.startsWith("/api/v1/admin/") || byThisMember(frame);
+}
+
+function ownable(frame: BalanceFrame): boolean {
+  return !frame.reason || (MEMBER_REASONS.has(frame.reason) && byThisMember(frame));
+}
+
 export type LiveBalancePolicy = { -readonly [K in keyof typeof LIVE_BALANCE_POLICY]: number };
 
 /**
@@ -458,8 +498,12 @@ export function useLiveBalance({
    * frame for it can overtake the HTTP answer (see `setMoneyRequestListener`), so the whole
    * bracket, plus {@link SELF_GRACE_MS} after it, counts as the member's own doing.
    */
-  const selfInFlight = useRef(0);
-  const selfUntil = useRef(0);
+  const writes = useRef(new Map<MoneyWrite, number | null>());
+  /** The writes still out, and those settled inside the grace (older ones are forgotten here). */
+  const liveWrites = useCallback(() => {
+    for (const [w, endedAt] of writes.current) if (endedAt !== null && Date.now() >= endedAt + SELF_GRACE_MS) writes.current.delete(w);
+    return [...writes.current.keys()];
+  }, []);
   /**
    * R17 J17-2 — how many stream frames have arrived. A wallet read notes it when SENT; an answer
    * that finds a frame has arrived since describes the balance before that frame and is dropped.
@@ -474,17 +518,12 @@ export function useLiveBalance({
    */
   const bracketMark = useRef<number | null>(null);
   useEffect(() => {
-    setMoneyRequestListener((phase) => {
-      if (phase === "start") {
-        if (selfInFlight.current === 0 && Date.now() >= selfUntil.current) bracketMark.current = framesSeen.current;
-        selfInFlight.current += 1;
-        return;
-      }
-      selfInFlight.current = Math.max(0, selfInFlight.current - 1);
-      selfUntil.current = Date.now() + SELF_GRACE_MS;
+    setMoneyRequestListener((phase, write) => {
+      if (phase === "start" && liveWrites().length === 0) bracketMark.current = framesSeen.current;
+      writes.current.set(write, phase === "start" ? null : Date.now());
     });
     return () => setMoneyRequestListener(null);
-  }, []);
+  }, [liveWrites]);
 
   const record = useCallback((minutes: number, frame?: BalanceFrame, quiet = false) => {
     const before = previous.current;
@@ -503,7 +542,11 @@ export function useLiveBalance({
     // is told: that one balance-neutral frame is still a movement (amount 0) for the toast.
     const neutralNews = before !== null && (frame?.reason === CANCELLED_NO_REFUND || frame?.reason === CANCELLED_SHARE_STANDS);
     if (before === null || (Math.abs(amount) < 0.01 && !neutralNews)) { expectSelf.current = false; return; }
-    const own = expectSelf.current || selfInFlight.current > 0 || Date.now() < selfUntil.current;
+    // R18 X18-2 — a frame is ours only when a write of ours makes it; a read keeps the window.
+    const open = liveWrites();
+    const own = frame
+      ? (expectSelf.current && ownable(frame)) || open.some((w) => writeMakes(w, frame))
+      : expectSelf.current || open.length > 0;
     setDelta({
       amount,
       at: Date.now(),
@@ -515,7 +558,7 @@ export function useLiveBalance({
       ...placeOf(frame),
     });
     expectSelf.current = false;
-  }, []);
+  }, [liveWrites]);
 
   const refresh = useCallback(async (options?: { expectSelf?: boolean }) => {
     if (!enabled) return;
