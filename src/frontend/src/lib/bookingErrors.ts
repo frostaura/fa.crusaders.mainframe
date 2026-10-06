@@ -380,6 +380,12 @@ function serverSentence(e: ApiError, action: BookingAction): string {
   return e.code === "conflict_retry" ? CONFLICT_RETRY_TEXT[action] : SERVER_DOWN_TEXT[action];
 }
 
+/** A write whose outcome was read back: a clash (`conflict_retry`) or an unanswered call. */
+function unsureSentenceOf(e: UnsureOutcome, action: BookingAction): string {
+  const words = isConflictRetry(e.original) ? CONFLICT_UNSURE_TEXT[action] : UNSURE_TEXT[action];
+  return e.checked ? words.checked : words.unchecked;
+}
+
 /**
  * @param fallback what to say when the server gave nothing recognisable — phrase it as
  * something the member can do, never as "an error occurred".
@@ -387,10 +393,7 @@ function serverSentence(e: ApiError, action: BookingAction): string {
 export function describeBookingError(e: unknown, fallback: string, context: BookingErrorContext = {}): string {
   const action = context.action ?? "book";
   if (e instanceof NotSent) return NOT_SENT_TEXT[action];
-  if (e instanceof UnsureOutcome) {
-    const words = isConflictRetry(e.original) ? CONFLICT_UNSURE_TEXT[action] : UNSURE_TEXT[action];
-    return e.checked ? words.checked : words.unchecked;
-  }
+  if (e instanceof UnsureOutcome) return unsureSentenceOf(e, action);
   if (!(e instanceof ApiError)) return fallback;
 
   // A lapsed or missing session reaches here as 401 (the client's own handler signs the
