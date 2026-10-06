@@ -183,7 +183,10 @@ public sealed class AdminBulkBookingService
             // The row was Booked when we read it and is not now — somebody else decided it
             // between the two statements. That is a success from the admin's point of view:
             // the court they wanted freed is free.
-            CancellationResult.NotFound => label with { Status = BulkCancelStatuses.AlreadyCancelled },
+            CancellationResult.NotFound or CancellationResult.NotOpen => label with { Status = BulkCancelStatuses.AlreadyCancelled },
+
+            // R17 E17-6: decided again after a lost race and found settled (played, a no-show) — not cancelled.
+            CancellationResult.NotCancellable => label with { Status = BulkCancelStatuses.Failed, Error = Endpoints.BookingEndpoints.NotCancellable },
 
             _ => label with { Status = BulkCancelStatuses.Failed, Error = "already_started" },
         };

@@ -22,6 +22,9 @@ public sealed record WalletFrame(
     /// </summary>
     public Guid? BookingId { get; init; }
 
+    /// <summary>R17 E17-1: the movement is a booking's charge the club made for the member. Never on the wire itself.</summary>
+    public bool ByClub { get; init; }
+
     /// <summary>
     /// This frame and a later one for the same member as ONE: the first frame's reason is the
     /// primary one, the delta is the net, and the parts are every row in order.
@@ -37,6 +40,7 @@ public sealed record WalletFrame(
             CancelledBy = CancelledBy ?? later.CancelledBy,
             CheckedInBy = CheckedInBy ?? later.CheckedInBy,
             BookingId = BookingId == later.BookingId ? BookingId : null,
+            ByClub = ByClub || later.ByClub,
         };
     }
 }

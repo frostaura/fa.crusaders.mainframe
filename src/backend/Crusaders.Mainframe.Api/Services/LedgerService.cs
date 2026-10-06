@@ -188,6 +188,8 @@ public sealed class LedgerService
             // R12 C1 / C2: who cancelled, and whose scan reversed a settlement — unstored, per posting.
             CancelledBy = rows?.Select(p => p.CancelledBy).FirstOrDefault(c => c is not null),
             CheckedInBy = rows?.Select(p => p.CheckedInBy ?? p.Share?.CheckedInBy).FirstOrDefault(c => c is not null),
+            // R17 E17-1: a booking the desk made for the member says so.
+            ByClub = rows?.Any(p => p.ByClub) == true,
         };
         var tenantId = _tenant.TenantId;
         var booking = BookingOf(rows);
@@ -269,8 +271,11 @@ public sealed class LedgerService
             cancelled_by = frame.CancelledBy,
             // R12 C2: on a reversal by a late check-in (and its share), the scanner when not this member.
             checked_in_by_name = string.IsNullOrWhiteSpace(checkedInBy) ? null : checkedInBy.Trim(),
+            // R17 E17-9 (BE17c's ask): the scan was this member's own — the phone can say "you checked in".
+            checked_in_by_you = frame.CheckedInBy is { } own && own == userId,
             // R14 E14-2: on a share frame, the player whose act moved it when it was not this member; null otherwise.
-            actor_name = await ShareActorNameAsync(frame.Share, userId, token),
+            // R17 E17-1: on a booking the desk made for this member, "The club".
+            actor_name = frame.ByClub ? ClubActorName : await ShareActorNameAsync(frame.Share, userId, token),
         })));
 
         _realtime.Publish(topic, new RealtimeMessage(
@@ -302,6 +307,9 @@ public sealed class LedgerService
         var frame = new WalletFrame(0, CancelledNoRefundReason, [], null, false) { BookingId = bookingId, CancelledBy = cancelledBy };
         return PublishFrameAsync(userId, frame, ct);
     }
+
+    /// <summary>R17 E17-1: the frame's <c>actor_name</c> when the club made the booking a charge is for — the member wallet's own word for an admin.</summary>
+    public const string ClubActorName = "The club";
 
     /// <summary>The frame reason of <see cref="PublishCancelledNoRefundAsync"/>.</summary>
     public const string CancelledNoRefundReason = "cancelled_no_refund";
@@ -631,6 +639,13 @@ public sealed record LedgerPosting(
 
     /// <summary>Review round 12, C2: on a reversal by a late check-in, the member whose scan it was. Never stored.</summary>
     public Guid? CheckedInBy { get; init; }
+
+    /// <summary>
+    /// Review round 17, E17-1: on a booking's charge, true when the club booked it for the member (the
+    /// desk, on their behalf) — the frame's <c>actor_name</c> is then <see cref="LedgerService.ClubActorName"/>.
+    /// Never stored; the row's actor already says who.
+    /// </summary>
+    public bool ByClub { get; init; }
 }
 
 /// <summary>

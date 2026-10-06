@@ -469,9 +469,15 @@ public static class BookingEndpoints
             CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
             // R15 D15-5: checked in (often early, before the start): the member's cancel is refused; the desk's is not.
             CancellationResult.AlreadyCheckedIn => Results.Conflict(new { error = "already_checked_in" }),
+            // R17 J17-7 / E17-6: the desk's cancel of a booking that is not open says why.
+            CancellationResult.NotOpen => Results.Conflict(new { error = PlayerErrors.BookingNotOpen }),
+            CancellationResult.NotCancellable refused => Results.Conflict(new { error = NotCancellable, status = refused.Status }),
             _ => Unmapped(result, ctx),
         };
     }
+
+    /// <summary>R17 E17-6: the desk's cancel of a played, no-show or held booking — 409 with its <c>status</c>.</summary>
+    public const string NotCancellable = "not_cancellable";
 
     /// <summary>
     /// The member's cancellation quote, with what the partners get back and what the organiser

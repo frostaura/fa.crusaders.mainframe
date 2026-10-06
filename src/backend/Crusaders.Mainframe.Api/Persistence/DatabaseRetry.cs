@@ -1,3 +1,4 @@
+using Crusaders.Mainframe.Api.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Npgsql;
@@ -47,6 +48,87 @@ internal static class DatabaseRetry
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="ex"/>, or anything it wraps, is a race this request lost — a PostgreSQL
+    /// abort (<see cref="IsRetryableAbort"/>) or an optimistic-concurrency miss: a booking or a seat
+    /// whose <c>Version</c> moved between the read and the write (review round 17, J17-1). Either way
+    /// nothing this save wrote exists, and asking again decides from the rows as they now are.
+    /// </summary>
+    public static bool IsLostRace(Exception? ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is DbUpdateConcurrencyException) return true;
+        }
+        return IsRetryableAbort(ex);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="unit"/>, and when one of its saves loses an optimistic-concurrency race
+    /// (<see cref="DbUpdateConcurrencyException"/>) runs it again — up to <see cref="Attempts"/>
+    /// times — on what the database now holds (review round 17, J17-1).
+    ///
+    /// <para>
+    /// For a unit that DECIDES from a row someone else may decide first: five members scanning one
+    /// booking at once each read it unlit, each stamped it, and the four whose UPDATE matched no row
+    /// (the booking's <c>Version</c> had moved) answered 500. Run again, the second look sees the
+    /// booking lit and takes the repeat-arrival branch — the scanner's own seat, nothing else.
+    /// </para>
+    ///
+    /// <para>
+    /// Unlike <see cref="RunAsync{T}"/>, the unit need not commit as one: an earlier save inside it
+    /// (a charge under the payer lock) may have committed before the losing one. So the context is
+    /// not rewound to a mark. What the losing attempt added is forgotten; what the CALLER staged
+    /// before the unit and is still unsaved stays staged; every booking and seat is re-read; and any
+    /// other row the attempt changed without saving is re-read. A concurrency miss does not abort a
+    /// PostgreSQL transaction (the save rolls back to its savepoint), so this also runs inside one.
+    /// </para>
+    /// </summary>
+    /// <param name="stillMine">
+    /// Asked after the re-read: whether the unit should decide again at all. False lets the race through
+    /// (503 at the net) — for a caller that settles a row which became something else (an upload whose
+    /// booking the no-show sweep settled meanwhile is REVERSED by its caller, not refused here).
+    /// </param>
+    public static async Task<T> ReDecideOnLostRaceAsync<T>(
+        MainframeDbContext db, Func<Task<T>> unit, CancellationToken ct, Func<bool>? stillMine = null)
+    {
+        var before = new Dictionary<object, EntityState>(ReferenceEqualityComparer.Instance);
+        foreach (var entry in db.ChangeTracker.Entries()) before[entry.Entity] = entry.State;
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await unit();
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < Attempts)
+            {
+                await ForgetLostAttemptAsync(db, before, ct);
+                if (stillMine is not null && !stillMine()) throw;
+            }
+        }
+    }
+
+    /// <summary>The context after a lost optimistic race, as <see cref="ReDecideOnLostRaceAsync{T}"/> describes.</summary>
+    private static async Task ForgetLostAttemptAsync(MainframeDbContext db, Dictionary<object, EntityState> before, CancellationToken ct)
+    {
+        foreach (var entry in db.ChangeTracker.Entries().ToList())
+        {
+            var had = before.TryGetValue(entry.Entity, out var was);
+            if (entry.State == EntityState.Added)
+            {
+                // Added by the losing attempt: never saved, and a decision this request no longer makes.
+                if (!had || was != EntityState.Added) entry.State = EntityState.Detached;
+                continue;
+            }
+            if (entry.State == EntityState.Detached) continue;
+
+            var raced = entry.Entity is Booking or BookingParticipant;
+            var changedHere = (entry.State is EntityState.Modified or EntityState.Deleted) && (!had || was == EntityState.Unchanged);
+            if (raced || changedHere) await entry.ReloadAsync(ct);
+        }
     }
 
     /// <summary>

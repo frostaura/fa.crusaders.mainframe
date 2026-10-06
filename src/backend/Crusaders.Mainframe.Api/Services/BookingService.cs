@@ -970,7 +970,8 @@ public sealed class BookingService
                     Reason: $"Booking {court.Name} · {SlotLabel(booking, settings)}",
                     ExternalReference: spec.ExternalReference)
                 // R15 D14-4: a walk-up is a device decision; its charge is on the clock it was sold at.
-                { At = spec.IsWalkUp ? booking.ChargedAt : null }, ct);
+                // R17 E17-1: the desk booking for a member — its frame names the club (the mail's MadeByClub rule).
+                { At = spec.IsWalkUp ? booking.ChargedAt : null, ByClub = actorId != userId }, ct);
             }
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -1318,13 +1319,30 @@ public sealed class BookingService
     /// behaves exactly as before.
     /// </para>
     /// </param>
-    public async Task<CancellationResult> CancelAsync(
+    /// <remarks>
+    /// R17 J17-1: a cancellation that loses its booking to a concurrent write (a check-in, the other
+    /// half of a double-tap, the desk) is decided AGAIN on the row as it now is
+    /// (<see cref="DatabaseRetry.ReDecideOnLostRaceAsync{T}"/>), instead of answering "not found" about
+    /// a booking that plainly exists: the second look refuses it by what happened to it, or cancels it
+    /// under the rules that now apply (a session that just started refunds nothing).
+    /// </remarks>
+    public Task<CancellationResult> CancelAsync(
         Guid bookingId, Guid actorId, bool actorIsAdmin, bool waivePenalty, CancellationToken ct,
         string? waiveReason = null, string? externalReferencePrefix = null)
     {
+        return DatabaseRetry.ReDecideOnLostRaceAsync(_db, () => CancelOnceAsync(
+            new CancelAsk(bookingId, actorId, actorIsAdmin, waivePenalty, waiveReason, externalReferencePrefix), ct), ct);
+    }
+
+    /// <summary>One cancellation's ask, as <see cref="CancelAsync"/> was given it.</summary>
+    private sealed record CancelAsk(
+        Guid BookingId, Guid ActorId, bool ActorIsAdmin, bool WaivePenalty, string? WaiveReason, string? ExternalReferencePrefix);
+
+    private async Task<CancellationResult> CancelOnceAsync(CancelAsk ask, CancellationToken ct)
+    {
+        var (bookingId, actorId, actorIsAdmin, waivePenalty, waiveReason, externalReferencePrefix) = ask;
         var booking = await _db.Bookings.FirstOrDefaultAsync(b => b.Id == bookingId, ct);
-        if (booking is null || booking.Status != BookingStatus.Booked) return new CancellationResult.NotFound();
-        if (booking.UserId is null) return new CancellationResult.NotFound();
+        if (booking?.UserId is null) return new CancellationResult.NotFound();
 
         var isSelfCancel = actorId == booking.UserId.Value;
 
@@ -1343,6 +1361,11 @@ public sealed class BookingService
         // stranger that the booking id is real and, from the penalty in the response, what
         // it cost.
         if (!actorIsAdmin && !isSelfCancel) return new CancellationResult.NotFound();
+
+        // R17 E17-6 / J17-7: the desk is told WHY a booking it can see is not cancellable — already
+        // cancelled is 409 booking_not_open (the split and add routes' word), a played or no-show row
+        // 409 not_cancellable with its status. A member's own stays "not found", as it always was.
+        if (booking.Status != BookingStatus.Booked) return actorIsAdmin ? Refused(booking.Status) : new CancellationResult.NotFound();
 
         // The member's own refusals. The ADMIN route is the club acting, so neither applies to it —
         // not even when the admin owns the booking (R15 J15-2: the desk cancels a started session).
@@ -1436,7 +1459,10 @@ public sealed class BookingService
                 refund = refundAmount,
                 penalty = penaltyAmount,
                 waived,
-                waive_reason = waiveReasonRecorded,
+                // R17 E17-7: the desk's words are the cancellation's reason; waive_reason only when a
+                // penalty was actually waived. (Rows before R17 carry the reason under waive_reason.)
+                reason = waiveReasonRecorded,
+                waive_reason = waived ? waiveReasonRecorded : null,
                 was_charged = booking.ChargedAt is not null,
             }),
         });
@@ -1484,6 +1510,8 @@ public sealed class BookingService
         // R16 E16-3: who checked in, so the mail, the inbox line and the frame name them ("you" to themselves).
         var checker = await CheckedInByAsync(booking, ct);
         if (startedNoRefund) await StageStartedCancelNoticeAsync(booking, settings, (waiveReasonRecorded, checker), ct);
+        // R17 E17-7: the desk's change record says what the cancellation did, in the same save.
+        await Endpoints.AdminCancelRecord.CompleteAsync(_db, booking, new Endpoints.CancelOutcome(refundAmount, penaltyAmount, waived, checker?.UserId), ct);
 
         try
         {
@@ -1491,16 +1519,10 @@ public sealed class BookingService
             // audit row and both movements roll back together, so nothing posts twice.
             await DatabaseRetry.RunAsync(_db, () => _ledger.PostManyAsync(postings, ct), ct);
         }
-        catch (DbUpdateConcurrencyException)
-        {
-            // Somebody else decided this booking between our read and our write — the other
-            // half of a double-tap on the PWA, an admin cancelling at the same moment, or a
-            // check-in at the pad. Nothing was written, including the ledger rows, because
-            // they save through this context. NotFound is the same answer a second
-            // cancellation gets when it loses cleanly, which is what this is.
-            _logger.LogInformation("Cancellation of {BookingId} lost a concurrent write", booking.Id);
-            return new CancellationResult.NotFound();
-        }
+        // A DbUpdateConcurrencyException — somebody else decided this booking between our read and our
+        // write (the other half of a double-tap, the desk at the same moment, a check-in at the pad) —
+        // is NOT caught here any more (R17 J17-1): nothing was written, including the ledger rows, and
+        // CancelAsync decides again on the row as it now is.
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
         {
             // The same cancellation twice, in flight together — a bulk batch retried before
@@ -1568,6 +1590,16 @@ public sealed class BookingService
             }), ct);
 
         return new CancellationResult.Ok(refundAmount, penaltyAmount);
+    }
+
+    /// <summary>
+    /// R17 E17-6 / J17-7: why the desk cannot cancel a booking that is not open — already cancelled, or
+    /// settled (played, a no-show, a club hold).
+    /// </summary>
+    private static CancellationResult Refused(BookingStatus status)
+    {
+        if (status == BookingStatus.Cancelled) return new CancellationResult.NotOpen();
+        return new CancellationResult.NotCancellable(CancellationResult.StatusWord(status));
     }
 
     /// <summary>
@@ -2102,8 +2134,10 @@ public sealed class BookingService
     private async Task<BookingParticipant?> RecordReversalScanAsync(
         Booking booking, ReversalScan scan, DateTimeOffset attendedAt, Guid payerUserId, CancellationToken ct)
     {
-        var seat = await SeatArrival.StampAsync(_db, booking.Id, scan.UserId, attendedAt, ct);
         var courtNumber = await _db.Courts.Where(c => c.Id == booking.CourtId).Select(c => c.CourtNumber).FirstAsync(ct);
+        // R17 J17-4: the seat's check-in is on the record too (court.checked_in), as an activation's is.
+        var seat = await SeatCheckIn.StampAsync(
+            _db, booking, new SeatScan(scan.UserId, attendedAt, courtNumber, scan.Method) { LitCourt = true, ReversedNoShow = true }, ct);
         _db.AuditLogs.Add(new AuditLog
         {
             TenantId = _tenant.TenantId,
@@ -3413,6 +3447,28 @@ public abstract record CancellationResult
 
     /// <summary>R15 D15-5: a member's own cancel of a booking they have checked in to — 409 <c>already_checked_in</c>.</summary>
     public sealed record AlreadyCheckedIn : CancellationResult;
+
+    /// <summary>R17 J17-7: the desk's cancel of a booking already cancelled — 409 <c>booking_not_open</c>.</summary>
+    public sealed record NotOpen : CancellationResult;
+
+    /// <summary>
+    /// R17 E17-6: the desk's cancel of a booking that is settled, not open — played (<c>completed</c>), a
+    /// <c>no_show</c>, a club hold (<c>blocked</c>) — 409 <c>not_cancellable</c> with its <paramref name="Status"/>.
+    /// </summary>
+    public sealed record NotCancellable(string Status) : CancellationResult;
+
+    /// <summary>A booking status in the wire's words — the ones the member and admin screens already key on.</summary>
+    public static string StatusWord(BookingStatus status)
+    {
+        return status switch
+        {
+            BookingStatus.Booked => "booked",
+            BookingStatus.Cancelled => "cancelled",
+            BookingStatus.NoShow => "no_show",
+            BookingStatus.Completed => "completed",
+            _ => "blocked",
+        };
+    }
 }
 
 /// <summary>

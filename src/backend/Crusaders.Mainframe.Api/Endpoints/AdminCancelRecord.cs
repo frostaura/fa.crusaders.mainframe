@@ -1,6 +1,7 @@
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
@@ -57,6 +58,47 @@ internal static class AdminCancelRecord
             After: what.PartOfBatch ? new { status = "cancelled", part_of_batch = true } : new { status = "cancelled" }), ct);
     }
 
+    /// <summary>
+    /// Review round 17, E17-7: what the cancellation DID, on the staged record's after side — the refund,
+    /// the penalty, whether a penalty was waived, whether the session had started, and who had checked in.
+    /// The record held only <c>{"status":"cancelled"}</c>, so the club's undeletable history of a desk
+    /// cancel could not say whether the member got anything back. Called by the cancellation itself, after
+    /// it settled and before its save; the row is still staged (append-only once saved), and it is the one
+    /// <see cref="StageAsync(MainframeDbContext, AdminChangeRecorder, AdminCancelFacts, CancellationToken)"/>
+    /// added for this booking. Nothing staged (a member's own cancel, the sweep): nothing to complete.
+    /// </summary>
+    public static async Task CompleteAsync(MainframeDbContext db, Booking booking, CancelOutcome outcome, CancellationToken ct)
+    {
+        var row = db.ChangeTracker.Entries<AdminChangeLog>()
+            .Where(e => e.State == EntityState.Added && e.Entity.Action == AdminChangeActions.BookingCancelledByAdmin)
+            .Select(e => e.Entity)
+            .FirstOrDefault(r => BookingOf(r.BeforeJson) == booking.Id);
+        if (row is null) return;
+
+        var after = (row.AfterJson is null ? null : JsonNode.Parse(row.AfterJson) as JsonObject) ?? [];
+        after["refunded_minutes"] = outcome.RefundedMinutes;
+        after["penalty_minutes"] = outcome.PenaltyMinutes;
+        after["penalty_waived"] = outcome.Waived;
+        after["started"] = booking.CheckedInAt is not null || booking.StartsAt <= DateTimeOffset.UtcNow;
+        after["checked_in_at"] = booking.CheckedInAt;
+        after["checked_in_by"] = await CheckerAsync(db, outcome.CheckedInBy, ct);
+        row.AfterJson = after.ToJsonString();
+    }
+
+    private static Guid? BookingOf(string? beforeJson)
+    {
+        if (beforeJson is null) return null;
+        return JsonNode.Parse(beforeJson)?["booking_id"]?.GetValue<Guid>();
+    }
+
+    /// <summary>Who had checked in, by id and name; null when nobody had.</summary>
+    private static async Task<JsonObject?> CheckerAsync(MainframeDbContext db, Guid? userId, CancellationToken ct)
+    {
+        if (userId is not { } who) return null;
+        var name = PersonNames.Of(who, await PersonNames.ForAsync(db, [who], ct));
+        return new JsonObject { ["user_id"] = who, ["name"] = name };
+    }
+
     /// <summary>Nothing was cancelled, so nothing is recorded.</summary>
     public static void Withdraw(HttpContext ctx, AdminChangeLog? row)
         => Withdraw(ctx.RequestServices.GetRequiredService<MainframeDbContext>(), row);
@@ -81,6 +123,9 @@ internal static class AdminCancelRecord
         };
     }
 }
+
+/// <summary>R17 E17-7: what a cancellation did — its refund, its penalty, whether one was waived, and who had checked in.</summary>
+internal readonly record struct CancelOutcome(int RefundedMinutes, int PenaltyMinutes, bool Waived, Guid? CheckedInBy);
 
 /// <summary>Which booking the desk cancelled, who did it, why, and whether it was one item of a batch.</summary>
 internal readonly record struct AdminCancelFacts(Guid BookingId, Guid ActorId, string Reason, bool PartOfBatch = false);

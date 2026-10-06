@@ -96,7 +96,7 @@ public static partial class WalletEndpoints
             Package = item,
         };
         var user = await db.Users.AsNoTracking().FirstAsync(u => u.Id == userId, ct);
-        return Replay(stored, movement, await services.Ledger.GetBalanceAsync(userId, ct), user);
+        return Replay(stored, movement, await ReplayBalancesAsync(services, stored, ct), user);
     }
 
     /// <summary>

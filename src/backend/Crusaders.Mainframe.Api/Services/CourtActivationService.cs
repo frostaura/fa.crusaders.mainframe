@@ -326,7 +326,25 @@ public class CourtActivationService
     /// the server clock, because the relay timer the box runs is the box's own.
     /// </para>
     /// </summary>
-    public virtual async Task<ActivationResult> ActivateAsync(ActivationRequest request, CancellationToken ct)
+    /// <remarks>
+    /// R17 J17-1: <b>decided again when another scan wins the booking first.</b> Five members scanning
+    /// one booking at once each read it unlit and each stamped it; the booking's <c>Version</c> let one
+    /// UPDATE through and the other four matched no row — a 500 at the box, and the partner's own
+    /// <c>CheckedInAt</c> lost. A save that loses that race is run again on the rows as they now are
+    /// (<see cref="DatabaseRetry.ReDecideOnLostRaceAsync{T}"/>): the booking is lit, so the second look
+    /// is a repeat arrival and stamps only the scanner's seat. Charged once either way — the charge
+    /// is idempotent and reads committed state.
+    /// </remarks>
+    /// <remarks>
+    /// Only while the booking is still live: one the no-show sweep settled (or the desk cancelled) under
+    /// the scan lets the race through, so the upload's settlement loop reverses or settles it as it always
+    /// did, and a live scan meets the 503 net and the box's retry finds the row as it now is.
+    /// </remarks>
+    public virtual Task<ActivationResult> ActivateAsync(ActivationRequest request, CancellationToken ct) =>
+        DatabaseRetry.ReDecideOnLostRaceAsync(
+            _db, () => ActivateOnceAsync(request, ct), ct, stillMine: () => request.Booking.Status == BookingStatus.Booked);
+
+    private async Task<ActivationResult> ActivateOnceAsync(ActivationRequest request, CancellationToken ct)
     {
         var (court, booking, identifiedUserId, payerOverrideUserId, method, when) = request;
         var now = _clock.GetUtcNow();
@@ -397,14 +415,14 @@ public class CourtActivationService
             // A second scan of a live session. Idempotent: no second charge (the charge
             // service refuses one), no second event, no re-stamp — except the scanning player's
             // OWN arrival (D11), which is theirs to record once whoever lit the court first.
-            await RecordRepeatArrivalAsync(booking.Id, identifiedUserId, occurredAt, ct);
+            await RecordRepeatArrivalAsync(booking, new SeatScan(identifiedUserId, occurredAt, court.CourtNumber, method), ct);
             return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: true);
         }
 
         // Attendance is when the member identified, which for an uploaded event is the
         // scan and not the upload.
         booking.CheckedInAt = occurredAt;
-        await StampPlayerArrivalAsync(booking.Id, identifiedUserId, occurredAt, ct);
+        await SeatCheckIn.StampAsync(_db, booking, new SeatScan(identifiedUserId, occurredAt, court.CourtNumber, method) { LitCourt = true }, ct);
         booking.LightsOnCuedAt ??= occurredAt;
 
         _db.AuditLogs.Add(new AuditLog
@@ -495,19 +513,15 @@ public class CourtActivationService
         return await BookingPlayerQueries.IsSplitAsync(_db, bookingId, ct) ? null : payerOverrideUserId;
     }
 
-    /// <summary>A repeat scan of a live session still records THIS player's arrival, once.</summary>
-    private async Task RecordRepeatArrivalAsync(Guid bookingId, Guid userId, DateTimeOffset at, CancellationToken ct)
-    {
-        if (await StampPlayerArrivalAsync(bookingId, userId, at, ct)) await DatabaseRetry.SaveAsync(_db, ct);
-    }
-
     /// <summary>
-    /// The identified player's own <c>CheckedInAt</c> on their seat, when the booking has seats
-    /// and theirs is not yet stamped (<see cref="SeatArrival"/>, the rule the no-show reversal
-    /// shares). Staged, not saved. Answers whether anything changed.
+    /// A repeat scan of a live session still records THIS player's arrival, once — their seat and its
+    /// <c>court.checked_in</c> row (R17 J17-4: a partner who scanned after the court was lit left no
+    /// trace on anybody's Night).
     /// </summary>
-    private async Task<bool> StampPlayerArrivalAsync(Guid bookingId, Guid userId, DateTimeOffset at, CancellationToken ct)
-        => await SeatArrival.StampAsync(_db, bookingId, userId, at, ct) is not null;
+    private async Task RecordRepeatArrivalAsync(Booking booking, SeatScan scan, CancellationToken ct)
+    {
+        if (await SeatCheckIn.StampAsync(_db, booking, scan, ct) is not null) await DatabaseRetry.SaveAsync(_db, ct);
+    }
 
     /// <summary>
     /// The single <c>booking.lights_on</c> shape.
@@ -722,3 +736,64 @@ public sealed record ActivationPlumbing(
     CourtLightStateService Lights,
     /// <summary>The device routes' clock (R14 D14-4). Optional so a hand-built fixture compiles; the container supplies it.</summary>
     TimeProvider? Clock = null);
+
+/// <summary>
+/// Who checked in on their own seat, where, how and when (review round 17, J17-4). <see cref="LitCourt"/>
+/// is true when the same scan also wrote <c>court.activated</c> (it lit the court, or reversed a no-show);
+/// <see cref="ReversedNoShow"/> when the scan reached the club as a late upload that reversed one.
+/// </summary>
+public sealed record SeatScan(Guid UserId, DateTimeOffset At, int CourtNumber, string Method)
+{
+    public bool LitCourt { get; init; }
+    public bool ReversedNoShow { get; init; }
+}
+
+/// <summary>
+/// A player's own seat stamped at a court box, AND the record of it (review round 17, J17-4): one
+/// <c>court.checked_in</c> audit row per seat stamped, in the stamp's own save. Only the first scanner's
+/// check-in reached the record (<c>court.activated</c>), so every partner who scanned after the court was
+/// lit was "checked in" on the booking page and nowhere on any Night. The row is the seat member's
+/// (subject) and the scanner's (actor) — the same person, since a scan stamps only its own seat — and names
+/// the organiser in its details so the organiser's Night can find it (as <c>OrganisersViewActions</c> do).
+/// </summary>
+public static class SeatCheckIn
+{
+    /// <summary>The audit action of a seat's check-in.</summary>
+    public const string Action = "court.checked_in";
+
+    /// <summary>
+    /// Stamps <paramref name="scan"/>'s member's accepted seat on <paramref name="booking"/> (<see cref="SeatArrival"/>)
+    /// and stages its <c>court.checked_in</c> row. Staged, not saved; the seat it stamped, or null when nothing changed.
+    /// </summary>
+    public static async Task<BookingParticipant?> StampAsync(MainframeDbContext db, Booking booking, SeatScan scan, CancellationToken ct)
+    {
+        var seat = await SeatArrival.StampAsync(db, booking.Id, scan.UserId, scan.At, ct);
+        if (seat is null) return null;
+        db.AuditLogs.Add(Row(booking, seat, scan));
+        return seat;
+    }
+
+    private static AuditLog Row(Booking booking, BookingParticipant seat, SeatScan scan)
+    {
+        var details = new Dictionary<string, object?>
+        {
+            ["booking_id"] = booking.Id,
+            ["participant_id"] = seat.Id,
+            ["organiser_user_id"] = booking.UserId,
+            ["court_number"] = scan.CourtNumber,
+            ["method"] = scan.Method,
+            ["occurred_at"] = scan.At,
+            ["lit_court"] = scan.LitCourt,
+            ["reversed_no_show"] = scan.ReversedNoShow,
+        };
+        return new AuditLog
+        {
+            TenantId = booking.TenantId,
+            ActorUserId = scan.UserId,
+            SubjectUserId = seat.UserId,
+            Action = Action,
+            ScanAt = scan.At,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(details),
+        };
+    }
+}

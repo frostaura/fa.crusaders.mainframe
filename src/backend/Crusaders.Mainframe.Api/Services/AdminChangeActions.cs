@@ -288,7 +288,7 @@ public static class AdminChangeActions
             BookingPlayerAdded => $"Added a player to a booking{of}",
             BookingPlayerRemoved => $"Took a player off a booking{of}",
             BookingPlayerAcceptedOnBehalf => $"Accepted a game on a member's behalf{of}",
-            BookingShareSettledOutside => $"Recorded a share as paid outside the app{of}",
+            BookingShareSettledOutside => $"Recorded a share as paid by hand{of}",
             BookingShareCollected => $"Collected a member's share of a booking{of}",
 
             MinutesAdjusted => $"Adjusted a member's minutes{of}",

@@ -737,7 +737,9 @@ public class MoneySurfaceTests
             .FirstAsync();
         using var details = System.Text.Json.JsonDocument.Parse(audit.DetailsJson!);
         var auditWaived = details.RootElement.GetProperty("waived").GetBoolean();
-        var auditReason = details.RootElement.GetProperty("waive_reason");
+        // R17 E17-7: the desk's words are the cancellation's `reason`; `waive_reason` only when a penalty was waived.
+        var auditReason = details.RootElement.GetProperty("reason");
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, details.RootElement.GetProperty("waive_reason").ValueKind);
 
         // The club's report: no waiver — and the reason the desk typed, kept, because the
         // club did cancel this court and this row is the only place that survives.
@@ -837,8 +839,10 @@ public class MoneySurfaceTests
             .FirstAsync();
         using var details = System.Text.Json.JsonDocument.Parse(audit.DetailsJson!);
         Assert.False(details.RootElement.GetProperty("waived").GetBoolean());
-        // The club's only record of why it cancelled a court a member was standing on.
-        Assert.Equal(reason, details.RootElement.GetProperty("waive_reason").GetString());
+        // The club's only record of why it cancelled a court a member was standing on (R17 E17-7: as `reason`;
+        // nothing was waived, so no `waive_reason`).
+        Assert.Equal(reason, details.RootElement.GetProperty("reason").GetString());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, details.RootElement.GetProperty("waive_reason").ValueKind);
 
         var mail = await PollMail(host, m => m.Subject.Contains("club", StringComparison.Ordinal));
         Assert.NotNull(mail);

@@ -339,15 +339,13 @@ public static partial class WalletEndpoints
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == movement.UserId, ct);
         if (user is null) return Results.NotFound();
 
-        var balanceBefore = await services.Ledger.GetBalanceAsync(movement.UserId, ct);
-
         // A double-click on the desk's Apply button posted the movement twice, and a slow club
         // connection with four impatient clicks posted it four times: 44 minutes granted where
         // 11 were typed. Money is ledger-only, so a duplicated row IS the wrong balance, and
         // there is nothing on the ledger to say which of the identical rows was the mistake.
         if (movement.Reference is { } key && await ExistingAdjustmentAsync(db, key, ct) is { } already)
         {
-            return Replay(already, movement, balanceBefore, user);
+            return Replay(already, movement, await ReplayBalancesAsync(services, already, ct), user);
         }
 
         // One unit of work for the money AND its record. See PostAndRecordAsync.
@@ -362,7 +360,8 @@ public static partial class WalletEndpoints
             db.ChangeTracker.Clear();
             var twin = await ExistingAdjustmentAsync(db, movement.Reference!, ct);
             if (twin is null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(raced!);
-            return Replay(twin!, movement, balanceBefore, user);
+            // R17 J17-6: the twin's own balances — never a balance read before the twin committed.
+            return Replay(twin!, movement, await ReplayBalancesAsync(services, twin!, ct), user);
         }
 
         // D11: an adjustment naming a booking moves the organiser's Owed, so the partners' shares
@@ -591,7 +590,7 @@ public static partial class WalletEndpoints
     /// names one member's movement; any other member's is a different one, and is refused.
     /// </para>
     /// </summary>
-    private static IResult Replay(LedgerEntry stored, DeskMovement m, int balanceBefore, Domain.User user)
+    private static IResult Replay(LedgerEntry stored, DeskMovement m, (int Before, int After) balance, Domain.User user)
     {
         var same = stored.UserId == m.UserId
                 && stored.AmountMinutes == m.AmountMinutes
@@ -614,10 +613,40 @@ public static partial class WalletEndpoints
             }, statusCode: StatusCodes.Status409Conflict);
         }
 
-        // The stored movement already happened, so the balance it left behind is the one before
-        // it plus itself — read back rather than recomputed, so a replay quotes the same pair the
-        // original did.
-        return MovementResult(stored, m, balanceBefore - stored.AmountMinutes, balanceBefore, user);
+        // The stored movement already happened: the pair it moved between, as its own record says.
+        return MovementResult(stored, m, balance.Before, balance.After, user);
+    }
+
+    /// <summary>
+    /// The two balances a stored desk movement moved between, for its replay (review round 17, J17-6):
+    /// read off the movement's own audit row (<c>balance_before_minutes</c> / <c>balance_after_minutes</c>,
+    /// written in its save), so a replay quotes the pair the original answered. A raced double-click used to
+    /// answer from a balance read BEFORE its twin committed — "before 100, after 70" for a sale that took
+    /// 100 to 130. Without a record (a movement older than the audit row's figures): the balance now, as
+    /// the movement's after side.
+    /// </summary>
+    private static async Task<(int Before, int After)> ReplayBalancesAsync(AdjustServices services, LedgerEntry stored, CancellationToken ct)
+    {
+        var db = services.Db;
+        var rows = db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == AdminCreditReasons.AuditAction && a.SubjectUserId == stored.UserId && a.DetailsJson != null);
+        var containment = JsonSerializer.Serialize(new { entry_id = stored.Id });
+        var details = db.Database.IsNpgsql()
+            ? await rows.Where(a => EF.Functions.JsonContains(a.DetailsJson!, containment)).Select(a => a.DetailsJson).FirstOrDefaultAsync(ct)
+            : (await rows.Select(a => a.DetailsJson).ToListAsync(ct)).FirstOrDefault(d => d!.Contains(stored.Id.ToString(), StringComparison.OrdinalIgnoreCase));
+        if (details is not null && RecordedBalances(details) is { } recorded) return recorded;
+
+        var now = await services.Ledger.GetBalanceAsync(stored.UserId, ct);
+        return (now - stored.AmountMinutes, now);
+    }
+
+    private static (int Before, int After)? RecordedBalances(string details)
+    {
+        using var doc = JsonDocument.Parse(details);
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("balance_before_minutes", out var before) || before.ValueKind != JsonValueKind.Number) return null;
+        if (!root.TryGetProperty("balance_after_minutes", out var after) || after.ValueKind != JsonValueKind.Number) return null;
+        return (before.GetInt32(), after.GetInt32());
     }
 
     /// <summary>

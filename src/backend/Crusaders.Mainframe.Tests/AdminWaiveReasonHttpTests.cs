@@ -284,7 +284,9 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
 
         var details = await CancellationAuditAsync(factory, s);
         Assert.False(details.GetProperty("waived").GetBoolean());
-        Assert.Equal("Court flooded", details.GetProperty("waive_reason").GetString());
+        // R17 E17-7: the reason is the cancellation's `reason`; nothing was waived, so no `waive_reason`.
+        Assert.Equal("Court flooded", details.GetProperty("reason").GetString());
+        Assert.Equal(JsonValueKind.Null, details.GetProperty("waive_reason").ValueKind);
     }
 
     /// <summary>

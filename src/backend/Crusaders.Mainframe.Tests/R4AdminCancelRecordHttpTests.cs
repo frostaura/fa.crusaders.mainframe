@@ -101,7 +101,8 @@ public sealed class R4AdminCancelRecordHttpTests(PostgresFixture pg) : IClassFix
 
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(
             $"/api/v1/admin/bookings/{bookingId}/cancel", new { reason = "First" })).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await admin.PostAsJsonAsync(
+        // R17 J17-7: the desk is told it is no longer open (409 booking_not_open), not "not found".
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync(
             $"/api/v1/admin/bookings/{bookingId}/cancel", new { reason = "Second" })).StatusCode);
 
         Assert.Equal("First", Assert.Single(await RowsAsync(factory, club.TenantId)).Reason);

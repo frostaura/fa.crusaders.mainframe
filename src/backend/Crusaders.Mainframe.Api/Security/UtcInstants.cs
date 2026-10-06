@@ -135,7 +135,11 @@ public static class InternalErrors
 
         // R16 BE16c: the database chose this request as a deadlock's (or a serialization failure's)
         // victim and rolled it back. Not a server fault and not the caller's: ask again shortly.
-        if (Persistence.DatabaseRetry.IsRetryableAbort(error))
+        //
+        // R17 J17-1: and an optimistic-concurrency miss the route did not re-decide — a booking or a
+        // seat whose Version moved between the read and the write. Nothing of the save exists; the
+        // same answer, so a member's screen re-reads and a box keeps the event (any 5xx) and retries.
+        if (Persistence.DatabaseRetry.IsLostRace(error))
         {
             return (StatusCodes.Status503ServiceUnavailable, Persistence.DatabaseRetry.ConflictRetry);
         }
