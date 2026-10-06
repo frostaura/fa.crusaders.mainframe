@@ -181,6 +181,16 @@ public static class AdminChangeActions
     public const string WebhookCreated = "webhook.created";
     public const string WebhookDeleted = "webhook.deleted";
 
+    /// <summary>
+    /// An admin moved between the club and its demo club, or wiped the demo's made-up data.
+    /// Written into the REAL club's record (never the demo's), so who opened the demo — and when
+    /// they came back — is on the record that survives every reset. Settings, because it is the
+    /// admin choosing which copy of the app they work in, not anything a member sees.
+    /// </summary>
+    public const string DemoEntered = "demo.entered";
+    public const string DemoLeft = "demo.left";
+    public const string DemoReset = "demo.reset";
+
     // ---- device ----
     public const string DeviceUpdated = "device.updated";
     public const string DeviceDeleted = "device.deleted";
@@ -213,6 +223,7 @@ public static class AdminChangeActions
         MemberApproved, MemberRejected, MemberSuspended, MemberReactivated, MemberDeleted,
         MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported, WebhookCreated, WebhookDeleted,
+        DemoEntered, DemoLeft, DemoReset,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
         PlayResultVoided, PlayResultUpheld,
     ];
@@ -256,7 +267,8 @@ public static class AdminChangeActions
                 or MemberReactivated or MemberPasswordReset or MemberCodeReset or MemberTraceViewed
                 or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
-                or ChangesExported or WebhookCreated or WebhookDeleted => AdminChangeAreas.Setting,
+                or ChangesExported or WebhookCreated or WebhookDeleted
+                or DemoEntered or DemoLeft or DemoReset => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
                 or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
             PlayResultVoided or PlayResultUpheld => AdminChangeAreas.Play,
@@ -330,6 +342,9 @@ public static class AdminChangeActions
             ChangesExported => "Downloaded the club's change record",
             WebhookCreated => $"Added a webhook{of}",
             WebhookDeleted => $"Removed a webhook{of}",
+            DemoEntered => "Opened the demo club",
+            DemoLeft => "Came back from the demo club",
+            DemoReset => "Reset the demo club's made-up data",
 
             DeviceUpdated => $"Changed a device{of}",
             DeviceDeleted => $"Removed a device{of}",

@@ -404,7 +404,10 @@ builder.Services.AddScoped<IJwtIssuer, JwtIssuer>();
 // Singleton — SmtpEmailService is stateless (only depends on IConfiguration + logger),
 // and keeping it singleton lets the booking/cancel hot paths fire-and-forget the send
 // off the request thread without scope-disposal hazards.
-builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
+// Demo mode wraps it: nothing leaves for a demo club or a made-up address (DemoAwareEmailService).
+builder.Services.AddSingleton<SmtpEmailService>();
+builder.Services.AddSingleton<IEmailService>(sp => new DemoAwareEmailService(
+    sp.GetRequiredService<SmtpEmailService>(), sp.GetRequiredService<ILogger<DemoAwareEmailService>>()));
 builder.Services.AddScoped<TenantSettingsAccessor>();
 // Which club a message is from. One source for a fact that had four.
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Email.ClubIdentityResolver>();
@@ -512,6 +515,11 @@ builder.Services.AddScoped<AdminRoleService>();
 builder.Services.AddScoped<MemberDeletionService>();
 builder.Services.AddScoped<MemberDeletionService.AccessEnders>();
 builder.Services.AddSingleton<MemberPhotoFiles>();
+
+// Demo mode: each club's demo club, the switch into and out of it, and what fills it.
+builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.Demo.DemoModeService>();
+builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.Demo.DemoDataGenerator>();
+builder.Services.AddHostedService<Crusaders.Mainframe.Api.Services.Demo.DemoPulseWorker>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
@@ -658,6 +666,20 @@ catch (Exception ex)
         .LogWarning(ex, "Could not rehydrate the access-token revocation list");
 }
 
+// Demo mode: which clubs are demo clubs, before the first request can act for one (DemoTenants).
+try
+{
+    using var scope = app.Services.CreateScope();
+    await Crusaders.Mainframe.Api.Services.Demo.DemoTenants.LoadAsync(
+        scope.ServiceProvider.GetRequiredService<MainframeDbContext>(), CancellationToken.None);
+}
+catch (Exception ex)
+{
+    // Tenant resolution registers each demo club again as it reads it, so an empty start is covered.
+    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Demo")
+        .LogWarning(ex, "Could not load the demo clubs at startup");
+}
+
 if (app.Environment.IsDevelopment())
 {
     var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Seed");
@@ -747,6 +769,7 @@ app.MapGet("/api/v1/whoami", async (HttpContext ctx, ITenantContext tenant, Main
 app.MapAuthEndpoints();
 app.MapAdminMemberEndpoints();
 app.MapAdminRoleEndpoints();
+app.MapAdminModeEndpoints();
 app.MapWalletEndpoints();
 app.MapScheduleEndpoints();
 app.MapMemberGroupEndpoints();

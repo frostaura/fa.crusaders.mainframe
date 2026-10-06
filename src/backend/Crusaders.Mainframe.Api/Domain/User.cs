@@ -51,5 +51,20 @@ public sealed class User : ITenantScoped
     /// </summary>
     public int SessionEpoch { get; set; }
 
+    /// <summary>
+    /// Set on a demo club's MIRROR admin only: the real admin, in the real club, this account
+    /// stands in for. The mirror has no password, a non-routable address and no passkey — it is
+    /// reachable only through the mode switch, and switching back hands a session to exactly this
+    /// user and nobody else (<see cref="Services.Demo.DemoModeService"/>).
+    /// </summary>
+    public Guid? DemoSourceUserId { get; set; }
+
+    /// <summary>
+    /// The real admin's <see cref="SessionEpoch"/> when they last entered the demo. Switching back
+    /// is refused once the real account's epoch has moved past it — a "sign out everywhere", a
+    /// password change or a suspension in the real club also ends the way back from the demo.
+    /// </summary>
+    public int? DemoSourceEpoch { get; set; }
+
     public Membership? Membership { get; set; }
 }

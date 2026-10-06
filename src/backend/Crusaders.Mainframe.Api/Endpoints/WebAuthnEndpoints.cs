@@ -69,7 +69,8 @@ public static class WebAuthnEndpoints
             var cred = await db.WebAuthnCredentials
                 .IgnoreQueryFilters()
                 .FirstOrDefaultAsync(c => c.CredentialId == rawId, ct);
-            if (cred is null) return Results.Unauthorized();
+            // A demo club is reachable only through the admin's mode switch, never by a passkey.
+            if (cred is null || Services.Demo.DemoTenants.IsDemo(cred.TenantId)) return Results.Unauthorized();
 
             AssertionVerificationResult result;
             try
@@ -144,6 +145,9 @@ public static class WebAuthnEndpoints
             MainframeDbContext db,
             CancellationToken ct) =>
         {
+            // The demo's mirror admin is reachable only through the mode switch (demo mode).
+            if (Services.Demo.DemoTenants.IsDemo(ctx.RequestServices.GetRequiredService<ITenantContext>().TenantId))
+                return Services.Demo.DemoTenants.Refusal();
             var userId = ctx.User.Id() ?? Guid.Empty;
             var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
             var membership = await db.Memberships.FirstOrDefaultAsync(m => m.UserId == userId, ct);

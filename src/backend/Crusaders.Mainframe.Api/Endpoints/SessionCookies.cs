@@ -73,6 +73,8 @@ public static class SessionCookies
 
         if (cookie is null) return SessionEnded();
 
+        // Demo mode: the cookie may be the club's DEMO session, presented on the club's address.
+        await Services.Demo.DemoSessions.AdoptCookieTenantAsync(ctx, cookie, ct);
         var outcome = await auth.RefreshWithCookieAsync(cookie, ct);
         if (outcome is { Result: LoginResult.Ok refreshed, Successor: { } successor })
         {
@@ -116,6 +118,10 @@ public static class SessionCookies
         var refresh = ctx.RequestServices.GetRequiredService<RefreshSessions>();
         var tenant = ctx.RequestServices.GetRequiredService<ITenantContext>();
         var cookie = RefreshSessions.CookieOf(ctx.Request);
+        if (cookie is not null && RefreshSessions.FamilyOf(ctx.User) is null)
+        {
+            await Services.Demo.DemoSessions.AdoptCookieTenantAsync(ctx, cookie, ct);
+        }
         if (tenant.IsResolved)
         {
             var families = new HashSet<Guid>();

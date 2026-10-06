@@ -126,6 +126,10 @@ public partial class MainframeDbContext : DbContext
             e.Property(t => t.Slug).HasMaxLength(64).IsRequired();
             e.Property(t => t.DisplayName).HasMaxLength(255).IsRequired();
             e.Property(t => t.Status).HasMaxLength(32).IsRequired();
+            // One demo club per real club: the switch finds it by this, and a race between two
+            // admins entering at once loses on the index rather than making two.
+            e.HasIndex(t => t.DemoOfTenantId).IsUnique().HasFilter("\"DemoOfTenantId\" IS NOT NULL");
+            e.Ignore(t => t.IsDemo);
         });
 
         modelBuilder.Entity<TenantSettings>(e =>
@@ -141,6 +145,8 @@ public partial class MainframeDbContext : DbContext
             e.ToTable("users");
             e.HasKey(u => u.Id);
             e.HasIndex(u => new { u.TenantId, u.Email }).IsUnique();
+            // One mirror per real admin per demo club.
+            e.HasIndex(u => new { u.TenantId, u.DemoSourceUserId }).IsUnique().HasFilter("\"DemoSourceUserId\" IS NOT NULL");
             e.Property(u => u.Email).HasMaxLength(320).IsRequired();
             e.Property(u => u.Status).HasMaxLength(32).IsRequired();
             // Plain equality. See the remarks on OnModelCreating for why it must stay one.

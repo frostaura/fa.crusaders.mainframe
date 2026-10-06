@@ -89,7 +89,21 @@ public sealed class TenantResolutionMiddleware
     /// </summary>
     internal static readonly TimeSpan SlugCacheFor = TimeSpan.FromMinutes(5);
 
-    private sealed record KnownTenant(Guid Id, string Slug);
+    private sealed record KnownTenant(Guid Id, string Slug, Guid? DemoOf);
+
+    /// <summary>
+    /// The token names one club and the host another. The one agreement that is not a mismatch:
+    /// a DEMO club's token on its own club's host (demo mode) — the admin switched into the demo
+    /// while still on the club's address, which is the only address they have.
+    /// </summary>
+    private static async Task<bool> MismatchedAsync(MainframeDbContext db, IMemoryCache cache, string jwtSlug, string hostSlug)
+    {
+        if (string.Equals(jwtSlug, hostSlug, StringComparison.OrdinalIgnoreCase)) return false;
+        var fromToken = await KnownAsync(db, cache, jwtSlug);
+        if (fromToken?.DemoOf is not { } source) return true;
+        var fromHost = await KnownAsync(db, cache, hostSlug);
+        return fromHost?.Id != source;
+    }
 
     public async Task InvokeAsync(HttpContext context, ITenantContext tenantContext, MainframeDbContext db, IConfiguration config, IMemoryCache cache)
     {
@@ -121,7 +135,7 @@ public sealed class TenantResolutionMiddleware
             return;
         }
 
-        if (jwtSlug is not null && hostSlug is not null && !string.Equals(jwtSlug, hostSlug, StringComparison.OrdinalIgnoreCase))
+        if (jwtSlug is not null && hostSlug is not null && await MismatchedAsync(db, cache, jwtSlug, hostSlug))
         {
             _logger.LogWarning("Tenant mismatch: jwt='{Jwt}' host='{Host}'", jwtSlug, hostSlug);
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -129,7 +143,7 @@ public sealed class TenantResolutionMiddleware
             return;
         }
 
-        var tenant = await KnownAsync(db, cache, resolvedSlug);
+        var tenant = await ResolveAsync(db, cache, resolvedSlug, fromToken: jwtSlug is not null);
         if (tenant is null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -166,6 +180,20 @@ public sealed class TenantResolutionMiddleware
     /// every other route of that session got <c>401</c>.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The club a slug names, or null. Demo mode: a demo club is entered by its token only — never
+    /// by a host name or the configured default, so nobody reaches it anonymously (register, sign
+    /// in, an invite) — and one that is entered is known to <see cref="Services.Demo.DemoTenants"/>.
+    /// </summary>
+    private static async Task<KnownTenant?> ResolveAsync(MainframeDbContext db, IMemoryCache cache, string slug, bool fromToken)
+    {
+        var tenant = await KnownAsync(db, cache, slug);
+        if (tenant?.DemoOf is null) return tenant;
+        if (!fromToken) return null;
+        Services.Demo.DemoTenants.Register(tenant.Id);
+        return tenant;
+    }
+
     private static async Task<KnownTenant?> KnownAsync(MainframeDbContext db, IMemoryCache cache, string slug)
     {
         // Ordinal key: the database match below is case-sensitive, and so is the memory of it.
@@ -174,7 +202,7 @@ public sealed class TenantResolutionMiddleware
 
         known = await db.Tenants.AsNoTracking()
             .Where(t => t.Slug == slug)
-            .Select(t => new KnownTenant(t.Id, t.Slug))
+            .Select(t => new KnownTenant(t.Id, t.Slug, t.DemoOfTenantId))
             .FirstOrDefaultAsync();
         if (known is not null) cache.Set(key, known, SlugCacheFor);
         return known;

@@ -37,6 +37,10 @@ public sealed class WebhookDeliveryWorker : BackgroundService
         var tenant = scope.ServiceProvider.GetRequiredService<ITenantContext>();
         tenant.Set(evt.TenantId, evt.TenantSlug);
 
+        // Demo mode: a demo club's events go nowhere. Its admin may add a webhook while showing the
+        // app off, and a made-up booking must never reach a real URL.
+        if (Services.Demo.DemoTenants.IsDemo(evt.TenantId)) return;
+
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
         var endpoints = await db.WebhookEndpoints

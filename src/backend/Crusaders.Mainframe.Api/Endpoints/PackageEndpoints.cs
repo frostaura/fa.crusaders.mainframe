@@ -85,6 +85,13 @@ public static class PackageEndpoints
         if (item.PriceZar < 0.01m)
             return Results.Json(new { error = "package_price_zero" }, statusCode: StatusCodes.Status409Conflict);
 
+        // Demo mode: no gateway, no money — the purchase completes on the spot as a simulation.
+        if (Services.Demo.DemoTenants.IsDemo(services.Tenant.TenantId))
+        {
+            var settings = await ctx.RequestServices.GetRequiredService<TenantSettingsAccessor>().GetAsync(ct);
+            return await Services.Demo.DemoPurchase.CompleteAsync(ctx, db, Lock(services.Tenant.TenantId, userId, item, shelf.Tariff), settings, ct);
+        }
+
         var creds = await services.Secrets.GetPaymentsAsync(ct);
         if (creds is null) return Results.Json(new { error = "payments_not_configured" }, statusCode: 503);
 

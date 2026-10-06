@@ -46,7 +46,8 @@ public sealed class DeviceKeyResolver
     public async Task<Tenant?> ResolveAsync(string key, CancellationToken ct = default)
     {
         var candidates = await _db.Tenants
-            .Where(t => t.DeviceApiKey != null)
+            // A demo club is never a box's club, whatever key it may hold (demo mode).
+            .Where(t => t.DeviceApiKey != null && t.DemoOfTenantId == null)
             .OrderBy(t => t.Id)
             .ToListAsync(ct);
 

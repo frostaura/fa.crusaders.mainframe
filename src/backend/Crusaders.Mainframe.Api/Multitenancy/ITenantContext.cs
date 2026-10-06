@@ -23,5 +23,8 @@ public sealed class TenantContext : ITenantContext
     {
         TenantId = tenantId;
         TenantSlug = tenantSlug;
+        // Demo mode: the flag that silences mail, payments and webhooks for a demo club follows
+        // the tenant, so it is raised (or lowered) wherever a tenant is chosen. See DemoTenants.
+        Services.Demo.DemoTenants.Enter(tenantId);
     }
 }

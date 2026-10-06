@@ -39,6 +39,30 @@ public sealed class Tenant
     /// <summary>When the key was last generated. Shown on the Devices page so an admin can
     /// tell "the box has never been flashed" from "the key was rotated this morning".</summary>
     public DateTimeOffset? DeviceApiKeyRegeneratedAt { get; set; }
+
+    /// <summary>
+    /// Set on a DEMO club only: the real club it is the demo of (one per club). A demo club is a
+    /// second tenant full of made-up members that an admin switches into from the account menu
+    /// (<see cref="Services.Demo.DemoModeService"/>). Null on every real club.
+    ///
+    /// <para>
+    /// <b>Why a second tenant rather than a flag on rows.</b> Every tenant-scoped table already
+    /// carries a global query filter on <c>TenantId</c>, so a session minted in the demo tenant
+    /// cannot read a single real row — the isolation is the one the product already proves for two
+    /// clubs, not a new one that every query would have to remember. A demo club never gets a
+    /// <see cref="DeviceApiKey"/>, and the device key resolver refuses one anyway, so no box can
+    /// ever talk to it.
+    /// </para>
+    /// </summary>
+    public Guid? DemoOfTenantId { get; set; }
+
+    /// <summary>When the demo club's made-up data was last generated, relative to which every
+    /// date in it was drawn. Older than a day and the next entry regenerates it, so "today"
+    /// always has a realistic past and future. Null on a real club.</summary>
+    public DateTimeOffset? DemoGeneratedAt { get; set; }
+
+    /// <summary>True for a demo club (<see cref="DemoOfTenantId"/> set).</summary>
+    public bool IsDemo => DemoOfTenantId is not null;
 }
 
 /// <summary>

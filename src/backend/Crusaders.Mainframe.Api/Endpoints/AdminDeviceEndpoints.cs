@@ -125,7 +125,16 @@ public static class AdminDeviceEndpoints
     /// </summary>
     private static async Task<IResult> ApiKeyAsync(
         DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
-        => Results.Ok(ApiKeyView(await devices.ApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
+    {
+        // Demo mode: a demo club never holds a device key, so no box can ever talk to it.
+        if (InDemo(ctx)) return Services.Demo.DemoTenants.Refusal(DemoKeyRefusal);
+        return Results.Ok(ApiKeyView(await devices.ApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
+    }
+
+    private const string DemoKeyRefusal = "Boxes can't connect to the demo club.";
+
+    private static bool InDemo(HttpContext ctx) =>
+        Services.Demo.DemoTenants.IsDemo(ctx.RequestServices.GetRequiredService<Multitenancy.ITenantContext>().TenantId);
 
     /// <summary>
     /// <c>POST /api/v1/admin/devices/api-key/regenerate</c> — a new key, effective
@@ -133,7 +142,10 @@ public static class AdminDeviceEndpoints
     /// </summary>
     private static async Task<IResult> RegenerateApiKeyAsync(
         DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
-        => Results.Ok(ApiKeyView(await devices.RegenerateApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
+    {
+        if (InDemo(ctx)) return Services.Demo.DemoTenants.Refusal(DemoKeyRefusal);
+        return Results.Ok(ApiKeyView(await devices.RegenerateApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
+    }
 
     // Block body, not an expression body: lizard's C# parser mis-scopes an
     // expression-bodied member containing braces into a *global* pseudo-function the

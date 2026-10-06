@@ -2232,6 +2232,12 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("DemoGeneratedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DemoOfTenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("DeviceApiKey")
                         .HasColumnType("text");
 
@@ -2254,6 +2260,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("character varying(32)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DemoOfTenantId")
+                        .IsUnique()
+                        .HasFilter("\"DemoOfTenantId\" IS NOT NULL");
 
                     b.HasIndex("Slug")
                         .IsUnique();
@@ -2287,6 +2297,12 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DemoSourceEpoch")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("DemoSourceUserId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Email")
                         .IsRequired()
@@ -2326,6 +2342,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DemoSourceUserId")
+                        .IsUnique()
+                        .HasFilter("\"DemoSourceUserId\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "Email")
                         .IsUnique();
