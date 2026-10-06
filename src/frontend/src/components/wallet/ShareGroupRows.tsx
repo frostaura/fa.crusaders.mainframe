@@ -2,6 +2,7 @@ import { Fragment, useId, useState, type ReactNode } from "react";
 import type { LedgerRow } from "@/lib/api";
 import { clubDayAndClock, clubInstant } from "@/lib/clubClock";
 import { cn } from "@/lib/utils";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 import { MinutesFigure } from "./MinutesFigure";
 import { SHARE_LEDGER_COPY as COPY, shareGroupSentence } from "@/lib/walletCopy";
 import { shareRowSentence } from "@/lib/shareMovementCopy";
@@ -161,6 +162,9 @@ function GroupComment({ head }: { head: Head }) {
         type="button"
         aria-expanded={head.open}
         aria-controls={head.controls}
+        // R17 (CI class, FE17s ask) — the painted sentence keeps "15 minutes" / "9 Oct" whole; the
+        // name a reader hears is the plain sentence and its count.
+        aria-label={`${head.sentence}, ${COPY.movements(head.group.rows.length)}`}
         onClick={head.onToggle}
         data-share-toggle=""
         className={cn(
@@ -172,8 +176,7 @@ function GroupComment({ head }: { head: Head }) {
         )}
       >
         <Caret size={16} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0 text-text-secondary" />
-        <span className="min-w-0 break-words">{head.sentence}</span>
-        <span className="sr-only">{`, ${COPY.movements(head.group.rows.length)}`}</span>
+        <span className="min-w-0 break-words">{keepFiguresWhole(head.sentence)}</span>
       </button>
       {/* Under the sentence, not under the caret: the caret (16px) and its gap (8px) are pl-6. */}
       <div className="pl-6">
