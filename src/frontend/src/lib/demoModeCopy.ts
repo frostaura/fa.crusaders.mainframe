@@ -10,8 +10,8 @@ export const DEMO_COPY = {
   demo: "Demo club",
   /** Under the two choices: what the demo is, and the promise that matters. */
   menuLine: "Demo is a full copy of the app with made-up members. Nothing you do there touches the club.",
-  /** Said while a switch is on its way — the first visit makes the whole demo club, so it can take a while. */
-  opening: "Opening the demo club — making it up can take a few seconds…",
+  /** Said while a switch is on its way — the first visit of the day makes the whole demo club. */
+  opening: "Opening the demo club. The first visit of the day makes it up, which can take a minute or two…",
   closing: "Going back to the live club…",
   /** The stripe. */
   stripeTitle: "Demo mode",

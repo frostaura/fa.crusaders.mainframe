@@ -14,7 +14,7 @@ import { keepSettingsDraft, keptSettingsDraft } from "../../lib/settingsDraftSto
 import { DEMO_COPY } from "../../lib/demoModeCopy";
 import { refuse, renderPage, signIn, signOut, SETTINGS_FIXTURE, stubFetch, type FetchStub } from "../../test/harness";
 import { resetClubModeForTests } from "./clubMode";
-import { leavePage } from "./switchClub";
+import { leavePage, retryPause } from "./switchClub";
 
 vi.mock("../../lib/pwa", async (original) => ({ ...(await original<typeof import("../../lib/pwa")>()), clearOfflineCache: vi.fn(() => Promise.resolve()) }));
 vi.mock("../../lib/offline/queryCache", async (original) => {
@@ -116,6 +116,27 @@ describe("switching to the demo club from the account menu", () => {
     expect(keptSettingsDraft(userId)).toBeNull();
     // Still busy while the page leaves: the choice it is going to is the checked one.
     expect(screen.getByRole("menuitemradio", { name: DEMO_COPY.demo })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("asks again when the gateway cuts off a switch the club is still drawing, and goes in on the answer", async () => {
+    retryPause.ms = 0;
+    try {
+      const { stub } = renderShell("live", [{
+        method: "POST", path: "/api/v1/admin/mode",
+        // Cloudflare's 524, then nginx's 504, while the Pi draws the club; then the club's answer.
+        sequence: [refuse(524, "<html>timeout</html>"), refuse(504, "<html>gateway</html>"), DEMO_ANSWER],
+      }]);
+      await openMenu();
+
+      fireEvent.click(screen.getByRole("menuitemradio", { name: DEMO_COPY.demo }));
+
+      await waitFor(() => expect(leave).toHaveBeenCalledWith("/my-code"));
+      expect(stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/mode")).toHaveLength(3);
+      expect(tokenStore.get()).toBe("demo.token.value");
+      expect(screen.queryByText(/Couldn't open the demo club/)).not.toBeInTheDocument();
+    } finally {
+      retryPause.ms = 2_000;
+    }
   });
 
   it("stays in the live club, says why, and keeps the session when the club refuses", async () => {

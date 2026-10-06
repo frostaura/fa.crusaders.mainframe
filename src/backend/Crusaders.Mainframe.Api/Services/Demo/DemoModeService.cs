@@ -37,13 +37,17 @@ public sealed class DemoModeService
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _clock;
     private readonly ILogger<DemoModeService> _logger;
+    private readonly CancellationToken _stopping;
 
-    public DemoModeService(MainframeDbContext db, ITenantContext tenant, IServiceScopeFactory scopes, TimeProvider clock, ILogger<DemoModeService> logger)
+    public DemoModeService(
+        MainframeDbContext db, ITenantContext tenant, IServiceScopeFactory scopes, TimeProvider clock,
+        IHostApplicationLifetime lifetime, ILogger<DemoModeService> logger)
     {
         _db = db;
         _tenant = tenant;
         _scopes = scopes;
         _clock = clock;
+        _stopping = lifetime.ApplicationStopping;
         _logger = logger;
     }
 
@@ -108,9 +112,21 @@ public sealed class DemoModeService
     /// Wipes the demo club's made-up data and draws it again, unless (<paramref name="force"/>
     /// false) another request drew it while this one waited for the lock. Answers when the data
     /// now standing was generated.
+    ///
+    /// <para>
+    /// <b>Finishes even when the caller has gone.</b> On the club's Pi a whole club takes longer than
+    /// the gateway or Cloudflare holds a request open. Bound to the request, a cut-off connection
+    /// cancelled the draw and rolled it back, so every retry started from nothing and none ever
+    /// finished. It now runs to the end unless the app itself is stopping — the caller's
+    /// <paramref name="requestAborted"/> is honoured only before it starts — and the app's retry
+    /// finds the club drawn, or waits on the lock for the draw still running.
+    /// </para>
     /// </summary>
-    public async Task<DateTimeOffset> RegenerateAsync(Guid demoTenantId, bool force, CancellationToken ct)
+    public async Task<DateTimeOffset> RegenerateAsync(Guid demoTenantId, bool force, CancellationToken requestAborted)
     {
+        requestAborted.ThrowIfCancellationRequested();
+        var ct = _stopping;
+        var started = _clock.GetTimestamp();
         using var scope = _scopes.CreateScope();
         var tenant = scope.ServiceProvider.GetRequiredService<ITenantContext>();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -139,7 +155,7 @@ public sealed class DemoModeService
 
         await scope.ServiceProvider.GetRequiredService<DemoDataGenerator>()
             .AwardBadgesAsync(scope.ServiceProvider.GetRequiredService<PlayEvaluator>(), now, ct);
-        _logger.LogInformation("Demo club {Slug} regenerated", club.Slug);
+        _logger.LogInformation("Demo club {Slug} regenerated in {Seconds:F1}s", club.Slug, _clock.GetElapsedTime(started).TotalSeconds);
         return now.Storable();
     }
 

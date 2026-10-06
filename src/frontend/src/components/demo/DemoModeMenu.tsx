@@ -20,8 +20,8 @@ function isClubMode(value: string): value is ClubMode {
 /**
  * The account menu's Live / Demo choice — admins only, shaped like the Appearance group beside it
  * (radio items: arrow keys rove, Space/Enter choose, the checked one is announced). Choosing keeps
- * the menu open with the choice busy, because the first visit makes the whole demo club and can take
- * a few seconds; the club's yes then loads the app afresh in the other club (`switchClub`). A
+ * the menu open with the choice busy, because the first visit of the day makes the whole demo club
+ * and can take a minute or two on the club's Pi; the club's yes then loads the app afresh in the other club (`switchClub`). A
  * refusal is a toast and the menu stays in the club it was in.
  */
 export function DemoModeMenu({ userId }: { userId: string | null }) {

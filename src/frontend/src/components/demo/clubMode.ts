@@ -32,10 +32,17 @@ export type ModeSwitchAnswer = {
   generated_at: string | null;
 };
 
+/**
+ * How long a switch or a reset may take. The first visit (and each one after the data is a day
+ * old) draws a whole made-up club, which on the club's Pi takes far longer than the 20 s every
+ * other call gets.
+ */
+export const DEMO_DRAW_TIMEOUT_MS = 5 * 60_000;
+
 export const clubModeApi = {
   read: () => api.get<ClubModeRead>("/api/v1/admin/mode"),
-  switchTo: (mode: ClubMode) => api.post<ModeSwitchAnswer>("/api/v1/admin/mode", { mode }),
-  resetDemo: () => api.post<{ generated_at: string }>("/api/v1/admin/demo/reset"),
+  switchTo: (mode: ClubMode) => api.postSlow<ModeSwitchAnswer>("/api/v1/admin/mode", { mode }, DEMO_DRAW_TIMEOUT_MS),
+  resetDemo: () => api.postSlow<{ generated_at: string }>("/api/v1/admin/demo/reset", undefined, DEMO_DRAW_TIMEOUT_MS),
 };
 
 const HINT_KEY = "crusaders.mainframe.club-mode";

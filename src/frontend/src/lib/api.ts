@@ -484,13 +484,13 @@ function movesMoney(method: string, path: string): boolean {
   return method !== "GET" && MONEY_PATHS.some((p) => path.startsWith(p));
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  if (!movesMoney(method, path)) return send<T>(method, path, body);
+async function request<T>(method: string, path: string, body?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  if (!movesMoney(method, path)) return send<T>(method, path, body, false, timeoutMs);
   const listener = moneyRequestListener;
   const write: MoneyWrite = { method, path };
   listener?.("start", write);
   noteWalletMoved();
-  try { return await send<T>(method, path, body); } finally { noteWalletMoved(); listener?.("end", write); }
+  try { return await send<T>(method, path, body, false, timeoutMs); } finally { noteWalletMoved(); listener?.("end", write); }
 }
 
 /* ─────────────────────────────── one wallet read, shared ─────────────────────────────── */
@@ -547,7 +547,7 @@ function readWallet(limit?: number, offset?: number, shareBookings = false): Pro
   return promise;
 }
 
-async function send<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+async function send<T>(method: string, path: string, body?: unknown, retried = false, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   // R4 wave B — a write with no network at all is refused here, before anything is sent.
   if (method !== "GET" && phoneIsOffline()) throw new OfflineError();
   const sentToken = tokenStore.get();
@@ -558,7 +558,7 @@ async function send<T>(method: string, path: string, body?: unknown, retried = f
       ...(sentToken ? { authorization: `Bearer ${sentToken}` } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  }, timeoutMs);
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   const payload = res.ok ? (text ? JSON.parse(text) : null) : parseFailureBody(text);
@@ -569,7 +569,7 @@ async function send<T>(method: string, path: string, body?: unknown, retried = f
     // repeating a mutation cannot do it twice.
     if (mayRefresh(res.status, sentToken, path, retried)) {
       const outcome = await refreshSession(sentToken);
-      if (outcome.kind === "ok") return send<T>(method, path, body, true);
+      if (outcome.kind === "ok") return send<T>(method, path, body, true, timeoutMs);
       // C2 — the club did not answer the exchange. The session stands (token and cookie kept);
       // this request fails as the club being unreachable, and the next one tries again.
       if (outcome.kind === "transient") throw outcome.error;
@@ -648,6 +648,8 @@ async function failureFrom(res: Response): Promise<ApiError> {
 export const api = {
   get: <T>(p: string) => request<T>("GET", p),
   post: <T>(p: string, b?: unknown) => request<T>("POST", p, b),
+  /** A write the club is known to take long over (demo mode's whole made-up club), with its own ceiling. */
+  postSlow: <T>(p: string, b: unknown, timeoutMs: number) => request<T>("POST", p, b, timeoutMs),
   put: <T>(p: string, b?: unknown) => request<T>("PUT", p, b),
   patch: <T>(p: string, b?: unknown) => request<T>("PATCH", p, b),
   del: <T>(p: string, b?: unknown) => request<T>("DELETE", p, b),

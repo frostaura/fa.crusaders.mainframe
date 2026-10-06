@@ -1,7 +1,7 @@
-import { endSessionGeneration, tokenStore } from "@/lib/api";
+import { ApiError, NetworkError, endSessionGeneration, tokenStore } from "@/lib/api";
 import { wipeSessionData } from "@/lib/sessionWipe";
 import { readLastIdentity, writeLastIdentity } from "@/lib/lastIdentity";
-import { clubModeApi, rememberClubMode, type ClubMode } from "./clubMode";
+import { DEMO_DRAW_TIMEOUT_MS, clubModeApi, rememberClubMode, type ClubMode } from "./clubMode";
 
 /**
  * Moving between the live club and its demo, and resetting the demo.
@@ -58,10 +58,58 @@ async function startAfresh(accessToken: string, userId: string, mode: ClubMode, 
   leavePage.to(landing);
 }
 
+/**
+ * The gateway or Cloudflare gave up on a request the club was still working on: nginx's 502/504,
+ * Cloudflare's 524 — or this tab's own ceiling. The club finishes a demo draw whoever is still
+ * waiting, so asking again is how the answer is collected.
+ */
+export function cutOffInFlight(error: unknown): boolean {
+  if (error instanceof NetworkError) return error.kind === "timeout";
+  return error instanceof ApiError && (error.status === 502 || error.status === 504 || error.status === 524);
+}
+
+/** Pause between asks — a seam, so tests need not wait. */
+export const retryPause = { ms: 2_000 };
+
+/**
+ * Asks until the club answers or {@link DEMO_DRAW_TIMEOUT_MS} has passed, retrying only a cut-off
+ * request. Safe for the switch: the mode already in force answers a fresh session, and a club
+ * already drawn answers at once.
+ */
+async function untilAnswered<T>(ask: () => Promise<T>): Promise<T> {
+  const giveUpAt = Date.now() + DEMO_DRAW_TIMEOUT_MS;
+  for (;;) {
+    try {
+      return await ask();
+    } catch (error) {
+      if (!cutOffInFlight(error) || Date.now() + retryPause.ms >= giveUpAt) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retryPause.ms));
+    }
+  }
+}
+
 /** Into the demo, or back to the live club. Rejects (and changes nothing here) when the club refuses. */
 export async function switchClub(to: ClubMode): Promise<void> {
-  const answer = await clubModeApi.switchTo(to);
+  const answer = await untilAnswered(() => clubModeApi.switchTo(to));
   await startAfresh(answer.access_token, answer.user_id, answer.mode, AFTER_SWITCH_PATH);
+}
+
+/**
+ * A reset is NOT asked twice — a second one would draw the club again from the start. A cut-off
+ * one is waited out instead: the club's mode is read until the demo's draw time moves past the
+ * one standing before the reset.
+ */
+async function resetAndWait(): Promise<void> {
+  const before = await clubModeApi.read().then((r) => r.demo?.generated_at ?? null, () => null);
+  try {
+    await clubModeApi.resetDemo();
+  } catch (error) {
+    if (!cutOffInFlight(error)) throw error;
+    await untilAnswered(async () => {
+      const now = await clubModeApi.read();
+      if ((now.demo?.generated_at ?? null) === before) throw new NetworkError("timeout");
+    });
+  }
 }
 
 /**
@@ -69,7 +117,7 @@ export async function switchClub(to: ClubMode): Promise<void> {
  * data does not; the page reloads where it is unless it names something by id (that row is gone).
  */
 export async function resetDemoClub(): Promise<void> {
-  await clubModeApi.resetDemo();
+  await resetAndWait();
   const token = tokenStore.get();
   const userId = readLastIdentity();
   const here = window.location.pathname;
