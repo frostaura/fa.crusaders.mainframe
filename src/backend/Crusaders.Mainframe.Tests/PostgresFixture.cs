@@ -240,6 +240,12 @@ public static partial class PostgresDatabases
         await ExecAsync(AdminConnectionString(), $"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)");
     }
 
+    /// <summary>R19 BE19L: seconds a test pool keeps a connection nobody is using. See <see cref="ConnectionStringFor"/>.</summary>
+    private const int IdleLifetimeSeconds = 3;
+
+    /// <summary>How often a test pool looks for idle connections to close; under <see cref="IdleLifetimeSeconds"/>.</summary>
+    private const int PruningIntervalSeconds = 1;
+
     public static string ConnectionStringFor(string database)
     {
         var builder = new NpgsqlConnectionStringBuilder(Required()) { Database = database };
@@ -250,6 +256,14 @@ public static partial class PostgresDatabases
         builder.Options = string.IsNullOrWhiteSpace(builder.Options)
             ? "-c synchronous_commit=off"
             : builder.Options + " -c synchronous_commit=off";
+
+        // R19 BE19L: an idle pooled connection gives its server slot back within seconds, not
+        // Npgsql's 300. Every class has its own database and so its own pool, the sharded run puts
+        // ~30 classes on one server at once, and their idle sessions alone filled its 100 slots — the
+        // next burst was refused 53300 and answered 503 service_busy (R19TestServerSlotsTests). The
+        // API's pool is the bounded copy of this string (DatabasePool.Bound), so it inherits both.
+        builder.ConnectionIdleLifetime = IdleLifetimeSeconds;
+        builder.ConnectionPruningInterval = PruningIntervalSeconds;
         return builder.ConnectionString;
     }
 
