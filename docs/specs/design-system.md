@@ -85,7 +85,8 @@ squash court's tin). Never as a state colour.
   `touch` 44px, `appbar` 56px, `tabbar` 64px. Page gutter `px-4 sm:px-6 lg:px-8`, page top `pt-6 lg:pt-8`,
   header→body 24px, section gap 32px, in-section 16px, card padding `p-4 sm:p-6`, field stack 16px,
   label→control 6px, toolbar gap 8px, grid row gap 4px / column gap 6px. Arbitrary spacing only inside
-  `components/ui/`.
+  `components/ui/` — sizing too (`w-[…]`, `h-[…]`, `min-*`/`max-*`, `size-[…]`: `theme-vocabulary`'s
+  `arbitrary-spacing` rule), so a screen's px or ch box is an **inline style** (R18).
 - **Type** (t-shirt keys overridden so tailwind-merge still recognises them; sizes in rem so large text
   scales): xs 12/16 (the product floor — no 10–11px text) · sm 14/20 · base 16/24 · lg 18/26 · xl 20/28 ·
   2xl 24/32 · 3xl 30/36 · 4xl 36/40 · 5xl 48/1. Weights 400/500/600/650 (`heading`)/700/800. Tracking
@@ -288,6 +289,36 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   chunk). Every other page is `React.lazy` behind the page-shaped `RouteSkeleton` — except the admin
   frame, Overview and the two doors pages, which read the shared doors store (it dedupes only in
   flight). React + the router are a vendor chunk of their own; nothing else is grouped by hand.
+- **Boxes and rows hold at 320 px and 200 % text (R18 L18-1/L18-3/L18-5).**
+  - **A narrow row stacks by a rem container query**, never by the viewport: the member picker's row
+    (`@container/row`, side by side from 15rem), an invite list item (`@container/card`, `p-3` below
+    17rem), the invite page card (`p-3` under 18rem of page), game facts lose their box under 13rem.
+    Use containers, not arbitrary px spacing.
+  - **A box beside words is px and steps aside in a rem container**: the sheet tile's racquet box is
+    an inline 40 px that hides under a 12rem row; Split's figure inputs are `calc(7ch + 1.5rem)` with
+    the name above them under a 16rem card; mode toggles are
+    `repeat(auto-fit,minmax(min(100%,5rem),1fr))`.
+  - **Figures and time ranges stay whole**: a time range is `whitespace-nowrap`, so "21:00–21:30"
+    never splits; accept figures do not wrap and wrap under their term instead.
+  - **`overflow-wrap: anywhere`, never `break-all`, on text with words in it.** `break-all` splits
+    ordinary words that fit a line of their own ("cupb/oard"); `anywhere` breaks only a token too
+    wide for any line (an address on the printed door card).
+  - *Trap:* a `//` comment between JSX children paints as text — it shipped on every accept sheet
+    once. `{/* … */}` only.
+- **A sheet's refusal is taken to the reader (R18 L18-2).** The alert carries `data-sheet-refusal`
+  and `tabIndex=-1`; once it renders it is scrolled into view (`block: "nearest"`) and focused
+  (`useRefusalInView`). At 320 px and 200 % it sat below the fold while focus stayed on the button
+  just pressed. *Except* a gone slot, where focus goes to "Pick another time" (R11 X11-3): there the
+  refusal is only scrolled to and is that button's `aria-describedby`.
+- **A refusal that can never succeed ends the task (R18 L18-10).** A cancel refused for good
+  (`endsCancel`: `booking_not_open`, `not_cancellable`, `booking_not_found`, `already_checked_in`)
+  drops the quote's figures, the waiver and the primary verb; the way out is a primary "Done". A
+  refusal that can be tried again keeps everything. A picker keeps a refusal's focus when it closes
+  (focus already inside `[data-detail-notice]` stays).
+- **The tour's mark stays on screen (R18 L18-6).** A coach mark's anchor is clamped into the visible
+  band between the app bar and the bottom bar (`clampedRect`): Radix's `sticky` shifts only on the
+  alignment axis, so a mark under a scrolled section bar rode it off the top. Past an edge the rect
+  is a zero-height line at that edge; the outline stays on the real control.
 - **Focus rings in a list that clips its rows (R15 L15-1).** A list that sets `overflow-hidden` with
   `divide-y` insets its rows' focus rings with `[&_:focus-visible]:-outline-offset-2` on the list.
   Without it, the house outside ring is clipped to nothing. Guarded by `clipped-focus-scan.test.ts`.
@@ -310,7 +341,12 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   "Can't reach the club" ("…showing what we had at 18:00"). This applies to stale notices, the My Code
   badge, the nothing-kept page, the minutes chip and write refusals. It reverses R8, which said
   offline whatever `onLine` said: a member on Wi-Fi with the club down was told to check a
-  connection that was fine.
+  connection that was fine. The "showing what we had at" time is the club's clock, and "today" is the
+  club's day (R18 X18-3, the kept club zone).
+- **Busy is not down (R18).** `503 service_busy` reads "the club's system is very busy right now. Try
+  again in a moment." — never "down or restarting", never "didn't answer", and not a deployment fault,
+  so Try again stays. The unsure causes are three — busy, a clash (`conflict_retry`), silence — and a
+  hand-written sentence carries its busy and clash twins.
 
 ## Guards (tests)
 

@@ -20,7 +20,11 @@ beyond a result on a booking they both played. `show_in_leaderboards` and `share
 - **Player of a booking** — exactly P11's rule (`players-and-splits.md` §5, through
   `BookingPlayerQueries`): the booker (`bookings.UserId`), or a member holding a LIVE accepted
   seat. A declined, withdrawn, removed or lapsed seat is not a player. Admin blocks
-  (`UserId` null) have no players.
+  (`UserId` null) have no players. **A pay-for payer with no accepted seat is not a player**
+  (R18 E18-6, decided): D10 lets a member pay at the box for a court they are not on, so paying
+  and scanning put the payment and the scan on their Night but the session is not on their play
+  record. A payer who holds an accepted seat is a player through the seat, and their scan stamps
+  that seat only — never the organiser's (`member-code.md` §9.2).
 - **Attended** — the invariant's meaning: attendance is `CheckedInAt`, set only by the court box's
   identification (or a no-show reversal on box evidence), **never the clock, never `ChargedAt`,
   and never a door scan** (`decisions-gate.md`: a door is never attendance). A member attended a
@@ -171,6 +175,7 @@ A player may record a result for booking `b` when **all** hold, else `409 result
 
 | Condition | `reason` |
 | --- | --- |
+| `b` is not cancelled — `Status` is not `Cancelled` and `CancelledAt` is unset (`ResultService.IsCalledOff`); checked **first** (R18 J18-1) | `cancelled` |
 | `b` is not an admin block and has at least two players or guests to line up | `not_enough_players` |
 | `b.CheckedInAt` is set — the box saw the session (a door scan is not enough) | `not_checked_in` |
 | the court time has started AND the check-in has happened — whichever is later (review round 1, B15: an early-entry scan does not open recording) | `not_started` |
@@ -178,6 +183,15 @@ A player may record a result for booking `b` when **all** hold, else `409 result
 | no live result exists on `b` | → `409 result_exists {result_id}` instead |
 
 Recording may begin the moment the court is checked in — players often record between games.
+
+**A cancelled game takes no result (R18 J18-1).** This reverses the earlier rule that an S4
+booking — one the club cancelled after check-in — was recordable: it was checked in, so every
+other condition passed, and it took a result that nobody's attendance counted (§1 has not counted
+it as attended since R17). Record, edit and confirm on a cancelled booking are all `409
+result_not_recordable {reason: "cancelled"}`, a pending result included; **dispute and withdraw
+still work**, so a pending result can still be taken back or argued. A result confirmed before
+the cancellation stays on the booking but stops counting at once (§5.1); a badge it already
+earned is kept (§3.3).
 
 ### 3.2 The lineup
 
@@ -332,12 +346,16 @@ can drive them without a database: `ClubWeek`, `StreakMath`, `PlayStats`, `Badge
 | `sessions_attended` | count of attended bookings (§1), all time |
 | `minutes_on_court` | Σ played minutes of attended bookings, all time — **from attendance, never from results** |
 | `minutes_this_year` | the same, `StartsAt` in the current club-local calendar year |
-| `matches_played` / `won` / `lost` | confirmed results with the member in the lineup; won when their side is `WinnerSide` |
+| `matches_played` / `won` / `lost` | confirmed results with the member in the lineup, **on a session the member attended (§1)** — R18 J18-1, `PlayRecord.Attended`, so matches can never disagree with sessions attended; won when their side is `WinnerSide` |
 | `games_won` / `games_lost` | Σ over those results, from the member's side |
 | `win_rate_percent` | `round(100 × won / played)`, null when `played = 0` |
 | `partners` | top 3 **members** by number of the member's attended sessions they were a player of; ties → most recent shared session. P11's word "partner" — the people you booked and played with, whichever side of the net |
 | `opponents` | top 3 members most often on the other side of a confirmed result, with the head-to-head `won`/`lost`; ties → most recent |
 | `form` | the last 5 confirmed results, newest first: `won` · `lost` |
+
+Every figure that reads results — matches, games, win rate, opponents, form and the result badges
+(`first_result`, `first_win`) — reads the same set: confirmed results on the member's attended
+sessions, loaded once by `PlayRecord`.
 
 ### 5.2 The weekly streak (`ClubWeek`, `StreakMath`)
 
@@ -518,7 +536,7 @@ viewer_side: "a"|"b"|null, viewer_outcome: "won"|"lost"|null}`
 
 | Route | Body → answer |
 | --- | --- |
-| `GET /api/v1/bookings/{id}/result` | → `{booking_id, result: result\|null, permissions: {can_record, can_edit, can_confirm, can_dispute, can_withdraw}, not_recordable_reason: null\|"not_checked_in"\|"not_started"\|"window_closed"\|"not_enough_players", record_closes_at, candidates: [player], default_sides: {a: [player_key], b: [player_key]}, default_format: "best_of_5"}`. `result` is the live one, else the most recent closed one (so players see "the club removed this result"), else null. Applies a due auto-confirmation first (§3.3). 404 for a non-player |
+| `GET /api/v1/bookings/{id}/result` | → `{booking_id, result: result\|null, permissions: {can_record, can_edit, can_confirm, can_dispute, can_withdraw}, not_recordable_reason: null\|"cancelled"\|"not_checked_in"\|"not_started"\|"window_closed"\|"not_enough_players", record_closes_at, candidates: [player], default_sides: {a: [player_key], b: [player_key]}, default_format: "best_of_5"}`. `result` is the live one, else the most recent closed one (so players see "the club removed this result"), else null. Applies a due auto-confirmation first (§3.3). 404 for a non-player |
 | `POST /api/v1/bookings/{id}/result` | `{idempotencyKey, format, sideA: [playerKey], sideB: [playerKey], games: [{a, b}]}` → `201 result`; a replay of the same `idempotencyKey` by the same member → `200` with that result as it now stands. Errors: `400 idempotency_key_invalid` (1–64 chars), `400 format_invalid`, `400 lineup_invalid {reason}`, `400 score_invalid {game_index, reason}`, `400 match_incomplete {games_needed}`, `400 games_after_decided {game_index}`, `409 result_not_recordable {reason}`, `409 result_exists {result_id}` |
 | `PUT /api/v1/bookings/{id}/result` | `{expectedVersion, format, sideA, sideB, games}` → `result` (still `pending`, `ConfirmDueAt` restarted). The caller must be a member of the submitting side and in the new lineup. `403 result_not_yours`, `409 result_not_pending {status}`, `409 result_changed {version, status}`, plus the create's validation errors |
 | `POST /api/v1/bookings/{id}/result/confirm` | `{expectedVersion}` → `result`. `403 result_not_yours_to_confirm` (the caller is on the submitting side, or not in the lineup), `409 result_not_pending {status}`, `409 result_changed` |
@@ -866,7 +884,9 @@ you earn a badge or reach your goal.`
   side; idempotent create replay; `result_exists`; edit restarts `ConfirmDueAt`; confirm, dispute,
   withdraw and their 403s; double-tap confirm → one confirmation; confirm vs sweep race; dispute
   after the deadline → `result_not_pending`; lazy auto-confirm on read; a removed seat can no
-  longer confirm; S4 and reversed-no-show bookings are recordable, a no-show is not.
+  longer confirm; reversed-no-show bookings are recordable, a no-show is not, and an S4 (club-cancelled
+  after check-in) booking is not (R18 J18-1 — `R18ResultCancelledHttpTests` pins record, edit,
+  confirm and the stats).
 - `PlayStatsHttpTests` — attendance by own scan vs by the booking's check-in; played minutes after
   a release, and an S4-cancelled session not attended (R17); stats move on void; partners/opponents/form; `GET /me/play`
   for a member with nothing.

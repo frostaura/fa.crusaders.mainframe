@@ -559,6 +559,12 @@ Courts (`/api/v1/admin/courts`):
 
 ### 3.10 Live balance stream (`GET /api/v1/wallet/stream`)
 
+**An open stream holds no database connection (R18, measured: 500 streams held 35 s kept at most 8
+busy)** — the bus is an in-process fan-out. What a stream reads — its opening frame and the session
+guard before every keep-alive and frame — runs under `StreamDbGate`, at most `max(2, pool ÷ 5)` reads
+at once, the rest queued in memory, so a reconnect storm costs the pool a fixed share (`deployment.md`,
+*Capacity*). A stream open that gets no connection is `503 service_busy` like any request.
+
 There are two frames per movement, as today.
 - **Unnamed legacy frame:** `{ "balance_minutes": int }`.
 - **Named `balance` event:** `{ balance_minutes, delta_minutes, reason, at, held_minutes, owed_back_minutes, spendable_minutes, held_until, held_parts: [{minutes, until}] }`.
@@ -575,10 +581,19 @@ net of every row, and `parts` every row in order with the share rows last (one p
 order). The frame also carries `cancelled_by` (`member | club`, on a cancellation — the partner's
 share frame too; null otherwise) and `checked_in_by_name` (on a reversal, the scanner when it was
 not this member; null for their own scan — and every frame carries **`checked_in_by_you`** (R17 E17-9), true exactly when the frame's check-in was this member's own scan, so the phone can say "you checked in"; and since R16 E16-3 on the booker's `cancelled_no_refund`
-frame, whoever checked the started session in, null when it was the booker). Each `share_transfer` part names the other member on it,
+frame, whoever checked the started session in, null when it was the booker — and since R18 E18-2 on each partner's `cancelled_share_stands` frame too, `checked_in_by_name` / `checked_in_by_you` by the same rule, `ClubCancelNotices.CheckedInByAsync`: the seat stamped at the booking's check-in, else the scanner on its `court.activated` row, else the booker; the organiser's and the partners' frames of one cancel name one person). Each `share_transfer` part names the other member on it,
 `counterparty_name`, and a share frame carries `court_name` and `booking_starts_at` so a member no
 longer on the game is still told which one (R13 C13-7). Backend: `NoShowWorker` holds a booking's
 frames until its share follow-up has run (`Realtime/WalletFrameHolds`).
+
+**The phone takes a frame as the member's own only when a write in flight makes its reason (R18
+X18-2).** Each request hands the live-balance listener its `{method, path}`; a booking makes
+`booking_charge`, a cancel its refund, penalty, `mixed`, `cancelled_no_refund` and share moves, a
+seat or invite act share moves, a desk adjust or sale `admin_adjustment` / `admin_top_up`, a purchase
+`top_up`. A frame with `actor_name` or `cancelled_by: "club"` is never owned by a member-route write
+(a desk route can own one — an admin's own wallet). A reasonless legacy frame keeps the old window
+(any money write and three seconds), which silenced a club adjustment landing beside a member's own
+write every time.
 
 ### 3.11 Quotes
 
@@ -639,9 +654,9 @@ Upcoming games become `my_share_minutes`, `my_paid_minutes` and `my_owing_minute
 
 **A member cannot cancel a booking they have checked in to (R15 D15-5):** `409 {"error":"already_checked_in"}`. **Why:** the scan proved the court was used, a self-cancel refunds nothing, and the freed slot could be resold — the club would take the minutes twice for one lit slot. The admin cancel is not refused for a started or checked-in session, including the admin's own booking; it cancels with nothing refunded and the booker gets the `cancelled_no_refund` frame.
 
-**The desk is told why a booking it can see is not cancellable (R17 E17-6 / J17-7).** `POST /api/v1/admin/bookings/{id}/cancel` on a booking already cancelled answers `409 {"error":"booking_not_open"}` (the split and add routes' word); on one that is played, a no-show or a club hold, `409 {"error":"not_cancellable","status":"completed|no_show|blocked"}`. Both were a bare 404. **A member's own cancel of such a booking stays 404**, as before: a 409 would tell a stranger the id is real. In a bulk cancel, an already-cancelled row is `already_cancelled` and a settled one is `failed` with `error: "not_cancellable"`.
+**The desk is told why a booking it can see is not cancellable (R17 E17-6 / J17-7).** `POST /api/v1/admin/bookings/{id}/cancel` on a booking already cancelled answers `409 {"error":"booking_not_open"}` (the split and add routes' word); on one that is played, a no-show or a club hold, `409 {"error":"not_cancellable","status":"completed|no_show|blocked"}`. Both were a bare 404. **Since R18 (J18-8) a member's cancel of their OWN such booking answers the same** — `409 booking_not_open` on a cancelled one, `409 not_cancellable {status}` on a played one, a no-show or a hold — the losing half of a double-tap included, which read "That booking is no longer there" about a game the member could see. A stranger's cancel is still 404: the ownership check comes first, so a 409 never tells a stranger the id is real. The member's sheet treats both as final (`feature-spec.md` §7). In a bulk cancel, an already-cancelled row is `already_cancelled` and a settled one is `failed` with `error: "not_cancellable"`.
 
-**A cancel that loses its booking to a concurrent write is decided again (R17 J17-1)** — the other half of a double-tap, the desk at the same moment, a check-in at the pad — on the row as it now is (`DatabaseRetry.ReDecideOnLostRaceAsync`): refused by what happened to it (`booking_not_open` / `not_cancellable` at the desk, 404 for the member), or cancelled under the rules that now apply (a session that just started refunds nothing). It used to answer "not found" about a booking that plainly exists. Two cancels at once refund exactly once.
+**A cancel that loses its booking to a concurrent write is decided again (R17 J17-1)** — the other half of a double-tap, the desk at the same moment, a check-in at the pad — on the row as it now is (`DatabaseRetry.ReDecideOnLostRaceAsync`): refused by what happened to it (`booking_not_open` / `not_cancellable`, at the desk and — since R18 J18-8 — for the member on their own booking), or cancelled under the rules that now apply (a session that just started refunds nothing). It used to answer "not found" about a booking that plainly exists. Two cancels at once refund exactly once.
 
 **The desk cancel's record says what it did (R17 E17-7).** The `booking.cancelled_by_admin` change record's after side, filled while the row is still staged in the cancellation's own save (it is append-only once saved), is `{status: "cancelled", part_of_batch?, refunded_minutes, penalty_minutes, penalty_waived, started, checked_in_at, checked_in_by: {user_id, name} | null}` — `started` is a check-in or a start already past; `checked_in_by` whoever had checked in (`feature-spec.md` §11's checker). It held only `{"status":"cancelled"}`, so the club's undeletable history of a desk cancel could not say whether the member got anything back. The `booking.cancelled` audit row keeps the desk's words as **`reason`**, and **`waive_reason` only when a penalty was actually waived**; readers (`BookingCancellation.ReasonOf`) take `reason`, then `waive_reason`, because rows before R17 carry the words only under `waive_reason`.
 

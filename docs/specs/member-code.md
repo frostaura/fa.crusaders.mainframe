@@ -565,6 +565,15 @@ together, actor = payer, subject = the booking — through `ChargeOnActivationAs
 which case the confirm also stamps `CheckedInAt` for the payer as `/activate` would. Idempotent on
 `(tenant, device, nonce)`.
 
+**Whose check-in it is (R18 E18-6, decided).** A scan stamps only the scanner's own seat: a payer
+who holds an accepted seat gets that seat stamped, never the organiser's. The booking's own
+`CheckedInAt` is whoever lit the court — the money rule, unchanged. **A payer with no accepted seat
+is not a player** (P11: the booker or an accepted seat — `play.md` §1): the payment and the scan
+are on their Night, the session is not on their play record. The organiser of a seatless game who
+scans after a payer lit it is recorded **once**, as one seatless `court.checked_in` row
+(`participant_id` null — `SeatCheckIn.StageBookerArrivalAsync`); a second scan adds nothing. Before
+R18 that arrival left no row on any record. `AttendanceQuery` is unchanged.
+
 ### 9.3 The glass, exactly — and why it fits
 
 The firmware drives the fitted 20×4 panel with the **safe-subset contract**: rows 0–1 clipped at
