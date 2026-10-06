@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { playersEndpoints, type SocialPrefs } from "@/lib/playersApi";
-import { UnsureOutcome, writeOrReadBack } from "@/lib/lostReply";
+import { UnsureOutcome, isConflictRetry, writeOrReadBack } from "@/lib/lostReply";
 import { PLAYERS_UNSURE, PRIVACY_COPY as COPY } from "@/lib/playersCopy";
 import { useRead, type Read } from "@/lib/useRead";
 
@@ -77,7 +77,9 @@ export function usePrivacyPrefs(): PrivacyPrefs {
       setWanted((current) => ({ ...current, [key]: before }));
       const label = PRIVACY_LABEL[key].label;
       const unknown = error instanceof UnsureOutcome && !error.checked;
-      setErrors((current) => ({ ...current, [key]: unknown ? PLAYERS_UNSURE.privacy(label) : COPY.saveFailed(label) }));
+      // R18 X18-1 — a 503 conflict_retry is said as that, never "the club didn't answer".
+      const unsure = unknown && isConflictRetry(error.original) ? PLAYERS_UNSURE.privacyConflict : PLAYERS_UNSURE.privacy;
+      setErrors((current) => ({ ...current, [key]: unknown ? unsure(label) : COPY.saveFailed(label) }));
     } finally {
       mark(key, false);
     }

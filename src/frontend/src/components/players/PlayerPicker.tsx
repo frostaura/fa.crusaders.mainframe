@@ -117,12 +117,22 @@ export type PlayerPickerDialogProps = PlayerPickerProps & {
   title: string;
 };
 
+/**
+ * R18 (L17-6) — a pick refused while the picker was still closing (the add answers in ~60ms, the
+ * close animation ends ~300ms in) has already taken focus to the page's refusal; returning focus to
+ * Invite then took it away again. Focus that already sits on a notice outside the picker stays.
+ */
+function keepRefusalFocus(event: Event) {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active.closest("[data-detail-notice]")) event.preventDefault();
+}
+
 /** The same picker in its own dialog (with the ×), for a page that has no sheet open. */
 export function PlayerPickerDialog(props: PlayerPickerDialogProps) {
   const { open, onOpenChange, title, ...picker } = props;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-dialog="player-picker" className={TOP_ANCHORED_SHEET}>
+      <DialogContent data-dialog="player-picker" className={TOP_ANCHORED_SHEET} onCloseAutoFocus={keepRefusalFocus}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{PICKER.dialogDescription}</DialogDescription>

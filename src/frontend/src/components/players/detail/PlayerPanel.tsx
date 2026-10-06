@@ -40,7 +40,7 @@ export function PlayerPanel({ detail, reload, say }: Props) {
   // is still a second button to a screen reader).
   const wide = useMediaQuery(LG_UP);
   if (!seat || detail.viewer.role !== "player") return null;
-  if (isCancelled(detail)) return <CancelledShare seat={seat} />;
+  if (isCancelled(detail)) return <CancelledShare seat={seat} detail={detail} />;
   if (isNoShow(detail)) return <NoShowShare seat={seat} />;
   const { permissions } = detail;
   const review = permissions.can_accept ? (
@@ -72,14 +72,25 @@ export function PlayerPanel({ detail, reload, say }: Props) {
 }
 
 /** R1 F2.10 — a cancelled game asks nothing more: what they paid stands, or there is nothing to pay. */
-function CancelledShare({ seat }: { seat: DetailPlayer }) {
+function CancelledShare({ seat, detail }: { seat: DetailPlayer; detail: BookingDetail }) {
   return (
     <Section title={DETAIL_PLAYER.title}>
-      <p className="text-sm text-text-secondary" data-cancelled-share="">
-        {seat.paid_minutes > 0 ? keepAmounts(DETAIL_CANCELLED.partnerPaid(minutesSpoken(seat.paid_minutes))) : DETAIL_CANCELLED.partnerNothing}
-      </p>
+      <p className="text-sm text-text-secondary" data-cancelled-share="">{keepAmounts(cancelledShareWords(seat, detail))}</p>
     </Section>
   );
+}
+
+/**
+ * R18 J18-6 / E18-5 — what became of this seat's share, as its record says: paid and standing (the
+ * lights had been on), paid by hand (nothing moved here), back to them (with the figure), or nothing
+ * paid — never "any share you'd paid went back" to a seat that paid nothing in the app.
+ */
+function cancelledShareWords(seat: DetailPlayer, detail: BookingDetail): string {
+  if (seat.paid_minutes > 0) return DETAIL_CANCELLED.partnerPaid(minutesSpoken(seat.paid_minutes));
+  const back = seat.returned_minutes ?? 0;
+  if (back > 0) return DETAIL_CANCELLED.partnerBack(minutesSpoken(back));
+  if (seat.settled_outside) return DETAIL_CANCELLED.partnerByHand(detail.organiser.name ? firstName(detail.organiser.name) : null);
+  return detail.attendance.checked_in_at ? DETAIL_CANCELLED.partnerStartedNothing : DETAIL_CANCELLED.partnerNothing;
 }
 
 /**

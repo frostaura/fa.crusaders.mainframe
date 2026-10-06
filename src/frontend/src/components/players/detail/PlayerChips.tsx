@@ -5,7 +5,8 @@ import { CheckCircle, UserPlus } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_COPY } from "@/lib/playersCopy";
-import { formerPlayers, isCancelled, positions, seatName, statusTone, statusWord, type SeatPosition } from "./detailModel";
+import { formerPlayers, isCancelled, isViewerSeat, positions, seatName, statusTone, statusWord, type SeatPosition } from "./detailModel";
+import { useAuth } from "@/lib/useAuth";
 import { DETAIL_COLUMN_GAP } from "./detailLayout";
 
 /**
@@ -19,7 +20,9 @@ type Props = { detail: BookingDetail; actions?: SeatActions };
 
 export function PlayerChips({ detail, actions }: Props) {
   const former = formerPlayers(detail);
-  const mine = detail.viewer.participant_id;
+  const auth = useAuth();
+  const userId = auth.status === "authenticated" ? auth.userId : null;
+  const mine = (p: DetailPlayer) => isViewerSeat(p, detail, userId);
   const cancelled = isCancelled(detail);
   const teams = drawnTeams(detail);
   const lone = teams.length === 1;
@@ -55,7 +58,7 @@ function drawnTeams(detail: BookingDetail): { label: string; seats: SeatPosition
 }
 
 type TeamProps = {
-  label: string; seats: SeatPosition[]; lone: boolean; mine: string | null; actions?: SeatActions; cancelled: boolean;
+  label: string; seats: SeatPosition[]; lone: boolean; mine: (p: DetailPlayer) => boolean; actions?: SeatActions; cancelled: boolean;
   players: readonly DetailPlayer[];
 };
 
@@ -68,7 +71,7 @@ function Team(props: TeamProps) {
       <h3 className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{label}</h3>
       <ul className={cn("grid grid-cols-1 gap-2", lone && "@[32rem]/team:grid-cols-2")}>
         {seats.map((s) => (s.player
-          ? <SeatChip key={s.seat} player={s.player} isMe={s.player.participant_id !== null && s.player.participant_id === mine} actions={actions} cancelled={cancelled} players={players} />
+          ? <SeatChip key={s.seat} player={s.player} isMe={mine(s.player)} actions={actions} cancelled={cancelled} players={players} />
           : <FreeSeat key={s.seat} seat={s.seat} />))}
       </ul>
     </div>

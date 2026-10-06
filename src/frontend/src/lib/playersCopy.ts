@@ -636,10 +636,19 @@ export const PLAYERS_UNSURE = {
   /** The admin's god-mode act on a seat, and the admin's add. */
   admin: (name: string) => unsureWords(`${name}'s seat is as it was`, "that went through", "the booking"),
   adminAdd: unsureWords("no new player is on the booking", "the player was added", "the booking"),
+  /** R18 X18-1 — the reminder, when the club answered `503 conflict_retry`: it did answer. */
+  nudgeConflict: (name: string) =>
+    `Someone else was changing this booking at the same moment, so we can't tell whether the reminder reached ${name}. Give it a few minutes before reminding them again — they may already have it.`,
   /** A privacy switch whose reply was lost and whose read-back failed too. */
   privacy: (label: string) => `The club didn't answer and we couldn't check either, so we can't tell whether "${label}" changed. Refresh the page to see.`,
+  /** R18 X18-1 — the same, after a `503 conflict_retry`. */
+  privacyConflict: (label: string) =>
+    `Your settings were being changed somewhere else at the same moment and we couldn't check either, so we can't tell whether "${label}" changed. Refresh the page to see.`,
   star: (name: string) =>
     `The club didn't answer, so we can't tell whether the star on ${name} changed. Close this and open it again to see.`,
+  /** R18 X18-1 — the same, after a `503 conflict_retry`. */
+  starConflict: (name: string) =>
+    `Your favourites were being changed somewhere else at the same moment, so we can't tell whether the star on ${name} changed. Close this and open it again to see.`,
 } as const;
 
 /** A players write that landed although its reply was lost: its own sentence, and that we checked. */
@@ -716,7 +725,15 @@ export const DETAIL_CANCELLED = {
   paidRow: (paid: string) => `Paid ${paid}`,
   /** R2 F2-4 — a partner's share that went back when the game was cancelled: "25 min back". */
   returnedRow: (returned: string) => `${returned} back`,
-  partnerNothing: "The game was cancelled, so there's nothing for you to pay — any share you'd paid went back to you.",
+  partnerNothing: "The game was cancelled, so there's nothing for you to pay.",
+  /** R18 J18-6 / E18-5 — said only when a share DID go back to the seat, with its figure. */
+  partnerBack: (back: string) => `The game was cancelled, so there's nothing for you to pay — the ${back} you'd paid went back to you.`,
+  /** R18 J18-6 — the club recorded this seat as paid to the organiser by hand: nothing moved in the app. */
+  partnerByHand: (organiser: string | null) => organiser
+    ? `The game was cancelled. You paid ${organiser} by hand, so nothing moved in the app — anything owed back is between you and ${organiser}.`
+    : "The game was cancelled. You paid your share by hand, so nothing moved in the app.",
+  /** R18 E18-5 — cancelled after someone had checked in, and this seat had paid nothing in the app. */
+  partnerStartedNothing: "The game was cancelled after check-in. You hadn't paid a share in the app, so nothing moved.",
   partnerPaid: (paid: string) => `The game was cancelled after check-in, so the ${paid} you paid stands.`,
   /**
    * R5 M5-7 — a late cancellation says its penalty on the booking as the sheet did, as the ledger's
@@ -1208,7 +1225,8 @@ export const INBOX_COPY = {
   resolved: "Nothing needed now",
   resolvedHint: "This no longer needs you — the booking has the latest.",
   /** Lost-reply audit (R3): a mark whose reply was lost and whose look failed too. */
-  markUnknown: "The club didn't answer and we couldn't check either, so we can't tell whether that was marked read. Refresh to see.",
+  /** R18 X18-1 — true of a lost reply and of a `503 conflict_retry` alike: no clear answer, no look. */
+  markUnknown: "We didn't get a clear answer from the club and couldn't check either, so we can't tell whether that was marked read. Refresh to see.",
 } as const;
 
 /** The bell's words live with the shell (`bellCopy`, so this file stays out of the entry chunk). */

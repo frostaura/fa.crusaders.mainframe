@@ -163,9 +163,44 @@ export function liveCount(d: BookingDetail): number {
 }
 
 /** The viewer's own seat, when they have one. */
+/**
+ * R18 J18-7 — whether a seat is the viewer's own, for "(you)". By its participant id — and by its
+ * member, because the organiser's own seat on a solo or club-made booking has no participant id
+ * (`viewer.participant_id` is null there too, so the id alone never matched and the organiser read
+ * as a stranger on their own booking).
+ */
+export function isViewerSeat(p: DetailPlayer, d: BookingDetail, userId: string | null): boolean {
+  if (p.participant_id !== null && p.participant_id === d.viewer.participant_id) return true;
+  return p.kind !== "guest" && p.kind !== "open_link" && p.user_id !== null && userId !== null && p.user_id === userId;
+}
+
 export function mySeat(d: BookingDetail): DetailPlayer | null {
   const id = d.viewer.participant_id;
   return id ? d.players.find((p) => p.participant_id === id) ?? null : null;
+}
+
+/**
+ * R18 L18-7 — whether the page's court column (your seat, attendance, the result) draws anything.
+ * A cancelled game nobody scanned, seen by its organiser or an admin, has none of the three; its
+ * empty wrapper (with the cancel panel's) left a 96px gap under the money.
+ */
+export function courtColumnShows(d: BookingDetail): boolean {
+  const seatPanel = d.viewer.role === "player" && mySeat(d) !== null;
+  const attendance = !(isCancelled(d) && !d.attendance.checked_in_at);
+  return seatPanel || attendance || showsResult(d);
+}
+
+/** R15 D15-5 — the member's Cancel is offered only while the server allows it and nobody has checked in. */
+export function cancelPanelShows(d: BookingDetail): boolean {
+  return d.permissions.can_cancel && !d.attendance.checked_in_at;
+}
+
+/**
+ * R18 L18-8 — the admin's seat hands (add a player, a seat's menu) belong to a game still on: the
+ * API answers 409 for each of them on a cancelled booking.
+ */
+export function adminSeatHands(d: BookingDetail): boolean {
+  return !isCancelled(d);
 }
 
 /** "Court 1 · Tue 30 Sep, 18:00–18:45", in the club's zone. */

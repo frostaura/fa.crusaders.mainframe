@@ -191,12 +191,12 @@ function InviteList(props: ListProps) {
   return (
     <ul aria-label={INVITES_COPY.listLabel} className="flex flex-col gap-3">
       {pending ? (
-        <li key={`pending-${pending.token}`}>
+        <li key={`pending-${pending.token}`} className="@container/card">
           <InviteCard invite={pending.invite} to={pending.path} note={INVITES_COPY.pendingFrom} />
         </li>
       ) : null}
       {items.map((invite) => (
-        <li key={invite.participant_id}>
+        <li key={invite.participant_id} className="@container/card">
           <InviteCard
             invite={invite} onOpen={wide ? picked.pick : openSheet}
             current={wide && picked.invite?.participant_id === invite.participant_id}

@@ -30,13 +30,16 @@ export function InvitePanel({ invite, port }: { invite: Invite; port: AcceptPort
   );
   const heading = answerHeading(invite, INVITES_COPY.linkTitle, flow.askingDecline);
   return (
-    <PageShell width="narrow">
+    // R18 L18-9 — the width a member page has (the list beside it is `wide`): the card lays its
+    // facts and figures side by side from 44 root ems, rather than a 512px column on a 1440px screen.
+    <PageShell width="content">
       <PageHeader
         title={panelTitle(flow.outcome?.kind, heading.title)}
         description={heading.line}
         back={{ to: "/bookings/invites", label: INVITES_COPY.title }}
       />
-      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6">
+      {/* R18 L18-1 — p-3 under 18 root ems of page (150 %+ text on a phone): the facts inside keep 16px more. */}
+      <div data-invite-card="" className="@container/invite flex flex-col gap-4 rounded-2xl border border-border bg-bg-surface p-3 shadow-xs @[18rem]/page:p-4 sm:p-6">
         <AcceptBody flow={flow} reasonId={reasonId} headed />
         <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
           <AcceptActions flow={flow} reasonId={reasonId} dismiss={dismiss} />
@@ -59,7 +62,7 @@ function panelTitle(outcome: "accepted" | "declined" | undefined, asked: string)
 /** The page while the invite is read — the panel's own shape. */
 export function InvitePanelSkeleton({ loading, error, onRetry }: { loading: boolean; error: unknown; onRetry: () => void }) {
   return (
-    <PageShell width="narrow">
+    <PageShell width="content">
       <PageHeader title={INVITES_COPY.pageTitle} back={{ to: "/bookings/invites", label: INVITES_COPY.title }} />
       <StateBlock
         loading={loading}

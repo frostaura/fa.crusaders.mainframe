@@ -7,7 +7,7 @@ import { useBalance } from "@/lib/useBalance";
 import {
   playersEndpoints, type AddPlayersAnswer, type BookingDetail, type DetailPlayer, type PlayerSpec,
 } from "@/lib/playersApi";
-import { UnsureOutcome } from "@/lib/lostReply";
+import { UnsureOutcome, isConflictRetry } from "@/lib/lostReply";
 import { DETAIL_ACTIONS, firstName, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal } from "@/lib/playersCopy";
 import { focusAfterAction } from "@/lib/focusAfterAction";
 import { useAsyncAction } from "@/lib/useAsyncAction";
@@ -150,7 +150,9 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, pag
       failure: (error, p) => {
         const name = seatName(p, detail.players);
         const unknown = error instanceof UnsureOutcome;
-        say({ tone: unknown ? "info" : "danger", text: unknown ? PLAYERS_UNSURE.nudge(name) : playersRefusal(error, { action: DETAIL_ACTIONS.nudgeAction }) });
+        // R18 X18-1 — a 503 conflict_retry is an answer: someone else was changing the booking.
+        const words = unknown && isConflictRetry(error.original) ? PLAYERS_UNSURE.nudgeConflict : PLAYERS_UNSURE.nudge;
+        say({ tone: unknown ? "info" : "danger", text: unknown ? words(name) : playersRefusal(error, { action: DETAIL_ACTIONS.nudgeAction }) });
       },
     },
   );

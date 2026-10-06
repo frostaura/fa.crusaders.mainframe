@@ -6,7 +6,7 @@ import { Plus, Star } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { playersEndpoints, type PublicMember } from "@/lib/playersApi";
 import { useToast } from "@/components/toastContext";
-import { UnsureOutcome, writeOrReadBack } from "@/lib/lostReply";
+import { UnsureOutcome, isConflictRetry, writeOrReadBack } from "@/lib/lostReply";
 import { PICKER, PLAYERS_UNSURE } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { cn } from "@/lib/utils";
@@ -36,15 +36,17 @@ export function MemberRow(props: MemberRowProps) {
   const detail = props.detail ?? namesakeDetail(member);
   const detailId = useId();
   return (
-    <li className="flex items-center gap-1" data-member-row={member.user_id}>
+    // R18 L18-1 — the row is its own container: where photo, name, "+" and star cannot share a line
+    // with room for the words (a 320 px phone at 150–200 % text) the words take the row's whole width
+    // under the photo, instead of a ~56px column that broke "Member since" mid-word.
+    <li className="@container/row flex items-center gap-1" data-member-row={member.user_id}>
       <button
         type="button"
         aria-label={added ? `${member.name}, ${PICKER.added}` : PICKER.add(member.name)}
         aria-disabled={added || undefined}
         aria-describedby={detail ? detailId : undefined}
         onClick={added ? undefined : () => onPick(member)}
-        className={cn(
-          "flex min-h-touch min-w-0 flex-1 items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-left",
+        className={cn(ROW_GRID, "min-h-touch min-w-0 flex-1 rounded-lg border border-transparent px-2 py-1.5 text-left",
           "transition-colors duration-fast ease-standard motion-reduce:transition-none",
           added ? "cursor-default" : "hover:bg-bg-muted",
         )}
@@ -53,17 +55,29 @@ export function MemberRow(props: MemberRowProps) {
           {member.photo_url ? <AvatarImage src={member.photo_url} alt="" /> : null}
           <AvatarFallback name={member.name} />
         </Avatar>
-        <span className="grid grid-cols-[minmax(0,1fr)] min-w-0 flex-1 gap-0.5">
-          <span className="truncate text-sm font-semibold text-text-primary">{member.name}</span>
+        <span className={ROW_WORDS}>
+          {/* Two lines of name before an ellipsis — never "Ch…" — and a word breaks only if alone it cannot fit. */}
+          <span data-member-name="" className="line-clamp-2 break-words text-sm font-semibold text-text-primary">{member.name}</span>
           {/* R17 (CI class) — "6 Oct 2026" never splits its figure from its unit; the paint is glued. */}
-          {detail ? <span id={detailId} className="break-words text-xs text-text-secondary">{keepFiguresWhole(detail)}</span> : null}
+          {detail ? <span id={detailId} data-member-detail="" className="break-words text-xs text-text-secondary">{keepFiguresWhole(detail)}</span> : null}
         </span>
-        {added ? <Badge tone="neutral">{PICKER.added}</Badge> : <Plus size={16} aria-hidden="true" className="shrink-0 text-accent-strong" />}
+        <span className={ROW_MARK}>
+          {added ? <Badge tone="neutral">{PICKER.added}</Badge> : <Plus size={16} aria-hidden="true" className="shrink-0 text-accent-strong" />}
+        </span>
       </button>
       <StarButton member={member} favourites={favourites} />
     </li>
   );
 }
+
+/**
+ * R18 L18-1 — written whole, so Tailwind's scanner sees every class. Narrow (under 15 root ems of
+ * row, 240px at 100 % and 480px at 200 %): photo and mark on the first line, the words
+ * under them across the row. Wide: photo · words · mark on one line, as before.
+ */
+const ROW_GRID = "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 @[15rem]/row:grid-cols-[auto_minmax(0,1fr)_auto]";
+const ROW_WORDS = "col-span-2 row-start-2 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0.5 @[15rem]/row:col-span-1 @[15rem]/row:col-start-2 @[15rem]/row:row-start-1";
+const ROW_MARK = "col-start-2 row-start-1 flex justify-self-end @[15rem]/row:col-start-3";
 
 /**
  * The star, optimistic: it turns at once and turns back if the server says no. `aria-pressed`
@@ -88,7 +102,9 @@ function StarButton({ member, favourites }: { member: PublicMember; favourites: 
       },
       failure: (error) => {
         const unknown = error instanceof UnsureOutcome && !error.checked;
-        toast.push({ tone: "danger", text: unknown ? PLAYERS_UNSURE.star(member.name) : PICKER.starFailed(member.name), unchanged: !unknown });
+        // R18 X18-1 — a 503 conflict_retry is said as that, never "the club didn't answer".
+        const unsure = unknown && isConflictRetry(error.original) ? PLAYERS_UNSURE.starConflict : PLAYERS_UNSURE.star;
+        toast.push({ tone: "danger", text: unknown ? unsure(member.name) : PICKER.starFailed(member.name), unchanged: !unknown });
       },
     },
   );

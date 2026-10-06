@@ -18,7 +18,8 @@ import { useBookingDetail, type DetailRead } from "@/components/players/detail/u
 import { useDetailLiveness } from "@/components/players/detail/useDetailLiveness";
 import { useOrganiserHands, type Notice } from "@/components/players/detail/useOrganiserHands";
 import {
-  adminActs, canNudge, canRemove, canShareLink, cancellationWords, detailTitle, isCancelled, organiserName, showsResult,
+  adminActs, adminSeatHands, canNudge, canRemove, canShareLink, cancelPanelShows, cancellationWords, courtColumnShows, detailTitle,
+  isCancelled, organiserName, showsResult,
 } from "@/components/players/detail/detailModel";
 import { ResultCard } from "@/components/play/ResultCard";
 import { ContextBar } from "@/components/ui/context-bar";
@@ -286,7 +287,7 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
   const wide = useMediaQuery(LG_UP);
   const seatActions = (p: DetailPlayer) => {
     const own = canInvite && (canNudge(p) || canShareLink(p) || canRemove(p));
-    const god = isAdmin && adminActs(p).length > 0;
+    const god = isAdmin && adminSeatHands(detail) && adminActs(p).length > 0;
     if (!own && !god) return null;
     return (
       <>
@@ -313,19 +314,25 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
         <div data-detail-money="" className={MONEY}>
           <MoneyPanel detail={detail} actions={detail.viewer.role === "organiser" ? <ChangeSplitButton hands={organiser} /> : null} />
         </div>
-        <div data-detail-court="" className={COURT}>
-          <PlayerPanel detail={detail} reload={reload} say={say} />
-          {/* A cancelled game nobody scanned has no attendance to report (R1 F2.10). */}
-          {cancelled && !detail.attendance.checked_in_at ? null : <Attendance detail={detail} />}
-          {/* P12 — the match result, below attendance: it can be recorded once the box saw the court.
-              Asked for only by the game's own players, and never on a cancelled game (R1 F2.15). */}
-          {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} freshAt={readAt} firstRead={earlyResult} /> : null}
-        </div>
-        <div data-detail-cancel="" className={CANCEL}>
-          <CancelPanel detail={detail} reload={reload} />
-        </div>
-        {isAdmin ? (
-          <div className={cn(ADMIN, "flex flex-col gap-8")}>
+        {/* R18 L18-7 — a wrapper is drawn only with something in it: two empty ones were a 96px gap. */}
+        {courtColumnShows(detail) ? (
+          <div data-detail-court="" className={COURT}>
+            <PlayerPanel detail={detail} reload={reload} say={say} />
+            {/* A cancelled game nobody scanned has no attendance to report (R1 F2.10). */}
+            {cancelled && !detail.attendance.checked_in_at ? null : <Attendance detail={detail} />}
+            {/* P12 — the match result, below attendance: it can be recorded once the box saw the court.
+                Asked for only by the game's own players, and never on a cancelled game (R1 F2.15). */}
+            {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} freshAt={readAt} firstRead={earlyResult} /> : null}
+          </div>
+        ) : null}
+        {cancelPanelShows(detail) ? (
+          <div data-detail-cancel="" className={CANCEL}>
+            <CancelPanel detail={detail} reload={reload} />
+          </div>
+        ) : null}
+        {/* R18 L18-8 — no admin hands on a cancelled game (each would be refused 409). */}
+        {isAdmin && adminSeatHands(detail) ? (
+          <div data-detail-admin="" className={cn(ADMIN, "flex flex-col gap-8")}>
             <AdminSection hands={admin} />
             <AdminCancelPanel detail={detail} reload={reload} />
           </div>

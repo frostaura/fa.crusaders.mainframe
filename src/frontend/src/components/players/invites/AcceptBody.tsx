@@ -17,6 +17,7 @@ import { inviteCapSentence, inviteRefusal, inviteWhen, organiserName } from "./i
 import type { AcceptAnswer } from "@/lib/playersApi";
 import type { AcceptFlow } from "./useAcceptFlow";
 import { useDailyCap } from "./useDailyCap";
+import { cn } from "@/lib/utils";
 
 /**
  * What an invite asks, and what saying yes would do — the accept sheet's body, and the whole of
@@ -53,8 +54,11 @@ export function AcceptBody({ flow, reasonId, headed = false }: {
       {/* The last answer first: a risen share or a refusal is the reason the sheet changed. */}
       <Problem flow={flow} />
       {flow.blocked === "rereading" ? <p role="status" id={reasonId} className="text-sm text-text-secondary">{flow.readingAgain}</p> : null}
-      <GameFacts flow={flow} />
-      <MoneyFacts flow={flow} />
+      {/* R18 L18-9 — the game and the money side by side where the invite page has the width. */}
+      <div className={FACTS_PAIR}>
+        <GameFacts flow={flow} />
+        <MoneyFacts flow={flow} />
+      </div>
       {flow.blocked === "short" ? <ShortNotice shortBy={flow.money.shortBy} reasonId={reasonId} /> : null}
       <CapEffect flow={flow} reasonId={reasonId} />
       {/* A share of nothing has nothing to pay by and nothing to lapse (R1 F2.14). */}
@@ -66,6 +70,13 @@ export function AcceptBody({ flow, reasonId, headed = false }: {
     </div>
   );
 }
+
+/**
+ * R18 L18-9 — the invite PAGE's card is `@container/invite` (the sheet and the split pane are not):
+ * from 44 root ems of card the facts and the figures stand in two columns, as the list's own pane
+ * uses its width. Written whole for Tailwind's scanner.
+ */
+const FACTS_PAIR = "flex flex-col gap-4 @[44rem]/invite:grid @[44rem]/invite:grid-cols-2 @[44rem]/invite:items-start @[44rem]/invite:gap-x-8";
 
 /**
  * One term and its value. The wrapping `div` is the only element between the `dl` and its
@@ -86,7 +97,9 @@ function GameFacts({ flow }: { flow: AcceptFlow }) {
   return (
     // R12 — one column until the card is 16 root ems wide: two at 320 / 200 % broke "Cou / rt 1".
     <div className="@container">
-    <dl className="grid grid-cols-1 gap-x-4 gap-y-3 rounded-xl border border-border bg-bg-surface p-3 @[16rem]:grid-cols-2 sm:p-4">
+    // R18 L18-1 — and no box of its own under 13 root ems (a card inside the page's card at 150 %+
+    // text left a 190px column): the facts take the card's width.
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-3 rounded-xl border-border bg-bg-surface @[13rem]:border @[13rem]:p-3 @[16rem]:grid-cols-2 sm:p-4" data-game-facts="">
       <Fact label={INVITES_COPY.court}>{invite.court_name ?? INVITES_COPY.court}</Fact>
       <Fact label={INVITES_COPY.players}>{playersCount(invite.players)}</Fact>
       <Fact label={INVITES_COPY.when} className="@[16rem]:col-span-2">{inviteWhen(invite)}</Fact>
@@ -108,9 +121,11 @@ function GameFacts({ flow }: { flow: AcceptFlow }) {
 /** One figure of the accept: whole minutes, read aloud in words (`<Minutes>`), never "h" or "min". */
 function MoneyRow({ label, value, strong = false }: { label: string; value: number; strong?: boolean }) {
   return (
-    <div className="flex items-baseline justify-between gap-4">
-      <dt className={strong ? "text-sm font-semibold text-text-primary" : "text-sm text-text-secondary"}>{label}</dt>
-      <dd className={strong ? "text-base font-semibold text-text-primary" : "text-sm text-text-primary"}><Minutes value={value} /></dd>
+    // R18 L18-4 — the figure is one piece ("10 min", never "10 / min"): it wraps under its term as a
+    // whole where the two cannot share a line (320 / 200 %).
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5" data-money-row="">
+      <dt className={cn("min-w-0 break-words", strong ? "text-sm font-semibold text-text-primary" : "text-sm text-text-secondary")}>{label}</dt>
+      <dd className={cn("ml-auto whitespace-nowrap", strong ? "text-base font-semibold text-text-primary" : "text-sm text-text-primary")}><Minutes value={value} /></dd>
     </div>
   );
 }

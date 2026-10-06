@@ -5,7 +5,8 @@ import { minutesSpoken } from "@/lib/minutes";
 import { cn } from "@/lib/utils";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_MONEY, DETAIL_NO_SHOW, playersWhen } from "@/lib/playersCopy";
-import { isCancelled, isLive, isNoShow, keepAmounts, organiserName, seatName, settlementOf, statusKey } from "./detailModel";
+import { isCancelled, isLive, isNoShow, isViewerSeat, keepAmounts, organiserName, seatName, settlementOf, statusKey } from "./detailModel";
+import { useAuth } from "@/lib/useAuth";
 
 /**
  * Who paid what. The organiser covered the court at booking; each partner is ASKED for a share,
@@ -127,11 +128,13 @@ function unpaidSentence(p: DetailPlayer, name: string, deadline: string, toWhom:
 }
 
 function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: string }) {
+  const auth = useAuth();
+  const userId = auth.status === "authenticated" ? auth.userId : null;
   const live = detail.players.filter(isLive);
   const toWhom = detail.viewer.role === "organiser" ? DETAIL_MONEY.toYou : organiserName(detail) ?? DETAIL_MONEY.toYou;
   // The viewer's own unpaid share is said in their own panel, in the second person.
   const unpaid = live.filter((p) => p.kind === "member" && p.unpaid_minutes > 0 && !p.settled_outside
-    && p.participant_id !== detail.viewer.participant_id);
+    && !isViewerSeat(p, detail, userId));
   return (
     <div className="flex flex-col gap-3">
       <h3 className="text-sm font-semibold text-text-primary">{DETAIL_MONEY.perPlayerTitle}</h3>
@@ -139,8 +142,7 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
         {live.map((p) => (
           <li key={p.participant_id ?? `seat-${p.seat}`} className={PAIR}>
             <span className="min-w-0 break-words font-medium text-text-primary">
-              {p.participant_id !== null && p.participant_id === detail.viewer.participant_id
-                ? DETAIL_COPY.you(seatName(p, detail.players)) : seatName(p, detail.players)}
+              {isViewerSeat(p, detail, userId) ? DETAIL_COPY.you(seatName(p, detail.players)) : seatName(p, detail.players)}
             </span>
             <span className={cn(PAIR_RIGHT, "text-text-secondary")}>{keepAmounts(lineFor(p))}</span>
           </li>

@@ -42,7 +42,11 @@ type CardProps = {
  * they drop under the avatar at the card's full width instead of an ~80px column beside it
  * ("Wai / ting / for / you / r" in the badge). At 100 % text a phone keeps them side by side.
  */
-const CARD_CLASS = "flex flex-wrap w-full min-h-touch items-start gap-3 rounded-xl border border-border bg-bg-surface p-4 text-left shadow-xs no-underline";
+/**
+ * R18 L18-1 — the padding is the list item's (`@container/card`): under 17 root ems (a 320 px phone
+ * at 150 % text and up) it is p-3, so the heading has 16px more before a long name has to break.
+ */
+const CARD_CLASS = "flex flex-wrap w-full min-h-touch items-start gap-3 rounded-xl border border-border bg-bg-surface p-3 @[17rem]/card:p-4 text-left shadow-xs no-underline";
 
 export function InviteCard({ invite, onOpen, to, note, current, actions }: CardProps) {
   const body = <CardBody invite={invite} note={note} />;
