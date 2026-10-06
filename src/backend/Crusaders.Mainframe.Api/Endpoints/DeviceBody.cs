@@ -109,18 +109,25 @@ public static partial class DeviceBody
         return macs.Count == 1 && DeviceRegistryService.NormaliseMacAddress(macs[0]) != charged;
     }
 
-    /// <summary>Every value of a top-level <c>"mac"</c> property (any case), in order. Empty for a body that is not an object.</summary>
+    /// <summary>Every value of a top-level <c>"mac"</c> property (any case), in order, as far as the bytes parse. Empty for a body that is not an object.</summary>
     internal static List<string> TopLevelMacs(byte[] bytes)
     {
         var found = new List<string>();
         var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
-        while (reader.Read())
+        try
         {
-            // Any spelling the binder would take for it: the device routes bind case-insensitively.
-            if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1
-                || !string.Equals(reader.GetString(), "mac", StringComparison.OrdinalIgnoreCase)) continue;
-            if (!reader.Read()) break;
-            found.Add(reader.TokenType == JsonTokenType.String ? reader.GetString() ?? "" : "");
+            while (reader.Read())
+            {
+                // Any spelling the binder would take for it: the device routes bind case-insensitively.
+                if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1
+                    || !string.Equals(reader.GetString(), "mac", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!reader.Read()) break;
+                found.Add(reader.TokenType == JsonTokenType.String ? reader.GetString() ?? "" : "");
+            }
+        }
+        catch (JsonException)
+        {
+            // R19 D19-4: a body that stops parsing (one being filed as unreadable) names what it named so far.
         }
         return found;
     }
@@ -173,8 +180,14 @@ public static partial class DeviceBody
     }
 
     /// <summary>
-    /// Files the fault, against the board when the bytes still name a MAC this club registered.
+    /// Files the fault, against the board when the bytes name exactly one MAC and this club registered it.
     /// Never throws: a monitoring write must not decide what the box is answered.
+    ///
+    /// <para>
+    /// R19 D19-4: a body naming two boards (<see cref="BoardsNamed"/>) is filed against NEITHER — the
+    /// club's folded row — with every board it named in the detail. Filing it against the first-named
+    /// board blamed the court box for a body the door may have sent (and the door, in the other order).
+    /// </para>
     /// </summary>
     private static async Task FileAsync(HttpContext ctx, byte[] bytes, string detail)
     {
@@ -183,8 +196,10 @@ public static partial class DeviceBody
         var name = slash >= 0 ? route[(slash + 1)..] : route;
         try
         {
-            var device = await DeviceOfAsync(ctx, bytes);
-            ctx.RequestServices.GetRequiredService<DeviceFaultSink>().MalformedBody(name, detail, device);
+            var named = BoardsNamed(ctx, bytes);
+            var device = named.Count == 1 ? await DeviceOfAsync(ctx, named[0]) : null;
+            var said = named.Count > 1 ? $"{detail} (boards named: {string.Join(", ", named)})" : detail;
+            ctx.RequestServices.GetRequiredService<DeviceFaultSink>().MalformedBody(name, said, device);
         }
         catch (Exception ex)
         {
@@ -193,12 +208,26 @@ public static partial class DeviceBody
         }
     }
 
-    /// <summary>The registered board a body's <c>"mac"</c> names, read out of the raw text; null when it names none.</summary>
-    private static async Task<Domain.Device?> DeviceOfAsync(HttpContext ctx, byte[] bytes)
+    /// <summary>The most boards a fault's detail lists; a body naming more is not a board talking.</summary>
+    internal const int MaxBoardsListed = 4;
+
+    /// <summary>
+    /// R19 D19-4: every distinct board MAC (normalised) the request named, in order: the one the limiter
+    /// charged, each <c>"mac"</c> anywhere in the raw text, and each top-level <c>mac</c> in any case (read as
+    /// far as the bytes parse). Values that are not a MAC are not listed — they are the body's words, not a
+    /// board — and the list stops at <see cref="MaxBoardsListed"/>.
+    /// </summary>
+    internal static List<string> BoardsNamed(HttpContext ctx, byte[] bytes)
     {
-        var match = MacField().Match(Encoding.UTF8.GetString(bytes));
-        var mac = match.Success ? DeviceRegistryService.NormaliseMacAddress(match.Groups[1].Value) : null;
-        if (mac is null) return null;
+        var raw = new List<string?> { Security.DeviceRateKey.ChargedMac(ctx) };
+        raw.AddRange(MacField().Matches(Encoding.UTF8.GetString(bytes)).Select(m => m.Groups[1].Value));
+        raw.AddRange(TopLevelMacs(bytes));
+        return [.. raw.Select(DeviceRegistryService.NormaliseMacAddress).OfType<string>().Distinct(StringComparer.Ordinal).Take(MaxBoardsListed)];
+    }
+
+    /// <summary>The registered board with this (normalised) MAC; null when the club has none.</summary>
+    private static async Task<Domain.Device?> DeviceOfAsync(HttpContext ctx, string mac)
+    {
         var db = ctx.RequestServices.GetRequiredService<MainframeDbContext>();
         return await db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.MacAddress == mac, ctx.RequestAborted);
     }
