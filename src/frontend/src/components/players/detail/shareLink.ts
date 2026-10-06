@@ -1,3 +1,6 @@
+import { UnsureOutcome, isConflictRetry } from "@/lib/lostReply";
+import { PLAYERS_UNSURE } from "@/lib/playersCopy";
+
 /**
  * Handing an invite link on: the phone's own share sheet first (WhatsApp is one tap away there),
  * then the clipboard, and — when neither is allowed — the page shows the link for a long-press.
@@ -44,4 +47,10 @@ export async function shareLink(url: string, title: string, text: string): Promi
 /** The clipboard alone — the "Copy link" button beside Share. */
 export function copyLink(url: string): Promise<ShareOutcome> {
   return copy(url);
+}
+
+/** A new link whose outcome is unknown, said by why (R17 X17-1: a conflict_retry is a clash); null for a refusal. */
+export function linkUnsure(error: unknown): string | null {
+  if (!(error instanceof UnsureOutcome)) return null;
+  return isConflictRetry(error.original) ? PLAYERS_UNSURE.linkConflict : PLAYERS_UNSURE.link;
 }

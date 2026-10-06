@@ -121,7 +121,8 @@ export const PLAYERS_REFUSAL: Record<string, string> = {
   invite_closed: "This invite has closed — the game was cancelled, or its shares are settled.",
   not_invited: "That seat isn't waiting for an answer any more.",
   nothing_to_nudge: "There's nothing to remind them about — they've answered and paid.",
-  conflict_retry: "Someone else changed this booking at the same moment. The page has the latest — try again.",
+  // R17 X17-1 — one form with the rest of the app's clash sentence (FE17s): present tense, "try again now".
+  conflict_retry: "Someone else was changing this booking at the same moment. The page has the latest — try again now.",
   reason_required: "Give a reason — it goes on the club's record.",
   overdraft_not_authorised: "Collecting past a member's balance needs your explicit go-ahead.",
   nothing_to_collect: "There's nothing left to collect on that seat.",
@@ -630,6 +631,8 @@ export const PLAYERS_UNSURE = {
   nudge: (name: string) =>
     `The club didn't answer, so we can't tell whether the reminder reached ${name}. Give it a few minutes before reminding them again — they may already have it.`,
   link: "The club didn't answer, so we can't tell whether a new link was made — if it was, the old link has stopped working. Make a new link to get one you can share.",
+  /** R17 X17-1 — the same, when the club answered `503 conflict_retry`. */
+  linkConflict: "Someone else was changing this booking at the same moment, so we can't tell whether a new link was made — if it was, the old link has stopped working. Make a new link to get one you can share.",
   /** The admin's god-mode act on a seat, and the admin's add. */
   admin: (name: string) => unsureWords(`${name}'s seat is as it was`, "that went through", "the booking"),
   adminAdd: unsureWords("no new player is on the booking", "the player was added", "the booking"),
@@ -1153,6 +1156,11 @@ export function declinedLine(organiser: string): string {
 export const INVITE_UNSURE = {
   checked: "The club didn't answer, so we checked your invite: you're not on this game yet — nothing was taken. Try again in a moment.",
   unchecked: "The club didn't answer and your invite couldn't be checked either, so we can't tell whether you're in. Check your bookings and your wallet before trying again.",
+  /** R17 X17-1 — the club answered `503 conflict_retry`: someone else was changing the game at that moment. */
+  conflict: {
+    checked: "Someone else was changing this game at the same moment, so we checked your invite: you're not on this game yet — nothing was taken. Try again now.",
+    unchecked: "Someone else was changing this game at the same moment and your invite couldn't be checked either, so we can't tell whether you're in. Check your bookings and your wallet before trying again.",
+  },
   provenNote: "The club's reply didn't arrive, so we checked your invite — you're in. Your wallet is being re-read.",
   /** R3 I-3 — the decline landed although its reply was lost. */
   declineProvenNote: "The club's reply didn't arrive, so we checked your invite — your answer went through.",

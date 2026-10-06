@@ -1,5 +1,6 @@
 import { ApiError } from "@/lib/api";
 import { UnsureOutcome } from "@/lib/bookingOutcome";
+import { unsureSentence } from "@/lib/lostReply";
 import { clubClock } from "@/lib/clubClock";
 import type { Invite, PartnerCap } from "@/lib/playersApi";
 import {
@@ -86,7 +87,8 @@ export function inviteRefusal(error: unknown, action: string = INVITES_COPY.acce
   if (error instanceof UnsureOutcome) {
     // R3 I-3 — a decline's lost reply is its own sentence: "nothing was taken" is the accept's.
     const words = action === INVITES_COPY.declineAction ? PLAYERS_UNSURE.decline : INVITE_UNSURE;
-    return error.checked ? words.checked : words.unchecked;
+    // R17 X17-1 — through `unsureSentence`, so a conflict_retry is said as the clash it was.
+    return unsureSentence(error, words) ?? (error.checked ? words.checked : words.unchecked);
   }
   if (error instanceof ApiError && error.code && error.code in INVITE_REFUSAL) return INVITE_REFUSAL[error.code];
   return playersRefusal(error, { action });

@@ -8,11 +8,10 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Copy, ShareNetwork } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { playersEndpoints } from "@/lib/playersApi";
-import { UnsureOutcome } from "@/lib/lostReply";
-import { PLAYERS_UNSURE, SHARE_LINK, playersRefusal } from "@/lib/playersCopy";
+import { SHARE_LINK, playersRefusal } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { orNotKnown } from "./detailReadBack";
-import { absoluteLink, copyLink, shareLink, type ShareOutcome } from "./shareLink";
+import { absoluteLink, copyLink, linkUnsure, shareLink, type ShareOutcome } from "./shareLink";
 
 /** Button icons, hoisted: 16px, decorative — the label names the action. */
 const COPY_ICON = <Copy aria-hidden="true" />;
@@ -79,7 +78,7 @@ function MakeStep({ name, rotate, onClose }: { name: string; rotate: Rotate; onC
       </DialogHeader>
       {rotate.error ? (
         <DialogBody>
-          <Alert tone="danger">{rotate.error instanceof UnsureOutcome ? PLAYERS_UNSURE.link : playersRefusal(rotate.error, { action: SHARE_LINK.makeAction })}</Alert>
+          <Alert tone="danger">{linkUnsure(rotate.error) ?? playersRefusal(rotate.error, { action: SHARE_LINK.makeAction })}</Alert>
         </DialogBody>
       ) : null}
       <DialogFooter>
