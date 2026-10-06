@@ -226,8 +226,11 @@ export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "de
     const kind = said ? READ_ANYWAY[said.kind] : undefined;
     if (said && kind) {
       // The server's headline follows the detail (`DeviceErrorCodes.HeadlineOf(code, detail)`), so it
-      // is the title — except on a row filed before it did, whose headline is the dropped one.
-      const headline = said.legacy ? "" : (row.headline ?? "").trim();
+      // is the title — except on a row filed before it did, whose headline is the dropped one; on a
+      // two-boards row, whose headline is the dropped one too ("could not read" a message it read);
+      // and on a row carrying the R19 board list, which the server's variant match does not see past.
+      const ownTitle = said.legacy || said.kind === "twoBoards" || said.boards.length > 0;
+      const headline = ownTitle ? "" : (row.headline ?? "").trim();
       return { title: headline || kind.title, means: kind.means, doThis: kind.doThis, unrecognised: false };
     }
   }
@@ -259,17 +262,25 @@ export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "de
  * a read-anyway row; it supplies the body (`means`/`doThis`), and a title only for a row with no
  * headline or one filed before the server's plain words (`legacy`), whose headline is the dropped one.
  */
-type BodyFaultKind = "replaced" | "version" | "dropped";
+type BodyFaultKind = "replaced" | "version" | "dropped" | "twoBoards";
 
 const REPLACED_DETAIL = "some characters could not be read and were replaced; the rest was read and used";
 const NOT_JSON_DETAIL = "the message could not be read at all, so nothing in it was used";
 const VERSION_DETAIL = "it reported a version longer than 32 characters, which was not kept";
+/** `DeviceBody.TwoBoardsDetail` (R18 D18-5): refused whole, so a flood cannot be charged to one board while acting as another. */
+const TWO_BOARDS_DETAIL = "the message named more than one board, so nothing in it was used";
+/**
+ * R19 D19-4 — `DeviceBody.FileAsync` adds " (boards named: <mac>, <mac>)" when a body named more
+ * than one board, and files it against neither (the club's folded row). Normalised MACs, at most four.
+ */
+const BOARDS_NAMED = /^(.+) \(boards named: ([0-9a-f]{12}(?:, [0-9a-f]{12})*)\)$/;
 
 /** What became of the message, by the server's detail: its kind and the words for it. */
 const BODY_FAULT: Record<string, { kind: BodyFaultKind; how: string; legacy?: true }> = {
   [REPLACED_DETAIL]: { kind: "replaced", how: "some characters in it could not be read and were replaced; the rest was read and used" },
   [VERSION_DETAIL]: { kind: "version", how: "it reported a version too long to keep, so the board's record keeps the one it had" },
   [NOT_JSON_DETAIL]: { kind: "dropped", how: "it could not be read at all, so nothing in it was used" },
+  [TWO_BOARDS_DETAIL]: { kind: "twoBoards", how: "it named more than one board, so nothing in it was used" },
   "body too large": { kind: "dropped", how: "it was far too large to be a board's message, so it could not be read" },
   // Filed before the server's details were words (d151a964); such rows stay in the history.
   "invalid UTF-8 read as U+FFFD": { kind: "replaced", how: "some characters in it could not be read and were replaced; the rest was read and used", legacy: true },
@@ -277,16 +288,36 @@ const BODY_FAULT: Record<string, { kind: BodyFaultKind; how: string; legacy?: tr
   malformed: { kind: "dropped", how: "it could not be read" },
 };
 
-/** "activate: <detail>" → the route and what became of the message; null for any other detail. */
-function bodyFaultOf(detail: string | null | undefined): { route: string; kind: BodyFaultKind; how: string; legacy: boolean } | null {
+/** What `bodyFaultOf` reads out of a detail. */
+type BodyFault = { route: string; kind: BodyFaultKind; how: string; legacy: boolean; boards: string[] };
+
+/** "activate: <detail>[ (boards named: …)]" → the route, what became of the message and the boards it named; null for any other detail. */
+function bodyFaultOf(detail: string | null | undefined): BodyFault | null {
   const parts = /^([a-z-]+): (.+)$/.exec((detail ?? "").trim());
-  const known = parts ? BODY_FAULT[parts[2]] : undefined;
-  if (!parts || !known) return null;
-  return { route: parts[1], kind: known.kind, how: known.how, legacy: known.legacy === true };
+  if (!parts) return null;
+  const listed = BOARDS_NAMED.exec(parts[2]);
+  const known = BODY_FAULT[listed ? listed[1] : parts[2]];
+  if (!known) return null;
+  const boards = listed ? listed[2].split(", ") : [];
+  return { route: parts[1], kind: known.kind, how: known.how, legacy: known.legacy === true, boards };
 }
 
-/** The two kinds whose message WAS used; a dropped one is the closed table's `malformed_body`. */
+/** "a", "a and b", "a, b and c". */
+function listOf(items: string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * The kinds with words of their own: the two whose message WAS used, and one refused for naming two
+ * boards (R19 — read perfectly well, so "could not read" is false). A dropped one is the closed
+ * table's `malformed_body`.
+ */
 const READ_ANYWAY: Partial<Record<BodyFaultKind, { title: string; means: string; doThis: string }>> = {
+  twoBoards: {
+    title: "A message named more than one board, so nothing in it was used",
+    means: "A message reached the club's system naming more than one board. It cannot tell which board sent it, so nothing in it was used — a scan in it lit no court and opened no door — and it is filed against no board.",
+    doThis: "One board's software is mixing up whose message it is sending. Note the boards in the detail and tell whoever looks after the boards; if it keeps happening, check what sits on the network between them and the club.",
+  },
   replaced: {
     title: "A board sent a few unreadable characters, and the rest was used",
     means: "A board sent a message with a few characters the club's system could not read. It read the rest and acted on it — a scan that came through garbled is refused at the court as a code nobody holds.",
@@ -313,7 +344,11 @@ const DEVICE_ROUTE: Record<string, string> = {
 function bodyFaultLine(text: string): string | null {
   const said = bodyFaultOf(text);
   if (!said) return null;
-  return `What the board was sending: ${DEVICE_ROUTE[said.route] ?? "a message"} — ${said.how}.`;
+  const line = `What the board was sending: ${DEVICE_ROUTE[said.route] ?? "a message"} — ${said.how}.`;
+  if (said.boards.length === 0) return line;
+  // R19 D19-4 — filed on the club's row, not a board's: say which boards, and why on neither.
+  const lead = said.kind === "twoBoards" ? "The boards it named" : "It named more than one board";
+  return `${line} ${lead}: ${listOf(said.boards)} — so it is filed against ${said.boards.length === 2 ? "neither" : "none of them"}.`;
 }
 
 // ---------------------------------------------------------------------------------------
