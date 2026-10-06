@@ -448,6 +448,12 @@ export function useLiveBalance({
    */
   const selfInFlight = useRef(0);
   const selfUntil = useRef(0);
+  /**
+   * R17 J17-2 — how many stream frames have arrived. A wallet read notes it when SENT; an answer
+   * that finds a frame has arrived since describes the balance before that frame and is dropped.
+   * Applying it put an older figure over a newer one and raised "went up" when it had gone down.
+   */
+  const framesSeen = useRef(0);
   useEffect(() => {
     setMoneyRequestListener((phase) => {
       if (phase === "start") { selfInFlight.current += 1; return; }
@@ -494,12 +500,16 @@ export function useLiveBalance({
     inflight.current = true;
     const asked = generation.current;
     if (options?.expectSelf) expectSelf.current = true;
+    const sentAfter = framesSeen.current;
     try {
       // P4-7 / M4-9 (R4): the balance and the held parts are top-level on any page of the wallet,
       // so the chip asks for the smallest page (the server's floor is one row), not a hundred.
       // A first-page read already in flight for more rows (the page's) still answers it.
       const w = await endpoints.wallet(CHIP_WALLET_ROWS);
       if (asked !== generation.current) return;
+      // R17 J17-2 — the stream spoke while this read was out: its figure is newer than ours. An
+      // `expectSelf` stays for the named frame (an unnamed twin leaves it; `record` clears it).
+      if (framesSeen.current !== sentAfter) return;
       setHeldFigures(heldFrom(w));
       record(w.balance_minutes);
       setState((current) => (current === "degraded" ? "degraded" : "live"));
@@ -623,6 +633,7 @@ export function useLiveBalance({
       try {
         const opened = await wire.open({
           onFrame: (frame, origin) => {
+            framesSeen.current += 1;
             failures = 0;
             backoffMs = policy.backoffInitialMs;
             setState("live");
