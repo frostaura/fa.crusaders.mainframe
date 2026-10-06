@@ -653,7 +653,7 @@ ul.tight li{margin:5px 0}
           <tr><td class="mono">roster/</td><td>who may open which court — cached, age-limited</td></tr>
           <tr><td class="mono">eventq/</td><td>what the box DID, queued until the API can hear</td></tr>
           <tr><td class="mono">court/</td><td>what a scan means; button map; walk-up pad</td></tr>
-          <tr><td class="mono" style="color:var(--amber)">bridgelogic/</td><td><b>the ESP's decisions</b> — <span class="mono">RosterSync</span> (heartbeat → cache), <span class="mono">ScanFlow</span> (online-then-roster), <span class="mono">WalkUp</span> (court + nonce body), <span class="mono">StateReconcile</span> (<span class="mono">!STATE</span> → held state), <span class="mono">Relight</span> (<span class="mono">!EXT</span> before each cap expiry), <span class="mono">OnRetry</span>, <span class="mono">ApiBreaker</span>, <span class="mono">AuthPolicy</span>, <span class="mono">Cadence</span>; everything <span class="mono">court_bridge/main.cpp</span> does NOT do</td></tr>
+          <tr><td class="mono" style="color:var(--amber)">bridgelogic/</td><td><b>the ESP's decisions</b> — <span class="mono">RosterSync</span> (heartbeat → cache), <span class="mono">ScanFlow</span> (online-then-roster), <span class="mono">ScanMemory</span> (the one rule for how long a scan is remembered — the tenant's scan memory, held whole for a countdown and never shortened, never past the oldest <span class="mono">scan_age_ms</span> the server checks; else SCAN AGAIN — R19), <span class="mono">WalkUp</span> (court + nonce body), <span class="mono">StateReconcile</span> (<span class="mono">!STATE</span> → held state), <span class="mono">Relight</span> (<span class="mono">!EXT</span> before each cap expiry), <span class="mono">OnRetry</span>, <span class="mono">ApiBreaker</span>, <span class="mono">AuthPolicy</span>, <span class="mono">Cadence</span>; everything <span class="mono">court_bridge/main.cpp</span> does NOT do</td></tr>
           <tr><td class="mono" style="color:var(--amber)">gatelogic/</td><td><b>the door's decisions</b> — <span class="mono">GateApp</span> (the loop itself, one pass at a time over ports a fake answers), the online-then-roster scan flow, the lock's two polarity flags composed in one function, the debounce, the LED, and the compile-time check on <span class="mono">API_BASE_URL</span>. <span class="mono">src/gate/main.cpp</span> decides nothing</td></tr>
           <tr><td class="mono">devlink/</td><td>the roster element grammar and the event body both device kinds share — parsed once, not forked per board</td></tr>
           <tr><td class="mono">devapi/</td><td>the bearer header, the response-status policy, and a heapless JSON scanner</td></tr>
@@ -1198,6 +1198,8 @@ ul.tight li{margin:5px 0}
 ├── Domain/         # entities + invariants · Device.CourtNumbers · AccessCode
 ├── Services/       # booking, ledger, activation, AccessCodeService,
 │                   #   DeviceRegistryService, RelayHardCap, ButtonMap
+│                   #   Play/: AttendanceQuery · PlayerEvidence (whose
+│                   #   scan proves a PLAYER came, R19) · PlayEvaluator
 ├── Persistence/    # EF Core, migrations (mandatory)
 ├── Security/       # JWT · WebAuthn · DeviceAuth/ (bearer key)
 │                   #   · GatewayTrust · OutboundAddressGuard
@@ -1213,7 +1215,7 @@ ul.tight li{margin:5px 0}
         <li><b>Money is ledger-only.</b> Balance = sum of immutable entries, never a stored field. Every movement carries actor, subject, reason, external reference; disputes replay the ledger.</li>
         <li><b>Whole minutes are the unit of account.</b> A booking costs exactly its length, <span class="mono">SliceMinutes × SliceCount</span>; there are no court prices, group prices or conversion rates, and nothing holds a fraction of a minute. Every split, share and penalty rounds down in favour of whoever pays. Rand appears only where money changes hands — package prices, the purchase row (<span class="mono">PendingTopup</span>), the ledger's <span class="mono">ZarPaid</span> and the desk's amount received — for reconciliation, and never enters a balance. A field mixing units is a money-correctness bug, and a test fails on any <span class="mono">*Minutes</span> property typed <span class="mono">decimal</span>.</li>
         <li><b>Charge at booking; refund on cancel; nothing back once checked in.</b> Booking row + <span class="mono">BookingCharge</span> debit flush in one unit of work — a lost slot race can't leave a member paying for a court they didn't get. Penalty and refund post as separate rows, never netted.</li>
-        <li><b>Attendance means <span class="mono">CheckedInAt</span></b> — never the clock, never <span class="mono">ChargedAt</span>. A no-show is the <em>absence</em> of an identification match in the grace window. A box's queued activation <em>is</em> an identification match, judged at scan time.</li>
+        <li><b>Attendance means <span class="mono">CheckedInAt</span></b> — never the clock, never <span class="mono">ChargedAt</span>, and only a <em>player's</em> scan: a pay-for payer with no seat lights and pays, but their scan is nobody's attendance (<span class="mono">Services/Play/PlayerEvidence</span>, R19 E19-3). A no-show is the <em>absence</em> of an identification match in the grace window. A box's queued activation <em>is</em> an identification match, judged at scan time.</li>
         <li><b>The cue window gates the stamp.</b> The 2-hour forward window only disambiguates back-to-back slices; <span class="mono">CheckedInAt</span> and the lights cue happen only from <span class="mono">activation_cue_window_minutes</span> (10) before start — a curious scan at 17:00 for an 18:45 slot answers <span class="mono">too_early</span> and forfeits nothing (review A2-11).</li>
         <li><b>Every debit takes the payer advisory lock.</b> <span class="mono">PayerLock.BeginAsync</span> serialises the read-then-post on the booking path and on <em>both</em> <span class="mono">ChargeOnActivation</span> branches — the payer reassignment and the never-charged row — so two courtside "I'll pay" taps cannot both see 200 minutes and both post (review A2-10).</li>
         <li><b>A settled no-show frees the slot.</b> The sweep truncates <span class="mono">EndsAt</span> to its own clock in the same save as the refund and penalty, so the tail is resellable through the real GiST exclusion constraint, which exempts only Cancelled (review H5). No un-no-show admin endpoint; ledger adjustment is the recovery path — and a box's own late evidence is the one automatic exception (<a href="#deviceapi">C6 residual</a>).</li>
@@ -1287,12 +1289,13 @@ ul.tight li{margin:5px 0}
       <text x="872" y="242" fill="currentColor" opacity=".75">no cap · expires after 1 h</text>
       <text x="872" y="258" fill="currentColor" opacity=".75">rand never enters a balance</text>
       <!-- devices -->
-      <rect x="20" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+      <rect x="20" y="330" width="220" height="116" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
       <text x="130" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">devices (court boxes)</text>
       <text x="32" y="370" fill="currentColor" opacity=".75">court_numbers[≤4] = relays A–D</text>
       <text x="32" y="386" fill="currentColor" opacity=".75">mac · fw · mega_fw · failed_version</text>
       <text x="32" y="402" fill="currentColor" opacity=".75">key HKDF-derived, never stored ·</text>
       <text x="32" y="418" fill="currentColor" opacity=".75">last_ip observability only</text>
+      <text x="32" y="434" fill="currentColor" opacity=".75">RestoreServedBootAt · 1 restore/boot</text>
       <!-- access codes -->
       <rect x="860" y="330" width="230" height="100" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
       <text x="975" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">access_codes</text>

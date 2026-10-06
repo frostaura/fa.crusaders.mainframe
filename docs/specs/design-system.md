@@ -228,7 +228,7 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   `split-view`, `with-aside`, `auto-grid` (AutoGrid, Columns), `context-bar`, with their shared
   parts in `layout.ts` (the AutoGrid template, the bottom dock, the list keys).
 - **Product composites outside `ui/`** (built on it): `ConfirmButton` (two-press, armed state),
-  `Toast` (live-region handling), `Alert`, `DataTable`, `SegmentedTabs` (legacy tabs, still in use),
+  `Toast` (live-region handling — see *Toasts* below), `Alert`, `DataTable`, `SegmentedTabs` (legacy tabs, still in use),
   `ScrollArea`, `Carousel`, `Charts`/`ChartFrame`, and the app shell in `components/shell/`.
 
 ## Patterns
@@ -345,8 +345,38 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   club's day (R18 X18-3, the kept club zone).
 - **Busy is not down (R18).** `503 service_busy` reads "the club's system is very busy right now. Try
   again in a moment." — never "down or restarting", never "didn't answer", and not a deployment fault,
-  so Try again stays. The unsure causes are three — busy, a clash (`conflict_retry`), silence — and a
-  hand-written sentence carries its busy and clash twins.
+  so Try again stays. The unsure causes are four — busy, a clash (`conflict_retry`), an error (R19),
+  silence — and a hand-written sentence carries its busy, clash and error twins (`lib/lostReply.ts`
+  `answerReasonOf`, words in `lib/lostReplyCopy.ts`).
+- **An error is not silence (R19 X19-2).** "The club didn't answer" is said only when nothing
+  answered: a network failure, a timeout or an abort, a `502`, a `504`, or a `503` carrying no code of
+  the club's own (the gateway saying the system did not answer it). **Any other 5xx — a plain `500` —
+  is the club's system answering with an error**: "The club's system hit an error, so we checked: … —
+  nothing changed. Try again, and tell the club committee if it keeps happening." (`ERROR_LEAD`,
+  `LOST_REPLY.errorChecked` / `errorUnchecked` / `errorGeneric`). No error sentence promises "a
+  moment" or "a minute" — an error does not pass by itself. Every write surface chooses its words by
+  that reason — the booking sheets' unread and read-back sentences (`bookingErrors`), a hold lift, a
+  bulk-cancel row, the players hands (star, reminder, share link, privacy switch, invite accept), the
+  purchase cancel's read-back — and a failed READ (the booking page, the games lists, the door card,
+  the session check) names busy and a clash as busy and a clash, never with a write's refusal words
+  ("The page has the latest") and never as "no connection".
+- **Proven after an answer says what the answer was (R19).** A write read back and found to have
+  landed says "Done. The club's reply didn't arrive, so we checked its record." only after silence.
+  After an answer it says that answer: "Done. The club's system hit an error, but we checked its
+  record: it went through." — busy "…said it was too busy, but…", a clash "…said someone else was
+  changing the same thing, but…" (`PROVEN_LEAD`, `LOST_REPLY.proven(done, why)`; `writeOrReadBack`'s
+  landed result carries `answered`).
+- **Toasts (R19 X19-3).** The toast viewport (`data-toast-viewport`) is the **one polite live region**
+  (`aria-live="polite"`, `aria-relevant="additions text"`), rendered by the provider at the app root
+  **from app start, before any toast**, so a toast's words are set inside a region that already
+  exists — NVDA and JAWS may not announce a live region that arrives already full. The visual toast
+  (`data-toast`) carries **no live role and no `aria-label`** (each used to be its own pre-filled
+  `role="status"` whose label overrode its words); tests find it by `data-toast`, never
+  `role=status`. Its dismiss control is a **real button named "Dismiss"** (`TOAST_COPY.dismiss`),
+  described by the toast's words, with an inset focus ring and a 44px hit box; tapping anywhere on
+  the toast still dismisses. **Gutters, padding and gap are px-capped** (`min(rem, px)`) so at large
+  text the words keep their column — a toast at 320px / 200 % was 256 × 410px over the page heading
+  with rem gutters, and is 288 × 186px with the caps.
 
 ## Guards (tests)
 

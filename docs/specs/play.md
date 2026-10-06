@@ -25,15 +25,25 @@ beyond a result on a booking they both played. `show_in_leaderboards` and `share
   and scanning put the payment and the scan on their Night but the session is not on their play
   record. A payer who holds an accepted seat is a player through the seat, and their scan stamps
   that seat only — never the organiser's (`member-code.md` §9.2).
+  Nor is it anybody else's attendance (R19 E19-3, rule 2 below): before R19 a payer's scan
+  gave a seatless organiser a session at the payer's instant, the booking page's organiser row
+  printed the payer's time beside "0 of 1 checked in", and accepted partners who never came were
+  credited.
 - **Attended** — the invariant's meaning: attendance is `CheckedInAt`, set only by the court box's
   identification (or a no-show reversal on box evidence), **never the clock, never `ChargedAt`,
   and never a door scan** (`decisions-gate.md`: a door is never attendance). A member attended a
   booking when either
   1. their own seat carries `booking_participants.CheckedInAt` (they scanned), whatever the seat's
      status now; or
-  2. the booking carries `bookings.CheckedInAt` and they are a player of it (the booker, or an
-     accepted seat) — one scan lights the court for everybody on it, and partners who walked in
-     behind the scanner played;
+  2. the booking carries `bookings.CheckedInAt` **from a PLAYER's scan** and they are a player of
+     it (the booker, or an accepted seat) — one scan lights the court for everybody on it, and
+     partners who walked in behind the scanner played. `bookings.CheckedInAt` is whoever lit the
+     court (the money rule), so it is a player's scan only while nobody but the booker paid
+     (`PaidByUserId` null or the booker). **Once a pay-for payer paid, only players' own scans
+     count** (R19 E19-3): seat stamps, or the booker's own `court.activated` / seatless
+     `court.checked_in` audit row — the earliest of them is the game's evidence (the booker's own
+     scan for the booker). The payer's lighting scan is not the organiser's or any partner's
+     attendance; with no player's scan, nobody attended (`PlayerEvidence`);
 
   **and the booking was not cancelled** (`CancelledAt` null — R17 J17-5). A reversed no-show (S6)
   was attended; a no-show and a displaced booking (S8) were not, because they carry no check-in;
@@ -59,7 +69,11 @@ beyond a result on a booking they both played. `show_in_leaderboards` and `share
 
   **Partners who walked in behind the scanner count** (rule 2) — the founder's default since
   review round 2. Round 16 considered limiting play to members who scanned themselves and did not
-  change it; it stands until the founder says otherwise (§14 Q4).
+  change it; it stands until the founder says otherwise (§14 Q4). Since R19 the scanner must be a
+  player: a pay-for payer's scan lets nobody in behind it. One rule, one reader —
+  `PlayerEvidence` — serves `AttendanceQuery` (stats, streak, ring, badges, time-on-court), the
+  booking page (the organiser row and the "N of M checked in" count from one value,
+  `SeatlessOrganiserCheckInAsync`) and the played-with lists (`CheckedInByAPlayer`).
 - **Session** — one attended booking, from one member's point of view.
 - **Played minutes** of an attended booking — `max(0, min(EndsAt, CancelledAt ?? EndsAt) − StartsAt)`
   in whole minutes, from the row as it stands (a released tail has already truncated `EndsAt`).
@@ -498,7 +512,8 @@ top-up or a share. Each badge is `{key, name, description, criteria}`; the API s
 | `streak_26` | Half a year | Played every week for 26 weeks. | as above, 26 |
 
 Ordering sessions uses `(CheckedInAt of the member's evidence, BookingId)` — the seat's own
-`CheckedInAt` when set, else the booking's — so the Nth session is deterministic.
+`CheckedInAt` when set, else the game's evidence under §1 rule 2 (the booking's when a player lit
+it, else the players' own earliest scan) — so the Nth session is deterministic.
 
 **Badges are earned when a session ENDS, never for one the club cancelled (R16 E16-9).** The badge
 rules read only sessions that have ended and were not cancelled
