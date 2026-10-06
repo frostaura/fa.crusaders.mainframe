@@ -79,30 +79,28 @@ export function splitEffects(d: BookingDetail, shares: readonly SplitPreviewShar
     if (p.kind === "guest") continue;
     const next = shares.find((s) => s.seat === p.seat)?.share_minutes;
     if (next === undefined) continue;
-    const name = seatName(p, d.players);
-    if (p.settled_outside) {
-      // R17 J17-3 — paid by hand: the seat's target is 0 whatever its share, so nothing is asked
-      // and nothing goes back. Its paid_minutes is 0 after the settle, which read as "asked for more".
-      if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.settledByHand(name));
-    } else if (p.status !== "accepted") {
-      if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.askedFor(name, minutesSpoken(next)));
-    } else if (next > p.paid_minutes && p.paid_minutes === 0) {
-      // R17 J17-3 — nothing paid yet: "more" has no base. They are asked for the share.
-      if (next !== p.share_minutes || p.unpaid_minutes > 0) {
-        lines.push(CHANGE_SPLIT.askedFor(name, minutesSpoken(next), next > p.consented_minutes));
-      }
-    } else if (next > p.paid_minutes) {
-      if (next !== p.share_minutes || p.unpaid_minutes > 0) {
-        lines.push(CHANGE_SPLIT.askedMore(name, minutesSpoken(next - p.paid_minutes), next > p.consented_minutes));
-      }
-    } else if (next < p.paid_minutes) {
-      lines.push(CHANGE_SPLIT.goesBack(name, minutesSpoken(p.paid_minutes - next)));
-    }
+    const line = seatEffect(p, next, seatName(p, d.players));
+    if (line) lines.push(line);
   }
   if (lines.length === 0) return [CHANGE_SPLIT.noChange];
   const organiser = shares.find((s) => s.seat === 1);
   if (organiser) lines.push(CHANGE_SPLIT.youCover(minutesSpoken(organiser.share_minutes)));
   return lines;
+}
+
+/** What a new share of `next` minutes does to one partner seat, or null when nothing changes for it. */
+function seatEffect(p: DetailPlayer, next: number, name: string): string | null {
+  const changed = next !== p.share_minutes;
+  // R17 J17-3 — paid by hand: the seat's target is 0 whatever its share, so nothing is asked
+  // and nothing goes back. Its paid_minutes is 0 after the settle, which read as "asked for more".
+  if (p.settled_outside) return changed ? CHANGE_SPLIT.settledByHand(name) : null;
+  if (p.status !== "accepted") return changed ? CHANGE_SPLIT.askedFor(name, minutesSpoken(next)) : null;
+  if (next < p.paid_minutes) return CHANGE_SPLIT.goesBack(name, minutesSpoken(p.paid_minutes - next));
+  if (next === p.paid_minutes || !(changed || p.unpaid_minutes > 0)) return null;
+  const consent = next > p.consented_minutes;
+  // R17 J17-3 — nothing paid yet: "more" has no base. They are asked for the share.
+  if (p.paid_minutes === 0) return CHANGE_SPLIT.askedFor(name, minutesSpoken(next), consent);
+  return CHANGE_SPLIT.askedMore(name, minutesSpoken(next - p.paid_minutes), consent);
 }
 
 /* ─────────────────────────────── a share for a player added later ─────────────────────────────── */
