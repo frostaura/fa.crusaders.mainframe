@@ -2,8 +2,8 @@ import { type ReactNode } from "react";
 import { cn } from "../lib/utils";
 import { typography } from "../lib/typography";
 import { CrestMark } from "./shell/Crest";
-import { AUTH_BRAND } from "../lib/authCopy";
-import type { Icon } from "./ui/icons";
+import { AUTH_BRAND, AUTH_MAKER_LINE } from "../lib/authCopy";
+import { Heart, type Icon } from "./ui/icons";
 
 /**
  * The frame every screen a member meets before they have a session sits in — sign in, join,
@@ -149,7 +149,8 @@ const CARD_GUTTER = { paddingInline: "min(var(--auth-gutter), var(--auth-gutter-
  * text simply falls back to the one column; normal text at 1024 (60rem) still splits.
  */
 const SHELL = [
-  "@container/authshell w-full",
+  // A column that fills the frame's height, so the maker's line (`mt-auto`) sits at its foot.
+  "@container/authshell flex w-full grow flex-col",
   "[--split-gutter-px:16px] [--split-gutter:1rem] sm:[--split-gutter-px:24px] sm:[--split-gutter:1.5rem]",
   "lg:[--split-gutter-px:32px] lg:[--split-gutter:2rem] 3xl:[--split-gutter-px:48px] 3xl:[--split-gutter:3rem]",
 ].join(" ");
@@ -169,7 +170,38 @@ export function AuthShell(props: AuthShellProps) {
       <div data-auth-shell="" className={cn(SPLIT, size === "wide" ? SPLIT_WIDE : SPLIT_FORM, className)}>
         <AuthColumns subline={subline} title={title} lead={lead} mark={mark} footer={footer}>{children}</AuthColumns>
       </div>
+      <MakerLine />
     </div>
+  );
+}
+
+/** Clear of the home indicator; at least the page's own 16px under the line. */
+const MAKER_LINE_FOOT = { paddingBottom: "max(1rem, env(safe-area-inset-bottom))" } as const;
+
+/**
+ * "Made with ♥ by FrostAura" — one quiet line at the very foot of the signed-out screens, never on
+ * the app's own pages. In the flow (`mt-auto` in a column that fills the frame), so it is pushed
+ * below the card at a short height or 200 % text rather than ever sitting over the form. The heart
+ * is decoration sized to the text and never crest red (tin is the crest's and the now-line's); the
+ * line is read as "Made with love by FrostAura", and the maker's name is a link out.
+ */
+function MakerLine() {
+  return (
+    <p data-maker-line="" className="mt-auto pt-6 text-center text-xs text-text-muted" style={MAKER_LINE_FOOT}>
+      <span className="sr-only">{`${AUTH_MAKER_LINE.spokenBefore} `}</span>
+      <span aria-hidden="true">
+        {AUTH_MAKER_LINE.before}{" "}
+        <Heart size="1em" weight="fill" className="inline-block align-text-bottom text-accent-strong" />{" "}by{" "}
+      </span>
+      <a
+        href={AUTH_MAKER_LINE.href}
+        target="_blank"
+        rel="noopener"
+        className="no-lift rounded-sm font-medium text-text-secondary underline-offset-2 hover:underline"
+      >
+        {AUTH_MAKER_LINE.maker}
+      </a>
+    </p>
   );
 }
 

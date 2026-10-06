@@ -14,7 +14,8 @@ import { useDoorsChrome } from "../doors/useDoorsChrome";
 import { AccountMenu } from "./AccountMenu";
 import { MinutesChip } from "./MinutesChip";
 import { CrestLink } from "./Crest";
-import { LANDING_PATH } from "./nav";
+import { LANDING_PATH, PRIMARY_DESTINATIONS } from "./nav";
+import { PageNamedByNav, samePath } from "@/components/ui/page-title";
 import { NotificationBell } from "./NotificationBell";
 import { PageErrorBoundary } from "./PageErrorBoundary";
 import { PrimaryNav } from "./PrimaryNav";
@@ -94,7 +95,7 @@ const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-
  * backdrop-filter or layout/paint containment would.
  */
 const HEADER_FRAME = [
-  "@container/appbar mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8",
+  "@container/appbar mx-auto flex min-h-appbar w-full max-w-wide flex-nowrap items-center gap-x-3 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8",
   "3xl:max-w-page 3xl:px-12",
 ].join(" ");
 /** 3xl: the frame's gutter is 3rem, so the gap from the crest box is too (3xl:px-12 would put the pl back). */
@@ -110,11 +111,20 @@ const BANNER = "mx-auto w-full max-w-wide px-4 pt-4 empty:hidden print:hidden sm
 /** On /admin from xl the shut-doors banner starts where the content does: right of the rail. */
 const BANNER_BESIDE_RAIL = cn(ADMIN_RAIL_OFFSET_XL, "xl:w-auto xl:max-w-none");
 
+/**
+ * The crest's box SHRINKS (its name truncates, then hides by the bar's container query) — never
+ * the row. It was `shrink-0` in a `flex-wrap justify-end` row: from a 24rem bar (393–430 px phones)
+ * the club's name joined the crest, crest + name + bell + chip + avatar no longer fit, and the row
+ * wrapped — the crest right-aligned alone on line one, the actions on line two (~100 px of bar).
+ * The row is `flex-nowrap` now, so the one place width gives is the name's `truncate`.
+ */
+const CREST_BOX = "flex min-w-0 shrink";
+
 /** The frame the bar follows: the admin console's (over the rail) or a member page's. */
 function chromeFrame(admin: boolean) {
   return admin
-    ? { name: "admin", header: cn(HEADER_FRAME, HEADER_OVER_RAIL), crest: cn("flex shrink-0", CREST_OVER_RAIL), banner: cn(BANNER, BANNER_BESIDE_RAIL) }
-    : { name: "member", header: HEADER_FRAME, crest: "flex shrink-0", banner: BANNER };
+    ? { name: "admin", header: cn(HEADER_FRAME, HEADER_OVER_RAIL), crest: cn(CREST_BOX, "xl:shrink-0", CREST_OVER_RAIL), banner: cn(BANNER, BANNER_BESIDE_RAIL) }
+    : { name: "member", header: HEADER_FRAME, crest: CREST_BOX, banner: BANNER };
 }
 
 /**
@@ -125,6 +135,11 @@ function chromeFrame(admin: boolean) {
  */
 function holdsSession(status: string): boolean {
   return status === "offline" && Boolean(tokenStore.get());
+}
+
+/** A page the tab bar (or the inline tabs) names on screen: its PageHeader paints no title. */
+function namedByTabs(pathname: string): boolean {
+  return PRIMARY_DESTINATIONS.some((d) => samePath(d.to, pathname));
 }
 
 export default function AppShell() {
@@ -241,7 +256,7 @@ export default function AppShell() {
         ) : null}
         <div data-shell-frame={wide ? "wide" : "content"} className={cn(FRAME, wide ? "max-w-wide" : "max-w-content", SELF_FRAMED)}>
           {/* A page that throws takes only itself down, and leaving it clears the failure. */}
-          <PageErrorBoundary resetKey={location.pathname}><Outlet /></PageErrorBoundary>
+          <PageNamedByNav.Provider value={memberChrome && namedByTabs(location.pathname)}><PageErrorBoundary resetKey={location.pathname}><Outlet /></PageErrorBoundary></PageNamedByNav.Provider>
         </div>
       </main>
       {/* P12 — a badge or a goal, once. It keeps its own rules: signed in only, and never over the pass (§9.3). */}

@@ -3,6 +3,8 @@ import { useAdminAttention } from "@/lib/adminAttention";
 import { AdminRail } from "./AdminRail";
 import { AdminSectionSwitcher } from "./AdminSectionSwitcher";
 import { AdminTour } from "../onboarding/AdminTour";
+import { PageNamedByNav, samePath } from "@/components/ui/page-title";
+import { ADMIN_NAV_ITEMS } from "./adminNav";
 
 /**
  * The admin console's frame (plan: Target IA → Admin, R16): every `/admin/*` route renders inside it
@@ -61,7 +63,10 @@ export default function AdminLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <AdminSectionSwitcher pathname={pathname} attention={attention} />
         <div data-admin-frame="" className={FRAME}>
-          <Outlet />
+          {/* The rail (xl) or the section switcher (below) names exactly these pages on screen. */}
+          <PageNamedByNav.Provider value={ADMIN_NAV_ITEMS.some((item) => samePath(item.path, pathname))}>
+            <Outlet />
+          </PageNamedByNav.Provider>
         </div>
       </div>
       {/* P8 — the first-visit tour of the rail / section bar above. Renders nothing once finished. */}

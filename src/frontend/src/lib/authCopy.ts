@@ -180,3 +180,12 @@ export const WELCOME = {
   signIn: "Sign in",
   resetLink: "Email me a reset link",
 } as const;
+
+/** The maker's line at the foot of every signed-out screen (`AuthShell`). Read whole, the heart as "love". */
+export const AUTH_MAKER_LINE = {
+  before: "Made with",
+  /** What a screen reader hears in place of "Made with ♥ by"; the name follows, as the link. */
+  spokenBefore: "Made with love by",
+  maker: "FrostAura",
+  href: "https://frostaura.net",
+} as const;

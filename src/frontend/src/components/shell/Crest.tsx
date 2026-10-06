@@ -42,7 +42,7 @@ export function CrestLink({ to }: { to: string }) {
       to={to}
       data-crest-link=""
       aria-label="Crusaders Squash — home"
-      className="no-lift flex min-h-touch min-w-touch items-center justify-start gap-2.5 rounded-lg"
+      className="no-lift flex min-h-touch min-w-touch max-w-full items-center justify-start gap-2.5 rounded-lg"
     >
       <CrestMark />
       <span aria-hidden="true" className={cn("hidden min-w-0 truncate font-display text-lg font-bold tracking-tight text-text-primary @[24rem]/appbar:block @[44rem]/appbar:hidden @[60rem]/appbar:block", CREST_NAME_FITS_BOX)}>

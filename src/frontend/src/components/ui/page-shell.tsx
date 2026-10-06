@@ -1,8 +1,9 @@
-import { useId, type ComponentProps, type ReactNode } from "react";
+import { useContext, useId, type ComponentProps, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { typography } from "@/lib/typography";
 import { CaretLeft } from "./icons";
+import { PageNamedByNav } from "./page-title";
 
 /**
  * The page shell (design-system.md, Patterns → Page shell). Every page is
@@ -140,19 +141,31 @@ const TITLE_STEPS_DOWN = [
   "[@container_head_(max-width:8.99rem)]:text-base",
 ].join(" ");
 
+/**
+ * Where the nav already names the page (`PageNamedByNav`), the title and its eyebrow are for
+ * screen readers only — the `<h1>` stays (the route announcer focuses it) but paints nothing. The
+ * row keeps the freshness line (left) and the actions (right); with neither, and no back link or
+ * description, the whole header leaves the flow, so no empty band is left above the page.
+ */
 export function PageHeader(props: PageHeaderProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { title, description, eyebrow, back, actions, freshness, className } = props;
+  const titleHidden = useContext(PageNamedByNav) && !back;
+  const nothingShown = titleHidden && !actions && !freshness && !description;
   return (
-    <header data-page-header="" className={cn("@container/head -mb-2 flex flex-col gap-2", className)}>
+    <header
+      data-page-header=""
+      data-title-hidden={titleHidden ? "" : undefined}
+      className={cn("@container/head -mb-2 flex flex-col gap-2", nothingShown && "sr-only", className)}
+    >
       {back ? <BackLink to={back.to} label={back.label} /> : null}
-      {eyebrow ? <p className={typography({ variant: "overline" })}>{eyebrow}</p> : null}
+      {eyebrow ? <p className={cn(typography({ variant: "overline" }), titleHidden && "sr-only")}>{eyebrow}</p> : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), TITLE_STEPS_DOWN, "min-w-0 flex-[1_1_min-content] break-words")}>
+        <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), TITLE_STEPS_DOWN, "min-w-0 flex-[1_1_min-content] break-words", titleHidden && "sr-only")}>
           {title}
         </h1>
         {freshness ? (
-          <div className="order-last basis-full sm:order-none sm:basis-auto">{freshness}</div>
+          <div className={titleHidden ? "min-w-0" : "order-last basis-full sm:order-none sm:basis-auto"}>{freshness}</div>
         ) : null}
         {actions ? (
           <div data-page-actions="" className="ml-auto flex flex-wrap items-center justify-end gap-2">

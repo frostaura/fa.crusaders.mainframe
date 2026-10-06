@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, typ
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CaretDown } from "@/components/ui/icons";
+import { FILL_ROOM_VAR, useFillHeight } from "@/components/ui/use-fill-height";
 import type { ScheduleCourt, ScheduleSlot } from "../../lib/api";
 import { cn } from "../../lib/utils";
 import { isSlotHead, peakRestricted, slotAt, type TimeSlice } from "../../lib/scheduleGrid";
@@ -64,6 +65,8 @@ export function BookingBoard(props: BoardProps) {
   const { day } = ctx;
   const firstLive = firstLiveIndex(timeSlices, collapsedRows, pastThresholdMs);
   const { scroller, gridRef, chips } = useBoardScroll(firstLive, `${day.date}|${collapsedRows}`, day.courts.length);
+  // The grid fills what is left under the page's controls and scrolls itself; the page holds still.
+  useFillHeight(scroller, PAGE_BOTTOM_PX);
   const interactions = useGridInteractions({
     gridRef, selection: ctx.selection, rowCount: timeSlices.length, colCount: day.courts.length,
     firstRow: collapsedRows, initialRow: firstLive < 0 ? collapsedRows : firstLive, resetKey: day.date,
@@ -133,31 +136,26 @@ export function BookingBoard(props: BoardProps) {
 }
 
 /**
- * The scroller's ceiling: the viewport less the measured top bar, the phone's tab bar and the
- * page's own bottom padding — never below 280px, so a phone at a 32px root font still has a grid
- * to scroll rather than a slit (D3-B10). Pixels, because what it reserves is pixels of chrome.
+ * The scroller's ceiling: the room left under the page's controls (`useFillHeight`, measured
+ * against `<main>`, whose bottom padding already holds the phone's tab bar and any docked bar such
+ * as the selection bar) — so the grid takes the space it can and `<main>` itself never scrolls on
+ * Bookings (Dean, 2026-10: a scrolling page around a scrolling grid "makes for a jumpy UI").
  *
  * <p>
- * <b>Sized so the whole grid fits when the page is scrolled to its end.</b> The reserve was 24px
- * against the page shell's 40px bottom padding, so at the page's end the court header row sat
- * 16px above the page's scroll edge; in selection mode the 64px room kept for the floating bar
- * pushed it a further 64px out, and the court names vanished exactly while slots were being
- * picked (measured at the P3/P4 integration: grid top 56px above the scroll edge at 1440px).
- * The selection room is reserved here too, so the grid shrinks by what the bar needs.
+ * <b>The short-viewport rule:</b> never below 280px (D3-B10 — a phone at a 32px root font, a
+ * landscape phone ~360px tall). Where the room left is less than that, the grid keeps 280px and
+ * only then does the page scroll to reach its foot. Before the first measure, the old estimate
+ * (viewport less the measured chrome) stands in. Pixels, because what it reserves is chrome.
  * </p>
  */
 /** The page shell's `pb-10`, plus the grid frame's 1px top and bottom borders. */
 const PAGE_BOTTOM_PX = 42;
 export const SELECTION_ROOM_PX = 64;
+export const GRID_MIN_PX = 280;
 
-/**
- * R4 form factor: the selection bar's room is the bar's MEASURED height (`--context-bar-height`,
- * published by every docked bar and added to `<main>`'s padding by the shell), not a guessed 64px
- * — the page and the grid now reserve the same pixels, once.
- */
 function scrollerMaxHeight(): string {
-  // R5 §4.2 — less the phone's sticky week strip (`--day-strip-height`, 0 when it does not stick).
-  return `max(280px, calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - var(--day-strip-height, 0px) - ${PAGE_BOTTOM_PX}px))`;
+  const estimate = `calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - var(--day-strip-height, 0px) - ${PAGE_BOTTOM_PX}px)`;
+  return `max(${GRID_MIN_PX}px, var(${FILL_ROOM_VAR}, ${estimate}))`;
 }
 
 /**

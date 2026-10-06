@@ -30,6 +30,7 @@ export const ICON_DEFAULTS: IconProps = { size: 20, weight: "regular", color: "c
 export { ArrowsClockwiseIcon, ArrowsClockwiseIcon as ArrowsClockwise } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
 export { CheckIcon, CheckIcon as Check } from "@phosphor-icons/react/dist/csr/Check";
 export { XIcon, XIcon as X } from "@phosphor-icons/react/dist/csr/X";
+export { HeartIcon, HeartIcon as Heart } from "@phosphor-icons/react/dist/csr/Heart";
 export { CaretLeftIcon, CaretLeftIcon as CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
 export { CaretRightIcon, CaretRightIcon as CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 export { CaretDownIcon, CaretDownIcon as CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";

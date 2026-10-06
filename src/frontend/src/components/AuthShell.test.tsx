@@ -113,4 +113,21 @@ describe("AuthShell", () => {
     expect(screen.getByText("Pick up where you left off.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Register" })).toBeInTheDocument();
   });
+
+  it("ends with the maker's line: read as words, the name a link out, the heart decoration", () => {
+    const { container } = render(<AuthShell subline="Court bookings and your club account."><p>form</p></AuthShell>);
+    const line = container.querySelector<HTMLElement>("[data-maker-line]");
+    expect(line, "the maker line is missing").not.toBeNull();
+    const link = within(line!).getByRole("link", { name: "FrostAura" });
+    expect(link.getAttribute("href")).toBe("https://frostaura.net");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener");
+    // What a screen reader gets: the sr-only words and the link, never the painted "♥ by".
+    const spoken = [...line!.childNodes].filter((n) => !(n instanceof HTMLElement && n.getAttribute("aria-hidden") === "true")).map((n) => n.textContent).join("");
+    expect(spoken).toBe("Made with love by FrostAura");
+    expect(line!.querySelector("svg")?.closest("[aria-hidden=true]")).not.toBeNull();
+    // The last thing in the shell, under the card.
+    expect(container.querySelector("[data-full-bleed]")!.lastElementChild).toBe(line);
+  });
 });
+

@@ -182,12 +182,11 @@ export default function MyCodePage() {
     // column left 60 % of a laptop and 73 % of a 1920 screen empty around the pass.
     <PageShell width="content" fullFrom3xl className={cn("2xl:max-w-wide", facts.decision && "pb-24 sm:pb-10")}>
       {/*
-        Visually hidden on a phone, and only there (D8: the code first). The pass's own band
-        says whose pass it is, the tab bar says "My Code", and at 320x568 with the reader's text
-        turned up a visible title was what pushed the symbol below the fold. It is still the
-        page's one h1 — the route announcer focuses it and a screen reader lands on it.
+        Visually hidden wherever the shell's nav names the page (`PageNamedByNav` — the tab says
+        "My Code"; D8: the code first). It is still the page's one h1 — the route announcer
+        focuses it and a screen reader lands on it.
       */}
-      <PageHeader title={MY_CODE.title} className="sr-only sm:not-sr-only" />
+      <PageHeader title={MY_CODE.title} />
 
       <div ref={attachLayout} data-my-code-layout="" className={LAYOUT}>
         <div data-my-code-pass="" className={PASS_COLUMN}>
