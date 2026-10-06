@@ -243,10 +243,11 @@ export function WeekStrip(props: WeekStripProps) {
         // overflow: at 200% text on a 390px phone the chips overlapped.
         // R17 X17-3 — each chip is a 44px target (2.75rem), and seven still fit a 320px phone: a
         // row narrower than seven of them (310px) reaches up to 12px into the page's 16px gutters,
-        // with no gap between chips until there is room for one (the chips have no fill at rest).
+        // and the gap between chips is only what is left over, up to 2px (the chips have no fill
+        // at rest). A width, not a breakpoint: `min-[…]` is not emitted with these mixed-unit screens.
         className={cn(
-          "grid grid-cols-[repeat(auto-fit,minmax(2.75rem,1fr))] gap-0",
-          "mx-[clamp(-12px,calc((100%_-_310px)_/_2),0px)] min-[25rem]:gap-0.5 sm:gap-1",
+          "grid grid-cols-[repeat(auto-fit,minmax(2.75rem,1fr))] gap-y-0.5",
+          "mx-[clamp(-12px,calc((100%_-_310px)_/_2),0px)] gap-x-[clamp(0px,calc((100%_-_310px)_/_6),2px)] sm:gap-1",
         )}
       >
         {days.map((day) => (

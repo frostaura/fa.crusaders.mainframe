@@ -40,6 +40,30 @@
 let known: string | null = null;
 
 /**
+ * R17 X17-5 — the zone is kept on the phone with the member's kept reads. A phone opened offline
+ * (a cold start: no `/me/profile` answer) drew its kept bookings in the READER's zone, because the
+ * zone lived in memory only. What the club last said survives a restart; sign-out forgets it.
+ */
+const KEPT_ZONE = "crusaders.club-zone";
+let restored = false;
+
+function restore(): void {
+  if (restored) return;
+  restored = true;
+  try {
+    const kept = window.localStorage.getItem(KEPT_ZONE);
+    if (known === null && isUsableZone(kept)) known = kept;
+  } catch { /* storage refused: memory only, as before */ }
+}
+
+function keep(zone: string | null): void {
+  try {
+    if (zone === null) window.localStorage.removeItem(KEPT_ZONE);
+    else window.localStorage.setItem(KEPT_ZONE, zone);
+  } catch { /* storage refused: memory only */ }
+}
+
+/**
  * Zones already checked, so a formatter on a 200-row log does not construct 200
  * `Intl.DateTimeFormat`s to ask the same question.
  */
@@ -76,11 +100,14 @@ export function isUsableZone(zone: string | null | undefined): zone is string {
  */
 export function rememberClubZone(zone: string | null | undefined): void {
   if (!isUsableZone(zone)) return;
+  restored = true;
+  if (known !== zone) keep(zone);
   known = zone;
 }
 
 /** The club's zone, or `undefined` while nobody has said. Never a guess. */
 export function clubZone(): string | undefined {
+  restore();
   return known ?? undefined;
 }
 
@@ -94,6 +121,7 @@ export function clubZone(): string | undefined {
  * </p>
  */
 export function clubZoneIsKnown(): boolean {
+  restore();
   return known !== null;
 }
 
@@ -103,6 +131,8 @@ export function clubZoneIsKnown(): boolean {
  */
 export function forgetClubZone(): void {
   known = null;
+  restored = true;
+  keep(null);
 }
 
 /**
