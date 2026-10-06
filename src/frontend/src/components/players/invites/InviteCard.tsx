@@ -105,7 +105,7 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
         {note ? <span className="text-xs font-semibold uppercase tracking-overline text-text-muted">{note}</span> : null}
         <span className="break-words text-base font-semibold text-text-primary">{invitedLine(name, invite.open_link, invite.added_by_club === true)}</span>
         <span className="break-words text-sm text-text-secondary">
-          {`${invite.court_name ?? INVITES_COPY.court} · ${inviteWhen(invite)} · ${playersCount(invite.players)}`}
+          {invite.court_name ?? INVITES_COPY.court}{" · "}<WhenWhole when={inviteWhen(invite)} />{" · "}{playersCount(invite.players)}
         </span>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1">
           <span className="text-sm font-semibold tabular-nums text-text-primary">
@@ -117,6 +117,16 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
       </span>
     </>
   );
+}
+
+/**
+ * R18 L18-1 — "18:00–18:45" is one figure: at 320 / 200 % it broke after the dash. The day may wrap
+ * at its spaces; the time range never does (the text the reader hears is unchanged).
+ */
+function WhenWhole({ when }: { when: string }) {
+  const cut = when.lastIndexOf(", ");
+  if (cut < 0) return <>{when}</>;
+  return <>{when.slice(0, cut + 2)}<span className="whitespace-nowrap">{when.slice(cut + 2)}</span></>;
 }
 
 /** The list while it is read — the card's own shape, three times. */

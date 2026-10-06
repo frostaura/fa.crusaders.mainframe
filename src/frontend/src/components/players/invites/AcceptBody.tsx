@@ -97,8 +97,8 @@ function GameFacts({ flow }: { flow: AcceptFlow }) {
   return (
     // R12 — one column until the card is 16 root ems wide: two at 320 / 200 % broke "Cou / rt 1".
     <div className="@container">
-    // R18 L18-1 — and no box of its own under 13 root ems (a card inside the page's card at 150 %+
-    // text left a 190px column): the facts take the card's width.
+    {/* R18 L18-1 — and no box of its own under 13 root ems (a card inside the page's card at 150 %+
+        text left a 190px column): the facts take the card's width. */}
     <dl className="grid grid-cols-1 gap-x-4 gap-y-3 rounded-xl border-border bg-bg-surface @[13rem]:border @[13rem]:p-3 @[16rem]:grid-cols-2 sm:p-4" data-game-facts="">
       <Fact label={INVITES_COPY.court}>{invite.court_name ?? INVITES_COPY.court}</Fact>
       <Fact label={INVITES_COPY.players}>{playersCount(invite.players)}</Fact>
