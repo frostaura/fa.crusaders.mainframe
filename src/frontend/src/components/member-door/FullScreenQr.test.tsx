@@ -268,12 +268,13 @@ describe("FullScreenQr", () => {
   });
 
   /** Nineteen tracked monospace characters are wider than a phone once the root font is up. */
-  it("lets the code wrap rather than run off the glass", () => {
+  // Dean, 2026-10-06: a scanner reads the symbol and nobody types the code, so the digits are
+  // not drawn. They stay in the accessible text for a screen reader.
+  it("keeps the code for a screen reader without drawing it", () => {
     renderHost();
     open();
     const code = screen.getByText(TOKEN);
-    expect(code.className).toContain("break-all");
-    expect(code.className).toContain("max-w-full");
+    expect(code.className).toBe("sr-only");
   });
 
   /**

@@ -30,7 +30,7 @@ export function CodePreview() {
         <QrSvg value={token} className="block h-auto w-full" />
       </div>
       <div className="flex min-w-0 flex-col gap-1 text-sm text-text-secondary">
-        <span aria-label={MY_CODE.codeLabel} className="font-mono text-base font-semibold tracking-code text-text-primary">
+        <span aria-label={MY_CODE.codeLabel} className="sr-only">
           <CodeGroups token={token} />
         </span>
         <StepCountdown remainingMs={view.remainingMs} size={24} />

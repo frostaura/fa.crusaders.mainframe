@@ -81,7 +81,7 @@ for (const width of [320, 390]) {
       { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null, retention_days: 90, timezone: TZ } },
     ]);
     await page.goto("/my-code");
-    await expect(page.locator("[data-member-code]")).toBeVisible();
+    await expect(page.locator("[data-member-code]")).toBeAttached();
     await bigText(page);
     const fit = await page.locator("[data-pass-card]").evaluate((card) => {
       const r = card.getBoundingClientRect();

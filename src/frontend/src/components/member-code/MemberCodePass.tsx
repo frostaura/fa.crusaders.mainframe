@@ -126,9 +126,11 @@ export function MemberCodePass(props: MemberCodePassProps) {
       memberName={memberName}
       avatar={<MemberAvatar name={memberName} photoUrl={photoUrl} />}
       qr={<PassSymbol token={token} onOpenFullScreen={onOpenFullScreen} triggerRef={triggerRef} />}
-      code={token ? <span aria-label={MY_CODE.codeLabel} data-member-code=""><CodeGroups token={token} /></span> : null}
       meta={(
         <>
+          {/* Read by a scanner, never typed, so the digits are not drawn (Dean, 2026-10-06); a
+              screen reader still gets the code, and absolute positioning keeps it out of the gap. */}
+          {token ? <span aria-label={MY_CODE.codeLabel} data-member-code="" className="sr-only"><CodeGroups token={token} /></span> : null}
           {token ? <StepCountdown remainingMs={remainingMs} /> : <span>{MY_CODE.loading}</span>}
           {offline ? <ReachBadge /> : null}
         </>

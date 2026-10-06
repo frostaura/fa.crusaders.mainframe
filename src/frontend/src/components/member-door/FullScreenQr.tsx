@@ -424,7 +424,7 @@ export function FullScreenQr(props: {
           root font is turned up, and a code that runs off the edge is a code nobody can read
           back to the desk. The groups are spans with no spaces between them, so the text is the
           unbroken code for a screen reader and for copy and paste alike. */}
-      <p className="max-w-full break-all text-center font-mono text-lg tracking-[0.25em] text-black">
+      <p className="sr-only">
         {codeText ?? code}
       </p>
       {/* D12. The one clock a member holding this against a scanner can see. Black on white

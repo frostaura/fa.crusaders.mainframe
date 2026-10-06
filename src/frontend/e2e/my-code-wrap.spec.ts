@@ -1,15 +1,14 @@
 import { SESSION_ADMIN, serveApi, signIn, test, expect, memberCodeRoutes } from "./fixtures";
 
 /**
- * F4-16 (review round 2, VIS-L) — the code's groups wrap BALANCED. At 390 and 768 the flex-wrap
- * row filled its first line and left the last two groups ("661 592") alone on the second. Measured
- * as the width of each line of groups: when the code takes two lines, neither is more than one
- * group's width longer than the other.
+ * The code's digits are not drawn (Dean, 2026-10-06): a scanner reads the symbol and nobody types
+ * the code. Retires F4-16's balanced-wrap check, which measured digits that are no longer shown.
+ * The code stays in the accessible text, and the symbol is what fills the pass.
  */
 const TZ = "Africa/Johannesburg";
 
 for (const width of [390, 768]) {
-  test(`the code's groups wrap balanced at ${width} px`, async ({ page }) => {
+  test(`only the symbol is drawn at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await signIn(page);
     await serveApi(page, [
@@ -31,24 +30,10 @@ for (const width of [390, 768]) {
     ]);
     await page.goto("/my-code");
     const code = page.locator("[data-member-code]");
-    await expect(code).toBeVisible();
-
-    const lines = await code.evaluate((el) => {
-      const byTop = new Map<number, number>();
-      let widest = 0;
-      for (const g of el.querySelectorAll<HTMLElement>(":scope > span > span")) {
-        const r = g.getBoundingClientRect();
-        const top = Math.round(r.top);
-        byTop.set(top, (byTop.get(top) ?? 0) + r.width);
-        widest = Math.max(widest, r.width);
-      }
-      return { widths: [...byTop.values()], widest };
-    });
-    // The pass is narrow enough on both widths that the code takes two lines — the case at issue.
-    expect(lines.widths.length, `line widths ${lines.widths.join(" / ")}`).toBe(2);
-    {
-      const spread = Math.max(...lines.widths) - Math.min(...lines.widths);
-      expect(spread, `line widths ${lines.widths.join(" / ")}`).toBeLessThanOrEqual(lines.widest);
-    }
+    await expect(code).toBeAttached();
+    expect(await code.getAttribute("aria-label")).toBeTruthy();
+    const box = await code.boundingBox();
+    expect(box === null || (box.width <= 1 && box.height <= 1), JSON.stringify(box)).toBe(true);
+    await expect(page.locator("[data-qr-panel]")).toBeVisible();
   });
 }
