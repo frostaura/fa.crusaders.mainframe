@@ -5,8 +5,8 @@ import { Clock, WifiSlash } from "@/components/ui/icons";
 import { PageShell } from "@/components/ui/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { ApiError } from "@/lib/api";
-import { rateLimitedSentence } from "@/lib/errors";
+import { ApiError, errorCode } from "@/lib/api";
+import { SERVICE_BUSY_CAUSE, rateLimitedSentence } from "@/lib/errors";
 import { CONNECTION_COPY } from "@/lib/shellCopy";
 import { typography } from "@/lib/typography";
 import { useAsyncAction } from "@/lib/useAsyncAction";
@@ -63,14 +63,14 @@ export function ConnectionLost({ onRetry, cause }: { onRetry: () => void | Promi
   const retry = useAsyncAction(async () => { await onRetry(); });
   const phoneOffline = useOffline();
   // V-10 — a 429 is the club ANSWERING, busy; saying "can't reach" blamed a connection that was fine.
-  const busy = cause instanceof ApiError && cause.status === 429;
-  const wait = busy ? Number(cause.detail("retry_after_seconds")) || null : null;
+  // R19 X19-1.1 — so are the 503s that pass by themselves (`service_busy`, `conflict_retry`).
+  const busy = busyAnswer(cause);
   // R14 X14-3 — the phone says it has no connection at all: that is the member's signal, not the
   // club, so it is said as offline. `onLine` true proves nothing (Wi-Fi without internet), so only
   // false switches it; `auth.tsx` re-checks by itself on the browser's `online` event.
   const offline = phoneOffline && !busy;
   const title = busy ? CONNECTION_COPY.busyTitle : offline ? CONNECTION_COPY.offlineTitle : CONNECTION_COPY.unreachableTitle;
-  const body = busy ? `${rateLimitedSentence(wait)} ${CONNECTION_COPY.busyBody}` : offline ? CONNECTION_COPY.offlineBody : CONNECTION_COPY.unreachableBody;
+  const body = busy ? `${busy} ${CONNECTION_COPY.busyBody}` : offline ? CONNECTION_COPY.offlineBody : CONNECTION_COPY.unreachableBody;
   return (
     <PageShell width="narrow">
       <Card>
@@ -87,6 +87,21 @@ export function ConnectionLost({ onRetry, cause }: { onRetry: () => void | Promi
       </Card>
     </PageShell>
   );
+}
+
+/**
+ * The sentence for a club that ANSWERED, busy — a 429 (its rate-limit sentence, with the wait it
+ * gives) or a 503 `service_busy` / `conflict_retry` (R19 X19-1.1: a session check that lost a
+ * clash is busy for a moment too; nothing about it is the member's to resolve) — or null.
+ */
+function busyAnswer(cause: unknown): string | null {
+  if (!(cause instanceof ApiError)) return null;
+  if (cause.status === 429) return rateLimitedSentence(Number(cause.detail("retry_after_seconds")) || null);
+  const code = errorCode(cause);
+  if (cause.status === 503 && (code === "service_busy" || code === "conflict_retry")) {
+    return SERVICE_BUSY_CAUSE.charAt(0).toUpperCase() + SERVICE_BUSY_CAUSE.slice(1);
+  }
+  return null;
 }
 
 /** `navigator.onLine === false`, followed through the browser's online/offline events. */
