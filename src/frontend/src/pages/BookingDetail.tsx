@@ -42,7 +42,7 @@ import { fetchQuery, peekQuery } from "@/lib/offline/queryCache";
 import { useDataOwner } from "@/lib/offline/useCachedRead";
 import type { EarlyResult } from "@/components/play/useResult";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
-import { DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
+import { DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_READ_REFUSAL } from "@/lib/playersCopy";
 import { vouchesForResult } from "@/lib/bookingLink";
 import { bookedByClub } from "@/components/bookings/bookedByClub";
 import { DETAIL_GAP } from "@/components/players/detail/detailLayout";
@@ -212,7 +212,9 @@ function DetailBody({ read, say, earlyResult, bookingId, seatId }: BodyProps) {
         loading={read.loading}
         error={read.error}
         action={DETAIL_COPY.readAction}
-        codes={PLAYERS_REFUSAL}
+        // R19 X19-1.2 — the READ's codes, never the players writes' (their clash says "The page has
+        // the latest", and here the page is what failed): a read clash or a busy club is said as a read.
+        codes={PLAYERS_READ_REFUSAL}
         onRetry={read.reload}
         skeleton={<DetailSkeleton />}
       />

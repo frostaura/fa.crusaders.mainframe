@@ -6,7 +6,7 @@ import { minutesSpoken } from "./minutes";
 import { SOMEONE } from "./playersNames";
 import { BUY_MINUTES_ACTION } from "./gridCopy";
 import { unsureSentence, type UnsureWords } from "./lostReply";
-import { BUSY_LEAD, LOST_REPLY, unsureWords } from "./lostReplyCopy";
+import { BUSY_LEAD, ERROR_LEAD, LOST_REPLY, unsureWords } from "./lostReplyCopy";
 
 /**
  * Every word the players feature says (P11, D11–D13): the BookSheet's Players and Split steps,
@@ -144,6 +144,16 @@ export const PLAYERS_REFUSAL: Record<string, string> = {
   query_too_short: "Type at least two letters of their name.",
   cannot_favourite_self: "You can't star yourself.",
   notification_not_found: "That notification has gone.",
+};
+
+/**
+ * R19 X19-1.2 — the codes a READ of a booking can answer, and only those. The write refusals above
+ * are worded for a change that was refused on a page that is showing ("The page has the latest —
+ * try again now"); handed a failed read, their clash sentence pointed at a page that never loaded.
+ * A read's `503 conflict_retry` and `service_busy` fall through to the shared read causes.
+ */
+export const PLAYERS_READ_REFUSAL: Record<string, string> = {
+  booking_not_found: PLAYERS_REFUSAL.booking_not_found,
 };
 
 function numberDetail(e: ApiError, key: string): number | null {
@@ -652,6 +662,17 @@ export const PLAYERS_UNSURE = {
   /** R18 — the same, after a `503 service_busy`. */
   privacyBusy: (label: string) =>
     `${BUSY_LEAD} and we couldn't check either, so we can't tell whether "${label}" changed. Refresh the page in a moment to see.`,
+  /** R19 X19-2 — the same, after the club's system answered with an error (a plain 500): it did answer. */
+  privacyError: (label: string) =>
+    `${ERROR_LEAD} and we couldn't check either, so we can't tell whether "${label}" changed. Refresh the page to see.`,
+  /** R19 X19-2 — the reminder, after the club's system answered with an error (for `useOrganiserHands`). */
+  nudgeError: (name: string) =>
+    `${ERROR_LEAD}, so we can't tell whether the reminder reached ${name}. Give it a few minutes before reminding them again — they may already have it.`,
+  /** R19 X19-2 — a new share link, after the club's system answered with an error (for `shareLink`). */
+  linkError: `${ERROR_LEAD}, so we can't tell whether a new link was made — if it was, the old link has stopped working. Make a new link to get one you can share.`,
+  /** R19 X19-2 — the star, after the club's system answered with an error (for the picker's `MemberRow`). */
+  starError: (name: string) =>
+    `${ERROR_LEAD}, so we can't tell whether the star on ${name} changed. Close this and open it again to see.`,
   star: (name: string) =>
     `The club didn't answer, so we can't tell whether the star on ${name} changed. Close this and open it again to see.`,
   /** R18 — the same, after a `503 service_busy`. */
@@ -1198,6 +1219,11 @@ export const INVITE_UNSURE = {
     checked: `${BUSY_LEAD}, so we checked your invite: you're not on this game yet — nothing was taken. Try again in a moment.`,
     unchecked: `${BUSY_LEAD} and your invite couldn't be checked either, so we can't tell whether you're in. Check your bookings and your wallet before trying again in a moment.`,
   },
+  /** R19 X19-2 — the club's system answered with an error (a plain 500): it answered, and an error does not pass in a moment. */
+  error: {
+    checked: `${ERROR_LEAD}, so we checked your invite: you're not on this game yet — nothing was taken. Try again, and tell the club committee if it keeps happening.`,
+    unchecked: `${ERROR_LEAD} and your invite couldn't be checked either, so we can't tell whether you're in. Check your bookings and your wallet before trying again.`,
+  },
   provenNote: "The club's reply didn't arrive, so we checked your invite — you're in. Your wallet is being re-read.",
   /** R3 I-3 — the decline landed although its reply was lost. */
   declineProvenNote: "The club's reply didn't arrive, so we checked your invite — your answer went through.",
@@ -1299,5 +1325,16 @@ export const PRIVACY_COPY = {
   savedOff: (label: string) => `${label}: off.`,
   /** The switch went back; this says why and that nothing changed. */
   saveFailed: (label: string) => `Couldn't change "${label}" — it's back as it was. Try again.`,
+  /** R19 X19-1.4 — the club answered `503 service_busy` and the look found nothing changed. */
+  saveBusy: (label: string) =>
+    `Couldn't change "${label}" — the club's system was too busy to take it just now, and it's back as it was. Try again in a moment.`,
+  /** R19 X19-1.4 — the club answered `503 conflict_retry` and the look found nothing changed. */
+  saveConflict: (label: string) =>
+    `Couldn't change "${label}" — your settings were being changed somewhere else at the same moment, and it's back as it was. Try again now.`,
+  /** R19 X19-2 — the club's system answered with an error (a plain 500) and the look found nothing changed. */
+  saveError: (label: string) =>
+    `Couldn't change "${label}" — the club's system hit an error, and it's back as it was. Try again, and tell the club committee if it keeps happening.`,
+  /** R19 X19-1.4 — a refusal whose cause is the club's to say (a rate limit): the cause follows. */
+  saveRefused: (label: string, cause: string) => `Couldn't change "${label}" — it's back as it was. ${cause}`,
 } as const;
 

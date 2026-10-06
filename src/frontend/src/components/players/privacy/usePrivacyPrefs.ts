@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { playersEndpoints, type SocialPrefs } from "@/lib/playersApi";
-import { UnsureOutcome, unsureCauseOf, writeOrReadBack } from "@/lib/lostReply";
+import { ApiError } from "@/lib/api";
+import { describeFailure } from "@/lib/errors";
+import { unsureSentence, writeOrReadBack, type UnsureWords } from "@/lib/lostReply";
 import { PLAYERS_UNSURE, PRIVACY_COPY as COPY } from "@/lib/playersCopy";
 import { useRead, type Read } from "@/lib/useRead";
 
@@ -28,6 +30,34 @@ export type PrivacyPrefs = {
   error: (key: PrivacyKey) => string | null;
   set: (key: PrivacyKey, on: boolean) => Promise<void>;
 };
+
+/**
+ * The words for a privacy write that each cause has (R18 X18-1, R19 X19-1.4): after a look that
+ * found nothing changed, and after a look that failed — for silence, a clash, a busy club and the
+ * club's system answering with an error (R19 X19-2: a plain 500 is an answer, not silence).
+ * Said through `unsureSentence`, so a cause `lostReply` learns is worded there, never dropped here.
+ */
+function privacyWords(label: string): UnsureWords {
+  return {
+    checked: COPY.saveFailed(label),
+    unchecked: PLAYERS_UNSURE.privacy(label),
+    busy: { checked: COPY.saveBusy(label), unchecked: PLAYERS_UNSURE.privacyBusy(label) },
+    conflict: { checked: COPY.saveConflict(label), unchecked: PLAYERS_UNSURE.privacyConflict(label) },
+    error: { checked: COPY.saveError(label), unchecked: PLAYERS_UNSURE.privacyError(label) },
+  };
+}
+
+/**
+ * Why a flip went back. An unknown outcome is said by its cause (R19 X19-1.4 — a busy club, read back
+ * unchanged, said a bare "Try again" into a club that had just said it was busy); a rate limit says
+ * the wait the club gave; any other refusal keeps the plain sentence.
+ */
+function flipFailure(error: unknown, label: string): string {
+  const unsure = unsureSentence(error, privacyWords(label));
+  if (unsure) return unsure;
+  if (error instanceof ApiError && error.status === 429) return COPY.saveRefused(label, describeFailure(error));
+  return COPY.saveFailed(label);
+}
 
 /**
  * The member's own social switches (D13), read from and written to `/me/preferences`.
@@ -75,11 +105,7 @@ export function usePrivacyPrefs(): PrivacyPrefs {
       );
     } catch (error) {
       setWanted((current) => ({ ...current, [key]: before }));
-      const label = PRIVACY_LABEL[key].label;
-      const unknown = error instanceof UnsureOutcome && !error.checked;
-      // R18 X18-1 — a 503 conflict_retry is said as that, never "the club didn't answer".
-      const unsure = unknown ? { busy: PLAYERS_UNSURE.privacyBusy, conflict: PLAYERS_UNSURE.privacyConflict, silent: PLAYERS_UNSURE.privacy }[unsureCauseOf(error)] : PLAYERS_UNSURE.privacy;
-      setErrors((current) => ({ ...current, [key]: unknown ? unsure(label) : COPY.saveFailed(label) }));
+      setErrors((current) => ({ ...current, [key]: flipFailure(error, PRIVACY_LABEL[key].label) }));
     } finally {
       mark(key, false);
     }

@@ -74,7 +74,8 @@ describe("the privacy switches", () => {
     const findable = await switchNamed(COPY.findableLabel);
     fireEvent.click(findable);
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(COPY.saveFailed(COPY.findableLabel));
+    // R19 X19-2 — a plain 500 is the club's system answering with an error, said as that.
+    expect(alert).toHaveTextContent(COPY.saveError(COPY.findableLabel));
     expect(findable).toHaveAttribute("aria-checked", "false");
     expect(within(findable.closest("li")!).getByRole("alert")).toBe(alert);
   });
