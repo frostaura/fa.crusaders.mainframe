@@ -62,6 +62,9 @@ public sealed class UtcInstantConverter : JsonConverter<DateTimeOffset>
 /// route. Nothing the request did committed — the database rolled it back — so asking again is the
 /// right answer, and a box (which keeps an event on any 5xx and backs off) and a screen both read it
 /// as "try again", never as a fault in the server.</item>
+/// <item>R18: a request that could not get a database connection — the pool exhausted for its whole
+/// wait, the server full (53300) or starting (57P03): <c>503 {"error":"service_busy"}</c> with
+/// <c>Retry-After</c> (<see cref="Persistence.DatabasePool"/>).</item>
 /// </list>
 /// </summary>
 public static class InternalErrors
@@ -99,9 +102,9 @@ public static class InternalErrors
         var request = ctx.Request;
         var (status, code) = Classify(feature?.Error, request, feature?.Path);
         ctx.Response.StatusCode = status;
-        if (code == Persistence.DatabaseRetry.ConflictRetry)
+        if (RetryAfterFor(code) is { } seconds)
         {
-            ctx.Response.Headers.RetryAfter = Persistence.DatabaseRetry.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            ctx.Response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         ctx.Response.ContentType = "application/json";
         await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { error = code }));
@@ -144,7 +147,23 @@ public static class InternalErrors
             return (StatusCodes.Status503ServiceUnavailable, Persistence.DatabaseRetry.ConflictRetry);
         }
 
+        // R18 (scalability): the request could not get a database connection at all — the pool stayed
+        // exhausted for its whole wait, or the server was full or starting. Nothing ran; the server is
+        // busy, not broken. See Persistence.DatabasePool.
+        if (Persistence.DatabasePool.IsUnavailable(error))
+        {
+            return (StatusCodes.Status503ServiceUnavailable, Persistence.DatabasePool.ServiceBusy);
+        }
+
         return (StatusCodes.Status500InternalServerError, Code);
+    }
+
+    /// <summary>The <c>Retry-After</c> seconds a 503 code carries; null for every other code.</summary>
+    private static int? RetryAfterFor(string code)
+    {
+        if (code == Persistence.DatabaseRetry.ConflictRetry) return Persistence.DatabaseRetry.RetryAfterSeconds;
+        if (code == Persistence.DatabasePool.ServiceBusy) return Persistence.DatabasePool.RetryAfterSeconds;
+        return null;
     }
 
     /// <remarks>Block body: a switch expression's braces trip lizard (memory/gotchas-build.md).</remarks>

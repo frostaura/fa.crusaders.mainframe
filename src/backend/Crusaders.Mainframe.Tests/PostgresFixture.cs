@@ -236,7 +236,7 @@ public static partial class PostgresDatabases
     {
         // This database's pool only. ClearAllPools would also close every idle connection of
         // every class running beside this one.
-        NpgsqlConnection.ClearPool(new NpgsqlConnection(connectionString));
+        ClearPools(connectionString);
         await ExecAsync(AdminConnectionString(), $"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)");
     }
 
@@ -293,13 +293,26 @@ public static partial class PostgresDatabases
         }
         finally
         {
-            NpgsqlConnection.ClearPool(new NpgsqlConnection(connectionString));
+            ClearPools(connectionString);
         }
 
         // Nothing may connect to the template once it is migrated: a stray session makes every
         // later CREATE DATABASE … TEMPLATE fail with "source database is being accessed".
         await ExecAsync(admin, $"ALTER DATABASE \"{name}\" WITH ALLOW_CONNECTIONS false");
         return name;
+    }
+
+    /// <summary>
+    /// Closes the idle connections of every pool a host over <paramref name="connectionString"/> uses.
+    /// Npgsql keys a pool by the WHOLE connection string, and the API bounds the one it is given
+    /// (R18, <see cref="Crusaders.Mainframe.Api.Persistence.DatabasePool"/>) — so the host's pool is
+    /// the bounded string's, not this one's, and clearing only this one left the migrating host's
+    /// sessions on the template, where every clone then failed with "source database is being accessed".
+    /// </summary>
+    private static void ClearPools(string connectionString)
+    {
+        NpgsqlConnection.ClearPool(new NpgsqlConnection(connectionString));
+        NpgsqlConnection.ClearPool(new NpgsqlConnection(Crusaders.Mainframe.Api.Persistence.DatabasePool.Bound(connectionString, null)));
     }
 
     private static void DropOnExit(string admin, string name)

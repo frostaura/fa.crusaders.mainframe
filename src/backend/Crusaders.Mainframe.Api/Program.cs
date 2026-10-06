@@ -28,9 +28,17 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 // ---- Postgres / EF Core ----
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
+//
+// R18 (scalability): the pool is bounded below PostgreSQL's own connection limit — Npgsql's default
+// of 100 equals the server's default max_connections, so the API alone could take every slot. See
+// DatabasePool. Stream-side reads share a fifth of the pool (StreamDbGate).
+var connectionString = DatabasePool.Bound(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required."),
+    builder.Configuration.GetValue<int?>(DatabasePool.MaxPoolSizeKey));
 builder.Services.AddDbContext<MainframeDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddSingleton(new Crusaders.Mainframe.Api.Services.Realtime.StreamDbGate(
+    Crusaders.Mainframe.Api.Services.Realtime.StreamDbGate.PermitsFor(DatabasePool.MaxPoolSizeOf(connectionString))));
 
 // ---- CORS ----
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()

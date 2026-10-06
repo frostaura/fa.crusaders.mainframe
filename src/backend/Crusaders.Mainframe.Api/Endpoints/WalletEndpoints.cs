@@ -207,6 +207,9 @@ public static partial class WalletEndpoints
         var keepAlive = KeepAliveOverride ?? RealtimeSettings.KeepAlive(await settings.GetAsync(ct));
         var topic = RealtimeTopic.Wallet(tenant.TenantId, userId);
 
+        // R18: every read this stream makes — the opening balance, the guard before each frame — runs
+        // under the stream gate, so a storm of streams costs the pool a fixed share. See StreamDbGate.
+        var gate = ctx.RequestServices.GetRequiredService<StreamDbGate>();
         Channel<RealtimeMessage>? channel = null;
         try
         {
@@ -216,7 +219,7 @@ public static partial class WalletEndpoints
                     ctx,
                     new RealtimeMessage(
                         string.Empty,
-                        await OpeningFrameAsync(ledger, userId, ct)),
+                        await gate.RunAsync(token => OpeningFrameAsync(ledger, userId, token), ct)),
                     ct));
 
             // The session is re-asked before every frame and keep-alive: a rotation (member-code
@@ -224,7 +227,7 @@ public static partial class WalletEndpoints
             var epochs = ctx.RequestServices.GetRequiredService<SessionEpochs>();
             var principal = ctx.User;
             var services = ctx.RequestServices;
-            var guard = new SseGuard(keepAlive, token => epochs.StillCurrentAsync(principal, services, token));
+            var guard = gate.Guard(keepAlive, token => epochs.StillCurrentAsync(principal, services, token));
             await SseStream.PumpAsync(
                 channel.Reader,
                 keepAlive,

@@ -25,7 +25,8 @@ public static class AdminStreamGuard
 
         // The role AND the session: a rotation (member-code §10) ends every session, and a stream
         // opened before it is one of them — it must close, not run until the connection drops.
-        return new SseGuard(keepAlive, async ct =>
+        // R18: under the stream gate, like the wallet stream's — see StreamDbGate.
+        return ctx.RequestServices.GetRequiredService<StreamDbGate>().Guard(keepAlive, async ct =>
             await live.StillHoldsAsync(principal, services, ct) && await epochs.StillCurrentAsync(principal, services, ct));
     }
 }
