@@ -943,6 +943,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("RestoreServedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("RestoreServedBootAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("RestoreServedRelays")
                         .HasColumnType("integer");
 

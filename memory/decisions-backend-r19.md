@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-backend-r19
-description: "Backend round 19 (lane BE19): a device body naming two boards files its malformed_body fault against no board, listing every board it named."
+description: "Backend round 19 (lane BE19): two-board device bodies filed against no board; power-dip restore served and confirmed once per boot; restore rows about the organiser."
 type: decision
 last_verified: 2026-10-06
 ---
@@ -22,3 +22,20 @@ last_verified: 2026-10-06
   detail (as R18's `TwoBoardsDetail` already did). A cut body naming two boards no longer maps to the
   "dropped" explanation line for the same reason.
 - Tests: `R19DeviceBodyHttpTests` (8 two-board shapes red before the fix; 4 one-board controls).
+
+- **One restore per boot (E19-1).** The box's `restored_relays` is set once per boot and rides EVERY later beat
+  unchanged (bridge `applyRestore`, `gRestoreDone`); the server read any `> 0` as a confirmation, so a steady box
+  re-confirmed every beat and the fresh-boot window re-served the plan — a `court.lights_restored` row per lit
+  court per beat and `OnSince`/`Cause` overwritten. Now (`Endpoints/RestoreBoot.cs`): boot = server clock − the
+  board's uptime; new column `devices.RestoreServedBootAt` (migration `AddDeviceRestoreServedBootAt`) keeps the
+  served boot after settlement. Settle only with `RestoreServedAt` set AND the served boot == this boot (±3 s);
+  an expectation from an earlier boot is dropped without a verdict (rebooted before answering — not a failure);
+  never serve a boot already served or one whose count is already > 0. Unknown uptime (absent/negative/>10 y)
+  reads as the same boot (pre-R19 behaviour). **Why a column, not reuse:** the served boot must survive the
+  settle that clears `RestoreServedAt`, and an estimate from serve time alone mis-reads a reboot seconds later.
+- **Out-of-range `restored_relays` (outside 0–255, the firmware's byte) settles nothing**; the expectation waits.
+  Not 400 (a diagnostic counter must never take the roster down), not clamp (a clamped 9e18 would "confirm").
+  `no_push`/`events_lost` were already clamped into int; `uptime_ms` out of range gives no boot.
+- **Restore rows are about the organiser (E19-4):** `RelayRestoreItem.OrganiserUserId` (= `booking.UserId`) is the
+  audit subject; the light state's `CausedByUserId` stays the payer (`PaidByUserId ?? UserId`).
+- Test model fixed: `DeviceRelayRestoreHttpTests` walks boots on a movable clock with the count sticky per boot.

@@ -11,10 +11,11 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <param name="BookingId">The booking the remaining time belongs to.</param>
 /// <param name="RemainingSeconds">True remaining seconds, UNCAPPED — see <see cref="RelayRestorePlan"/>.</param>
 /// <param name="EndsAt">When the grant ends, for the projection row.</param>
-/// <param name="CausedByUserId">Whose booking it is, so "restored after power loss" can still name a member.</param>
+/// <param name="CausedByUserId">Who paid for the time being restored (a pay-for payer, else the organiser), so "restored after power loss" can still name a member on the light state.</param>
+/// <param name="OrganiserUserId">The booking's organiser: the member the restore's row on the Night is about (R19 E19-4), as every lights row is.</param>
 public sealed record RelayRestoreItem(
     int Relay, Guid CourtId, int CourtNumber, Guid BookingId, int RemainingSeconds,
-    DateTimeOffset EndsAt, Guid? CausedByUserId)
+    DateTimeOffset EndsAt, Guid? CausedByUserId, Guid? OrganiserUserId)
 {
     /// <summary>
     /// The wire element: <c>&lt;relay&gt;|&lt;remaining_seconds&gt;|&lt;booking_ref&gt;</c>.
@@ -165,6 +166,6 @@ public static class RelayRestorePlan
 
         return new RelayRestoreItem(
             relay, court.Id, court.CourtNumber, booking.Id, remaining, booking.EndsAt,
-            booking.PaidByUserId ?? booking.UserId);
+            booking.PaidByUserId ?? booking.UserId, booking.UserId);
     }
 }

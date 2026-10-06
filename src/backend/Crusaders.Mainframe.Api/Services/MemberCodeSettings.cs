@@ -79,8 +79,16 @@ public static class MemberCodeSettings
     /// <summary>
     /// The oldest scan the server will check (§4.2), milliseconds:
     /// <c>(scan_memory_seconds + lcd_choice_seconds) × 1000 + 30 000</c> from the club's own
-    /// clamped settings — the box never remembers a scan longer than scan memory plus one pay-for
-    /// question, plus one step of slack. At most 390 000.
+    /// clamped settings. At most 390 000.
+    ///
+    /// <para>
+    /// The box holds itself 5 s inside this bound (bridge 2.2.9, <c>bridgelogic::ScanMemory</c>,
+    /// R19 D19-2): a remembered scan, however many pay-for questions and PRESS AGAIN holds extend
+    /// it, never carries a <c>scan_age_ms</c> past <c>(scan_memory + choice) × 1000 + 25 000</c>.
+    /// When a whole further countdown would not fit under that cap the box forgets the scan and
+    /// shows SCAN AGAIN instead of inviting a press this check would refuse. The 5 s is the box's
+    /// margin for the pass between its expiry check and the request that carries the age.
+    /// </para>
     /// </summary>
     public static long MaxScanAgeMs(TenantSettingsView s) =>
         ((long)BoxSettings.ScanMemorySeconds(s) + BoxSettings.LcdChoiceSeconds(s)) * 1000L + (MemberCodeMath.StepSeconds * 1000L);

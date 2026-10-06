@@ -8,6 +8,7 @@ using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Crusaders.Mainframe.Tests;
 
@@ -144,7 +145,8 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
     {
         var body = JsonSerializer.SerializeToNode(extra ?? new { })!.AsObject();
         body["mac"] = box.Mac;
-        body["uptime_ms"] = 30_000;
+        // R19 E19-1: a test that walks a boot sends its own uptime; the rest are a box 30 s up.
+        if (!body.ContainsKey("uptime_ms")) body["uptime_ms"] = 30_000;
 
         var req = new HttpRequestMessage(HttpMethod.Post, HeartbeatPath)
         {
@@ -473,6 +475,12 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
     /// a still-live booking gets told twice and the member's ledger does not move either time.
     /// </para>
     ///
+    /// <para>
+    /// R19 E19-1: modelled as the firmware behaves — <c>restored_relays</c> is set once per boot and
+    /// rides EVERY later heartbeat of that boot unchanged (the box never resets it), and only a reboot
+    /// clears it. The test model used to alternate 0 and 1, which is a box that does not exist.
+    /// </para>
+    ///
     /// <para><b>Mutant:</b> route the restore through the activation service. The member is
     /// charged once per power cut.</para>
     /// </summary>
@@ -480,9 +488,10 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
     public async Task Restoring_twice_charges_nothing_and_stamps_no_second_attendance()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-        using var factory = CreateFactory();
-        var box = await SeedAsync(factory, 1);
-        var bookingId = await LitBookingAsync(factory, box, courtNumber: 1, minutesRemaining: 30);
+        var clock = new MovableClock();
+        await using var factory = ClockedFactory(clock);
+        var box = await SeedAsync(_pg.SharedHost, 1);
+        var bookingId = await LitBookingAsync(_pg.SharedHost, box, courtNumber: 1, minutesRemaining: 30);
         using var client = factory.CreateClient();
 
         DateTimeOffset checkedInBefore;
@@ -492,10 +501,10 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
             checkedInBefore = (await db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == bookingId)).CheckedInAt!.Value;
         }
 
-        await BeatAsync(client, box);
-        await BeatAsync(client, box, new { restored_relays = 1 });
-        await BeatAsync(client, box);
-        await BeatAsync(client, box, new { restored_relays = 1 });
+        // Boot one, then a second power cut and boot two.
+        await BootAsync(client, clock, box, restored: 1);
+        clock.Now = clock.Now.AddMinutes(1);
+        await BootAsync(client, clock, box, restored: 1);
 
         using var after = factory.Services.CreateScope();
         var db2 = after.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -505,6 +514,11 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
 
         var booking = await db2.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == bookingId);
         Assert.Equal(checkedInBefore, booking.CheckedInAt);
+
+        // Told once per boot, confirmed once per boot, one row on the Night per boot.
+        Assert.Equal(2, await CountAsync(factory, box, "device.relay_restore_served"));
+        Assert.Equal(2, await CountAsync(factory, box, "device.relay_restore_confirmed"));
+        Assert.Equal(2, await CountAsync(factory, box, CourtLightStateService.LightsRestoredAction));
     }
 
     /// <summary>
@@ -671,5 +685,225 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
 
         Assert.False(body.TryGetProperty("relays", out _),
             "a club with restore switched off still received a relays key, so its boxes will wait for a restore that is never coming");
+    }
+
+    // ---- R19 E19-1: one restore per boot ------------------------------------------------------------
+
+    private sealed class MovableClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = TestHost.UtcNowStorable();
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> ClockedFactory(MovableClock clock) =>
+        _pg.SharedHost.WithWebHostBuilder(b => b.ConfigureServices(s =>
+        {
+            s.RemoveAll<TimeProvider>();
+            s.AddSingleton<TimeProvider>(clock);
+        }));
+
+    private static async Task<int> CountAsync(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> factory, Box box, string action)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.AuditLogs.IgnoreQueryFilters().CountAsync(a => a.TenantId == box.TenantId && a.Action == action);
+    }
+
+    /// <summary>
+    /// One boot as the firmware lives it: the first beat 5 s after power-up (nothing to report yet, the
+    /// restore answer served), then a beat a minute for <paramref name="beats"/> minutes, every one
+    /// carrying the same <c>restored_relays</c> — the box sets it once and never resets it.
+    /// </summary>
+    private static async Task BootAsync(HttpClient client, MovableClock clock, Box box, long restored, int beats = 4)
+    {
+        await BeatAsync(client, box, new { uptime_ms = 5_000 });
+        for (var i = 1; i <= beats; i++)
+        {
+            clock.Now = clock.Now.AddMinutes(1);
+            await BeatAsync(client, box, new { uptime_ms = 5_000 + (i * 60_000L), restored_relays = restored });
+        }
+    }
+
+    /// <summary>
+    /// E19-1: the box's count rides every heartbeat until it reboots, so a confirmation counts only
+    /// while a restore is outstanding for that board's current boot, and only once. One court and
+    /// two; the fresh-boot window (four beats) is walked to its end.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task A_boxs_restored_count_riding_every_heartbeat_confirms_once_per_boot(int courts)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        var clock = new MovableClock();
+        await using var factory = ClockedFactory(clock);
+        var box = await SeedAsync(_pg.SharedHost, 1, 2);
+        for (var c = 1; c <= courts; c++) await LitBookingAsync(_pg.SharedHost, box, courtNumber: c, minutesRemaining: 30);
+        using var client = factory.CreateClient();
+
+        await BootAsync(client, clock, box, restored: courts, beats: 6);
+
+        Assert.Equal(1, await CountAsync(factory, box, "device.relay_restore_served"));
+        Assert.Equal(1, await CountAsync(factory, box, "device.relay_restore_confirmed"));
+        Assert.Equal(0, await CountAsync(factory, box, "device.relay_restore_failed"));
+        Assert.Equal(courts, await CountAsync(factory, box, CourtLightStateService.LightsRestoredAction));
+
+        // The light row keeps the instant the restore was confirmed — the second beat — not the last beat.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var state = await db.CourtLightStates.IgnoreQueryFilters().AsNoTracking().FirstAsync(s => s.CourtId == box.CourtIds[1]);
+        Assert.Equal(LightCause.RestoreAfterPowerDip, state.Cause);
+        Assert.Equal(clock.Now.AddMinutes(-5), state.OnSince);
+    }
+
+    /// <summary>
+    /// E19-1: a box up for eleven hours still carries the count from its boot. With no restore
+    /// outstanding it is the box repeating itself: nothing is confirmed, no row is written, and a court a
+    /// member lit by scanning keeps its own cause and its own "on since".
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task A_steady_box_repeating_its_boot_count_restores_nothing(int restored)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        var clock = new MovableClock();
+        await using var factory = ClockedFactory(clock);
+        var box = await SeedAsync(_pg.SharedHost, 1, 2);
+        var bookingId = await LitBookingAsync(_pg.SharedHost, box, courtNumber: 1, minutesRemaining: 30);
+        var litAt = clock.Now.AddMinutes(-10);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.CourtLightStates.Add(new CourtLightState
+            {
+                TenantId = box.TenantId,
+                CourtId = box.CourtIds[1],
+                State = LightState.On,
+                OnSince = litAt,
+                OnUntil = clock.Now.AddMinutes(30),
+                BookingId = bookingId,
+                Cause = LightCause.Member,
+                CausedByUserId = box.MemberId,
+                LastEventAt = litAt,
+            });
+            await db.SaveChangesAsync();
+        }
+        using var client = factory.CreateClient();
+
+        for (var i = 0; i < 3; i++)
+        {
+            clock.Now = clock.Now.AddMinutes(1);
+            await BeatAsync(client, box, new { uptime_ms = (11 * 3_600_000L) + (i * 60_000L), restored_relays = restored });
+        }
+
+        Assert.Equal(0, await CountAsync(factory, box, "device.relay_restore_confirmed"));
+        Assert.Equal(0, await CountAsync(factory, box, "device.relay_restore_served"));
+        Assert.Equal(0, await CountAsync(factory, box, CourtLightStateService.LightsRestoredAction));
+        using var after = factory.Services.CreateScope();
+        var state = await after.ServiceProvider.GetRequiredService<MainframeDbContext>().CourtLightStates
+            .IgnoreQueryFilters().AsNoTracking().FirstAsync(s => s.CourtId == box.CourtIds[1]);
+        Assert.Equal(LightCause.Member, state.Cause);
+        Assert.Equal(litAt, state.OnSince);
+    }
+
+    /// <summary>
+    /// E19-1: a count no box can send (the firmware's is one byte) is not evidence the box acted: the
+    /// heartbeat is answered as always, nothing is confirmed or failed, and the restore stays outstanding
+    /// until the box's real count arrives.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(9_000_000_000_000_000_000L)]
+    [InlineData(256L)]
+    [InlineData(-1L)]
+    public async Task A_restored_count_no_box_can_send_settles_nothing(long garbage)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        var clock = new MovableClock();
+        await using var factory = ClockedFactory(clock);
+        var box = await SeedAsync(_pg.SharedHost, 1);
+        await LitBookingAsync(_pg.SharedHost, box, courtNumber: 1, minutesRemaining: 30);
+        using var client = factory.CreateClient();
+
+        Assert.Single(RelaysOf(await BeatAsync(client, box, new { uptime_ms = 5_000 })));
+        clock.Now = clock.Now.AddMinutes(1);
+        await BeatAsync(client, box, new { uptime_ms = 65_000, restored_relays = garbage });
+
+        Assert.Equal(0, await CountAsync(factory, box, "device.relay_restore_confirmed"));
+        Assert.Equal(0, await CountAsync(factory, box, "device.relay_restore_failed"));
+        Assert.Equal(0, await CountAsync(factory, box, CourtLightStateService.LightsRestoredAction));
+
+        clock.Now = clock.Now.AddMinutes(1);
+        await BeatAsync(client, box, new { uptime_ms = 125_000, restored_relays = 1 });
+        Assert.Equal(1, await CountAsync(factory, box, "device.relay_restore_confirmed"));
+        Assert.Equal(1, await CountAsync(factory, box, CourtLightStateService.LightsRestoredAction));
+    }
+
+    /// <summary>
+    /// E19-1, varied: a box that reboots before it answers a restore leaves nothing to judge — the
+    /// restore that boot was served is not a failure, and the new boot is served and confirmed afresh.
+    /// And a failure is judged once per boot: the box does not act on a second serving, so it is not
+    /// asked to.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_box_that_reboots_before_answering_is_served_again_and_a_failure_is_filed_once()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        var clock = new MovableClock();
+        await using var factory = ClockedFactory(clock);
+        var box = await SeedAsync(_pg.SharedHost, 1);
+        await LitBookingAsync(_pg.SharedHost, box, courtNumber: 1, minutesRemaining: 30);
+        using var client = factory.CreateClient();
+
+        Assert.Single(RelaysOf(await BeatAsync(client, box, new { uptime_ms = 5_000 })));
+        clock.Now = clock.Now.AddSeconds(40);
+        await BeatAsync(client, box, new { uptime_ms = 6_000 });
+        Assert.Equal(0, await CountAsync(factory, box, "device.relay_restore_failed"));
+        Assert.Equal(2, await CountAsync(factory, box, "device.relay_restore_served"));
+
+        // This boot heard and did not act: one failure, however many beats of the window follow.
+        for (var i = 1; i <= 4; i++)
+        {
+            clock.Now = clock.Now.AddMinutes(1);
+            await BeatAsync(client, box, new { uptime_ms = 6_000 + (i * 60_000L) });
+        }
+        Assert.Equal(1, await CountAsync(factory, box, "device.relay_restore_failed"));
+        Assert.Equal(2, await CountAsync(factory, box, "device.relay_restore_served"));
+        Assert.Equal(0, await CountAsync(factory, box, "device.relay_restore_confirmed"));
+    }
+
+    /// <summary>
+    /// E19-4: the restore's row on the Night is about the booking's organiser, as every lights row is —
+    /// not the member who paid for the court at the box. With a pay-for payer and without.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_restore_row_is_about_the_bookings_organiser_not_its_payer(bool paidForByAnother)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        var clock = new MovableClock();
+        await using var factory = ClockedFactory(clock);
+        var box = await SeedAsync(_pg.SharedHost, 1);
+        var bookingId = await LitBookingAsync(_pg.SharedHost, box, courtNumber: 1, minutesRemaining: 30);
+        if (paidForByAnother)
+        {
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var payer = new User { TenantId = box.TenantId, Email = $"payer-{box.Slug}@test.local", PasswordHash = "x", EmailVerified = true };
+            db.Users.Add(payer);
+            await db.SaveChangesAsync();
+            var booking = await db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == bookingId);
+            booking.PaidByUserId = payer.Id;
+            await db.SaveChangesAsync();
+        }
+        using var client = factory.CreateClient();
+
+        await BootAsync(client, clock, box, restored: 1, beats: 1);
+
+        using var after = factory.Services.CreateScope();
+        var row = await after.ServiceProvider.GetRequiredService<MainframeDbContext>().AuditLogs.IgnoreQueryFilters()
+            .SingleAsync(a => a.TenantId == box.TenantId && a.Action == CourtLightStateService.LightsRestoredAction);
+        Assert.Equal(box.MemberId, row.SubjectUserId);
     }
 }

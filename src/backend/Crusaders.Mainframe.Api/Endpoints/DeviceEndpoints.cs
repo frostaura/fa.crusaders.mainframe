@@ -508,9 +508,10 @@ public static class DeviceEndpoints
     ///
     /// <para>
     /// <b>The two halves are one method because they are one decision.</b> Settling first means
-    /// a box reporting <c>restored_relays: 0</c> against an outstanding expectation is recorded
-    /// as a failure AND is handed the same answer again on this very response — which is the
-    /// only behaviour that gets the court lit without a person walking to the cupboard.
+    /// this beat's answer is decided knowing what the box did with the last one. The plan is in
+    /// every response, but the box acts on the first it reads after booting and never again until
+    /// it reboots (bridge <c>applyRestore</c>), so a boot is served — and judged — once
+    /// (R19 E19-1, <see cref="RestoreBoot"/>).
     /// </para>
     ///
     /// <para>
@@ -533,17 +534,23 @@ public static class DeviceEndpoints
         if (!BoxSettings.RelayRestoreEnabled(s)) return null;
 
         var plan = await RelayRestorePlan.ForAsync(services.Db, device, now, ct);
-        await SettleRestoreAsync(services, device, req, plan, now, ct);
+        var boot = RestoreBoot.Of(req, now);
+        await SettleRestoreAsync(services, device, boot, plan, now, ct);
 
         // Marked ONLY for a board that looks freshly booted. The answer is served on every
         // heartbeat because only the box knows whether it has just started, but an ordinary
         // running box with a lit court must never be asked to confirm a restore it was never
         // going to perform — that would file a `restore_failed` every minute of every evening
         // and bury the one that means a court is genuinely dark.
-        if (plan.Count > 0 && LooksFreshlyBooted(req, s))
+        //
+        // R19 E19-1: and only ONCE per boot. The box acts on the first answer it reads after
+        // booting and never again until it reboots, so a second serving inside the same fresh
+        // window is an expectation it will never meet — and its unchanged count would confirm it.
+        if (plan.Count > 0 && LooksFreshlyBooted(req, s) && !boot.AlreadyServed(device))
         {
             device.RestoreServedAt = now;
             device.RestoreServedRelays = plan.Count;
+            device.RestoreServedBootAt = boot.BootedAt;
             Audit(services, device, "device.relay_restore_served", new
             {
                 device_id = device.Id,
@@ -653,14 +660,30 @@ public static class DeviceEndpoints
     /// so a second beat carrying zero is not a second failure — it is a board running normally,
     /// and re-filing the failure every minute would turn the one row that matters into noise.
     /// </para>
+    ///
+    /// <para>
+    /// R19 E19-1: <b>nothing is settled without an expectation for the board's current boot.</b>
+    /// The box's <c>restored_relays</c> is set once per boot and rides every later heartbeat of
+    /// that boot unchanged, so a positive count with nothing outstanding is the box repeating
+    /// itself: it confirms nothing, writes no row and never touches a court's "on since" or
+    /// cause. An expectation served to an EARLIER boot is dropped without a verdict — the box
+    /// rebooted before it could answer, and the new boot is served afresh. A count the box cannot
+    /// send (<see cref="RestoreBoot.Restored"/>) settles nothing and the expectation waits.
+    /// </para>
     /// </summary>
     private static async Task SettleRestoreAsync(
-        HeartbeatServices services, Device device, HeartbeatRequest req,
+        HeartbeatServices services, Device device, RestoreBoot boot,
         IReadOnlyList<RelayRestoreItem> plan, DateTimeOffset now, CancellationToken ct)
     {
-        var restored = req.RestoredRelays is > 0 and { } n ? n : 0;
         var served = device.RestoreServedRelays;
-        if (device.RestoreServedAt is null && restored == 0) return;
+        if (device.RestoreServedAt is null) return;
+        if (!boot.IsBootServed(device))
+        {
+            device.RestoreServedAt = null;
+            device.RestoreServedRelays = 0;
+            return;
+        }
+        if (boot.Restored is not { } restored) return;
 
         device.RestoreServedAt = null;
         device.RestoreServedRelays = 0;
@@ -702,9 +725,11 @@ public static class DeviceEndpoints
                 item.BookingId, ct);
             if (row is null) continue;
 
+            // R19 E19-4: about the booking's organiser, as every lights row is — never the pay-for
+            // payer the light state names as its cause.
             services.Lights.Audit(
                 CourtLightStateService.LightsRestoredAction, item.CourtId, item.CourtNumber,
-                item.CausedByUserId,
+                item.OrganiserUserId,
                 new
                 {
                     device_id = device.Id,
@@ -975,6 +1000,13 @@ public sealed record HeartbeatRequest(
     /// or by an absent field, which reads as zero — is the row an admin must see, because it
     /// means a court is dark that the club believes is lit, with a member on it who has already
     /// been charged.
+    /// </para>
+    ///
+    /// <para>
+    /// R19 E19-1: <b>it is a since-boot value, not a one-shot.</b> The box sets it once per boot and
+    /// sends it unchanged on every later heartbeat until it reboots, so it confirms only a restore
+    /// outstanding for the board's current boot, and only once (<see cref="RestoreBoot"/>). The
+    /// firmware's count is one byte: anything outside <c>[0, 255]</c> settles nothing.
     /// </para>
     ///
     /// <para>

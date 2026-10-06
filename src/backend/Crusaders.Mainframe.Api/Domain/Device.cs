@@ -464,6 +464,24 @@ public sealed class Device : ITenantScoped
     public int RestoreServedRelays { get; set; }
 
     /// <summary>
+    /// When the board booted — the server's clock at the heartbeat less the board's own
+    /// <c>uptime_ms</c> — for the boot the last non-empty restore was served to. Unlike
+    /// <see cref="RestoreServedAt"/> it is KEPT once that restore is settled. Null before the first
+    /// restore, or when the board that was served reported no readable uptime.
+    ///
+    /// <para>
+    /// <b>R19 E19-1: one restore per boot.</b> The box applies a restore once per boot and its
+    /// <c>restored_relays</c> then rides every heartbeat of that boot unchanged — it never resets
+    /// it. Without knowing which boot was served, the fresh-boot window re-served the plan and the
+    /// box's unchanged count confirmed it again on every beat: a <c>court.lights_restored</c> row
+    /// per lit court per beat and the court's "on since" moved each time. A confirmation now
+    /// counts only against a restore outstanding for the board's CURRENT boot, and a boot that has
+    /// been served is never served again.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? RestoreServedBootAt { get; set; }
+
+    /// <summary>
     /// This box's own button map, as the eight-entry wire array (<c>ButtonMap.ToWire()</c>)
     /// serialised to JSON — or null to use the club's map from <c>tenant_settings</c>.
     ///
