@@ -30,6 +30,9 @@ Tests: `components/bookings/__tests__/doneLineLiveR19`, `cancelCheckedInByR19`, 
   `refusedCheckedIn`), the shares-stand note (R16 J16-7) and the toast (`toastSubject`: the scanner or null
   in `cancellationOutcome`'s nothing-back branch; the organiser where minutes moved). Bulk row reason
   `already_checked_in` is subject-free.
+- **No room is said with its figure** (J19-5 client, BE19j's wire): `409 too_many_players {free_seats}` →
+  "Only 1 seat is still free on this booking — add 1 player, or fewer." (`playersCopy.freeSeatsSentence`);
+  the `400` (no `free_seats`) keeps the plain limit; `409 booking_full` was already worded. Test `lib/playersFullR19`.
 - Fixtures that leaned on the old default stamp the organiser's seat at the booking's instant.
 - Asked (integrator): `ALREADY_CHECKED_IN_TEXT` (the 409's words) to go subject-free; optional quote field
   `checked_in_by` so the sheet can skip its record read.
