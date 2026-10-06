@@ -258,12 +258,13 @@ function adminPrimary(quote: QuoteState, count: number, sendable: number, forNam
  * booking sent with players can be refused for the players (a split that cannot work, a member
  * who left); those codes are the players feature's sentences, everything else the booking's.
  */
-export function refusalSentence(error: unknown, withPlayers = false, forName: string | null = null): string {
+export function refusalSentence(error: unknown, withPlayers = false, forName: string | null = null, slots = 1): string {
   if (withPlayers && error instanceof ApiError && error.code !== null && error.code in PLAYERS_REFUSAL) {
     return playersRefusal(error);
   }
+  // R18 X18-5 — `slots`: how many the run sent, so an unsure answer over several says "slots".
   return error instanceof ApiError || error instanceof UnsureOutcome || error instanceof NotSent
-    ? describeBookingError(error, BOOK_SHEET.fallback, { action: "book", forName })
+    ? describeBookingError(error, BOOK_SHEET.fallback, { action: "book", forName, slots })
     : describeFailure(error, { action: BOOK_SHEET.failedAction });
 }
 
@@ -369,7 +370,7 @@ export function useBookFlow(input: BookFlowInput) {
           wallet.adopt(stated);
           input.onWalletStale?.();
         }
-        late.sayIfGone("danger", () => refusalSentence(error, Boolean(players.payload)));
+        late.sayIfGone("danger", () => refusalSentence(error, Boolean(players.payload), null, sendable.length));
         const reread = Boolean(input.reread) && worthRereading(error);
         if (!reread && provesStaleGrid(error)) input.onStale?.();
       },

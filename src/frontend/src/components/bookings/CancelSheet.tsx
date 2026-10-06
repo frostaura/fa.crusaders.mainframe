@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { focusFirstComplaint } from "@/components/members/saleFocus";
 import { ApiError, type CancellationQuote } from "@/lib/api";
 import { ADMIN_CANCEL } from "@/lib/adminCancelCopy";
-import { ALREADY_CHECKED_IN_TEXT, cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
+import { ALREADY_CHECKED_IN_TEXT, cancellationOutcome, describeBookingError, endsCancel, provesStaleGrid } from "@/lib/bookingErrors";
 import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
 import { playersEndpoints, type BookingDetail } from "@/lib/playersApi";
@@ -21,6 +21,7 @@ import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL, refusalReason } from "@/lib/bookingsCopy";
 import { BulkResults } from "./BulkResults";
 import { MoneyRows, SendingNote, SlotList, type MoneyRow, type SlotLine } from "./SheetParts";
+import { useRefusalInView } from "./useRefusalInView";
 import {
   bookingFace, cancelBookings, netOf, newCancelKey, quoteNote, totalsOf, useCancelQuotes,
   type CancelRun, type QuoteMap,
@@ -163,8 +164,14 @@ function useCancelFlow(props: FlowProps) {
     },
   );
 
+  const failed = action.status === "error" ? action.error : null;
+  // R18 L18-10 — refused for good (already cancelled, played, a hold, gone): nothing to press again.
+  const ended = endsCancel(failed);
+  // R18 L18-2 — the refusal is scrolled into view and takes the keyboard (its button may be gone).
+  useRefusalInView(failed, "[data-sheet='cancel']");
+
   const confirm = () => {
-    if (sendable.length === 0) return;
+    if (sendable.length === 0 || ended) return;
     if (reasonNeeded && reason.trim() === "") {
       setReasonShown(true);
       setRefusals((n) => n + 1);
@@ -176,7 +183,7 @@ function useCancelFlow(props: FlowProps) {
   };
 
   return {
-    quotes, waive, setWaive, reason, setReason, reasonNeeded, forOthers, single, refused, sendable: sendable.length,
+    quotes, waive, setWaive, reason, setReason, reasonNeeded, forOthers, single, refused, sendable: ended ? 0 : sendable.length, ended,
     reasonMissing: reasonShown && reasonNeeded && reason.trim() === "",
     action, run, confirm,
   };
@@ -205,8 +212,13 @@ function CancelFlowView(props: FlowProps) {
           <Button onClick={props.onClose}>{CANCEL_SHEET.done}</Button>
         ) : (
           <>
-            {/* R4 I4-1 — no way out while the cancel is on its way; the note says why. */}
-            {busy ? null : <Button variant="outline" onClick={props.onClose}>{CANCEL_SHEET.keep(count)}</Button>}
+            {/* R4 I4-1 — no way out while the cancel is on its way; the note says why. R18 L18-10 —
+                refused for good, the booking is not being kept by anyone's choice: Done. */}
+            {busy ? null : (
+              <Button variant={flow.ended ? "primary" : "outline"} onClick={props.onClose}>
+                {flow.ended ? CANCEL_SHEET.done : CANCEL_SHEET.keep(count)}
+              </Button>
+            )}
             {/* R15 D15-5 — nothing this member may cancel (checked in): no Cancel to press. */}
             {flow.sendable === 0 ? null : (
               <Button variant="danger" pending={flow.action.pending} onClick={flow.confirm}>
@@ -237,16 +249,32 @@ function lineFor(b: GridBooking, detail: string | undefined, loading: boolean): 
 function CancelBody({ flow, bookings }: { flow: CancelFlow; bookings: GridBooking[] }) {
   const quotes = flow.quotes.state.status === "ready" ? flow.quotes.state.quotes : null;
   const failed = flow.action.status === "error" ? flow.action.error : null;
+  // R18 L18-10 — refused for good: the booking stays named, the quote's figures (a cancel that
+  // will not happen), the waiver, the reason and "can't be undone" go; the refusal says the rest.
+  if (flow.ended) {
+    return (
+      <>
+        <SlotList lines={bookings.map((b) => lineFor(b, undefined, false))} label={CANCEL_SHEET.title(bookings.length)} refusedWord="" />
+        <RefusalAlert failed={failed} />
+      </>
+    );
+  }
   return (
     <>
       {flow.single
         ? <SingleCancel flow={flow} booking={bookings[0]} quotes={quotes} />
         : <ManyCancel flow={flow} bookings={bookings} quotes={quotes} />}
       <WaiveAndReason flow={flow} bookings={bookings} quotes={quotes} />
-      {failed ? <Alert tone="danger">{failureSentence(failed)}</Alert> : null}
+      <RefusalAlert failed={failed} />
       <p className="text-sm text-text-secondary">{CANCEL_SHEET.finalLine}</p>
     </>
   );
+}
+
+/** The press's refusal, marked for {@link useRefusalInView} (R18 L18-2). */
+function RefusalAlert({ failed }: { failed: unknown }) {
+  if (!failed) return null;
+  return <Alert tone="danger" data-sheet-refusal="" tabIndex={-1}>{failureSentence(failed)}</Alert>;
 }
 
 function consequence(quote: CancellationQuote, waived: boolean, subject: string | null) {

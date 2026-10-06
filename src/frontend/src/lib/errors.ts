@@ -53,6 +53,21 @@ export const CONFLICT_RETRY_CAUSE =
   "someone else was changing the same thing at that exact moment. Try again now.";
 
 /**
+ * R18 BE18s — `503 { error: "service_busy" }` (with Retry-After: 2): every database connection the
+ * club's system may hold is in use, so it turned this request away before doing anything. Busy for
+ * a moment, not down or restarting, not a deployment fault and not the member's connection — the
+ * Try again stays, and the wait it names is a moment, not "a minute".
+ */
+export const SERVICE_BUSY_CAUSE =
+  "the club's system is very busy right now. Try again in a moment.";
+
+/** The two 503s that pass by themselves — a clash, a busy moment — and their causes. */
+const PASSING_CAUSES: Record<string, string> = {
+  conflict_retry: CONFLICT_RETRY_CAUSE,
+  service_busy: SERVICE_BUSY_CAUSE,
+};
+
+/**
  * Puts what the member was trying to do in front of why it failed.
  *
  * <p>
@@ -89,6 +104,15 @@ function describeStatus(err: ApiError, action?: string): string | null {
   if (status >= 500)
     return lead(action, "something went wrong on the club's system. It isn't anything you did. Try again shortly, and tell the club committee if it keeps happening.");
   return null;
+}
+
+/** The sentence an error CODE carries: this screen's own, a cross-cutting one, or a passing 503's. */
+function describeCode(code: string | null, opts: DescribeOptions): string | null {
+  if (!code) return null;
+  if (opts.codes?.[code]) return opts.codes[code];
+  if (CROSS_CUTTING[code]) return CROSS_CUTTING[code];
+  const passing = PASSING_CAUSES[code];
+  return passing ? lead(opts.action, passing) : null;
 }
 
 export type DescribeOptions = {
@@ -134,10 +158,8 @@ export function describeFailure(err: unknown, opts: DescribeOptions = {}): strin
     return opts.fallback ?? lead(opts.action, "something went wrong. Try again, and tell the club committee if it keeps happening.");
   }
 
-  const code = errorCode(err);
-  if (code && opts.codes?.[code]) return opts.codes[code];
-  if (code && CROSS_CUTTING[code]) return CROSS_CUTTING[code];
-  if (code === "conflict_retry") return lead(opts.action, CONFLICT_RETRY_CAUSE);
+  const byCode = describeCode(errorCode(err), opts);
+  if (byCode) return byCode;
 
   const byStatus = describeStatus(err, opts.action);
   if (byStatus) return byStatus;
@@ -159,7 +181,7 @@ export function describeFailure(err: unknown, opts: DescribeOptions = {}): strin
 export function isDeploymentFault(err: unknown): boolean {
   const code = errorCode(err);
   if (code === "tenant_not_found" || code === "tenant_unresolved") return true;
-  // A lost race is the one 5xx a retry is MADE for (R16 BE16c).
-  if (code === "conflict_retry") return false;
+  // A lost race (R16 BE16c) and a busy moment (R18 BE18s) are the 5xx a retry is MADE for.
+  if (code && code in PASSING_CAUSES) return false;
   return err instanceof ApiError && err.status >= 500;
 }

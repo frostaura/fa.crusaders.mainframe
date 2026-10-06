@@ -171,6 +171,55 @@ export const CONFLICT_UNSURE_TEXT: Record<BookingAction, { checked: string; unch
   },
 };
 
+/**
+ * R18 X18-5 — the same unanswered booking, for a run of SEVERAL slots: "the slot is still free"
+ * over two slots on two courts was the one slot's sentence. Every slot was looked for (the sheet
+ * shows any that landed as booked instead), so when this is said none of them did.
+ */
+export const UNSURE_MANY_TEXT = {
+  checked: "The club's system didn't answer, so we checked the schedule: the slots are still free — nothing was booked and no minutes were taken. Try again in a minute.",
+  unchecked: "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether these were booked. Check the schedule and your wallet before trying again.",
+} as const;
+
+/** R18 X18-5 — the clash (`conflict_retry`) twin of {@link UNSURE_MANY_TEXT}. */
+export const CONFLICT_UNSURE_MANY_TEXT = {
+  checked: "Someone else was changing one of those courts at the same moment, so we checked the schedule: the slots are still free — nothing was booked and no minutes were taken. Try again now.",
+  unchecked: "Someone else was changing one of those courts at the same moment and the schedule couldn't be read either, so we can't tell whether these were booked. Check the schedule and your wallet before trying again.",
+} as const;
+
+/** R18 X18-5 — the unread 5xx sentences ({@link SERVER_DOWN_TEXT}, {@link CONFLICT_RETRY_TEXT}) for several slots. */
+export const BOOK_MANY_UNREAD_TEXT = {
+  down: "The club's system didn't answer, so these may or may not have gone through. Check the schedule, then try again in a minute.",
+  conflict: "Someone else was changing one of those courts at the same moment. Check the schedule, and try again for any slot that isn't yours on it.",
+} as const;
+
+/**
+ * R18 BE18s — `503 service_busy`: the club's system was too busy to take the write (every database
+ * connection in use) and says so — it did answer, so never "didn't answer", and the wait is a
+ * moment. The sheets still read the day back (a 5xx is never taken as a "no"), so these are the
+ * unread sentences; {@link SERVICE_BUSY_UNSURE_TEXT} the read-back ones.
+ */
+export const SERVICE_BUSY_BOOK_TEXT = {
+  book: "The club's system was too busy to take this just now. Check the schedule, and try again in a moment if your booking isn't on it.",
+  bookMany: "The club's system was too busy to take these just now. Check the schedule, and try again in a moment for any slot that isn't yours on it.",
+  cancel: "The club's system was too busy to take this just now. Check the schedule, and try again in a moment if the booking is still there.",
+} as const;
+
+export const SERVICE_BUSY_UNSURE_TEXT = {
+  book: {
+    checked: "The club's system was too busy to take this just now, so we checked the schedule: the slot is still free — nothing was booked and no minutes were taken. Try again in a moment.",
+    unchecked: "The club's system was too busy to take this just now and the schedule couldn't be read either, so we can't tell whether this was booked. Check the schedule and your wallet before trying again.",
+  },
+  bookMany: {
+    checked: "The club's system was too busy to take these just now, so we checked the schedule: the slots are still free — nothing was booked and no minutes were taken. Try again in a moment.",
+    unchecked: "The club's system was too busy to take these just now and the schedule couldn't be read either, so we can't tell whether these were booked. Check the schedule and your wallet before trying again.",
+  },
+  cancel: {
+    checked: "The club's system was too busy to take this just now, so we checked the schedule: the booking is still there — nothing was cancelled and no minutes moved. Try again in a moment.",
+    unchecked: "The club's system was too busy to take this just now and the schedule couldn't be read either, so we can't tell whether it was cancelled. Check the schedule and your wallet before trying again.",
+  },
+} as const;
+
 /** R17 X17-1 — a bulk-cancel row whose item was answered conflict_retry, after the day was read back. */
 export const CONFLICT_RETRY_ROW = {
   stillThere: "Someone else was changing it at the same moment, and it's still on the schedule — try again now.",
@@ -373,16 +422,36 @@ export type BookingErrorContext = {
   action?: BookingAction;
   /** The member's first name when an admin is acting for them. */
   forName?: string | null;
+  /** R18 X18-5 — how many slots the booking run sent; above one, the unsure sentences say "slots". */
+  slots?: number;
 };
 
+/** Several slots booked in one run (R18 X18-5): only a booking has a plural sentence of its own. */
+function many(action: BookingAction, slots: number | undefined): boolean {
+  return action === "book" && (slots ?? 1) > 1;
+}
+
 /** A 5xx: a lost race the club answered (R16 BE16c), or the club not answering at all. */
-function serverSentence(e: ApiError, action: BookingAction): string {
-  return e.code === "conflict_retry" ? CONFLICT_RETRY_TEXT[action] : SERVER_DOWN_TEXT[action];
+function serverSentence(e: ApiError, action: BookingAction, slots?: number): string {
+  if (e.code === "service_busy") return many(action, slots) ? SERVICE_BUSY_BOOK_TEXT.bookMany : SERVICE_BUSY_BOOK_TEXT[action];
+  const conflict = e.code === "conflict_retry";
+  if (many(action, slots)) return conflict ? BOOK_MANY_UNREAD_TEXT.conflict : BOOK_MANY_UNREAD_TEXT.down;
+  return conflict ? CONFLICT_RETRY_TEXT[action] : SERVER_DOWN_TEXT[action];
+}
+
+/** The read-back sentences for this write: a clash or silence, one slot or several. */
+function unsureWordsOf(e: UnsureOutcome, action: BookingAction, slots?: number) {
+  if (e.original instanceof ApiError && e.original.code === "service_busy") {
+    return many(action, slots) ? SERVICE_BUSY_UNSURE_TEXT.bookMany : SERVICE_BUSY_UNSURE_TEXT[action];
+  }
+  const conflict = isConflictRetry(e.original);
+  if (many(action, slots)) return conflict ? CONFLICT_UNSURE_MANY_TEXT : UNSURE_MANY_TEXT;
+  return conflict ? CONFLICT_UNSURE_TEXT[action] : UNSURE_TEXT[action];
 }
 
 /** A write whose outcome was read back: a clash (`conflict_retry`) or an unanswered call. */
-function unsureSentenceOf(e: UnsureOutcome, action: BookingAction): string {
-  const words = isConflictRetry(e.original) ? CONFLICT_UNSURE_TEXT[action] : UNSURE_TEXT[action];
+function unsureSentenceOf(e: UnsureOutcome, action: BookingAction, slots?: number): string {
+  const words = unsureWordsOf(e, action, slots);
   return e.checked ? words.checked : words.unchecked;
 }
 
@@ -393,7 +462,7 @@ function unsureSentenceOf(e: UnsureOutcome, action: BookingAction): string {
 export function describeBookingError(e: unknown, fallback: string, context: BookingErrorContext = {}): string {
   const action = context.action ?? "book";
   if (e instanceof NotSent) return NOT_SENT_TEXT[action];
-  if (e instanceof UnsureOutcome) return unsureSentenceOf(e, action);
+  if (e instanceof UnsureOutcome) return unsureSentenceOf(e, action, context.slots);
   if (!(e instanceof ApiError)) return fallback;
 
   // A lapsed or missing session reaches here as 401 (the client's own handler signs the
@@ -402,7 +471,7 @@ export function describeBookingError(e: unknown, fallback: string, context: Book
   // Both mean the same thing to the person holding the phone.
   if (e.status === 401 || e.code === "tenant_unresolved") return SESSION_LOST_TEXT;
   if (e.status === 429) return describeRateLimited(e, action);
-  if (e.status >= 500) return serverSentence(e, action);
+  if (e.status >= 500) return serverSentence(e, action, context.slots);
 
   const withFigures = e.code !== null ? FIGURED[e.code] : undefined;
   if (withFigures) return withFigures(e, context);
@@ -445,6 +514,19 @@ const STALE_GRID_CODES = new Set([
 
 export function provesStaleGrid(e: unknown): boolean {
   return e instanceof ApiError && e.code !== null && STALE_GRID_CODES.has(e.code);
+}
+
+/**
+ * R18 L18-10 — a cancel refused for GOOD: the booking is already cancelled, played, a no-show or a
+ * hold, gone altogether, or (the member's route) checked in to. Pressing Cancel again can never
+ * work, and the quote's figures describe a cancel that will not happen — so the sheet drops both
+ * and says the refusal alone. Everything else (a rate limit, a missing reason, a lost answer) can
+ * be tried again, and keeps them.
+ */
+const FINAL_CANCEL_CODES = new Set(["booking_not_open", "not_cancellable", "booking_not_found", "already_checked_in"]);
+
+export function endsCancel(e: unknown): boolean {
+  return e instanceof ApiError && e.code !== null && FINAL_CANCEL_CODES.has(e.code);
 }
 
 /**

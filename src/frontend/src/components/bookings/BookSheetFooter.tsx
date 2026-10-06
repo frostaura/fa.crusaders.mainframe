@@ -47,7 +47,7 @@ function PrimaryButton(props: PrimaryProps) {
   const { flow, reasonId, onClose } = props;
   const { primary } = flow;
   if (primary.kind === "none") return null;
-  if (primary.kind === "gone") return <PickAnother label={primary.label} onClose={onClose} />;
+  if (primary.kind === "gone") return <PickAnother label={primary.label} onClose={onClose} describedBy={`${reasonId}-refusal`} />;
   if (primary.kind === "unavailable") {
     // `aria-disabled`, never `disabled`: it stays focusable, so a reader reaches it and hears
     // why (its description) — and with no handler, a press does nothing.
@@ -74,11 +74,12 @@ function PrimaryButton(props: PrimaryProps) {
  * closes onto the refreshed grid, and the keyboard is put on it — never left on a Book button for
  * a slot that is somebody else's.
  */
-function PickAnother(props: { label: string; onClose: () => void }) {
-  const { label, onClose } = props;
+function PickAnother(props: { label: string; onClose: () => void; describedBy: string }) {
+  const { label, onClose, describedBy } = props;
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
-  return <Button ref={ref} data-pick-another="" onClick={onClose}>{label}</Button>;
+  // R18 L18-2 — the refusal above (scrolled into view) is what this button is heard with.
+  return <Button ref={ref} data-pick-another="" aria-describedby={describedBy} onClick={onClose}>{label}</Button>;
 }
 
 type ResultFooterProps = { flow: BookFlow; onClose: () => void; note: ReactNode };

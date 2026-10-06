@@ -18,6 +18,7 @@ import { heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
 import { GodModeNotice } from "./GodModeNotice";
 import { MoneyRows, SendingNote, SlotList, SlotSummary, Stepper } from "./SheetParts";
+import { useRefusalInView } from "./useRefusalInView";
 import { isAdminRun, slotCount } from "./bookFlow";
 import { PlayersStep } from "./PlayersStep";
 import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
@@ -115,6 +116,9 @@ function BookFlowView(props: ViewProps) {
   const body = useRef<HTMLDivElement>(null);
   /** The sentence an unavailable Book button is described by. */
   const reasonId = useId();
+  // R18 L18-2 — a refusal is scrolled into view and takes the keyboard, except from "Pick another
+  // time" (R11 X11-3), which the refusal describes instead.
+  useRefusalInView(flow.action.status === "error" ? flow.action.error : null, "[data-sheet='book']", flow.primary.kind !== "gone");
 
   // A new step is a new screen: take a screen reader to its top rather than leaving it on a
   // button that has just changed meaning under it. R8 L8-5 — and the EYE to its top too: the
@@ -252,7 +256,11 @@ function ConfirmStep({ flow, reasonId, terms }: { flow: BookFlow; reasonId: stri
       {flow.godMode ? <GodModeNotice name={flow.godMode.name} balanceAfter={flow.godMode.balanceAfter} owedBack={flow.godMode.owedBack} /> : null}
       <QuoteOwedBack flow={flow} />
       {flow.short !== null ? <ShortNotice shortBy={flow.short} reasonId={reasonId} /> : null}
-      {failed ? <Alert tone="danger">{refusalSentence(failed, Boolean(flow.players.payload), firstName(flow.memberName))}</Alert> : null}
+      {failed ? (
+        <Alert tone="danger" data-sheet-refusal="" id={`${reasonId}-refusal`} tabIndex={-1}>
+          {refusalSentence(failed, Boolean(flow.players.payload), firstName(flow.memberName), flow.sendable.length)}
+        </Alert>
+      ) : null}
     </>
   );
 }
