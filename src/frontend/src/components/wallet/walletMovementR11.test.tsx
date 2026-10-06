@@ -10,6 +10,9 @@ import { ToastProvider } from "../Toast";
 import { MinutesChip } from "../shell/MinutesChip";
 import { signIn, signOut, stubFetch } from "../../test/harness";
 
+/** R19 X19-3 — a toast is `[data-toast]` (no live role of its own); any other status region still counts. */
+const SAID = "[role=status], [data-toast]";
+
 /**
  * R11 X11-1 — on /wallet ONE club movement raised TWO toasts worded differently: the chip's
  * "The club added 7 minutes to your wallet." and the page's "Xavi Adminworth added 7 minutes…".
@@ -60,7 +63,7 @@ describe("R11 X11-1 — one announcement per wallet movement on /wallet", () => 
     club.balance_minutes = 207; club.entries = [ROW]; club.total_entries = 1;
     await push({ balance_minutes: 207, delta_minutes: 7, reason: "admin_adjustment" });
     await settle(); await settle();
-    const statuses = [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "");
+    const statuses = [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "");
     const money = statuses.filter((t) => /7 minutes/.test(t));
     expect(money).toHaveLength(1);
     expect(money[0]).toContain(movementSentence(7, "admin_adjustment"));
@@ -74,7 +77,7 @@ describe("R11 X11-1 — one announcement per wallet movement on /wallet", () => 
     club.balance_minutes = 193; club.entries = [{ ...ROW, signedAmountMinutes: -7 }]; club.total_entries = 1;
     await push({ balance_minutes: 193, delta_minutes: -7, reason: "admin_adjustment" });
     await settle(); await settle();
-    const money = [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /7 minutes/.test(t));
+    const money = [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "").filter((t) => /7 minutes/.test(t));
     expect(money).toEqual([movementSentence(-7, "admin_adjustment")].map((s) => expect.stringContaining(s)));
   });
 });

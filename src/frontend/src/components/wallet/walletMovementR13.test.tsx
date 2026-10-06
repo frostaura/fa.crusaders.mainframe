@@ -8,6 +8,9 @@ import { ToastProvider } from "../Toast";
 import { MinutesChip } from "../shell/MinutesChip";
 import { signIn, signOut, stubFetch, type StubRoute } from "../../test/harness";
 
+/** R19 X19-3 — a toast is `[data-toast]` (no live role of its own); any other status region still counts. */
+const SAID = "[role=status], [data-toast]";
+
 /**
  * R13 — the chip's money toasts, through the real chip (lane FC13).
  * X13-2: the organiser's club-cancel toast named nobody and said "partners" for one.
@@ -47,7 +50,7 @@ function mount(extra: StubRoute[] = []) {
 }
 
 const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
-const toasts = () => [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /minute/.test(t));
+const toasts = () => [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "").filter((t) => /minute/.test(t));
 
 /** The partner's share row as the wallet's newest entries carry it (r13e13/frames-par.jsonl's +7). */
 const shareBack = (n: number) => ({

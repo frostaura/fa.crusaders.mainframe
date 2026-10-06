@@ -9,6 +9,9 @@ import { ToastProvider } from "../Toast";
 import { MinutesChip } from "../shell/MinutesChip";
 import { signIn, signOut, stubFetch } from "../../test/harness";
 
+/** R19 X19-3 — a toast is `[data-toast]` (no live role of its own); any other status region still counts. */
+const SAID = "[role=status], [data-toast]";
+
 /**
  * Review round 16 (FE16m) — the chip's toasts against BE16b's R16 frames.
  *
@@ -39,7 +42,7 @@ function mount() {
 }
 
 const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
-const said = () => [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /Court 3/.test(t));
+const said = () => [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "").filter((t) => /Court 3/.test(t));
 
 describe("R16 J16-7 — the partner of a started game the club cancelled hears that their share stands", () => {
   it("one toast, with the court, day and time", async () => {
@@ -57,7 +60,7 @@ describe("R16 J16-7 — the partner of a started game the club cancelled hears t
     await wait(120);
     await push({ balance_minutes: 200, delta_minutes: 0, reason: "cancelled_share_stands", parts: [], cancelled_by: "club" });
     await wait(400);
-    const all = [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "");
+    const all = [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "");
     expect(all).toContain("The club cancelled your game — it had started, so your share stands.");
   }, 15_000);
 });

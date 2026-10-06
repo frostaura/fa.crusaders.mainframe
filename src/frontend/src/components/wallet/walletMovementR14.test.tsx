@@ -8,6 +8,9 @@ import { ToastProvider } from "../Toast";
 import { MinutesChip } from "../shell/MinutesChip";
 import { signIn, signOut, stubFetch, type StubRoute } from "../../test/harness";
 
+/** R19 X19-3 — a toast is `[data-toast]` (no live role of its own); any other status region still counts. */
+const SAID = "[role=status], [data-toast]";
+
 /**
  * R14 — the chip's money toasts, through the real chip (lane FE14m), against BE14b's contract:
  * X14-2 / E14-1: `share_returned` is only a withdrawal; `organiser_removed` and `split_changed` are
@@ -48,7 +51,7 @@ function mount(extra: StubRoute[] = []) {
 }
 
 const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
-const toasts = () => [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /minute/.test(t));
+const toasts = () => [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "").filter((t) => /minute/.test(t));
 
 /** The partner's share row as the wallet's newest entries carry it (r13e13/frames-par.jsonl's +7). */
 const shareBack = (n: number) => ({
@@ -197,7 +200,7 @@ describe("R14 J14-4 — a late cancel of a split booking: the penalty, then each
 });
 
 describe("R14 E14-5 (BE14b §5) — the club cancels a session that had started: nothing moved, but it is said", () => {
-  const said = () => [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /cancelled your session/.test(t));
+  const said = () => [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "").filter((t) => /cancelled your session/.test(t));
 
   it("a balance-neutral cancelled_no_refund frame raises one toast with court, day and time", async () => {
     const { push } = mount();
@@ -214,7 +217,7 @@ describe("R14 E14-5 (BE14b §5) — the club cancels a session that had started:
     await wait(120);
     await push({ balance_minutes: 200, delta_minutes: 0, reason: "cancellation_refund", parts: [], ...PLACE });
     await wait(400);
-    expect([...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /Court 3/.test(t))).toEqual([]);
+    expect([...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "").filter((t) => /Court 3/.test(t))).toEqual([]);
   }, 15_000);
 });
 

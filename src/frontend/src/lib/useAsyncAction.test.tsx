@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook, screen } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { useAsyncAction } from "./useAsyncAction";
 import { ToastProvider } from "../components/Toast";
@@ -146,7 +146,8 @@ describe("useAsyncAction", () => {
       toast: { action: "book the court", unchanged: true },
     }), { wrapper });
     await act(async () => { await result.current.run(); });
-    const toast = screen.getByRole("status");
+    // R19 X19-3 — the toast's words arrive in the one polite region, the viewport.
+    const toast = document.querySelector<HTMLElement>("[data-toast-viewport]")!;
     expect(toast).toHaveTextContent(/Couldn't book the court/);
     expect(toast).toHaveTextContent("Nothing changed.");
   });
@@ -157,7 +158,7 @@ describe("useAsyncAction", () => {
       toast: { success: (n) => `Booked ${n} slots.` },
     }), { wrapper });
     await act(async () => { await result.current.run(); });
-    expect(screen.getByRole("status")).toHaveTextContent("Booked 3 slots.");
+    expect(document.querySelector<HTMLElement>("[data-toast-viewport]")!).toHaveTextContent("Booked 3 slots.");
   });
 
   it("works without a ToastProvider when no toast is asked for", async () => {

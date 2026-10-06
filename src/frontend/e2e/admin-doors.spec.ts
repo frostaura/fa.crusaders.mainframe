@@ -409,7 +409,7 @@ test.describe("One door's page", () => {
     expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({
       name: "Front door", gate_key: "front-door", location_note: "", power_loss_behaviour: "not_established",
     });
-    await expect(page.getByRole("status").first())
+    await expect(page.locator("[data-toast-viewport]").first())
       .toContainText("Front door saved. It is the front-door door");
   });
 
@@ -458,7 +458,7 @@ test.describe("One door's page", () => {
     await expect(page.getByText(/no door name yet · gate-0a1b2c/)).toBeVisible();
     // And what the club has just given up: an unnamed door is sent an empty list, so it has
     // no offline fallback at all.
-    await expect(page.getByRole("status").first()).toContainText("only works while it can reach the server");
+    await expect(page.locator("[data-toast-viewport]").first()).toContainText("only works while it can reach the server");
   });
 
   /**

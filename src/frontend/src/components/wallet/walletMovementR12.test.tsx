@@ -8,6 +8,9 @@ import { ToastProvider } from "../Toast";
 import { MinutesChip } from "../shell/MinutesChip";
 import { signIn, signOut, stubFetch } from "../../test/harness";
 
+/** R19 X19-3 — a toast is `[data-toast]` (no live role of its own); any other status region still counts. */
+const SAID = "[role=status], [data-toast]";
+
 /**
  * R12 — the chip's money toasts.
  * X12-1: the club cancelled a shared booking and the organiser got two toasts ("put 30 minutes
@@ -50,7 +53,7 @@ function mount(extra: { path: string; body: unknown }[] = []) {
 }
 
 const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
-const toasts = () => [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "").filter((t) => /minute/.test(t));
+const toasts = () => [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "").filter((t) => /minute/.test(t));
 
 describe("R12 X12-1 — one toast for a cancelled shared booking", () => {
   it("contract C1: one frame with parts says the club cancelled, both rows and the net", async () => {

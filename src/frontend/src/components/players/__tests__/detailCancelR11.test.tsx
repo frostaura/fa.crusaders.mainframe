@@ -49,6 +49,7 @@ describe("R11 X11-2 — a cancel from the booking's page", () => {
     watch.disconnect();
     expect(seen).toHaveLength(0);
     // The sheet's toast, with the figures, is the one announcement.
-    expect([...document.querySelectorAll("[role=status]")].filter((n) => /cancel/i.test(n.textContent ?? ""))).toHaveLength(1);
+    // R19 X19-3 — a toast is `[data-toast]` (its words arrive in the viewport's one polite region).
+    expect([...document.querySelectorAll("[role=status], [data-toast]")].filter((n) => /cancel/i.test(n.textContent ?? ""))).toHaveLength(1);
   });
 });

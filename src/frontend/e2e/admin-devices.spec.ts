@@ -183,7 +183,7 @@ test.describe("A box that registered itself", () => {
     await page.getByRole("button", { name: "Save box" }).click();
 
     expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Cupboard box", court_numbers: [1, 2] });
-    await expect(page.getByRole("status")).toContainText("Cupboard box now drives A: court 1, B: court 2.");
+    await expect(page.locator("[data-toast-viewport]")).toContainText("Cupboard box now drives A: court 1, B: court 2.");
     await expect(page.getByText("New — check court numbers")).toBeHidden();
   });
 
@@ -275,8 +275,8 @@ test.describe("The club's device API key", () => {
     await expect(page.getByRole("button", { name: /Reflash every board after this/ })).toBeVisible();
     await page.getByRole("button", { name: /Reflash every board after this/ }).click();
 
-    await expect(page.getByRole("status")).toContainText("New key issued.");
-    await expect(page.getByRole("status")).toContainText("has to be reflashed with this one");
+    await expect(page.locator("[data-toast-viewport]")).toContainText("New key issued.");
+    await expect(page.locator("[data-toast-viewport]")).toContainText("has to be reflashed with this one");
     // And the panel now holds the new key, not the one that just stopped working.
     await page.getByRole("button", { name: "Reveal device API key" }).click();
     await expect(page.getByLabel("Device API key", { exact: true })).toHaveText("cmk_NEWNEWNEWNEW1234");
@@ -298,7 +298,7 @@ test.describe("The button map", () => {
     await page.getByRole("button", { name: "Save button map" }).click();
     const body = JSON.parse((await put).postData() ?? "{}");
 
-    await expect(page.getByRole("status")).toContainText("Button map saved.");
+    await expect(page.locator("[data-toast-viewport]")).toContainText("Button map saved.");
 
     expect(body.buttonMap).toEqual(["court:D", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"]);
     // Review finding 23: this screen used to PUT the whole settings document it read at
@@ -341,7 +341,7 @@ test.describe("The button map", () => {
 
     // Three-valued on the wire: a list sets an override, null goes back to the club's map.
     expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ button_map: null });
-    await expect(page.getByRole("status")).toContainText("uses the club's button map again");
+    await expect(page.locator("[data-toast-viewport]")).toContainText("uses the club's button map again");
   });
 
   test("an older API that sends no button_map field gets no per-box editor at all", async ({ page }) => {
@@ -372,7 +372,7 @@ test.describe("Deleting a box", () => {
     await serveApi(page, routes([FRESH], [{ method: "DELETE", path: "/api/v1/admin/devices/", body: { deleted: true } }]));
     await dialog.getByRole("button", { name: "Delete board" }).click();
 
-    await expect(page.getByRole("status")).toContainText("it re-registers on its next heartbeat as a new box");
+    await expect(page.locator("[data-toast-viewport]")).toContainText("it re-registers on its next heartbeat as a new box");
     await expect(page.getByText("New — check court numbers")).toBeVisible();
   });
 });

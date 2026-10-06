@@ -13,6 +13,9 @@ import { ToastProvider } from "../Toast";
 import { MinutesChip } from "../shell/MinutesChip";
 import { signIn, signOut } from "../../test/harness";
 
+/** R19 X19-3 — a toast is `[data-toast]` (no live role of its own); any other status region still counts. */
+const SAID = "[role=status], [data-toast]";
+
 /**
  * R17 J17-2 follow-through (lane FE17x) — the wallet page hands its own read to the live balance
  * (`apply`) so a Refresh can end a stale chip. Its first read JOINS a read already out for the same
@@ -88,7 +91,7 @@ function mount() {
   return { push: (f: BalanceFrame) => act(async () => { live?.onFrame(f); }) };
 }
 
-const statuses = () => [...document.querySelectorAll("[role=status]")].map((n) => n.textContent ?? "");
+const statuses = () => [...document.querySelectorAll(SAID)].map((n) => n.textContent ?? "");
 
 describe("the wallet page never puts an overtaken read over a newer frame (R17 J17-2, FE17x)", () => {
   it("early read sent → the club takes 50 (frame) → the page opens and joins it → old 200 lands: 150 stands, no 'arrived', and it reads again", async () => {
