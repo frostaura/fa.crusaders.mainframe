@@ -1,5 +1,6 @@
 import { ApiError } from "./api";
-import { NotSent, UnsureOutcome, isConflictRetry } from "./bookingOutcome";
+import { NotSent, UnsureOutcome } from "./bookingOutcome";
+import { answerReasonOf, unsureReasonOf, type UnsureReason } from "./lostReply";
 import type { SplitCancel } from "./bookingsApi";
 import { minutesSpoken } from "./minutes";
 import { rateLimitedSentence } from "./errors";
@@ -220,10 +221,51 @@ export const SERVICE_BUSY_UNSURE_TEXT = {
   },
 } as const;
 
+/**
+ * R19 X19-2 — a write the club's system answered with an ERROR (a plain 500; not 502/504, not a
+ * code-less 503 — those are the gateway saying the system did not answer). It answered, so never
+ * "didn't answer"; whether the write landed before the error is still unknown (F1.1), so it is read
+ * back like any 5xx; and an error does not pass "in a minute". Unread, then read back.
+ */
+export const SERVER_ERROR_TEXT = {
+  book: "The club's system hit an error, so this may or may not have gone through. Check the schedule before trying again.",
+  bookMany: "The club's system hit an error, so these may or may not have gone through. Check the schedule before trying again.",
+  cancel: "The club's system hit an error, so the booking may or may not have been cancelled. Check the schedule before trying again.",
+} as const;
+
+const ERROR_TRY = "Try again, and tell the club committee if it keeps happening.";
+
+export const ERROR_UNSURE_TEXT = {
+  book: {
+    checked: `The club's system hit an error, so we checked the schedule: the slot is still free — nothing was booked and no minutes were taken. ${ERROR_TRY}`,
+    unchecked: "The club's system hit an error and the schedule couldn't be read either, so we can't tell whether this was booked. Check the schedule and your wallet before trying again.",
+  },
+  bookMany: {
+    checked: `The club's system hit an error, so we checked the schedule: the slots are still free — nothing was booked and no minutes were taken. ${ERROR_TRY}`,
+    unchecked: "The club's system hit an error and the schedule couldn't be read either, so we can't tell whether these were booked. Check the schedule and your wallet before trying again.",
+  },
+  cancel: {
+    checked: `The club's system hit an error, so we checked the schedule: the booking is still there — nothing was cancelled and no minutes moved. ${ERROR_TRY}`,
+    unchecked: "The club's system hit an error and the schedule couldn't be read either, so we can't tell whether it was cancelled. Check the schedule and your wallet before trying again.",
+  },
+} as const;
+
 /** R17 X17-1 — a bulk-cancel row whose item was answered conflict_retry, after the day was read back. */
 export const CONFLICT_RETRY_ROW = {
   stillThere: "Someone else was changing it at the same moment, and it's still on the schedule — try again now.",
   unread: "Someone else was changing it at the same moment — check the schedule.",
+} as const;
+
+/** R19 — the same row for an item the club answered `503 service_busy` (it said "didn't answer"). */
+export const SERVICE_BUSY_ROW = {
+  stillThere: "The club's system was too busy to take it just now, and it's still on the schedule — try again in a moment.",
+  unread: "The club's system was too busy to take it just now — check the schedule.",
+} as const;
+
+/** R19 X19-2 — the same row for an item the club's system answered with an error (a plain 500). */
+export const SERVER_ERROR_ROW = {
+  stillThere: "The club's system hit an error, and it's still on the schedule — try again, and tell the club committee if it keeps happening.",
+  unread: "The club's system hit an error — check the schedule.",
 } as const;
 
 /** R3 I-4 — offline before sending: certain that nothing happened, and said so. */
@@ -431,22 +473,37 @@ function many(action: BookingAction, slots: number | undefined): boolean {
   return action === "book" && (slots ?? 1) > 1;
 }
 
-/** A 5xx: a lost race the club answered (R16 BE16c), or the club not answering at all. */
+/** "book", "bookMany" or "cancel" — the key of a table that has a plural for a booking run. */
+function keyOf(action: BookingAction, slots: number | undefined): "book" | "bookMany" | "cancel" {
+  return many(action, slots) ? "bookMany" : action;
+}
+
+/**
+ * A 5xx, by why (R19 X19-2, `answerReasonOf`): a busy club, a lost race the club answered (R16
+ * BE16c), the club's system answering with an error, or the club not answering at all.
+ */
 function serverSentence(e: ApiError, action: BookingAction, slots?: number): string {
-  if (e.code === "service_busy") return many(action, slots) ? SERVICE_BUSY_BOOK_TEXT.bookMany : SERVICE_BUSY_BOOK_TEXT[action];
-  const conflict = e.code === "conflict_retry";
+  const reason = answerReasonOf(e);
+  if (reason === "busy") return SERVICE_BUSY_BOOK_TEXT[keyOf(action, slots)];
+  if (reason === "error") return SERVER_ERROR_TEXT[keyOf(action, slots)];
+  const conflict = reason === "conflict";
   if (many(action, slots)) return conflict ? BOOK_MANY_UNREAD_TEXT.conflict : BOOK_MANY_UNREAD_TEXT.down;
   return conflict ? CONFLICT_RETRY_TEXT[action] : SERVER_DOWN_TEXT[action];
 }
 
-/** The read-back sentences for this write: a clash or silence, one slot or several. */
+/** The read-back sentences for this write: busy, a clash, an error or silence, one slot or several. */
 function unsureWordsOf(e: UnsureOutcome, action: BookingAction, slots?: number) {
-  if (e.original instanceof ApiError && e.original.code === "service_busy") {
-    return many(action, slots) ? SERVICE_BUSY_UNSURE_TEXT.bookMany : SERVICE_BUSY_UNSURE_TEXT[action];
-  }
-  const conflict = isConflictRetry(e.original);
+  const reason = unsureReasonOf(e);
+  if (reason === "busy") return SERVICE_BUSY_UNSURE_TEXT[keyOf(action, slots)];
+  if (reason === "error") return ERROR_UNSURE_TEXT[keyOf(action, slots)];
+  const conflict = reason === "conflict";
   if (many(action, slots)) return conflict ? CONFLICT_UNSURE_MANY_TEXT : UNSURE_MANY_TEXT;
   return conflict ? CONFLICT_UNSURE_TEXT[action] : UNSURE_TEXT[action];
+}
+
+/** R17 X17-1 / R19 — a bulk-cancel row read back off the day, worded by why its item's answer was unsure. */
+export function unsureRowWords(reason: UnsureReason, silent: { stillThere: string; unread: string }): { stillThere: string; unread: string } {
+  return { busy: SERVICE_BUSY_ROW, conflict: CONFLICT_RETRY_ROW, error: SERVER_ERROR_ROW, silent }[reason];
 }
 
 /** A write whose outcome was read back: a clash (`conflict_retry`) or an unanswered call. */

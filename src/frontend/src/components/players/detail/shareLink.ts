@@ -1,4 +1,4 @@
-import { UnsureOutcome, unsureCauseOf } from "@/lib/lostReply";
+import { UnsureOutcome, unsureReasonOf } from "@/lib/lostReply";
 import { PLAYERS_UNSURE } from "@/lib/playersCopy";
 
 /**
@@ -49,9 +49,11 @@ export function copyLink(url: string): Promise<ShareOutcome> {
   return copy(url);
 }
 
-/** A new link whose outcome is unknown, said by why (R17 X17-1: a conflict_retry is a clash); null for a refusal. */
+/**
+ * A new link whose outcome is unknown, said by why (R17 X17-1: a conflict_retry is a clash; R19
+ * X19-2: a plain 500 is the club's system answering with an error); null for a refusal.
+ */
 export function linkUnsure(error: unknown): string | null {
   if (!(error instanceof UnsureOutcome)) return null;
-  const cause = unsureCauseOf(error);
-  return cause === "busy" ? PLAYERS_UNSURE.linkBusy : cause === "conflict" ? PLAYERS_UNSURE.linkConflict : PLAYERS_UNSURE.link;
+  return { busy: PLAYERS_UNSURE.linkBusy, conflict: PLAYERS_UNSURE.linkConflict, error: PLAYERS_UNSURE.linkError, silent: PLAYERS_UNSURE.link }[unsureReasonOf(error)];
 }

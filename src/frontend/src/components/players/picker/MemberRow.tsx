@@ -6,7 +6,7 @@ import { Plus, Star } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { playersEndpoints, type PublicMember } from "@/lib/playersApi";
 import { useToast } from "@/components/toastContext";
-import { UnsureOutcome, unsureCauseOf, writeOrReadBack } from "@/lib/lostReply";
+import { UnsureOutcome, unsureReasonOf, writeOrReadBack } from "@/lib/lostReply";
 import { PICKER, PLAYERS_UNSURE } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { cn } from "@/lib/utils";
@@ -102,8 +102,8 @@ function StarButton({ member, favourites }: { member: PublicMember; favourites: 
       },
       failure: (error) => {
         const unknown = error instanceof UnsureOutcome && !error.checked;
-        // R18 X18-1 — a 503 conflict_retry is said as that, never "the club didn't answer".
-        const unsure = unknown ? { busy: PLAYERS_UNSURE.starBusy, conflict: PLAYERS_UNSURE.starConflict, silent: PLAYERS_UNSURE.star }[unsureCauseOf(error)] : PLAYERS_UNSURE.star;
+        // R18 X18-1 / R19 X19-2 — a clash, a busy club and a plain 500 are answers, never "the club didn't answer".
+        const unsure = unknown ? { busy: PLAYERS_UNSURE.starBusy, conflict: PLAYERS_UNSURE.starConflict, error: PLAYERS_UNSURE.starError, silent: PLAYERS_UNSURE.star }[unsureReasonOf(error)] : PLAYERS_UNSURE.star;
         toast.push({ tone: "danger", text: unknown ? unsure(member.name) : PICKER.starFailed(member.name), unchanged: !unknown });
       },
     },

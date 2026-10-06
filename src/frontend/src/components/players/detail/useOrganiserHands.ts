@@ -7,7 +7,7 @@ import { useBalance } from "@/lib/useBalance";
 import {
   playersEndpoints, type AddPlayersAnswer, type BookingDetail, type DetailPlayer, type PlayerSpec,
 } from "@/lib/playersApi";
-import { UnsureOutcome, unsureCauseOf } from "@/lib/lostReply";
+import { UnsureOutcome, unsureReasonOf } from "@/lib/lostReply";
 import { DETAIL_ACTIONS, firstName, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal } from "@/lib/playersCopy";
 import { focusAfterAction } from "@/lib/focusAfterAction";
 import { useAsyncAction } from "@/lib/useAsyncAction";
@@ -150,8 +150,8 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, pag
       failure: (error, p) => {
         const name = seatName(p, detail.players);
         const unknown = error instanceof UnsureOutcome;
-        // R18 X18-1 — a 503 conflict_retry is an answer: someone else was changing the booking.
-        const words = unknown ? { busy: PLAYERS_UNSURE.nudgeBusy, conflict: PLAYERS_UNSURE.nudgeConflict, silent: PLAYERS_UNSURE.nudge }[unsureCauseOf(error)] : PLAYERS_UNSURE.nudge;
+        // R18 X18-1 / R19 X19-2 — a clash, a busy club and a plain 500 are answers, not silence.
+        const words = unknown ? { busy: PLAYERS_UNSURE.nudgeBusy, conflict: PLAYERS_UNSURE.nudgeConflict, error: PLAYERS_UNSURE.nudgeError, silent: PLAYERS_UNSURE.nudge }[unsureReasonOf(error)] : PLAYERS_UNSURE.nudge;
         say({ tone: unknown ? "info" : "danger", text: unknown ? words(name) : playersRefusal(error, { action: DETAIL_ACTIONS.nudgeAction }) });
       },
     },

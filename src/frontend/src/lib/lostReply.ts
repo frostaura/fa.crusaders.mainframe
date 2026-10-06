@@ -68,19 +68,6 @@ export type UnsureWords = UnsurePair & { conflict?: UnsurePair; busy?: UnsurePai
 export type UnsureReason = "busy" | "conflict" | "error" | "silent";
 
 /**
- * The three-way cause the players hooks index their own sentences by (`{ busy, conflict, silent }`).
- * <b>Transitional (R19 X19-2):</b> an `error` is folded into `silent` here only so those callers keep
- * compiling until they carry an error sentence of their own and move to {@link unsureReasonOf} — the
- * ask is in the R19 FE19x report. Every `unsureSentence` caller already says the error.
- */
-export type UnsureCause = "busy" | "conflict" | "silent";
-
-export function unsureCauseOf(error: UnsureOutcome): UnsureCause {
-  const reason = unsureReasonOf(error);
-  return reason === "error" ? "silent" : reason;
-}
-
-/**
  * R19 X19-2 — "didn't answer" is true only when NOTHING answered: the connection failed, the request
  * timed out or was torn (`NetworkError`, an abort), or the gateway in front of the club's system said
  * the system did not answer it — 502, 504, and a 503 carrying no code of the club's own (down or
@@ -91,7 +78,14 @@ export function unsureCauseOf(error: UnsureOutcome): UnsureCause {
 const SILENT_STATUSES = new Set([502, 503, 504]);
 
 export function unsureReasonOf(error: UnsureOutcome): UnsureReason {
-  const original = error.original;
+  return answerReasonOf(error.original);
+}
+
+/**
+ * The same reason read off any error — an unread 5xx a caller words itself (the booking sheets'
+ * unread sentences, a hold lift, a bulk row) as well as an {@link UnsureOutcome}'s original.
+ */
+export function answerReasonOf(original: unknown): UnsureReason {
   if (isServiceBusy(original)) return "busy";
   if (isConflictRetry(original)) return "conflict";
   if (original instanceof ApiError && original.status >= 500 && !SILENT_STATUSES.has(original.status)) return "error";

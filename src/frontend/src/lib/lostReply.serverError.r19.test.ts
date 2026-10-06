@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, NetworkError } from "./api";
-import { UnsureOutcome, unsureCauseOf, unsureReasonOf, unsureSentence, writeOrReadBack } from "./lostReply";
+import { UnsureOutcome, answerReasonOf, unsureReasonOf, unsureSentence, writeOrReadBack } from "./lostReply";
 import { ERROR_LEAD, LOST_REPLY, unsureWords } from "./lostReplyCopy";
 
 /**
@@ -66,7 +66,10 @@ describe("R19 X19-2 — a 500 on a write is an error the club answered, not sile
     expect(unsureSentence(await unsureAfter(new ApiError(500, null), READ_FAILS), pair)).toBe(LOST_REPLY.errorGeneric.unchecked);
   });
 
-  it("the three-way cause the players hooks still index by is unchanged until they carry error words", async () => {
-    expect(unsureCauseOf(await unsureAfter(new ApiError(500, null), READ_OK))).toBe("silent");
+  it("an answer read off any error (an unread 5xx too) is the same reason (FE19m, the transitional three-way cause retired)", async () => {
+    expect(answerReasonOf(new ApiError(500, null))).toBe("error");
+    expect(answerReasonOf(new ApiError(504, null))).toBe("silent");
+    expect(answerReasonOf(new ApiError(503, { error: "service_busy" }))).toBe("busy");
+    expect(unsureReasonOf(await unsureAfter(new ApiError(500, null), READ_OK))).toBe(answerReasonOf(new ApiError(500, null)));
   });
 });
