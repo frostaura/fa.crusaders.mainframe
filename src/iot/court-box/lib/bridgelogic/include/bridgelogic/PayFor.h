@@ -115,6 +115,11 @@ struct PayForAnswer {
   /// window, so the next press cannot try a walk-up on it (review round 8,
   /// D8-1). Every other refusal leaves the payer's scan theirs.
   bool spendsScan = false;
+  /// A refusal whose words ask for ANOTHER PRESS on this scan — PRICE CHANGED
+  /// / Press court again. The caller holds the scan and the Mega's window for
+  /// the choice window (the screen's own countdown), or says SCAN AGAIN when
+  /// that no longer fits inside the server's bound on the scan's age (R19).
+  bool invitesPress = false;
 };
 
 /// A label the glass can show honestly: whole minutes, one to four ASCII digits

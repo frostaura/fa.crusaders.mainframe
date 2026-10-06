@@ -695,7 +695,9 @@ void scanAgain(uint32_t nowMs) {
 /// glass says PRESS AGAIN for the choice window (review round 18, D18-4). The
 /// press it asks for needs BOTH ends of the cable: the scan remembered here,
 /// and the Mega's button window to forward it. Each used to be left where the
-/// SCAN left it, so a press late in the countdown went nowhere.
+/// SCAN left it, so a press late in the countdown went nowhere. A decided
+/// refusal whose words ask for another press — TOO LONG / TRY LESS TIME,
+/// PRICE CHANGED / Press court again — is held the same way (R19).
 ///
 /// False when the whole countdown no longer fits inside the server's bound on
 /// the scan's age (R19 D19-2): SCAN AGAIN is already on the glass, and the
@@ -1441,11 +1443,12 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   }
   // After the call, for the same reason as activateOnline.
   const uint32_t nowMs = gClock.nowMs();
-  if (!answer.decided && !holdForPressAgain(nowMs)) {
-    // BUSY / PRESS AGAIN or NO CONNECTION, but the scan cannot be held for the
-    // whole countdown inside the server's bound on its age (R19 D19-2). SCAN
-    // AGAIN is on the glass instead; painting BUSY first would flash a press
-    // invitation the box has already withdrawn.
+  if ((!answer.decided || answer.invitesPress) && !holdForPressAgain(nowMs)) {
+    // BUSY / PRESS AGAIN, NO CONNECTION or TOO LONG / TRY LESS TIME — each asks
+    // for another press on this scan — but the scan cannot be held for the
+    // choice window that press needs inside the server's bound on its age
+    // (R19 D19-2). SCAN AGAIN is on the glass instead; painting the invitation
+    // first would flash a press the box has already withdrawn.
     return;
   }
   if (answer.outcome.action == court::Action::TurnOn) {
@@ -1544,6 +1547,12 @@ void confirmPayFor() {
     noteOnlineUse(gLastScan);
   }
   if (answer.kind != bridgelogic::PayForKind::Paid) {
+    if (answer.invitesPress && !holdForPressAgain(nowMs)) {
+      // PRICE CHANGED / Press court again asks for a re-quote on this scan;
+      // when the choice window no longer fits inside the server's bound on the
+      // scan's age, SCAN AGAIN is on the glass instead (R19).
+      return;
+    }
     sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
     if (answer.spendsScan) {
       // `code_used` / `not_recognised`: the code buys nothing more here (D8-1).
@@ -1655,7 +1664,8 @@ bool quotePayFor(uint8_t relay, uint32_t nowMs) {
     // somebody holds). The selection goes with it, so a duration press cannot
     // turn either into a walk-up on a court somebody is playing on.
     gPad.clear();
-    if (answer.kind == bridgelogic::PayForKind::Undecided && !holdForPressAgain(now)) {
+    if ((answer.kind == bridgelogic::PayForKind::Undecided || answer.invitesPress) &&
+        !holdForPressAgain(now)) {
       // PRESS AGAIN: the same court press asks again, so the scan and the
       // Mega's window are held for the whole choice window (D18-4) — unless
       // that window no longer fits inside the server's bound on the scan's

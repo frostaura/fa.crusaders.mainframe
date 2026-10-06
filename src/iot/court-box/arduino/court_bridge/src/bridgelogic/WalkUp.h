@@ -128,6 +128,13 @@ struct WalkUpResult {
   /// scan was gone, the Mega dropped the shorter press it told the member to
   /// make, and they had to scan again (D9-1).
   bool forgetsScan = false;
+  /// A decided refusal whose words ask for ANOTHER PRESS on this scan — TOO
+  /// LONG / TRY LESS TIME (`minutes_out_of_range`). The caller holds the scan
+  /// and the Mega's window for the choice window that press needs, or says
+  /// SCAN AGAIN when that window no longer fits inside the server's bound on
+  /// the scan's age (R19). A refusal that asks for a SCAN, the app or the
+  /// desk invites no press and holds nothing.
+  bool invitesPress = false;
 };
 
 /// Interprets the walk-up response for the relay the member pressed.

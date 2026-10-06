@@ -75,6 +75,16 @@ PayForAnswer answer(PayForKind kind, ScreenId screen) {
   return a;
 }
 
+/// A decided refusal, by its reason. PRICE CHANGED / Press court again is the
+/// one that asks for another press on this scan, so the caller holds the scan
+/// for it (R19); code_used and not_recognised forget it instead.
+PayForAnswer refusedFor(const char* body, size_t len) {
+  PayForAnswer refused = answer(PayForKind::Refused, screenForReason(body, len));
+  refused.spendsScan = spendsTheScan(body, len);
+  refused.invitesPress = refused.screen == ScreenId::PayForPriceChanged;
+  return refused;
+}
+
 } // namespace
 
 bool validAmountLabel(const char* label) {
@@ -159,9 +169,7 @@ PayForAnswer onPayForQuote(uint16_t status, const char* body, size_t len, int16_
     if (reasonIs(body, len, kNotBooked)) {
       return answer(PayForKind::WalkUp, ScreenId::ChooseTime);
     }
-    PayForAnswer refused = answer(PayForKind::Refused, screenForReason(body, len));
-    refused.spendsScan = spendsTheScan(body, len);
-    return refused;
+    return refusedFor(body, len);
   }
 
   uint32_t quotedCourt = 0U;
@@ -198,9 +206,7 @@ PayForAnswer onPayForConfirm(uint16_t status, const char* body, size_t len, cons
     return answer(PayForKind::Undecided, ScreenId::SeeTheDesk);
   }
   if (!paid) {
-    PayForAnswer refused = answer(PayForKind::Refused, screenForReason(body, len));
-    refused.spendsScan = spendsTheScan(body, len);
-    return refused;
+    return refusedFor(body, len);
   }
 
   PayForAnswer done = answer(PayForKind::Paid, ScreenId::PayForPaid);

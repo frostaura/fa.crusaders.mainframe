@@ -44,7 +44,11 @@ last_verified: 2026-10-06
 - **D19-5 (spec only):** §9.1 now says only a 404 (any status not 200/0/429/5xx) or an unreadable
   200 falls back to the walk-up choice; 0 is NO CONNECTION and 429/5xx BUSY — as the code has done
   since R18 D18-3. §4.2 records the ScanMemory bound.
-- **Not fixed, recorded:** refusals that invite a press without re-holding the scan
-  (`PayForPriceChanged` "Press court again", `MinutesOutOfRange` "Press less time") leave the scan
-  where it was; a press after it lapses buys nothing (the Mega's window closes with the scan) —
-  no money or age effect, so out of D19's class; a rescan works.
+- **Every press invitation is held the same way.** A decided refusal whose words ask for another
+  press on the same scan — the walk-up's `TOO LONG` / `TRY LESS TIME` (`WalkUpResult::invitesPress`)
+  and `PRICE CHANGED` / `Press court again` (`PayForAnswer::invitesPress`) — goes through the same
+  `holdForPressAgain` as BUSY: scan and Mega window held for the choice window, or SCAN AGAIN.
+  `PayForPriceChanged` now counts down the CHOICE window, not the revert one. *Why:* both used to
+  leave the scan where it was, so the press they asked for could land on a forgotten scan; and a
+  revert countdown may be set longer than any hold the server bound allows. Red first: both
+  `invitesPress` tests and the hold-class assert failed before the flags and the class changed.

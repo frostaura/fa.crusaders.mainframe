@@ -2284,6 +2284,74 @@ void test_scan_again_names_a_rescan_never_a_press() {
   TEST_ASSERT_EQUAL_UINT16(bridgelogic::kRevertSeconds, screen.holdSeconds);
 }
 
+/// R19 (follow-up to D19-1/2). TOO LONG / TRY LESS TIME asks the member for
+/// another press on the SAME scan, but nothing held the scan for it: a refusal
+/// late in the scan's memory invited a press the bridge had forgotten by the
+/// time it came. The walk-up answer now says which refusals invite a press, so
+/// the caller holds the scan for it (or says SCAN AGAIN). Only that one does —
+/// a refusal that asks for a scan, the app or the desk holds nothing.
+void test_walk_up_only_too_long_invites_another_press() {
+  const char tooLong[] = "{\"error\":\"minutes_out_of_range\",\"max_minutes\":20}";
+  const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(400U, tooLong, len(tooLong), 1U, 60U);
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_FALSE(r.forgetsScan);
+  TEST_ASSERT_TRUE_MESSAGE(r.invitesPress, "TRY LESS TIME invited a press nothing held the scan for");
+
+  struct Case {
+    uint16_t status;
+    const char* body;
+  };
+
+  const Case others[] = {
+      {200U, "{\"granted_minutes\":30}"},
+      {402U, "{\"error\":\"insufficient_balance\"}"},
+      {409U, "{\"error\":\"court_in_use\"}"},
+      {409U, "{\"error\":\"no_time_available\"}"},
+      {409U, "{\"error\":\"club_closed\",\"opens_at\":\"06:00\"}"},
+      {409U, "{\"error\":\"code_used\"}"},
+      {400U, "{\"error\":\"not_recognised\"}"},
+      {503U, "{\"error\":\"minutes_out_of_range\"}"},
+      {429U, "{}"},
+      {0U, ""},
+  };
+  for (const Case& c : others) {
+    const bridgelogic::WalkUpResult o =
+        bridgelogic::onWalkUpResponse(c.status, c.body, strlen(c.body), 1U, 60U);
+    TEST_ASSERT_FALSE_MESSAGE(o.invitesPress, c.body);
+  }
+}
+
+/// The same for pay-for: PRICE CHANGED / Press court again is the one refusal
+/// that asks for another press, and its countdown is the CHOICE window — the
+/// window the scan is held for — not the revert window, which a club may set
+/// longer than the scan can honestly be held.
+void test_pay_for_only_price_changed_invites_another_press() {
+  const char changed[] = "{\"paid\":false,\"reason\":\"price_changed\"}";
+  const bridgelogic::PayForAnswer a = bridgelogic::onPayForConfirm(200U, changed, len(changed), "50");
+  TEST_ASSERT_TRUE(a.kind == bridgelogic::PayForKind::Refused);
+  TEST_ASSERT_TRUE(a.screen == bridgelogic::ScreenId::PayForPriceChanged);
+  TEST_ASSERT_TRUE_MESSAGE(a.invitesPress, "Press court again invited a press nothing held the scan for");
+  TEST_ASSERT_TRUE_MESSAGE(bridgelogic::holdClassOf(bridgelogic::ScreenId::PayForPriceChanged) ==
+                               bridgelogic::HoldClass::Choice,
+                           "PRICE CHANGED counts down a window the scan is not held for");
+
+  const char* const others[] = {
+      "{\"paid\":false,\"reason\":\"split_booking\"}", "{\"paid\":false,\"reason\":\"own_booking\"}",
+      "{\"paid\":false,\"reason\":\"code_used\"}",     "{\"paid\":false,\"reason\":\"insufficient_balance\"}",
+      "{\"paid\":false,\"reason\":\"ended\"}",         "{\"paid\":false,\"reason\":\"something_new\"}",
+  };
+  for (const char* body : others) {
+    TEST_ASSERT_FALSE_MESSAGE(bridgelogic::onPayForConfirm(200U, body, strlen(body), "50").invitesPress,
+                              body);
+  }
+  // A QUOTE refused for a changed price (no server sends one today) reads the
+  // same, so the rule is one rule whichever press asked.
+  const char quoted[] = "{\"payable\":false,\"reason\":\"price_changed\"}";
+  TEST_ASSERT_TRUE(bridgelogic::onPayForQuote(200U, quoted, len(quoted), 2).invitesPress);
+  const char split[] = "{\"payable\":false,\"reason\":\"split_booking\"}";
+  TEST_ASSERT_FALSE(bridgelogic::onPayForQuote(200U, split, len(split), 2).invitesPress);
+}
+
 void test_auth_policy_a_refused_scan_cannot_release_any_court() {
   // THE #4/#14 PIN, half one. NOT RECOGNISED, then COURT B, then OFF used to
   // darken court B mid-match, repeatable every thirty seconds by anyone with
@@ -3806,6 +3874,8 @@ int main(int, char**) {
   RUN_TEST(test_scan_memory_repeated_holds_never_pass_the_server_bound);
   RUN_TEST(test_scan_memory_shorter_settings_bring_a_held_scan_inside_the_new_bound);
   RUN_TEST(test_scan_again_names_a_rescan_never_a_press);
+  RUN_TEST(test_walk_up_only_too_long_invites_another_press);
+  RUN_TEST(test_pay_for_only_price_changed_invites_another_press);
   RUN_TEST(test_auth_policy_a_recognised_refusal_arms_for_a_walk_up_but_releases_nothing);
   RUN_TEST(test_auth_policy_the_member_whose_scan_lit_b_can_release_b_and_only_b);
   RUN_TEST(test_session_and_walkup_say_whether_the_scan_was_recognised);

@@ -611,7 +611,7 @@ instruction cut off. So the same words run down three rows:
 | widest | `PAID FOR CT9999` (15) | `9999 MIN PAID` (13) | | | |
 | `PayForSplit` | `SPLIT BOOKING` | `PAY IN APP` | `Each player's share` | `NOTHING CHARGED` | revert |
 | `PayForNothingToPay` | `NOTHING TO PAY` | `Already paid for` | — | `NOTHING CHARGED` | revert |
-| `PayForPriceChanged` | `PRICE CHANGED` | `Nothing charged` | `Press court again` | court cells | revert |
+| `PayForPriceChanged` | `PRICE CHANGED` | `Nothing charged` | `Press court again` | court cells | choice |
 | `PayForWorking` | `ONE MOMENT` | `Asking the club` | — | `PLEASE WAIT` | wait (6 s) |
 
 The activation has its own wait, `CheckingCode` — `ONE MOMENT` / `Checking code` / — / `PLEASE
@@ -634,7 +634,11 @@ the same purchase), anything else → `SEE THE DESK`; no connection on a confirm
 `NO CONNECTION`. When a quote or an undecided answer could not be held for its whole countdown
 inside the §4.2 bound, the glass shows `ScanAgain` instead — `SCAN AGAIN` / `Waited too long` /
 `Then press a court` / `SCAN WHEN READY`, revert hold, no court cells — and the scan is forgotten
-(bridge 2.2.9, R19 D19-2). When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
+(bridge 2.2.9, R19 D19-2). The two refusals whose words ask for another press on the same scan —
+`PRICE CHANGED` / `Press court again` here and the walk-up's `TOO LONG` / `TRY LESS TIME` — are held
+exactly like `PRESS AGAIN`: the scan and the Mega's window for the choice window (which is why
+`PayForPriceChanged` counts down the choice window, not the revert one), or `SCAN AGAIN` when that
+no longer fits. When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
 `!LCD` lines ahead of the `!ON`. **Everything reaches the Mega through `!ROW`/`!SHOW`/`!LCD`/`!ON`
 /`!AUTH` — frames the Mega already speaks.** Nothing about the serial dialect changes.
 

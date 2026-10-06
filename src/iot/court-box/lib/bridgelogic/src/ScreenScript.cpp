@@ -324,12 +324,16 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
       {"NOTHING CHARGED", RowArg::None, ""}},
      kRevertSeconds,
      kShowFlagCountdown},
+    // A press invitation, so it counts down the CHOICE window — the window the
+    // bridge holds the scan and the Mega's button window for (R19), exactly as
+    // BUSY / PRESS AGAIN does. The revert window may be set longer than the
+    // scan can honestly be held, and a countdown past it is a dead press.
     {ScreenId::PayForPriceChanged,
      {{"PRICE CHANGED", RowArg::None, ""},
       {"Nothing charged", RowArg::None, ""},
       {"Press court again", RowArg::None, ""},
       {"", RowArg::CourtCells, ""}},
-     kRevertSeconds,
+     kChoiceSeconds,
      kShowFlagCountdown},
     {ScreenId::PayForWorking,
      {{"ONE MOMENT", RowArg::None, ""},

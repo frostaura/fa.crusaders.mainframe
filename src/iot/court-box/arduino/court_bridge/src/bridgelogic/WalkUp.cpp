@@ -163,6 +163,13 @@ court::Outcome refusal(uint16_t status, const char* body, size_t len) {
   return byStatus(status);
 }
 
+/// Whether the body's `error` is exactly `expected`.
+bool errorIs(const char* body, size_t len, const char* expected) {
+  char error[32] = {};
+  return devapi::json::topLevelStringField(body, len, "error", error, sizeof(error)) &&
+         strcmp(error, expected) == 0;
+}
+
 /// A refusal of the CODE itself: one the server already acted on, and one it
 /// cannot tie to a member. The same two pay-for forgets the scan on
 /// (PayFor.cpp, spendsTheScan) — one rule, whichever button asked. Keyed on the
@@ -270,6 +277,9 @@ WalkUpResult onWalkUpResponse(uint16_t status, const char* body, size_t len, uin
   // nothing about who scanned, and neither does a status on its own.
   result.outcome = refusal(status, body, len);
   result.forgetsScan = result.decided && refusesTheCode(body, len);
+  // TOO LONG / TRY LESS TIME asks for another press on THIS scan (R19): the
+  // caller holds the scan for it. No other refusal asks for a press.
+  result.invitesPress = result.decided && errorIs(body, len, "minutes_out_of_range");
   return result;
 }
 
