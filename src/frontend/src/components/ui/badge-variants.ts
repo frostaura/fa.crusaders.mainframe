@@ -9,7 +9,9 @@ import { cva } from "class-variance-authority";
  * The label sits in its own span, so the pill can wrap BETWEEN its words in a narrow row. It
  * never breaks INSIDE one (R9 L9-6): `min-w-0 break-words` let a caller's squeezed row cut
  * "Orga / niser" and "Archi / ved" at 320 / 200 %. The pill floors at its longest word; a caller
- * whose row cannot hold that wraps the row or steps its layout down — never the word.
+ * whose row cannot hold that wraps the row or steps its layout down — never the word. A flex row
+ * never squeezes it (`shrink-0`): the text beside it wraps first, and in a table it never wraps at
+ * all (`table-keep-whole`).
  * </p>
  *
  * <p>
@@ -19,7 +21,7 @@ import { cva } from "class-variance-authority";
  */
 export const badgeVariants = cva(
   [
-    "inline-flex max-w-full items-center gap-1 rounded-full border border-transparent px-2.5 py-0.5",
+    "inline-flex max-w-full shrink-0 items-center gap-1 rounded-full border border-transparent px-2.5 py-0.5",
     "text-xs font-semibold",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&>svg]:size-[1.1667em]",
   ],

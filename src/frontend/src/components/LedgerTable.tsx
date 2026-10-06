@@ -12,6 +12,7 @@ import { EARLY, HEAD_SHOW, PIN_AMOUNT, PIN_BESIDE_DETAILS, PIN_CELL, PIN_HEAD, P
 import { groupShareRows } from "./wallet/shareGroups";
 import { ShareGroupRows } from "./wallet/ShareGroupRows";
 import type { ShareBookings } from "./wallet/useShareBookings";
+import { TABLE_KEEP_WHOLE } from "@/components/ui/table-keep-whole";
 
 type SortDir = "asc" | "desc";
 
@@ -222,7 +223,7 @@ export function LedgerTable(props: LedgerTableProps) {
       <ScrollArea label={label} onlyWhenWider={!fill} className={cn(fill && "min-h-0 flex-1")}>
         {/* Named as well as its scroller (A11Y F3.22): a table reached by a screen reader's table
             navigation announces its own name, not the region's. */}
-        <table data-slot="table" aria-label={label} className="w-full border-collapse text-sm">
+        <table data-slot="table" aria-label={label} className={cn("w-full border-collapse text-sm", TABLE_KEEP_WHOLE)}>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               {columns.map((column) => <Fragment key={column}>{headerFor(column)}</Fragment>)}

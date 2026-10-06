@@ -5,8 +5,10 @@ export const buttonVariants = cva(
   [
     // No `whitespace-nowrap` (R11): a label wraps — balanced, centred, a word kept whole — rather than
     // run past its container; `white-space` is inherited, so a deliberately nowrap row (a table head)
-    // still keeps its buttons on one line.
-    "relative inline-flex max-w-full select-none items-center justify-center gap-[min(0.5rem,8px)] text-balance text-center [overflow-wrap:break-word]",
+    // still keeps its buttons on one line. But only when the CONTAINER is too narrow: `shrink-0`
+    // stops a flex row squeezing a button below its label while the text beside it has room to
+    // wrap instead ("Cancel" folding to two lines and doubling its height, 2026-10-06).
+    "relative inline-flex max-w-full shrink-0 select-none items-center justify-center gap-[min(0.5rem,8px)] text-balance text-center [overflow-wrap:break-word]",
     "rounded-lg border border-transparent font-semibold",
     "transition-colors duration-fast ease-standard motion-reduce:transition-none",
     "disabled:pointer-events-none disabled:opacity-50 aria-busy:cursor-progress",

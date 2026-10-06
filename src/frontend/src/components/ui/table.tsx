@@ -1,5 +1,6 @@
 import { createContext, useContext, type ComponentProps } from "react";
 import { cn } from "@/lib/utils";
+import { TABLE_KEEP_WHOLE } from "./table-keep-whole";
 
 /**
  * Table parts (shadcn, restyled). The table sits in its own horizontal scroller so a wide admin
@@ -43,7 +44,7 @@ export function Table({ className, stickyHeader = false, containerClassName, lab
         <table
           data-slot="table"
           aria-label={label}
-          className={cn("w-full caption-bottom border-collapse text-sm", className)}
+          className={cn("w-full caption-bottom border-collapse text-sm", TABLE_KEEP_WHOLE, className)}
           {...props}
         />
       </div>

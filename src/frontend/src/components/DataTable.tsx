@@ -6,6 +6,7 @@ import { Skeleton } from "./ui/skeleton";
 import { StateBlock } from "./ui/state-block";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { CaretDown, CaretUp, CaretUpDown, MagnifyingGlass, Tray } from "./ui/icons";
+import { TABLE_KEEP_WHOLE } from "@/components/ui/table-keep-whole";
 
 export type DataColumn<T> = {
   key: string;
@@ -127,7 +128,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           className="relative w-full overflow-auto rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong [&_:focus-visible]:-outline-offset-2"
           style={maxHeight !== undefined ? { maxHeight: typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight } : undefined}
         >
-          <table data-slot="table" aria-label={props.label} className="w-full border-collapse text-sm">
+          <table data-slot="table" aria-label={props.label} className={cn("w-full border-collapse text-sm", TABLE_KEEP_WHOLE)}>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 {columns.map((c) => <HeaderCell key={c.key} column={c} sort={sort} onSort={onSort} wrap={props.wrapHeaders === true} />)}
