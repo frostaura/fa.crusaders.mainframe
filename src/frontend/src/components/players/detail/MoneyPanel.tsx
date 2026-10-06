@@ -162,10 +162,14 @@ function sharesBack(detail: BookingDetail): string[] {
     .map((p) => seatName(p, detail.players));
 }
 
-/** What one partner's row says on a cancelled game: paid and standing, came back (R2 F2-4), or nothing owed. */
-function cancelledSeatWords(p: BookingDetail["players"][number]): string {
+/**
+ * What one partner's row says on a cancelled game: paid and standing, came back (R2 F2-4), paid the
+ * organiser by hand (R17 E17-3), or — paid nothing — nothing owed (R17 E17-2: never "went back").
+ */
+function cancelledSeatWords(p: BookingDetail["players"][number], organiser: string): string {
   if (p.paid_minutes > 0) return DETAIL_CANCELLED.paidRow(minutesSpoken(p.paid_minutes));
   if ((p.returned_minutes ?? 0) > 0) return DETAIL_CANCELLED.returnedRow(minutesSpoken(p.returned_minutes ?? 0));
+  if (p.settled_outside) return DETAIL_CANCELLED.paidByHand(organiser);
   return DETAIL_CANCELLED.nothingToPay;
 }
 
@@ -204,7 +208,7 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
             : DETAIL_CANCELLED.splitRefundNote(who, sharesBack(detail))}
         </p>
       ) : null}
-      <SeatLines detail={detail} seats={live} words={cancelledSeatWords} />
+      <SeatLines detail={detail} seats={live} words={(p) => cancelledSeatWords(p, who ?? "you")} />
     </Section>
   );
 }

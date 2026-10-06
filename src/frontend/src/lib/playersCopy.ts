@@ -702,7 +702,10 @@ export const DETAIL_CANCELLED = {
   moneyNote: "The booking was cancelled — this is where the money went.",
   refunded: (who: string | null) => (who ? `Refunded to ${who}` : "Refunded to you"),
   kept: (who: string | null) => (who ? `${who} paid in the end` : "You paid in the end"),
-  nothingToPay: "Nothing owed · any share paid went back",
+  /** R17 E17-2 — a seat that paid nothing: nothing went back to it, so the row never says so. */
+  nothingToPay: "Paid nothing · nothing owed",
+  /** R17 E17-3 — a share the club recorded as paid by hand, with nothing paid in the app. */
+  paidByHand: (organiser: string) => `Paid ${organiser} by hand`,
   /**
    * R2 F2-4 — on a SPLIT booking the gross refund to the organiser is not what they kept: the
    * partners' shares went back to the partners out of it. Never "Refunded to you 50 min" beside a
@@ -907,7 +910,8 @@ export const DETAIL_ADMIN = {
   acceptBody: "They're on the game. No consent is recorded, so nothing is collected from them.",
   acceptConfirm: "Accept for them",
   accepted: (name: string) => `${name} is in — accepted by the club.`,
-  settle: "Settled outside the app",
+  /** R17 L17-8 — one wording everywhere: "paid by hand", never "settled outside the app". */
+  settle: "Mark as paid by hand",
   settleTitle: (name: string) => `Mark ${name}'s share as paid by hand?`,
   settleBody: "Use this when they paid by hand. Anything collected in the app goes back to them.",
   settleConfirm: "Mark as paid by hand",
