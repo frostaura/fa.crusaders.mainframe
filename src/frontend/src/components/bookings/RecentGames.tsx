@@ -2,10 +2,9 @@ import { useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Warning } from "@/components/ui/icons";
 import { RECENT, UPCOMING } from "@/lib/bookingsCopy";
 import { bookingsApi, recentAction, type RecentGame } from "@/lib/bookingsApi";
-import { GameCard } from "./UpcomingGames";
+import { GameCard, GamesReadFailed } from "./UpcomingGames";
 import { GAMES_ITEM, GAMES_LIST, SHOWN, when } from "./gameWhen";
 import { memberReads } from "@/lib/offline/memberReads";
 import { useGamesRead } from "./useGamesRead";
@@ -30,15 +29,7 @@ export function RecentGames({ refreshKey, fallbackZone }: { refreshKey: unknown;
   // R8 X8-2 — offline with nothing kept is said once, by the page (Bookings' OfflineNothingKept), not
   // as a red line here: nothing would come of its Try again until the signal is back.
   if (state.status === "loading" || (state.status === "error" && state.offline)) return null;
-  if (state.status === "error") {
-    return (
-      <div data-recent="" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-secondary">
-        <Warning size={16} weight="bold" aria-hidden="true" className="shrink-0 text-warning-strong" />
-        <span>{RECENT.failed}</span>
-        <Button variant="ghost" size="sm" onClick={retry}>{RECENT.retry}</Button>
-      </div>
-    );
-  }
+  if (state.status === "error") return <GamesReadFailed list="recent" lead={RECENT.failed} error={state.error} retry={retry} />;
   if (state.items.length === 0) return null;
   const zone = state.timezone ?? fallbackZone;
   const shown = all ? state.items : state.items.slice(0, SHOWN);

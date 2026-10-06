@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Interactable } from "@/components/ui/interactable";
 import { CaretRight, Warning } from "@/components/ui/icons";
 import { UPCOMING } from "@/lib/bookingsCopy";
+import { describeFailure } from "@/lib/errors";
 import { bookingsApi, type UpcomingGame, type UpcomingPlayer } from "@/lib/bookingsApi";
 import { firstName } from "@/lib/playersCopy";
 import { memberReads } from "@/lib/offline/memberReads";
@@ -38,15 +39,7 @@ export function UpcomingGames({ refreshKey, fallbackZone }: { refreshKey: unknow
   // R8 X8-2 — offline with nothing kept is said once, by the page (Bookings' OfflineNothingKept), not
   // as a red line here: nothing would come of its Try again until the signal is back.
   if (state.status === "loading" || (state.status === "error" && state.offline)) return null;
-  if (state.status === "error") {
-    return (
-      <div data-upcoming="" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-secondary">
-        <Warning size={16} weight="bold" aria-hidden="true" className="shrink-0 text-warning-strong" />
-        <span>{UPCOMING.failed}</span>
-        <Button variant="ghost" size="sm" onClick={retry}>{UPCOMING.retry}</Button>
-      </div>
-    );
-  }
+  if (state.status === "error") return <GamesReadFailed list="upcoming" lead={UPCOMING.failed} error={state.error} retry={retry} />;
   if (state.items.length === 0) return null;
   const zone = state.timezone ?? fallbackZone;
   const shown = all ? state.items : state.items.slice(0, SHOWN);
@@ -63,6 +56,21 @@ export function UpcomingGames({ refreshKey, fallbackZone }: { refreshKey: unknow
         </Button>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * A games list whose read failed, in one line with a retry — and WHY (R19 L19-7, X19-1.4): "Couldn't
+ * load your upcoming games. The club's system is very busy right now. Try again in a moment." A
+ * busy club, a rate limit and a clash each say so, as Profile and Invites do; never "no games".
+ */
+export function GamesReadFailed({ list, lead, error, retry }: { list: "upcoming" | "recent"; lead: string; error: unknown; retry: () => void }) {
+  return (
+    <div {...{ [`data-${list}`]: "" }} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-secondary">
+      <Warning size={16} weight="bold" aria-hidden="true" className="shrink-0 text-warning-strong" />
+      <span className="min-w-0 flex-1 basis-60"><span>{lead}</span> {describeFailure(error)}</span>
+      <Button variant="ghost" size="sm" onClick={retry}>{UPCOMING.retry}</Button>
+    </div>
   );
 }
 
