@@ -388,6 +388,31 @@ public sealed class DeploymentPostureTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
+    /// <b>A backend that fails at start-up must leave its container.</b> As PID 1 the
+    /// <c>dotnet</c> host cannot die of its own <c>SIGABRT</c> — the kernel drops default-action
+    /// signals sent to a namespace's init — so an unhandled start-up exception (a refused
+    /// migration, a missing secret) left the runtime spinning at full CPU with the container
+    /// "running", the restart policy never firing and the health check failing forever. That is
+    /// how the 2026-10-06 redeploy hung on <c>MinutesReplaceCredits</c>' refusal even after the
+    /// reset it asked for. <c>tini</c> as PID 1 reaps and forwards, and the same start-up failure
+    /// exits 134. In the image rather than as compose's <c>init: true</c>, because a redeploy
+    /// moves images and nothing else.
+    /// </summary>
+    [Fact]
+    public void The_backend_image_runs_the_api_under_an_init()
+    {
+        var lines = Read("src", "backend", "Dockerfile").Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0 && !line.StartsWith('#'))
+            .ToList();
+
+        var entrypoint = Assert.Single(lines, line => line.StartsWith("ENTRYPOINT", StringComparison.Ordinal));
+        Assert.Matches(@"^ENTRYPOINT\s*\[\s*""/usr/bin/tini""\s*,\s*""--""\s*,\s*""dotnet""", entrypoint);
+        Assert.Contains(lines, line => line.Contains("install", StringComparison.Ordinal)
+            && Regex.IsMatch(line, @"\btini\b"));
+    }
+
+    /// <summary>
     /// <b>The seeded admin cannot exist outside Development.</b> The block above is only half of
     /// E-C2: a shortcut that fills in a password is harmless if the account it names is not
     /// there. <see cref="Seeder"/> is invoked from exactly one place and that place is inside an
