@@ -112,7 +112,7 @@ describe("MinutesChip — whose movement it was", () => {
     });
     // R15 J15-5 — a toast stands alone: the court AND the day.
     expect(expected).toBe("Sam paid you 20 minutes for their share of Court 1 · Tue 29 Sep");
-    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(await screen.findByText(`${expected}.`)).toBeInTheDocument();  // R17 X17-6 — a toast ends with a full stop
     expect(screen.queryByText(/The club/)).toBeNull();
   });
 

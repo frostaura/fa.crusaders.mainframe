@@ -23,6 +23,8 @@ export type ShareRowInput = {
   kept?: number | null;
   /** R12 E12-2 (contract C2) — with `attended`: who checked in, when it was not this member. */
   by?: string | null;
+  /** R17 E17-9 — the frame's `checked_in_by_you`: this member scanned (their inbox says "you checked in"). */
+  byYou?: boolean;
   /** R13 X13-3 — with `booking_cancelled`: the frame's `cancelled_by` ("club": the club cancelled it). */
   cancelledBy?: "club" | "member";
   /** R14 (BE14b §2) — the frame's `actor_name`: the player whose act moved the share, when not this member. */
@@ -145,13 +147,21 @@ function shareCauseClause(input: ShareRowInput, who: string | null): string {
     booking_cancelled: input.cancelledBy === "club" ? "the club cancelled the booking" : "the booking was cancelled",
     club_removed: partner ? "the club took you off the game" : "the club took them off the game",
     club_collected: "the club collected it",
-    attended: input.by ? `${input.by} checked in, so the session was attended` : "the session was attended",
+    // R17 E17-9 — the scanner by first name; this member's own scan (`checked_in_by_you`) as their inbox says it.
+    attended: attendedClause(input),
     // R12 X12-3 — a partner withdrew, and their share went back to them.
     share_returned: partner ? "you withdrew from the game" : `${who ? "they" : "the partner"} withdrew from the game`,
     no_show: `nobody checked in${keptPart}`,
   };
   const said = input.cause ? clauses[input.cause] : undefined;
   return said ? ` — ${said}` : "";
+}
+
+/** R17 E17-9 — who checked in: named, this member ("you checked in"), or — an older frame — nobody. */
+function attendedClause(input: ShareRowInput): string {
+  const by = input.by?.trim();
+  if (by) return `${firstName(by)} checked in, so the session was attended`;
+  return input.byYou ? "you checked in, so the session was attended" : "the session was attended";
 }
 
 /**
@@ -167,7 +177,10 @@ function shareCauseClause(input: ShareRowInput, who: string | null): string {
  */
 export function shareMovementPlain(
   amount: number, cause: string | undefined, kept: number | undefined, by?: string,
-  more: { cancelledBy?: "club" | "member"; place?: SharePlace; actor?: string; other?: string | null; others?: readonly (string | null | undefined)[] } = {},
+  more: {
+    cancelledBy?: "club" | "member"; place?: SharePlace; actor?: string; other?: string | null; others?: readonly (string | null | undefined)[];
+    byYou?: boolean;
+  } = {},
 ): string {
   // A collection (paid, collected, taken again) leaves the PARTNER; a return comes back to them.
   const collected = cause === "share_paid" || cause === "club_collected" || cause === "attended";
@@ -179,7 +192,7 @@ export function shareMovementPlain(
     others: [...new Set((more.others ?? [more.other]).map(personName).filter((n): n is string => n !== null))],
   }) : null;
   if (acted) return `${acted}.`;
-  const row = { side, signed: amount, place: more.place ?? null, other: null, cause, kept, by, cancelledBy: more.cancelledBy } as const;
+  const row = { side, signed: amount, place: more.place ?? null, other: null, cause, kept, by, byYou: more.byYou, cancelledBy: more.cancelledBy } as const;
   if (cause && side === "partner" && amount > 0) {
     // R13 J13-4 (C13-7) — the court and the day from the frame: "of your share of Court 1 · Tue 8 Oct".
     const where = sharePlace(row.place) ?? "a split booking";

@@ -54,7 +54,7 @@ describe("kept reads with no signal (R5 M5-6)", () => {
     const list = await screen.findByRole("list", { name: INVITES_COPY.listLabel }, { timeout: 3000 });
     expect(within(list).getByRole("button", { name: /Sam invited you to play/ })).toBeInTheDocument();
     const note = (await screen.findByText(OFFLINE_COPY.staleTitle)).closest("[data-stale-notice]");
-    expect(note).toHaveTextContent(`Showing what we had at ${asOfLabel(keptAt)}`);
+    expect(note).toHaveTextContent(`showing what we had at ${asOfLabel(keptAt)}`);
     expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
   });
 

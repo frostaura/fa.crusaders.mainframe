@@ -87,6 +87,8 @@ export type BalanceDelta = {
    * when it was this member, the club or an admin — the club is never named by its admin.
    */
   actorName?: string;
+  /** R17 E17-9 (BE17b) — the frame's `checked_in_by_you`: this member's own scan made the movement. */
+  checkedInByYou?: boolean;
 };
 
 /**
@@ -111,12 +113,13 @@ function shareCauseOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "shar
 }
 
 /** R12 contracts C1 / C2 — who cancelled, and who checked in, kept only when well-shaped. */
-function whoOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "cancelledBy" | "checkedInBy" | "actorName"> {
+function whoOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "cancelledBy" | "checkedInBy" | "actorName" | "checkedInByYou"> {
   const by = frame?.cancelled_by;
   const name = typeof frame?.checked_in_by_name === "string" ? frame.checked_in_by_name.trim() : "";
   const actor = typeof frame?.actor_name === "string" ? frame.actor_name.trim() : "";
   return {
     ...(by === "club" || by === "member" ? { cancelledBy: by } : {}), ...(name ? { checkedInBy: name } : {}), ...(actor ? { actorName: actor } : {}),
+    ...(frame?.checked_in_by_you === true ? { checkedInByYou: true } : {}),
   };
 }
 
@@ -158,6 +161,8 @@ export type BalanceFrame = {
   booking_starts_at?: string | null;
   /** R14 (BE14b §2) — on a share frame: the player whose act moved it, when not this member, the club or an admin. */
   actor_name?: string | null;
+  /** R17 E17-9 (BE17b) — on every balance frame: this member's own scan made the movement. Absent from an older API. */
+  checked_in_by_you?: boolean;
   /**
    * D11 (§3a): shares an organiser received, HELD for their partners' possible returns until
    * `held_until` (the earliest share deadline among them). Part of the balance, not spendable.

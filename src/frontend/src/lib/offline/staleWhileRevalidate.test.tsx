@@ -145,7 +145,7 @@ describe("with no signal", () => {
 
     expect(within(await inboxList()).getByText(ANAS.items[0].headline)).toBeInTheDocument();
     const note = (await screen.findByText(OFFLINE_COPY.staleTitle)).closest("[data-stale-notice]");
-    expect(note).toHaveTextContent(`Showing what we had at ${asOfLabel(keptAt)}`);
+    expect(note).toHaveTextContent(`showing what we had at ${asOfLabel(keptAt)}`);
     expect(screen.queryByText(/Can't reach the club/i)).toBeNull();
   });
 

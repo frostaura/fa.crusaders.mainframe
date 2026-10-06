@@ -18,7 +18,8 @@ export function OfflineNothingKept({ line }: { line: string }) {
   return (
     <Alert tone="warning" live="polite" data-offline-nothing-kept="">
       <strong className="font-semibold">{offline ? OFFLINE_COPY.staleTitle : OFFLINE_COPY.unreachableTitle}</strong>
-      {` — ${offline ? line : OFFLINE_COPY.unreachableNothingKept(line)}`}
+      {/* R17 X17-6 — the line is a sentence of its own ("Your invites haven't …"): a full stop, not a dash before a capital. */}
+      {`. ${offline ? line : OFFLINE_COPY.unreachableNothingKept(line)}`}
     </Alert>
   );
 }

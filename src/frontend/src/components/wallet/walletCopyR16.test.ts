@@ -49,7 +49,7 @@ describe("R16 J16-4 — a reversed no-show names the booking", () => {
 
   it("someone else's check-in", () => {
     expect(movementSentence(-6, "no_show_reversed", [{ reason: "penalty", delta_minutes: 4 }, { reason: "cancellation_refund", delta_minutes: -10 }], { ...where, checkedInBy: "Dan Splitter" }))
-      .toBe(`Dan Splitter checked in on ${AT}, so the no-show was reversed: the 4 minutes penalty came back and the 10 minutes refund was taken back, so 6 minutes left your wallet.`);
+      .toBe(`Dan checked in on ${AT}, so the no-show was reversed: the 4 minutes penalty came back and the 10 minutes refund was taken back, so 6 minutes left your wallet.`);
   });
 
   it("with partners' shares paid again", () => {
@@ -94,7 +94,7 @@ describe("R16 E16-4 — the pay-for payer's toast says whose booking, not whose 
 describe("R16 E16-3 — the club's cancel of a started session names who checked in", () => {
   it("someone else checked in", () => {
     expect(movementSentence(0, "cancelled_no_refund", [], { ...where, cancelledBy: "club", checkedInBy: "Pat Player" }))
-      .toBe(`The club cancelled your session on ${AT} — Pat Player had already checked in, so nothing was refunded.`);
+      .toBe(`The club cancelled your session on ${AT} — Pat had already checked in, so nothing was refunded.`);
   });
 
   it("nobody named (the member themself, or an older server): as before", () => {
@@ -104,6 +104,6 @@ describe("R16 E16-3 — the club's cancel of a started session names who checked
 
   it("the partner's side: who checked in, and the share stands", () => {
     expect(movementSentence(0, "cancelled_share_stands", [], { ...where, cancelledBy: "club", checkedInBy: "Pat Player" }))
-      .toBe(`The club cancelled ${AT} — Pat Player had already checked in, so your share stands.`);
+      .toBe(`The club cancelled ${AT} — Pat had already checked in, so your share stands.`);
   });
 });

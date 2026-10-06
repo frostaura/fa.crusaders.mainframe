@@ -72,7 +72,7 @@ test.describe("P11: the wallet, with shares", () => {
     await expect(held).toContainText(HELD_EXPLAINER);
     // The chip's name carries it too: the figure it shows is SPENDABLE (F1.11), and its name
     // also says the whole balance and what is held.
-    await expect(page.locator("[data-minutes-chip]")).toHaveAttribute("aria-label", /2 hours, 20 minutes held for partners/);
+    await expect(page.locator("[data-minutes-chip]")).toHaveAttribute("aria-label", /2 hours in your wallet, 20 minutes held for partners/);
   });
 
   test("gathers a booking's shares under one line that opens, and links to the booking", async ({ page }) => {

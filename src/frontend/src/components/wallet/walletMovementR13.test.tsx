@@ -107,7 +107,7 @@ describe("R13 X13-3 — the partner is told the club cancelled", () => {
     });
     await wait(600);
     // R15 J15-5 — the toast says the day too.
-    expect(toasts()).toEqual(["7 minutes of your share of Court 4 · Sat 5 Oct came back — the club cancelled the booking"]);
+    expect(toasts()).toEqual(["7 minutes of your share of Court 4 · Sat 5 Oct came back — the club cancelled the booking."]);
   }, 15_000);
 
   it("the plain sentence (booking unreadable) says it too", async () => {
@@ -164,7 +164,7 @@ describe("R13 E13-5 (contract C13-2) — one toast for a sweep or a reversal on 
     await wait(1_300);
     const said = toasts();
     expect(said).toHaveLength(1);
-    expect(said[0]).toBe("Pat Partner checked in, so the outage refund was taken back: the 15 minutes refund was taken back, 7 minutes came back from your partner for their share, so 8 minutes left your wallet.");
+    expect(said[0]).toBe("Pat checked in, so the outage refund was taken back: the 15 minutes refund was taken back, 7 minutes came back from your partner for their share, so 8 minutes left your wallet.");
   }, 15_000);
 });
 

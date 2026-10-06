@@ -131,3 +131,12 @@ describe("a stale wallet read never overwrites a newer frame (R17 J17-2)", () =>
     expect(seen).toHaveLength(0);
   });
 });
+
+describe("the frame's checked_in_by_you reaches the movement (R17 E17-9, BE17b)", () => {
+  it("true is kept; absent or false says nothing", async () => {
+    const { seen, push } = await mounted(120);
+    await act(async () => { push({ balance_minutes: 114, delta_minutes: -6, reason: "share_transfer", share_cause: "attended", checked_in_by_you: true }); });
+    await act(async () => { push({ balance_minutes: 108, delta_minutes: -6, reason: "share_transfer", share_cause: "attended", checked_in_by_you: false }); });
+    expect(seen.map((d) => d.checkedInByYou)).toEqual([true, undefined]);
+  });
+});

@@ -168,7 +168,8 @@ function chipLabel(balance: number | null, loading: boolean, state: LiveState, f
   const tone = walletTone(f.shown);
   const next = tone === "zero" ? " You can't book until you buy minutes. Tap to buy minutes." : tone === "low" ? " Running low. Tap to buy minutes." : " Tap to buy minutes.";
   const stale = state === "degraded" ? " This figure is checked every 30 seconds." : "";
-  return `Wallet balance ${spend} — ${minutesSpoken(balance)}${partsInWords(f)}.${next}${stale}`;
+  // R17 X17-6 — "in your wallet", as the title says: the second figure is the whole balance.
+  return `Wallet balance ${spend} — ${minutesSpoken(balance)} in your wallet${partsInWords(f)}.${next}${stale}`;
 }
 
 /** The chip's hover title: the stream's health first, then what is set aside, then the plain one. */

@@ -105,7 +105,7 @@ describe("R12 E12-2 — a reversal names who checked in", () => {
     await wait(400);
     const said = toasts();
     expect(said).toHaveLength(1);
-    expect(said[0]).toContain("Dan Splitter checked in");
+    expect(said[0]).toContain("Dan checked in");
     expect(said[0]).not.toMatch(/you were checked in/);
   }, 15_000);
 
@@ -115,7 +115,7 @@ describe("R12 E12-2 — a reversal names who checked in", () => {
     await wait(120);
     await push({ balance_minutes: 170, delta_minutes: -30, reason: "outage_refund_reversed", checked_in_by_name: "Dan Splitter" });
     await wait(400);
-    expect(toasts()[0]).toContain("Dan Splitter checked in");
+    expect(toasts()[0]).toContain("Dan checked in");
     expect(toasts()[0]).not.toMatch(/you were checked in/);
   }, 15_000);
 

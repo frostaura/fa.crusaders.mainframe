@@ -110,7 +110,7 @@ describe("the chip's name mentions what is held", () => {
   it("P11: wears what is owed back on the live chip, name and title", async () => {
     stub(wallet({ held_minutes: 0, owed_back_minutes: 16, spendable_minutes: 104, held_until: null }));
     renderPage(<MinutesChip />);
-    const chip = await screen.findByRole("link", { name: /2 hours, 16 minutes owed back to partners/ }, { timeout: 5_000 });
+    const chip = await screen.findByRole("link", { name: /2 hours in your wallet, 16 minutes owed back to partners/ }, { timeout: 5_000 });
     await waitFor(() => expect(chip).toHaveAttribute("title", "1 hour 44 minutes to spend — 2 hours in your wallet, 16 minutes owed back to partners. Tap to buy minutes."));
     expect(chipHeldTitle(0, 16)).toBe("Wallet balance — 16 minutes owed back to partners. Tap to buy minutes.");
     expect(chipHeldTitle(20)).toBe("Wallet balance — 20 minutes of it held for partners. Tap to buy minutes.");
@@ -124,10 +124,10 @@ describe("the chip's name mentions what is held", () => {
   it("shows what can be spent, and names the whole balance and what is held", async () => {
     stub(wallet({ held_minutes: 20, spendable_minutes: 100, held_until: UNTIL }));
     renderPage(<MinutesChip />);
-    const chip = await screen.findByRole("link", { name: /2 hours, 20 minutes held for partners/ }, { timeout: 5_000 });
+    const chip = await screen.findByRole("link", { name: /2 hours in your wallet, 20 minutes held for partners/ }, { timeout: 5_000 });
     await waitFor(() => expect(chip).toHaveTextContent("1 h 40 min"));
     expect(chip).not.toHaveTextContent("2 h");
-    expect(chip).toHaveAccessibleName("Wallet balance 1 hour 40 minutes to spend — 2 hours, 20 minutes held for partners. Tap to buy minutes.");
+    expect(chip).toHaveAccessibleName("Wallet balance 1 hour 40 minutes to spend — 2 hours in your wallet, 20 minutes held for partners. Tap to buy minutes.");
     expect(chip).toHaveAttribute("title", "1 hour 40 minutes to spend — 2 hours in your wallet, 20 minutes held for partners. Tap to buy minutes.");
   });
 

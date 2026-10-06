@@ -86,7 +86,7 @@ describe("R14 X14-2 — the partner hears who took them off, or changed the spli
   it("split_changed (still on the game, booking readable): 'Otto changed the split on Court 3 · Mon 7 Oct — 4 minutes came back.'", async () => {
     const readable = { path: `/api/v1/bookings/${BOOKING}`, body: { ...detail([]), organiser: { user_id: OMAR, name: "Otto Organiser", photo_url: null } } };
     expect(await share([readable], 4, { share_cause: "split_changed", actor_name: "Otto Organiser" }))
-      .toEqual(["Otto changed the split on Court 3 · Mon 7 Oct — 4 minutes came back"])  // the named path: the ledger's words, no full stop;
+      .toEqual(["Otto changed the split on Court 3 · Mon 7 Oct — 4 minutes came back."])  // R17 X17-6 — a toast ends with a full stop;
   }, 15_000);
 
   it("share_returned is the member's own withdrawal: 'You withdrew from Court 3 · Mon 7 Oct — 7 minutes came back.'", async () => {
@@ -106,7 +106,7 @@ describe("R14 X14-2 — the organiser's side mirrors it", () => {
   it("share_returned with actor_name: 'Sam withdrew from Court 3 · Mon 7 Oct — 7 minutes went back to them.'", async () => {
     const readable = { path: `/api/v1/bookings/${BOOKING}`, body: detail([]) };
     expect(await share([readable], -7, { share_cause: "share_returned", actor_name: "Sam Partner", parts: [{ reason: "share_transfer", delta_minutes: -7, counterparty_name: "Sam Partner" }] }, out))
-      .toEqual(["Sam withdrew from Court 3 · Mon 7 Oct — 7 minutes went back to them"])  // the named path: the ledger's words, no full stop;
+      .toEqual(["Sam withdrew from Court 3 · Mon 7 Oct — 7 minutes went back to them."])  // R17 X17-6 — a toast ends with a full stop;
   }, 15_000);
 
   it("organiser_removed (own act, another tab): 'You took Sam off Court 3 · Mon 7 Oct — 7 minutes went back to them.'", async () => {
@@ -117,7 +117,7 @@ describe("R14 X14-2 — the organiser's side mirrors it", () => {
   it("split_changed (own act, another tab): 'You changed the split on Court 3 · Mon 7 Oct — 4 minutes went back to Sam.'", async () => {
     const readable = { path: `/api/v1/bookings/${BOOKING}`, body: detail([]) };
     expect(await share([readable], -4, { share_cause: "split_changed", actor_name: null, parts: [{ reason: "share_transfer", delta_minutes: -4, counterparty_name: "Sam Partner" }] }, out))
-      .toEqual(["You changed the split on Court 3 · Mon 7 Oct — 4 minutes went back to Sam"])  // the named path: the ledger's words, no full stop;
+      .toEqual(["You changed the split on Court 3 · Mon 7 Oct — 4 minutes went back to Sam."])  // R17 X17-6 — a toast ends with a full stop;
   }, 15_000);
 });
 
@@ -231,7 +231,7 @@ describe("R14 §9 — club_settled and share_back: the record's cause, nobody na
   it("partner, club_settled (booking readable, named path): the same words", async () => {
     const readable = { path: `/api/v1/bookings/${BOOKING}`, body: { ...detail([]), organiser: { user_id: OMAR, name: "Omar Organiser", photo_url: null } } };
     expect(await share([readable], 7, { share_cause: "club_settled", actor_name: null }))
-      .toEqual(["7 minutes of your share of Court 3 · Mon 7 Oct came back — the club recorded that you paid Omar by hand"]);
+      .toEqual(["7 minutes of your share of Court 3 · Mon 7 Oct came back — the club recorded that you paid Omar by hand."]);
   }, 15_000);
 
   it("organiser, club_settled, one partner: '7 minutes went back to Sam — the club recorded that Sam paid you by hand for ….'", async () => {

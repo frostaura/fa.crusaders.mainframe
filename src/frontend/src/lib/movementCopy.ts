@@ -28,7 +28,7 @@ export function movementSentence(amount: number, reason: string | undefined, par
   const minutes = minutesSpoken(Math.abs(amount));
   const up = amount > 0;
   const said: Said = {
-    minutes, up, split: splitParts(parts), by: who.checkedInBy, where: sharePlace(who.place), whereAt: placeAt(who.place), other: namedOther(parts),
+    minutes, up, split: splitParts(parts), by: scanner(who.checkedInBy), where: sharePlace(who.place), whereAt: placeAt(who.place), other: namedOther(parts),
     byClub: /^the club$/i.test(who.actorName?.trim() ?? ""),
   };
   const caused = reason ? causedSentence(reason, said, parts, who) : null;
@@ -174,6 +174,15 @@ function splitParts(parts: readonly MovementPart[] | undefined): Split {
   const charged = -parts.filter((p) => p.delta_minutes < 0).reduce((n, p) => n + p.delta_minutes, 0);
   if (back <= 0 || charged <= 0) return null;
   return { back: minutesSpoken(back), charged: minutesSpoken(charged) };
+}
+
+/**
+ * R17 E17-9 — the scanner by first name, as the share rows name the same person ("Pippa checked in …,
+ * 6 minutes came back from Pippa"); it read "Pippa Partner checked in" beside "from Pippa".
+ */
+function scanner(name: string | undefined): string | undefined {
+  const said = name?.trim();
+  return said ? firstName(said) : undefined;
 }
 
 /** `by` (R12 E12-2, contract C2): the member whose scan reversed a no-show or an outage refund. */

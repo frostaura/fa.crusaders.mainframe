@@ -25,7 +25,8 @@ export const OFFLINE_COPY = {
   /** The stale banner's heading. */
   staleTitle: "You're offline",
   /** The stale banner's line: what is on screen and when it was true. */
-  staleLine: (at: number) => `Showing what we had at ${asOfLabel(at)}. It updates by itself when you're back online.`,
+  /** After "You're offline — ", so it starts lower-case (R17 X17-6). */
+  staleLine: (at: number) => `showing what we had at ${asOfLabel(at)}. It updates by itself when you're back online.`,
   /**
    * R15 X15-3 — the read never reached the club but the phone says it HAS a network (Wi-Fi
    * without internet, the club's system down): never "You're offline", which only
@@ -46,7 +47,7 @@ export const OFFLINE_COPY = {
   unreachableNothingKept: (line: string) => line.replace(OFFLINE_TAIL, "Try again in a moment"),
   /** The same, when the club answered with a failure rather than not at all. */
   refreshFailedTitle: "Couldn't refresh",
-  refreshFailedLine: (at: number) => `Showing what we had at ${asOfLabel(at)}.`,
+  refreshFailedLine: (at: number) => `showing what we had at ${asOfLabel(at)}.`,
   /** The grid's reason booking is off while it is the phone's copy. */
   gridStale: "Booking needs a connection. This is the grid as it was — a slot shown free may have gone since.",
   /** A Book press on a remembered grid. */

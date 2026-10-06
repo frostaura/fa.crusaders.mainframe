@@ -95,12 +95,12 @@ describe("R13 E13-5 — one sentence for a settlement with the partners' shares 
   });
   it("outage refund reversed by the partner's scan (C13-2's second example)", () => {
     const said = movementSentence(-8, "outage_refund_reversed", [refund(-15), share(7)], { checkedInBy: "Pat Partner" });
-    expect(said).toBe("Pat Partner checked in, so the outage refund was taken back: the 15 minutes refund was taken back, 7 minutes came back from your partner for their share, so 8 minutes left your wallet.");
+    expect(said).toBe("Pat checked in, so the outage refund was taken back: the 15 minutes refund was taken back, 7 minutes came back from your partner for their share, so 8 minutes left your wallet.");
     expect(said).not.toMatch(/you were checked in/);
   });
   it("no-show reversed with two partners paying again", () => {
     expect(movementSentence(-1, "no_show_reversed", [pen(4), refund(-15), share(5, "Sam Partner"), share(5, "Nomsa Dube")], { checkedInBy: "Sam Partner" }))
-      .toBe("Sam Partner checked in, so the no-show was reversed: the 4 minutes penalty came back and the 15 minutes refund was taken back, 5 minutes came back from Sam and 5 minutes from Nomsa for their shares, so 1 minute left your wallet.");
+      .toBe("Sam checked in, so the no-show was reversed: the 4 minutes penalty came back and the 15 minutes refund was taken back, 5 minutes came back from Sam and 5 minutes from Nomsa for their shares, so 1 minute left your wallet.");
   });
   it("without share rows the R10/R12 sentences are unchanged", () => {
     expect(movementSentence(11, "no_show_settled", [refund(15), pen(-4)]))
@@ -116,9 +116,9 @@ describe("R13 E13-5 — one sentence for a settlement with the partners' shares 
  */
 describe("R13 E13-3 — the wallet never says 'you were checked in' for somebody else's scan", () => {
   it("a named scanner is left as stored", () => {
-    expect(memberLedgerComment("Outage refund reversed — Pat Partner checked in after all"))
-      .toBe("Outage refund reversed — Pat Partner checked in after all");
-    expect(memberLedgerComment("Outage refund reversed — Pat Partner checked in after all, net of the desk's own adjustment"))
+    expect(memberLedgerComment("Outage refund reversed — Pat checked in after all"))
+      .toBe("Outage refund reversed — Pat checked in after all");
+    expect(memberLedgerComment("Outage refund reversed — Pat checked in after all, net of the desk's own adjustment"))
       .not.toMatch(/you were/);
   });
   it("the payer's own scan is said to them", () => {

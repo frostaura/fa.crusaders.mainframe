@@ -18,7 +18,7 @@ import { summariseBooking } from "@/components/wallet/useShareBookings";
  */
 export async function namedShareMovement(
   amount: number, me: string | null,
-  cause?: { shareCause?: string; shareKeptMinutes?: number; checkedInBy?: string; cancelledBy?: "club" | "member"; actorName?: string },
+  cause?: { shareCause?: string; shareKeptMinutes?: number; checkedInBy?: string; checkedInByYou?: boolean; cancelledBy?: "club" | "member"; actorName?: string },
 ): Promise<string | null> {
   const wallet = await endpoints.wallet(5, 0);
   const row = wallet.entries.find((e) =>
@@ -34,7 +34,7 @@ export async function namedShareMovement(
     : booking.organiserName;
   // R11 E11-1 — the frame's cause, said as the inbox says it.
   return shareRowSentence({
-    side, signed: row.signedAmountMinutes, place: booking, other, cause: cause?.shareCause, kept: cause?.shareKeptMinutes, by: cause?.checkedInBy,
+    side, signed: row.signedAmountMinutes, place: booking, other, cause: cause?.shareCause, kept: cause?.shareKeptMinutes, by: cause?.checkedInBy, byYou: cause?.checkedInByYou,
     // R13 X13-3 — a partner told the club cancelled, when it did. R14 — and who acted, by name.
     cancelledBy: cause?.cancelledBy, actor: cause?.actorName,
     // R15 J15-5 — a toast stands alone: it says the day as well as the court.
@@ -53,11 +53,17 @@ export async function shareToast(delta: BalanceDelta, me: string | null): Promis
   const other = shares[0]?.counterparty_name ?? null;
   const plain = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy, {
     cancelledBy: delta.cancelledBy, place: delta.place, actor: delta.actorName, other, others: shares.map((p) => p.counterparty_name),
+    byYou: delta.checkedInByYou,
   });
   try {
-    return (await namedShareMovement(delta.amount, me, delta)) ?? plain;
+    return sentence((await namedShareMovement(delta.amount, me, delta)) ?? plain);
   } catch {
-    return plain;
+    return sentence(plain);
   }
+}
+
+/** R17 X17-6 — a toast stands alone, so it ends like a sentence (the ledger's row lines do not). */
+function sentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
