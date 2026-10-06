@@ -7,7 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY, invitedLine, payByLine, playersCount } from "@/lib/playersCopy";
 import { cn } from "@/lib/utils";
-import { Minutes } from "@/components/Minutes";
+import { MinutesFigure } from "@/components/wallet/MinutesFigure";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 import { inviteStatus, inviteWhen, organiserName } from "./inviteFacts";
 
 /**
@@ -105,15 +106,17 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
         {note ? <span className="text-xs font-semibold uppercase tracking-overline text-text-muted">{note}</span> : null}
         <span className="break-words text-base font-semibold text-text-primary">{invitedLine(name, invite.open_link, invite.added_by_club === true)}</span>
         <span className="break-words text-sm text-text-secondary">
-          {invite.court_name ?? INVITES_COPY.court}{" · "}<WhenWhole when={inviteWhen(invite)} />{" · "}{playersCount(invite.players)}
+          {/* R19 L19-3 — "· 3 players" is one piece: the count never ends a line without its word. */}
+          {invite.court_name ?? INVITES_COPY.court}{" · "}<WhenWhole when={inviteWhen(invite)} />{` ·${NBSP}${keepFiguresWhole(playersCount(invite.players))}`}
         </span>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1">
+          {/* R19 L19-3 — "Your share 10 min": the figure never parts from its unit (it was "10 / min"). */}
           <span className="text-sm font-semibold tabular-nums text-text-primary">
-            {INVITES_COPY.yourShare} <Minutes value={invite.share_minutes} />
+            {INVITES_COPY.yourShare} <MinutesFigure value={invite.share_minutes} />
           </span>
           <Badge tone={status.tone}>{status.text}</Badge>
         </span>
-        {invite.share_minutes > 0 ? <span className="text-xs text-text-muted">{payByLine(invite.share_deadline)}</span> : null}
+        {invite.share_minutes > 0 ? <span className="text-xs text-text-muted">{keepFiguresWhole(payByLine(invite.share_deadline))}</span> : null}
       </span>
     </>
   );
@@ -125,9 +128,12 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
  */
 function WhenWhole({ when }: { when: string }) {
   const cut = when.lastIndexOf(", ");
-  if (cut < 0) return <>{when}</>;
-  return <>{when.slice(0, cut + 2)}<span className="whitespace-nowrap">{when.slice(cut + 2)}</span></>;
+  // R19 L19-3 — and the day's own figure stays with its month ("7 Oct").
+  if (cut < 0) return <>{keepFiguresWhole(when)}</>;
+  return <>{keepFiguresWhole(when.slice(0, cut + 2))}<span className="whitespace-nowrap">{when.slice(cut + 2)}</span></>;
 }
+
+const NBSP = "\u00a0";
 
 /** The list while it is read — the card's own shape, three times. */
 export function InviteListSkeleton() {

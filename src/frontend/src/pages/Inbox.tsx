@@ -18,6 +18,7 @@ import type { Invite, MemberNotification } from "@/lib/playersApi";
 import { BookingDetailPanel } from "./BookingDetail";
 import { StaleNotice } from "@/components/shell/StaleNotice";
 import { cn } from "@/lib/utils";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 import { INBOX_COPY as COPY, inboxUnreadLine } from "@/lib/playersCopy";
 import { SPLIT_PANE_COPY } from "@/lib/inboxCopy";
 import { typography } from "@/lib/typography";
@@ -134,7 +135,7 @@ function NoticeCard({ notice }: { notice: MemberNotification }) {
   return (
     <Panel role="region" aria-label={COPY.noticeLabel} className="flex flex-col gap-3">
       {/* A heading, so a pick opened while stacked has somewhere for focus to land (R5 X5-3). */}
-      <h2 className={cn(typography({ variant: "h3" }), "break-words")}>{notice.headline}</h2>
+      <h2 className={cn(typography({ variant: "h3" }), "break-words")}>{keepFiguresWhole(notice.headline)}</h2>
       {path ? <TextLink to={path} variant="standalone">{COPY.openTarget}</TextLink> : null}
     </Panel>
   );

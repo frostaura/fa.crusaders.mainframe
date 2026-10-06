@@ -17,7 +17,8 @@ import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
 import { StillTrying } from "../lib/offline/StillTrying";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { BUY_MINUTES_PATH } from "../lib/minutes";
-import { Minutes } from "../components/Minutes";
+import { MinutesFigure } from "../components/wallet/MinutesFigure";
+import { keepFiguresWhole } from "../components/ui/figure-text";
 import type { HeldFigures } from "../lib/liveBalance";
 import { WALLET_PAGE_SIZE as PAGE_SIZE } from "../lib/offline/memberReads";
 import { WalletNav } from "../components/wallet/WalletNav";
@@ -85,11 +86,18 @@ function BalanceCard(props: { state: CardState; painted: number | null; held: He
             announcements. The toast is the announcement.
           */}
           <p className={cn(typography({ variant: "display" }), "mt-1 tabular-nums", level === "zero" && tone.ink)}>
-            {/* Whole minutes in the one compact form ("7 h 30 min"), spoken in full (P13 §7.1). */}
-            <Minutes value={painted ?? 0} className={level === "zero" ? tone.ink : undefined} />
+            {/*
+              Whole minutes in the one compact form ("7 h 30 min"), spoken in full (P13 §7.1). R19
+              L19-3 — each figure glued to its unit: at large text the line may break between the
+              hours and the minutes ("9 h / 10 min"), never inside one ("9 h 10 / min").
+            */}
+            <span className={cn("tabular-nums", Math.trunc(painted ?? 0) < 0 && "text-danger-strong", level === "zero" && tone.ink)}>
+              <MinutesFigure value={painted ?? 0} />
+            </span>
           </p>
           <p data-balance-sentence="" className={cn("mt-2 max-w-prose text-sm", level === "fine" ? "text-text-secondary" : tone.ink)}>
-            {balanceSentence(level, spendable, slot)}
+            {/* R19 L19-3 — "15 minutes" is one piece when the sentence wraps. */}
+            {keepFiguresWhole(balanceSentence(level, spendable, slot))}
           </p>
           <HeldLine held={held} />
         </div>

@@ -1,6 +1,7 @@
 import type { HeldFigures } from "@/lib/liveBalance";
 import { HELD_EXPLAINER, OWED_BACK_EXPLAINER, heldLine, owedBackLine } from "@/lib/playersCopy";
 import { heldPartsLine, spendableLine } from "@/lib/walletCopy";
+import { keepFiguresWhole as whole } from "@/components/ui/figure-text";
 
 /**
  * D11 §3a — the part of the balance a member cannot spend yet, said where the balance is.
@@ -17,6 +18,11 @@ import { heldPartsLine, spendableLine } from "@/lib/walletCopy";
  * that balance, and incoming minutes pay it first. It has no date, so it is its own line; and
  * because it can push spendable below zero, the spendable sentence never shows a negative.
  * </p>
+ *
+ * <p>
+ * R19 L19-3 — every figure glued to its word ("You can spend 8 hours 45 minutes", "held until
+ * Wed 7 Oct"): at 200 % text the line broke "8 / hours" and "7 / Oct". Paint only.
+ * </p>
  */
 export function HeldLine({ held }: { held: HeldFigures | null }) {
   if (!held || (held.held <= 0 && held.owedBack <= 0)) return null;
@@ -25,14 +31,14 @@ export function HeldLine({ held }: { held: HeldFigures | null }) {
   return (
     <div data-held-line="" className="mt-3 flex max-w-prose flex-col gap-1 border-t border-border pt-3 text-sm">
       <p className="font-semibold tabular-nums text-text-primary">
-        {held.held > 0 ? <>{heldLine(held.held, parts ? null : held.until)}<span className="text-text-secondary"> · </span></> : null}
-        <span className="text-text-primary">{spendableLine(held.spendable)}</span>
+        {held.held > 0 ? <>{whole(heldLine(held.held, parts ? null : held.until))}<span className="text-text-secondary"> · </span></> : null}
+        <span className="text-text-primary">{whole(spendableLine(held.spendable))}</span>
       </p>
-      {parts ? <p data-held-parts="" className="tabular-nums text-text-primary">{parts}</p> : null}
+      {parts ? <p data-held-parts="" className="tabular-nums text-text-primary">{whole(parts)}</p> : null}
       {held.held > 0 ? <p className="text-text-secondary">{HELD_EXPLAINER}</p> : null}
       {held.owedBack > 0 ? (
         <>
-          <p data-owed-back-line="" className="font-semibold tabular-nums text-text-primary">{owedBackLine(held.owedBack)}</p>
+          <p data-owed-back-line="" className="font-semibold tabular-nums text-text-primary">{whole(owedBackLine(held.owedBack))}</p>
           <p className="text-text-secondary">{OWED_BACK_EXPLAINER}</p>
         </>
       ) : null}

@@ -10,6 +10,7 @@ import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { failureOf, knownUnchanged, markReadOrProve } from "./inboxReadBack";
 import { cn } from "@/lib/utils";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 import { appPath, inboxWhen, KIND_ICON, kindWord } from "./notificationKinds";
 import type { InboxFeed } from "./useInbox";
 import type { InboxPick } from "./InboxList";
@@ -48,7 +49,8 @@ export function InboxRow(props: { notice: MemberNotification; now: number; feed:
           }}
           data-split-item=""
           aria-current={pick?.id === notice.id ? "true" : undefined}
-          aria-labelledby={headlineId}
+          // R19 L19-3 — named by the notice's words as written; the headline's paint glues figures.
+          aria-label={notice.headline}
           aria-describedby={metaId}
           // R5 X5-7 — the picked row is marked by an EDGE, as Invites marks its card: the tint alone
           // was ~1.15:1 and forced colours drop it; a border survives them (as CanvasText).
@@ -123,7 +125,8 @@ function RowBody(props: BodyProps) {
       </span>
       <span className={HEAD}>
         <span id={ids.headlineId} className={cn(HEADLINE, resolved ? "text-text-secondary" : "text-text-primary", unread ? "font-bold" : "font-medium")}>
-          {notice.headline}
+          {/* R19 L19-3 — "15 minutes" never ends one line with "15" and starts the next with "minutes". */}
+          {keepFiguresWhole(notice.headline)}
         </span>
         {resolved ? <span data-resolved="" className="text-sm text-text-secondary">{COPY.resolvedHint}</span> : null}
       </span>

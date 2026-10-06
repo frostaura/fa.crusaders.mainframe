@@ -29,7 +29,8 @@ describe("Wallet — R10 the card answers 'can I book?'", () => {
     renderPage(<BalanceProvider><WalletPage /></BalanceProvider>, { initialEntries: ["/wallet"] });
     return stub;
   }
-  const sentence = () => document.querySelector("[data-balance-sentence]")?.textContent ?? "";
+  // R19 L19-3 — the paint glues figures to their words (no-break spaces); compared as words.
+  const sentence = () => (document.querySelector("[data-balance-sentence]")?.textContent ?? "").replace(/\u00a0/g, " ");
 
   it("says 10 minutes cannot book a court of 15, and offers Buy as the way on", async () => {
     open({ balance_minutes: 10 });
