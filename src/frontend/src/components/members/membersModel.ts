@@ -89,6 +89,19 @@ export function statusCounts(rows: MemberRow[] | null): StatusCounts | null {
   return counts;
 }
 
+/**
+ * The rows the chips may count (R19 L19-1): a club read WHOLE (`readAt` is stamped only when the
+ * last page arrived), or a first read still walking its pages — said beside the chips as "Counts
+ * cover those". A walk that failed part way is neither: page 1 counted as the club once read
+ * "Pending 1" with the applications on the page that answered 503, so it counts nothing.
+ */
+export function countableRows(list: {
+  members: MemberRow[] | null; readAt: number | null; reading: unknown;
+}): MemberRow[] | null {
+  if (list.readAt !== null || list.reading !== null) return list.members;
+  return null;
+}
+
 /** One row replaced in place, so a sorted, filtered, scrolled table does not jump under the cursor. */
 export function patchRow(rows: MemberRow[] | null, userId: string, patch: Partial<MemberRow>): MemberRow[] | null {
   if (!rows) return rows;

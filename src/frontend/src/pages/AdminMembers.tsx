@@ -13,7 +13,7 @@ import type { RowActionHandlers } from "../components/members/RowActions";
 import { SellPackageSheet } from "../components/members/SellPackageSheet";
 import { TopUpSheet } from "../components/members/TopUpSheet";
 import {
-  DEFAULT_SORT, listSends, nextSort, patchRow, rowMenuOf, statusCounts, visibleRows, type MemberRow, type Sort, type SortKey,
+  countableRows, DEFAULT_SORT, listSends, nextSort, patchRow, rowMenuOf, statusCounts, visibleRows, type MemberRow, type Sort, type SortKey,
 } from "../components/members/membersModel";
 import { useMinutesAdjust } from "../components/members/useMinutesAdjust";
 import { useMemberLifecycle } from "../components/members/useMemberLifecycle";
@@ -73,7 +73,9 @@ export default function AdminMembersPage() {
   const adjust = useMinutesAdjust(list.setMembers);
   const [selling, setSelling] = useState<MemberRow | null>(null);
 
-  const counts = useMemo(() => statusCounts(list.members), [list.members]);
+  // Only from a club read whole (or one still being read, said so): R19 L19-1.
+  const countable = countableRows(list);
+  const counts = useMemo(() => statusCounts(countable), [countable]);
   const rows = useMemo(() => visibleRows(list.members ?? [], status, query, sort), [list.members, status, query, sort]);
   const split = useMemo(() => ({ listHref: filters.listHref }), [filters.listHref]);
 
