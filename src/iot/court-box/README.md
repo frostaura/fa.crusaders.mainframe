@@ -142,7 +142,11 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.8 and Mega 2.0.0**: 2.2.8
+`platformio.ini`. The current images are **bridge 2.2.9 and Mega 2.0.0**: 2.2.9
+remembers a scan for the club's own scan memory, holds it for the whole
+countdown of every pay-for quote and PRESS AGAIN without ever shortening it,
+and never past the server's bound on its age — when a whole countdown no
+longer fits, the glass says SCAN AGAIN; 2.2.8
 observes every "how old is it?" age — the roster's, the member-code step
 clock's, the wall clock's — on every pass, so none can read fresh again after
 the 49.7-day millis() wrap; answers a pay-for quote that got no decision with

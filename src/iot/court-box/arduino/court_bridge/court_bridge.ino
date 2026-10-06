@@ -100,6 +100,7 @@
 #include "src/bridgelogic/Relight.h"
 #include "src/bridgelogic/RestorePlan.h"
 #include "src/bridgelogic/ScanFlow.h"
+#include "src/bridgelogic/ScanMemory.h"
 #include "src/bridgelogic/ScreenScript.h"
 #include "src/bridgelogic/StateReconcile.h"
 #include "src/bridgelogic/WalkUp.h"
@@ -475,14 +476,14 @@ uint16_t authSeconds() {
 
 /// The last thing the scanner read, verbatim. Cleared when it lapses or is spent.
 char gLastScan[proto::kMaxArgLen + 1] = {'\0'};
-tb::Deadline gScanAt;
 
-/// When the scanner read it — the millis() of the pass that decoded the frame.
-/// A v1 member code carries `scan_age_ms` on every call it is sent with, and a
-/// walk-up or a pay-for is sent after one or two button presses, so the server
-/// has to be told how old the code on the wire is to check it at the instant
-/// it was read. Measured with tb::since, never compared raw.
-uint32_t gScanReadMs = 0U;
+/// How long the scan above is remembered, and when it was read. A v1 member
+/// code carries `scan_age_ms` on every call it is sent with, and a walk-up or a
+/// pay-for is sent after one or two button presses, so the server has to be
+/// told how old the code on the wire is to check it at the instant it was
+/// read. One object since R19 (D19-1 to D19-3): the scan, the quote and PRESS
+/// AGAIN each armed it by a different rule, and the three disagreed.
+bridgelogic::ScanMemory gScan(kScanMemoryMs, devlink::kLcdChoiceDefaultMs);
 
 /// The state between a pay-for's two presses (D10): which court was quoted, at
 /// what price label, under which nonce.
@@ -490,7 +491,7 @@ bridgelogic::PayForFlow gPayFor;
 
 /// Milliseconds since the remembered scan was read.
 uint32_t scanAgeMs() {
-  return tb::since(gClock.nowMs(), gScanReadMs);
+  return gScan.ageMs(gClock.nowMs());
 }
 
 /// When the Mega's button window is armed, and which court an OFF press may
@@ -665,15 +666,29 @@ void applyAuth(bridgelogic::AuthCommand command) {
 /// works (review #4); a lapse spends it and closes the window (forgetScan).
 void spendScan() {
   gLastScan[0] = '\0';
-  gScanAt.disarm();
+  gScan.forget();
 }
 
 /// The scan lapsed unspent, or was thrown away. Identity and window both go:
 /// a window that outlives the scan is thirty seconds of buttons on the
 /// previous member's identity for whoever walks up next.
+///
+/// A pay-for quote goes with it: a quote is a question about THIS scan, and
+/// one left armed behind a forgotten scan is a confirm on nobody's code.
 void forgetScan() {
   spendScan();
+  gPayFor.clear();
   applyAuth(gAuth.disarm());
+}
+
+/// A question the glass would ask — a quote, or PRESS AGAIN — cannot be held
+/// for its whole countdown inside the server's bound on the scan's age
+/// (R19 D19-2). The scan is forgotten, the half-made purchase with it, and the
+/// glass asks for the one thing that works: a fresh scan.
+void scanAgain(uint32_t nowMs) {
+  gPad.clear();
+  forgetScan();
+  showScreen(bridgelogic::ScreenId::ScanAgain, nowMs);
 }
 
 /// A walk-up, a pay-for quote or a pay-for confirm got no decision and the
@@ -681,9 +696,17 @@ void forgetScan() {
 /// press it asks for needs BOTH ends of the cable: the scan remembered here,
 /// and the Mega's button window to forward it. Each used to be left where the
 /// SCAN left it, so a press late in the countdown went nowhere.
-void holdForPressAgain(uint32_t nowMs) {
-  bridgelogic::holdScanFor(gScanAt, gLcdSettings.choiceMs, nowMs);
+///
+/// False when the whole countdown no longer fits inside the server's bound on
+/// the scan's age (R19 D19-2): SCAN AGAIN is already on the glass, and the
+/// caller paints nothing that invites a press.
+bool holdForPressAgain(uint32_t nowMs) {
+  if (!gScan.holdForPressAgain(nowMs)) {
+    scanAgain(nowMs);
+    return false;
+  }
   applyAuth(gAuth.afterUndecided(nowMs));
+  return true;
 }
 
 /// Learns this board's MAC and renders the one header every call carries.
@@ -840,8 +863,8 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // roster's token: a walk-up member has no booking and so no roster entry, and the API is
   // the only thing that can verify a 60-second signed QR anyway.
   snprintf(gLastScan, sizeof(gLastScan), "%s", frame.arg(0));
-  gScanAt.arm(nowMs, kScanMemoryMs);
-  gScanReadMs = nowMs;
+  // For the TENANT's scan memory, not the compile-time one (R19 D19-3).
+  gScan.remember(nowMs);
   // A new identity at the panel: any pay-for quote on the glass was somebody
   // else's question.
   gPayFor.clear();
@@ -1418,6 +1441,13 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   }
   // After the call, for the same reason as activateOnline.
   const uint32_t nowMs = gClock.nowMs();
+  if (!answer.decided && !holdForPressAgain(nowMs)) {
+    // BUSY / PRESS AGAIN or NO CONNECTION, but the scan cannot be held for the
+    // whole countdown inside the server's bound on its age (R19 D19-2). SCAN
+    // AGAIN is on the glass instead; painting BUSY first would flash a press
+    // invitation the box has already withdrawn.
+    return;
+  }
   if (answer.outcome.action == court::Action::TurnOn) {
     noteOnlineUse(gLastScan);
   }
@@ -1442,8 +1472,8 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   }
   if (!answer.decided) {
     // BUSY / PRESS AGAIN or NO CONNECTION: the scan and the nonce are kept,
-    // and now so is the way to press again (D18-4).
-    holdForPressAgain(nowMs);
+    // and so is the way to press again — held above, before the glass said
+    // so (D18-4, D19-2).
     return;
   }
   applyAuth(gAuth.afterWalkUp(answer.outcome, nowMs));
@@ -1491,6 +1521,13 @@ void confirmPayFor() {
   const bridgelogic::ScreenFacts facts = payForFacts(relay, answer.amountLabel, nowMs);
 
   if (answer.kind == bridgelogic::PayForKind::Undecided) {
+    // The scan and the Mega's window are held for the whole choice window
+    // FIRST (D18-4): a re-armed quote nobody can press for is no retry at all.
+    // When that window no longer fits inside the server's bound on the scan's
+    // age, the quote goes with the scan and the glass says SCAN AGAIN (D19-2).
+    if (!holdForPressAgain(nowMs)) {
+      return;
+    }
     // The quote and its nonce stay armed — re-armed from now, so the retry has
     // the whole choice window — and pressing the court again asks the server
     // whether THIS payment happened, never for a second one. The selection
@@ -1498,9 +1535,6 @@ void confirmPayFor() {
     // a court somebody is playing on.
     gPayFor.arm(relay, gPayFor.courtNumber(), gPayFor.amountLabel(), gLcdSettings.choiceMs, nowMs);
     gPad.clear();
-    // And the scan and the Mega's window with it, for the same whole window
-    // (D18-4): a re-armed quote nobody can press for is no retry at all.
-    holdForPressAgain(nowMs);
     sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
     return;
   }
@@ -1569,13 +1603,16 @@ void armPayForQuote(uint8_t relay, const bridgelogic::PayForAnswer& answer, uint
   // time on a court somebody is playing on.
   gPad.clear();
   // The member is being asked to press again, so the scan they are paying
-  // with stays remembered for the question — but never past scan memory plus
-  // one choice window from the SCAN itself: a member who scans, is quoted and
-  // walks away must not leave an identity that re-quotes on every press.
-  const uint32_t read = tb::since(now, gScanReadMs);
-  const uint32_t limit = gScanMemoryMs + gLcdSettings.choiceMs;
-  if (read < limit) {
-    gScanAt.arm(now, limit - read);
+  // with stays remembered for the WHOLE question and is never shortened
+  // (R19 D19-1: after a PRESS AGAIN hold the old "scan memory plus one choice
+  // window from the scan" cut it below the countdown and the confirm went
+  // nowhere). Never past the server's bound on the scan's age, either: a
+  // question that cannot be held whole is not asked (D19-2) — which is also
+  // what stops a member who scans, is quoted and walks away from leaving an
+  // identity that re-quotes on every press.
+  if (!gScan.holdForQuote(now)) {
+    scanAgain(now);
+    return;
   }
   applyAuth(gAuth.afterPayForQuote(now));
   sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForQuote,
@@ -1618,10 +1655,12 @@ bool quotePayFor(uint8_t relay, uint32_t nowMs) {
     // somebody holds). The selection goes with it, so a duration press cannot
     // turn either into a walk-up on a court somebody is playing on.
     gPad.clear();
-    if (answer.kind == bridgelogic::PayForKind::Undecided) {
+    if (answer.kind == bridgelogic::PayForKind::Undecided && !holdForPressAgain(now)) {
       // PRESS AGAIN: the same court press asks again, so the scan and the
-      // Mega's window are held for the whole choice window (D18-4).
-      holdForPressAgain(now);
+      // Mega's window are held for the whole choice window (D18-4) — unless
+      // that window no longer fits inside the server's bound on the scan's
+      // age, and then SCAN AGAIN is already on the glass (D19-2).
+      return true;
     }
     sendScreen(
         bridgelogic::screenFor(answer.screen, payForFacts(relay, answer.amountLabel, now), gLcdSettings));
@@ -1898,6 +1937,10 @@ void pumpHeartbeat(uint32_t nowMs) {
   gPad.setTtlMs(gLcdSettings.choiceMs);
   gScanMemoryMs = gLcdSettings.scanMemoryMs;
   gAuth.setTtlMs(gLcdSettings.scanMemoryMs);
+  // The bridge's own memory of who scanned follows the same setting (D19-3),
+  // and a shorter one applies to a scan already held (D19-2: the server
+  // measures its age against what it holds now).
+  gScan.setLimits(gLcdSettings.scanMemoryMs, gLcdSettings.choiceMs, gClock.nowMs());
   gWallClock.setTrustMinutes(gLcdSettings.clockTrustMs / 60000UL);
   gFaults.setEnabled(gLcdSettings.faultReporting);
   gFaults.setMaxPerHour(gLcdSettings.faultMaxPerHour);
@@ -2055,7 +2098,7 @@ void loop() {
   }
   // A pay-for question nobody answered lapses on its own, for the same reason.
   static_cast<void>(gPayFor.tick(now));
-  if (gLastScan[0] != '\0' && gScanAt.expired(now)) {
+  if (gLastScan[0] != '\0' && gScan.expired(now)) {
     // Lapsed unspent. The Mega's own window lapses at the same TTL, but the
     // explicit `!AUTH,0` is what keeps the two from drifting by a loop pass.
     forgetScan();

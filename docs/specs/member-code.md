@@ -185,8 +185,15 @@ two button presses, so the code on the wire can be several steps old by then. Ab
 door gate never sends it: it asks the moment it reads). A legacy token's body is byte-for-byte
 what it always was. The server refuses a value above **`(scan_memory_seconds +
 lcd_choice_seconds) × 1000 + 30 000`** — the tenant's own settings, at most 390 000 — as
-`not_recognised`: the box never remembers a scan longer than scan memory plus one pay-for
-question.
+`not_recognised`. The box keeps every age it sends inside that bound by construction (bridge
+2.2.9, R19 D19-2, `bridgelogic::ScanMemory`): a scan is remembered for the club's
+`scan_memory_seconds` (D19-3); a question the glass asks with a countdown — a pay-for quote,
+or `BUSY` / `PRESS AGAIN` after an answer that decided nothing — holds it for at least that
+whole countdown and never shortens it (D19-1); and no hold carries it past this bound **less
+5 s**, for the settings the box last adopted (a shorter setting adopted later brings a scan
+already held inside the new bound at once). When a whole countdown no longer fits, the box does
+not ask: it forgets the scan and shows `SCAN AGAIN` (§9.3), because a press it invited would be
+refused here as `not_recognised` — `CODE NOT KNOWN` about the member's own code.
 
 ### 4.3 The check
 
@@ -427,7 +434,7 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    `code_step` to `codes:m1` devices. Phones still show legacy codes. Dean can pilot v1 on his own
    phone: v1 tokens are accepted online everywhere, even from un-flashed boards, because a board
    passes scanned bytes through unchanged.
-2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.8 —
+2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.9 —
    2.2.0 shows pay-for amounts in minutes, §9.3, 2.2.1 shows the member who rescans the code
    that just lit their own court its ON screen rather than `CODE USED`, 2.2.2 does the same
    on a court the box lit online for them, §6.5, and 2.2.3 arms nothing for a used code and
@@ -445,7 +452,10 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    D17-4, and 2.2.8 latches every age-style timer — roster staleness, the member-code step clock, the wall
    clock — stale once past its limit so a 49.7-day millis() wrap can never read it fresh again, shows `BUSY` for a
    429/5xx pay-for QUOTE (and `NO CONNECTION` for none) instead of offering a walk-up, and keeps the scan and the
-   Mega's button window alive for the whole `PRESS AGAIN` countdown — R18 D18-2/3/4) and each ESP32 door (1.1.2:
+   Mega's button window alive for the whole `PRESS AGAIN` countdown — R18 D18-2/3/4, and 2.2.9 remembers a scan
+   for the club's own `scan_memory_seconds`, holds it for the whole countdown of every quote and `PRESS AGAIN`
+   without ever shortening it, and never past the §4.2 bound less 5 s — `SCAN AGAIN` when a whole countdown no
+   longer fits — R19 D19-1/2/3) and each ESP32 door (1.1.2:
    the long-outage fix for every gate timer, R17 D17-2, and the same age latches, R18 D18-2) — the physical USB
    step, below. Each board then reports `codes:m1`.
 3. **Cut-over, automatic**: the first time **every enabled device** of the tenant reports
@@ -471,8 +481,8 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
   **1 ON 2 ON 3 ON 4 ON 5–8 OFF**. (`make flash-bridge` is the PlatformIO equivalent.)
 - **Each door (ESP32)**: Arduino IDE, sketch `src/iot/door-gate/arduino/door_gate/`, board
   `esp32:esp32:esp32` (core 2.0.17), its own `secrets.h`; USB, upload.
-- **Proof it landed**: the Devices page shows firmware **2.2.8** for the box (a box still on
-  2.1.0, 2.2.0, 2.2.1, 2.2.2, 2.2.3, 2.2.4, 2.2.5, 2.2.6 or 2.2.7 also reports `codes:m1`) and **1.1.2** for each door (1.1.0 and 1.1.1 also report it), and — once the backend lane ships —
+- **Proof it landed**: the Devices page shows firmware **2.2.9** for the box (a box still on
+  2.1.0, 2.2.0, 2.2.1, 2.2.2, 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 or 2.2.8 also reports `codes:m1`) and **1.1.2** for each door (1.1.0 and 1.1.1 also report it), and — once the backend lane ships —
   `codes:m1`. The Mega stays **2.0.0**: the bridge is the only half of the box that is flashed.
 
 ---
@@ -499,15 +509,22 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
    which moves no money.
 3. The glass asks (§9.3). The window re-arms; the court selection is cleared, so a duration
    press cannot turn the question into a walk-up on a court somebody is playing on (the only answer
-   is the same court again, which re-selects it); and the scan stays remembered for the question —
-   but never past `scan_memory_seconds + lcd_choice_seconds` from the scan itself.
+   is the same court again, which re-selects it); and the scan stays remembered for the whole
+   question — at least the choice window from now, never shortened — but never past the §4.2
+   bound less 5 s. A quote that cannot be held whole is not asked: the box forgets the scan and
+   shows `SCAN AGAIN` (R19 D19-1/2).
 4. The payer **presses the same court again**: `confirm:true`, echoing the label the glass showed.
    Paid → the booker is refunded, both are emailed (server side), and if nobody had started the
    booking the server may grant its remainder and the court lights as an activation would.
 
-**Online only.** A quote that is not a decision — no connection, a 404 from a server that has not
-shipped pay-for, a cut body — is the old walk-up choice (`ChooseTime`), so a box flashed before its
-server is upgraded behaves exactly as before. `not_booked` is the same. A confirm that got no
+**Online only.** Only a quote answer that tells the box nothing about pay-for falls back to the
+old walk-up choice (`ChooseTime`): a 404 from a server that has not shipped pay-for (so does any other
+status that is not 200, 0, 429 or 5xx), and a 200 the box cannot read — a cut body, no `payable`, a
+price for a different court or a label the glass cannot show whole. A box flashed before its
+server is upgraded therefore behaves exactly as before. `not_booked` is the same. **No connection
+(status 0) is `NO CONNECTION` and a 429 or any 5xx is `BUSY` / `PRESS AGAIN` — never the walk-up
+choice**, because the quote is only asked about a court the box believes is taken (R18 D18-3, as
+§9.3 states); the scan is kept for the retry. A confirm that got no
 decision (0, 429, 5xx, an unreadable 200) keeps the quote and its nonce armed — re-armed for a
 full choice window — so the next press retries **the same payment** and is answered with the
 first (`replayed:true`).
@@ -614,7 +631,10 @@ closes the window, so the next press cannot try a walk-up on it,
 answer reads `NO CONNECTION` instead of offering a walk-up, R18 D18-3 — the scan, nonce and quote are kept, and the
 scan and the Mega's button window last the whole countdown, R18 D18-4, so the next press retries
 the same purchase), anything else → `SEE THE DESK`; no connection on a confirm →
-`NO CONNECTION`. When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
+`NO CONNECTION`. When a quote or an undecided answer could not be held for its whole countdown
+inside the §4.2 bound, the glass shows `ScanAgain` instead — `SCAN AGAIN` / `Waited too long` /
+`Then press a court` / `SCAN WHEN READY`, revert hold, no court cells — and the scan is forgotten
+(bridge 2.2.9, R19 D19-2). When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
 `!LCD` lines ahead of the `!ON`. **Everything reaches the Mega through `!ROW`/`!SHOW`/`!LCD`/`!ON`
 /`!AUTH` — frames the Mega already speaks.** Nothing about the serial dialect changes.
 

@@ -59,13 +59,6 @@ AuthCommand AuthPolicy::afterUndecided(uint32_t nowMs) {
   return arm(court_, nowMs);
 }
 
-void holdScanFor(tb::Deadline& scanAt, uint32_t holdMs, uint32_t nowMs) {
-  // Never SHORTER than it was: a member with 25 s of scan memory left keeps it.
-  if (scanAt.remaining(nowMs) < holdMs) {
-    scanAt.arm(nowMs, holdMs);
-  }
-}
-
 bool AuthPolicy::allowsRelease(uint8_t court, uint32_t nowMs) const {
   return armed(nowMs) && court_ != kUnbound && court_ == court;
 }

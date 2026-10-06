@@ -226,9 +226,19 @@ enum class ScreenId : uint8_t {
   /// (D18-3) a QUOTE answered 429 or 5xx paints it too: nothing was quoted,
   /// the scan is kept, and the same court press asks again.
   Busy,
+
+  // --- review round 19 (D19-2). APPENDED, for the same reason. --------------
+
+  /// An answer decided nothing, or a quote came back, but a whole choice
+  /// window would carry the remembered scan past the oldest one the server
+  /// checks (member-code.md §4.2). BUSY / PRESS AGAIN there invited a press
+  /// the server would answer CODE NOT KNOWN about the member's own code, so
+  /// the scan is forgotten and the glass asks for the one thing that works: a
+  /// fresh scan. No court cells — no court press is honoured until then.
+  ScanAgain,
 };
 
-inline constexpr uint8_t kScreenCount = 33U;
+inline constexpr uint8_t kScreenCount = 34U;
 
 /// What the glass shows while `/activate` is asked about a scan.
 inline constexpr ScreenId kActivateWaitScreen = ScreenId::CheckingCode;

@@ -382,6 +382,19 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
       {"", RowArg::CourtCells, ""}},
      kChoiceSeconds,
      kShowFlagCountdown},
+
+    // --- review round 19 (D19-2) --------------------------------------------
+    // The scan has been held through so many undecided answers that another
+    // whole countdown would outlive the server's bound on its age. Rows 0-1
+    // say what to do and why; nothing on it invites a court press, because
+    // the scan behind one is gone.
+    {ScreenId::ScanAgain,
+     {{"SCAN AGAIN", RowArg::None, ""},
+      {"Waited too long", RowArg::None, ""},
+      {"Then press a court", RowArg::None, ""},
+      {"SCAN WHEN READY", RowArg::None, ""}},
+     kRevertSeconds,
+     kShowFlagCountdown},
 };
 
 /// kScreenSpecs is indexed by the ScreenId value, so a row in the wrong place

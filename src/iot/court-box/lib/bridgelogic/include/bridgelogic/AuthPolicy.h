@@ -132,17 +132,6 @@ private:
   uint8_t court_ = kUnbound;
 };
 
-/// The remembered scan's deadline after an answer that decided nothing (R18
-/// D18-4): at least `holdMs` — the choice window — from now, and never shorter
-/// than it already was. The other half of afterUndecided: the Mega forwarding
-/// a press is no use if the bridge has forgotten who is pressing.
-///
-/// It can extend the scan past armPayForQuote's "scan memory plus one choice
-/// window from the SCAN" bound, once per undecided answer — each needs a press
-/// and a server that decided nothing, and the nonce kept with it means the
-/// retry is the SAME purchase, never a new one on somebody's left-behind scan.
-void holdScanFor(tb::Deadline& scanAt, uint32_t holdMs, uint32_t nowMs);
-
 } // namespace bridgelogic
 
 #endif // CRUSADERS_BRIDGELOGIC_AUTHPOLICY_H

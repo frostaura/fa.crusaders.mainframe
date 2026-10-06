@@ -34,6 +34,7 @@
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterTokenFits.h"
 #include "bridgelogic/ScanFlow.h"
+#include "bridgelogic/ScanMemory.h"
 #include "bridgelogic/ScreenScript.h"
 #include "bridgelogic/StateReconcile.h"
 #include "bridgelogic/WalkUp.h"
@@ -2062,17 +2063,225 @@ void test_auth_policy_an_undecided_answer_keeps_press_again_working_for_the_whol
     TEST_ASSERT_FALSE(lapsed.allowsRelease(1U, base + ttl + 5U));
 
     // The scan: 2 s left at the BUSY answer becomes the whole choice window...
-    tb::Deadline scanAt;
-    scanAt.arm(base, ttl);
-    bridgelogic::holdScanFor(scanAt, choice, busyAt);
-    TEST_ASSERT_FALSE_MESSAGE(scanAt.expired(busyAt + choice - 1U), "the scan lapsed under PRESS AGAIN");
-    TEST_ASSERT_TRUE(scanAt.expired(busyAt + choice));
+    bridgelogic::ScanMemory scan(ttl, choice);
+    scan.remember(base);
+    TEST_ASSERT_TRUE(scan.holdForPressAgain(busyAt));
+    TEST_ASSERT_FALSE_MESSAGE(scan.expired(busyAt + choice - 1U), "the scan lapsed under PRESS AGAIN");
+    TEST_ASSERT_TRUE(scan.expired(busyAt + choice));
     // ...and 25 s left is never cut to 20.
-    scanAt.arm(base, ttl);
-    bridgelogic::holdScanFor(scanAt, choice, base + 5000UL);
-    TEST_ASSERT_FALSE(scanAt.expired(base + ttl - 1U));
-    TEST_ASSERT_TRUE(scanAt.expired(base + ttl));
+    scan.remember(base);
+    TEST_ASSERT_TRUE(scan.holdForPressAgain(base + 5000UL));
+    TEST_ASSERT_FALSE(scan.expired(base + ttl - 1U));
+    TEST_ASSERT_TRUE(scan.expired(base + ttl));
   }
+}
+
+/// The server's own §4.2 bound (MemberCodeSettings.MaxScanAgeMs), written out
+/// here rather than read from ScanMemory so the box's ceiling is checked
+/// against the server's rule and not against itself.
+uint32_t serverMaxScanAgeMs(uint32_t scanMemoryMs, uint32_t choiceMs) {
+  return scanMemoryMs + choiceMs + 30000UL;
+}
+
+struct ScanSettings {
+  uint32_t scanMemoryMs;
+  uint32_t choiceMs;
+};
+
+/// Defaults, both ends of each range, and the parser's raised floor.
+const ScanSettings kScanSettings[] = {
+    {30000UL, 20000UL}, {20000UL, 20000UL},  {120000UL, 20000UL},
+    {5000UL, 5000UL},   {300000UL, 60000UL}, {60000UL, 60000UL},
+};
+constexpr size_t kScanSettingsCount = sizeof(kScanSettings) / sizeof(kScanSettings[0]);
+
+/// R19 D19-3. The scan armed with the COMPILE-TIME scan memory, so a club's
+/// `scan_memory_seconds` reached the Mega's window and the server's bound but
+/// never the bridge's own memory of who scanned: 120 s forgot the member at
+/// 30, and 20 s kept them for 30 — ten seconds of somebody else's identity.
+void test_scan_memory_remembers_a_scan_for_the_tenant_scan_memory() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    const uint32_t memories[] = {20000UL, 120000UL, 30000UL};
+    for (const uint32_t memory : memories) {
+      bridgelogic::ScanMemory scan(30000UL, 20000UL);
+      scan.setLimits(memory, 20000UL, base);
+      scan.remember(base);
+      TEST_ASSERT_TRUE(scan.remembered());
+      TEST_ASSERT_FALSE_MESSAGE(scan.expired(base + memory - 1U),
+                                "the scan lapsed before the club's scan memory");
+      TEST_ASSERT_TRUE_MESSAGE(scan.expired(base + memory), "the scan outlived the club's scan memory");
+      TEST_ASSERT_EQUAL_UINT32(memory - 1U, scan.ageMs(base + memory - 1U));
+    }
+  }
+}
+
+/// R19 D19-1. A quote re-armed the scan to "scan memory plus one choice window
+/// from the SCAN". After a BUSY / PRESS AGAIN hold had carried the scan past
+/// that, the quote SHORTENED it: PAY 50 MIN? counted down to 67.5 s while the
+/// scan was forgotten at 50 s and `!AUTH,0` closed the Mega's window, so the
+/// confirm press went nowhere. The scan and the Mega's window now outlive the
+/// quote's whole countdown, every time.
+void test_scan_memory_a_quote_after_a_busy_hold_keeps_the_scan_for_its_whole_countdown() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    for (size_t s = 0U; s < kScanSettingsCount; ++s) {
+      const uint32_t memory = kScanSettings[s].scanMemoryMs;
+      const uint32_t choice = kScanSettings[s].choiceMs;
+      bridgelogic::ScanMemory scan(memory, choice);
+      bridgelogic::AuthPolicy auth(memory);
+      scan.remember(base);
+      static_cast<void>(
+          auth.afterScan(outcomeOf(court::Action::Refuse, eventq::Event::kNoCourt, true), base));
+
+      // A walk-up answered 429 a moment before the scan lapsed: PRESS AGAIN.
+      const uint32_t busyAt = base + memory - 1500U;
+      TEST_ASSERT_TRUE(scan.holdForPressAgain(busyAt));
+      static_cast<void>(auth.afterUndecided(busyAt));
+
+      // The member presses a booked court near the end of that countdown and
+      // is quoted: PAY 50 MIN? for a whole choice window from now.
+      const uint32_t quoteAt = busyAt + choice - 1000U;
+      TEST_ASSERT_FALSE(scan.expired(quoteAt));
+      if (scan.ageMs(quoteAt) + choice > scan.ceilingMs()) {
+        // A 60 s countdown no longer fits inside the server's bound: the
+        // question is not asked at all (SCAN AGAIN), never asked short.
+        TEST_ASSERT_FALSE_MESSAGE(scan.holdForQuote(quoteAt),
+                                  "a quote was asked that its scan cannot outlive");
+        continue;
+      }
+      bridgelogic::PayForFlow payFor;
+      payFor.arm(0U, 2, "50", choice, quoteAt);
+      TEST_ASSERT_TRUE_MESSAGE(scan.holdForQuote(quoteAt), "a quote inside the server's bound was refused");
+      static_cast<void>(auth.afterPayForQuote(quoteAt));
+
+      const uint32_t lastPress = quoteAt + choice - 1U;
+      TEST_ASSERT_TRUE(payFor.quoted(0U, lastPress));
+      TEST_ASSERT_FALSE_MESSAGE(
+          scan.expired(lastPress),
+          "the quote is still counting down but the scan was forgotten: the confirm goes nowhere");
+      TEST_ASSERT_TRUE_MESSAGE(auth.armed(lastPress), "the Mega's window closed under the quote's countdown");
+      TEST_ASSERT_TRUE(scan.ageMs(lastPress) <= serverMaxScanAgeMs(memory, choice));
+    }
+  }
+}
+
+/// D19-1, the plain cases: a quote never shortens what the scan already had,
+/// and one asked with a second of scan memory left gets its whole countdown.
+void test_scan_memory_a_quote_never_shortens_the_scan() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::ScanMemory scan(120000UL, 20000UL);
+    scan.remember(base);
+    TEST_ASSERT_TRUE(scan.holdForQuote(base + 5000UL));
+    TEST_ASSERT_FALSE_MESSAGE(scan.expired(base + 120000UL - 1U),
+                              "115 s of scan memory was cut to the 20 s quote");
+    TEST_ASSERT_TRUE(scan.expired(base + 120000UL));
+
+    scan.remember(base);
+    TEST_ASSERT_TRUE(scan.holdForQuote(base + 119000UL));
+    TEST_ASSERT_FALSE(scan.expired(base + 139000UL - 1U));
+    TEST_ASSERT_TRUE(scan.expired(base + 139000UL));
+  }
+}
+
+/// The answer comes back after a blocking call of up to several seconds, and
+/// the scan may have lapsed DURING it; the member pressed while it was alive,
+/// so PRESS AGAIN still holds it — the age bound is what limits it, not the
+/// deadline the call happened to cross. A forgotten scan holds nothing.
+void test_scan_memory_a_scan_that_lapsed_during_the_call_is_still_held() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::ScanMemory scan(30000UL, 20000UL);
+    scan.remember(base);
+    const uint32_t answeredAt = base + 30000UL + 4000UL;
+    TEST_ASSERT_TRUE(scan.expired(answeredAt));
+    TEST_ASSERT_TRUE_MESSAGE(scan.holdForPressAgain(answeredAt),
+                             "a BUSY answer to a live press read SCAN AGAIN");
+    TEST_ASSERT_FALSE(scan.expired(answeredAt + 20000UL - 1U));
+
+    scan.forget();
+    TEST_ASSERT_FALSE(scan.remembered());
+    TEST_ASSERT_FALSE(scan.holdForPressAgain(answeredAt));
+    TEST_ASSERT_FALSE(scan.holdForQuote(answeredAt));
+  }
+}
+
+/// R19 D19-2. Every BUSY / PRESS AGAIN held the scan a whole choice window
+/// more, without limit; the fourth busy answer in a row sent `scan_age_ms`
+/// 86 600 against the server's 80 000 and the member read CODE NOT KNOWN about
+/// their own code. A hold now never carries the scan past the server's bound
+/// less the margin, and when a whole countdown no longer fits, it answers
+/// false — the glass says SCAN AGAIN instead of inviting a press.
+void test_scan_memory_repeated_holds_never_pass_the_server_bound() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    for (size_t s = 0U; s < kScanSettingsCount; ++s) {
+      const uint32_t memory = kScanSettings[s].scanMemoryMs;
+      const uint32_t choice = kScanSettings[s].choiceMs;
+      const uint32_t server = serverMaxScanAgeMs(memory, choice);
+      bridgelogic::ScanMemory scan(memory, choice);
+      TEST_ASSERT_EQUAL_UINT32(server - bridgelogic::ScanMemory::kServerMarginMs, scan.ceilingMs());
+      scan.remember(base);
+
+      // Quote, then BUSY after BUSY, each press a second before the lapse.
+      uint32_t now = base + memory - 1000U;
+      bool held = scan.holdForQuote(now);
+      int holds = 0;
+      while (held && holds < 64) {
+        ++holds;
+        const uint32_t end = scan.ageMs(now) + scan.remainingMs(now);
+        TEST_ASSERT_TRUE_MESSAGE(end <= scan.ceilingMs(), "a hold carried the scan past the server's bound");
+        TEST_ASSERT_TRUE_MESSAGE(scan.remainingMs(now) >= choice,
+                                 "a hold gave less than the countdown it shows");
+        now += scan.remainingMs(now) - 1000U;
+        TEST_ASSERT_FALSE(scan.expired(now));
+        TEST_ASSERT_TRUE_MESSAGE(scan.ageMs(now) <= server, "the box sends a scan_age_ms the server refuses");
+        held = scan.holdForPressAgain(now);
+      }
+      TEST_ASSERT_FALSE_MESSAGE(held, "the holds never stopped: the scan is remembered forever");
+      // Refused because the whole countdown no longer fits, not before.
+      TEST_ASSERT_TRUE(scan.ageMs(now) + choice > scan.ceilingMs());
+    }
+  }
+}
+
+/// D19-2, the other way to get there: the club SHORTENS its settings while a
+/// scan is held. The next heartbeat brings the live deadline inside the new
+/// bound, and a scan already older than it is spent on the next pass.
+void test_scan_memory_shorter_settings_bring_a_held_scan_inside_the_new_bound() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::ScanMemory scan(300000UL, 60000UL);
+    scan.remember(base);
+    scan.setLimits(30000UL, 20000UL, base + 10000UL);
+    TEST_ASSERT_FALSE_MESSAGE(scan.expired(base + 10000UL), "a young scan was dropped by a settings change");
+    TEST_ASSERT_TRUE(scan.ageMs(base + 10000UL) + scan.remainingMs(base + 10000UL) <= scan.ceilingMs());
+    // Lengthening never extends what is held: the scan was read under 300 s.
+    scan.setLimits(300000UL, 60000UL, base + 20000UL);
+    TEST_ASSERT_TRUE(scan.ageMs(base + 20000UL) + scan.remainingMs(base + 20000UL) <= 75000UL);
+
+    scan.setLimits(300000UL, 60000UL, base);
+    scan.remember(base);
+    scan.setLimits(30000UL, 20000UL, base + 200000UL);
+    TEST_ASSERT_TRUE_MESSAGE(scan.expired(base + 200000UL),
+                             "a scan older than the new bound stayed remembered");
+    TEST_ASSERT_FALSE(scan.holdForPressAgain(base + 200000UL));
+  }
+}
+
+/// SCAN AGAIN: the screen a hold that answered false paints. Its words name
+/// what the member does, never a press the box can no longer honour.
+void test_scan_again_names_a_rescan_never_a_press() {
+  bridgelogic::ScreenFacts facts;
+  const bridgelogic::Screen screen = bridgelogic::screenFor(bridgelogic::ScreenId::ScanAgain, facts);
+  TEST_ASSERT_EQUAL_STRING("SCAN AGAIN", screen.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("Waited too long", screen.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("SCAN WHEN READY", screen.rows[3]);
+  for (const char* row : screen.rows) {
+    TEST_ASSERT_NULL_MESSAGE(strstr(row, "PRESS AGAIN"), "SCAN AGAIN invites the press it just refused");
+  }
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kRevertSeconds, screen.holdSeconds);
 }
 
 void test_auth_policy_a_refused_scan_cannot_release_any_court() {
@@ -3236,6 +3445,8 @@ const ScreenContract kContract[] = {
     // R17 D17-4. A busy server on the pay-for confirm: the court cells, because
     // pressing the court again is the retry.
     {bridgelogic::ScreenId::Busy, "BUSY", true, false},
+    // R19 D19-2. No court cells: no court press is honoured until a rescan.
+    {bridgelogic::ScreenId::ScanAgain, "SCAN", false, false},
 };
 
 constexpr size_t kContractCount = sizeof(kContract) / sizeof(kContract[0]);
@@ -3588,6 +3799,13 @@ int main(int, char**) {
   RUN_TEST(test_scan_flow_a_grant_carries_the_uncapped_booking_remainder);
   RUN_TEST(test_auth_policy_a_refused_scan_cannot_release_any_court);
   RUN_TEST(test_auth_policy_an_undecided_answer_keeps_press_again_working_for_the_whole_choice_window);
+  RUN_TEST(test_scan_memory_remembers_a_scan_for_the_tenant_scan_memory);
+  RUN_TEST(test_scan_memory_a_quote_after_a_busy_hold_keeps_the_scan_for_its_whole_countdown);
+  RUN_TEST(test_scan_memory_a_quote_never_shortens_the_scan);
+  RUN_TEST(test_scan_memory_a_scan_that_lapsed_during_the_call_is_still_held);
+  RUN_TEST(test_scan_memory_repeated_holds_never_pass_the_server_bound);
+  RUN_TEST(test_scan_memory_shorter_settings_bring_a_held_scan_inside_the_new_bound);
+  RUN_TEST(test_scan_again_names_a_rescan_never_a_press);
   RUN_TEST(test_auth_policy_a_recognised_refusal_arms_for_a_walk_up_but_releases_nothing);
   RUN_TEST(test_auth_policy_the_member_whose_scan_lit_b_can_release_b_and_only_b);
   RUN_TEST(test_session_and_walkup_say_whether_the_scan_was_recognised);
