@@ -234,26 +234,32 @@ export function WeekStrip(props: WeekStripProps) {
           {trailing}
         </span>
       </div>
-      <ToggleGroup.Root
-        type="single"
-        value={value}
-        onValueChange={(next) => { if (next) onChange(next); }}
-        aria-label={label}
-        // F1.16 — as many chips per row as fit whole, never seven squeezed into a row they
-        // overflow: at 200% text on a 390px phone the chips overlapped.
-        // R17 X17-3 — each chip is a 44px target (2.75rem), and seven still fit a 320px phone: a
-        // row narrower than seven of them (310px) reaches up to 12px into the page's 16px gutters,
-        // and the gap between chips is only what is left over, up to 2px (the chips have no fill
-        // at rest). A width, not a breakpoint: `min-[…]` is not emitted with these mixed-unit screens.
-        className={cn(
-          "grid grid-cols-[repeat(auto-fit,minmax(2.75rem,1fr))] gap-y-0.5",
-          "mx-[clamp(-12px,calc((100%_-_310px)_/_2),0px)] gap-x-[clamp(0px,calc((100%_-_310px)_/_6),2px)] sm:gap-1",
-        )}
-      >
-        {days.map((day) => (
-          <DayChip key={day.date} day={day} markedLabel={markedLabel} mutePast={disablePast} />
-        ))}
-      </ToggleGroup.Root>
+      {/* R17 — the strip's own width decides the bleed below (a container, not a breakpoint, so it
+          follows the reader's text size). */}
+      <div className="@container">
+        <ToggleGroup.Root
+          type="single"
+          value={value}
+          onValueChange={(next) => { if (next) onChange(next); }}
+          aria-label={label}
+          // F1.16 — as many chips per row as fit whole, never seven squeezed into a row they
+          // overflow: at 200% text on a 390px phone the chips overlapped.
+          // R17 X17-3 — each chip is a 44px target (2.75rem), and seven still fit a 320px phone: a
+          // row narrower than seven of them (310px) reaches up to 12px into the page's 16px gutters,
+          // and the gap between chips is only what is left over, up to 2px (the chips have no fill
+          // at rest). A width, not a breakpoint: `min-[…]` is not emitted with these mixed-unit screens.
+          // The bleed only when seven 44px chips can share one row with it (strip ≥ 17.75rem): at large
+          // text the chips wrap to rows instead, and a row must stay inside the page's content box.
+          className={cn(
+            "grid grid-cols-[repeat(auto-fit,minmax(2.75rem,1fr))] gap-y-0.5",
+            "@[17.75rem]:mx-[clamp(-12px,calc((100%_-_310px)_/_2),0px)] gap-x-[clamp(0px,calc((100%_-_310px)_/_6),2px)] sm:gap-1",
+          )}
+        >
+          {days.map((day) => (
+            <DayChip key={day.date} day={day} markedLabel={markedLabel} mutePast={disablePast} />
+          ))}
+        </ToggleGroup.Root>
+      </div>
     </div>
   );
 }
