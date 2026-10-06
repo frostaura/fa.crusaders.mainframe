@@ -1,15 +1,18 @@
+import { clubRowTime } from "../clubClock";
+
 /**
  * The words for reads shown from the phone and writes refused offline (R4 wave B). Tests query
  * these constants, never the sentences.
  */
 
-const TIME = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
-const DAY_TIME = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-
-/** "14:02" today, "Tue 29 Sep, 14:02" before today — in the phone's own clock, which is the member's. */
+/**
+ * "14:02" today, "Tue 29 Sep, 14:02" before today — in the CLUB's clock and day (R18 X18-3), the
+ * zone kept on the phone with its reads (R17 X17-5). It was the phone's own, so a member abroad
+ * read "showing what we had at 22:31" over kept bookings at 13:15 club time. Before the club has
+ * ever said its zone, `clubRowTime` falls back to the reader's — never a guess.
+ */
 export function asOfLabel(at: number, now = Date.now()): string {
-  const sameDay = new Date(at).toDateString() === new Date(now).toDateString();
-  return sameDay ? TIME.format(at) : DAY_TIME.format(at);
+  return clubRowTime(at, now);
 }
 
 /** R15 X15-3 — see {@link OFFLINE_COPY.backOnlineTail}. */
