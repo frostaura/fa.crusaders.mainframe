@@ -179,6 +179,8 @@ export type MovementWho = {
   cancelledBy?: "club" | "member"; checkedInBy?: string;
   /** R14 E14-7 — the booking the frame names (`court_name` + `booking_starts_at`): "on Court 3 · Mon 5 Oct". */
   place?: SharePlace;
+  /** R17 E17-1 — the frame's `actor_name`: "The club" on a booking the desk made for this member. */
+  actorName?: string;
 };
 
 /**

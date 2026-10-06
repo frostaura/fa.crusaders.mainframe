@@ -29,6 +29,7 @@ export function movementSentence(amount: number, reason: string | undefined, par
   const up = amount > 0;
   const said: Said = {
     minutes, up, split: splitParts(parts), by: who.checkedInBy, where: sharePlace(who.place), whereAt: placeAt(who.place), other: namedOther(parts),
+    byClub: /^the club$/i.test(who.actorName?.trim() ?? ""),
   };
   const caused = reason ? causedSentence(reason, said, parts, who) : null;
   // `mixed` without its rows, and anything unknown: true whoever caused it.
@@ -182,6 +183,8 @@ type Said = {
   where: string | null; whereAt: string | null;
   /** R15 E15-7 — the other member on the rows (`counterparty_name`), first name; null when none is named. */
   other: string | null;
+  /** R17 E17-1 — the frame says the club acted (`actor_name: "The club"`): a booking the desk made. */
+  byClub: boolean;
 };
 
 /** "Dan Splitter checked in, so …" or this member's own "… — you were checked in after all". */
@@ -219,7 +222,13 @@ function net({ minutes, up }: Said): string {
 }
 
 /** R10 E10-1 — the server's precise causes (BE10 `WalletStreamReasons`). Each says what happened, by sign. */
-const PRECISE_MOVEMENT: Record<string, (s: Said) => string> = {
+const PRECISE_MOVEMENT: Record<string, (s: Said) => string | null> = {
+  // R17 X17-4 / E17-1 — which booking, and the club's when the desk made it; an older frame (neither) keeps the plain words.
+  booking_charge: (s) => {
+    if (s.up) return s.whereAt ? `${s.minutes} came back from your booking on ${s.whereAt}.` : null;
+    if (s.byClub) return `The club booked you ${s.whereAt ?? "a court"} — ${s.minutes} went on it.`;
+    return s.whereAt ? `${s.minutes} went on your booking on ${s.whereAt}.` : null;
+  },
   outage_refund: (s) => s.up
     ? `The court's box was offline, so your booking was refunded: ${s.minutes} back in your wallet.`
     : `${s.minutes} of an outage refund left your wallet.`,
