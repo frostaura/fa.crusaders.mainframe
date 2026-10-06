@@ -359,7 +359,7 @@ export function useBookFlow(input: BookFlowInput) {
           ownBalanceAfter: viewerPaid ? result.balanceAfter : null,
           forMemberId: who.kind === "member" ? who.userId : null,
           hold: result.hold,
-          proven: result.proven,
+          proven: result.proven ? true : undefined,
         });
       },
       // A re-read already happened on the way here when there was one to make.

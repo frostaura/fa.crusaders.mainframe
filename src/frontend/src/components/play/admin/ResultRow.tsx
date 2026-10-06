@@ -91,9 +91,9 @@ function Decision({ row, kind, onDecided }: DecisionProps) {
   const [reason, setReason] = useState("");
   const voiding = kind === "void";
   const act = async () => {
-    const { value, proven } = await decide(row, voiding, reason.trim());
+    const { value, proven, answered } = await decide(row, voiding, reason.trim());
     const done = voiding ? ADMIN_RESULTS.removed : ADMIN_RESULTS.kept;
-    onDecided(value, proven ? RESULT_LOST(done) : done);
+    onDecided(value, proven ? RESULT_LOST(done, answered) : done);
   };
   return (
     <ConfirmDialog

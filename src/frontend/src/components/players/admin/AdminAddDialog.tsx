@@ -12,7 +12,7 @@ import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { endpoints } from "@/lib/api";
 import { playersEndpoints, type AddPlayersAnswer, type AdminAddPlayer, type BookingDetail } from "@/lib/playersApi";
-import { UnsureOutcome } from "@/lib/lostReply";
+import { UnsureOutcome, provenBy, type ProvenBy } from "@/lib/lostReply";
 import { DETAIL_ADMIN, PLAYERS_UNSURE, playersRefusal } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useRead } from "@/lib/useRead";
@@ -29,8 +29,8 @@ type Kind = "member" | "guest" | "link";
 type Props = {
   detail: BookingDetail;
   onClose: () => void;
-  /** `proven` — the reply was lost and the new seat was found on the booking (R3). */
-  onAdded: (answer: AddPlayersAnswer, kind: Kind, proven: boolean) => void;
+  /** `proven` — the new seat was found on the booking after an unsure reply (R3), and why (R19). */
+  onAdded: (answer: AddPlayersAnswer, kind: Kind, proven: ProvenBy) => void;
   /** Read the booking again — a lost reply that did not land, or could not be checked (R3). */
   onStale?: () => void;
 };
@@ -73,7 +73,7 @@ function useAddFlow({ detail, onAdded, onStale }: Props) {
   const add = useAsyncAction(
     () => addOrProve(detail, pickOf(kind, form), () => playersEndpoints.adminAdd(detail.booking_id, bodyOf(kind, form))),
     {
-      success: ({ value, proven }) => onAdded(value, kind, proven),
+      success: (landed) => onAdded(landed.value, kind, provenBy(landed)),
       failure: (error) => { if (error instanceof UnsureOutcome) onStale?.(); },
     },
   );

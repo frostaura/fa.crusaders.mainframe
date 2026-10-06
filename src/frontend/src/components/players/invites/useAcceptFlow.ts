@@ -7,7 +7,7 @@ import { useAsyncAction, type AsyncAction } from "@/lib/useAsyncAction";
 import { codeOf } from "./inviteFacts";
 import { leaveOrProve } from "../detail/detailReadBack";
 import { useUnreadCount } from "@/components/inbox/useUnreadCount";
-import type { Landed } from "@/lib/lostReply";
+import { answerReasonOf, provenBy, type Landed, type ProvenBy } from "@/lib/lostReply";
 
 /**
  * One invite's accept / decline, shared by the sheet (Invites page) and the link page.
@@ -30,10 +30,11 @@ export type AcceptPort = {
 
 /**
  * `proven` — the accept's reply was lost and the seat's own record said "accepted" (R2 F2-1): the
- * figures are the ones the member was shown, and the wallet is being re-read.
+ * figures are the ones the member was shown, and the wallet is being re-read. R19 — it says why the
+ * reply was unsure (an error the club answered is not a reply that did not arrive).
  */
 /** R15 J15-11 — `paidNow`: what this accept was asked to pay (the button's figure), beside the seat's total. */
-export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer; proven?: boolean; paidNow?: number } | { kind: "declined"; proven?: boolean } | null;
+export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer; proven?: ProvenBy; paidNow?: number } | { kind: "declined"; proven?: ProvenBy } | null;
 
 /** Why Accept cannot be pressed, most pressing first — or null when it can. */
 export type Blocked = "rereading" | "cap" | "short" | null;
@@ -100,7 +101,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
     if (!decline) throw new Error("decline unavailable");
     return leaveOrProve(invite.participant_id, decline);
   }, {
-    success: ({ proven }) => { setOutcome({ kind: "declined", proven }); void port.reread(); void refreshUnread(); },
+    success: (landed) => { setOutcome({ kind: "declined", proven: provenBy(landed) }); void port.reread(); void refreshUnread(); },
     failure: (failure) => { void afterRefusal(failure); },
   });
 
@@ -137,7 +138,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
 }
 
 /** A yes: the server's own answer, or (`proven`) one read back off the seat after a lost reply. */
-type Accepted = { answer: AcceptAnswer; proven: boolean };
+type Accepted = { answer: AcceptAnswer; proven: ProvenBy };
 
 /**
  * R2 F2-1 — Accept, and when its reply is lost (5xx, timeout, dropped connection) the seat's own
@@ -162,7 +163,7 @@ async function acceptOrProve(port: AcceptPort, invite: Invite, expected: number)
       share_minutes: seat.share_minutes, consented_minutes: seat.share_minutes, paid_minutes: invite.to_pay_minutes,
       balance_minutes: invite.balance_minutes,
     };
-    return { answer, proven: true };
+    return { answer, proven: answerReasonOf(error) };
   }
 }
 

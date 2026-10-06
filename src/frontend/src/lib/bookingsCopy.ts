@@ -1,4 +1,6 @@
 import { minutesSpoken } from "./minutes";
+import { PROVEN_LEAD } from "./lostReplyCopy";
+import type { ProvenBy } from "./lostReply";
 import { playersWhen } from "./playersCopy";
 
 /**
@@ -345,6 +347,10 @@ export const BOOK_SHEET = {
     forName ? `${forName} now has ${signedMinutes(after)} to spend.` : `You now have ${signedMinutes(after)} to spend.`,
   /** F1.1 — the club's reply was lost; the outcome was read off the schedule. */
   provenNote: "The club's reply didn't arrive, so this was read off the schedule. Your wallet is being re-read.",
+  /** R19 — by why the answer was unsure: one that arrived (an error, busy, a clash) is said as what it said. */
+  provenNoteAfter: (why: ProvenBy | undefined) => (why && why !== "silent"
+    ? `${PROVEN_LEAD[why]}, but this was read off the schedule: it went through. Your wallet is being re-read.`
+    : BOOK_SHEET.provenNote),
   confirmedFromSchedule: "On the schedule in this name.",
   notOnSchedule: "Not on the schedule — not booked.",
   haltedShort:

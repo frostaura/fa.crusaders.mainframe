@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { errorCode } from "@/lib/api";
 import { useAuth } from "@/lib/useAuth";
 import { playEndpoints, type MatchResult } from "@/lib/playApi";
-import { UnsureOutcome } from "@/lib/lostReply";
+import { UnsureOutcome, provenBy, type ProvenBy } from "@/lib/lostReply";
 import { CONFIRM_SHEET, FORMAT_LABEL, NOTE_MAX, playRefusal, playWhen, RESULT_CARD, RESULT_UNSURE } from "@/lib/playCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { landedAs, resultWrite } from "./resultReadBack";
@@ -34,8 +34,8 @@ export type ConfirmResultSheetProps = {
   result: MatchResult;
   /** Open straight at the note ("Something's wrong" on the card). */
   initialMode?: ConfirmMode;
-  /** `proven` — the reply was lost and the result was read back (R3 I-1). */
-  onDone: (result: MatchResult, mode: ConfirmMode, proven: boolean) => void;
+  /** `proven` — the result was read back after an unsure reply (R3 I-1), and why it was unsure (R19). */
+  onDone: (result: MatchResult, mode: ConfirmMode, proven: ProvenBy) => void;
   onStale: () => void;
 };
 
@@ -59,11 +59,11 @@ function useConfirmFlow(props: ConfirmResultSheetProps) {
   const bookingId = result.booking_id;
   const confirm = useAsyncAction(
     () => resultWrite(bookingId, () => playEndpoints.confirm(bookingId, result.version), landedAs.confirmed(result)),
-    { success: (landed) => onDone(landed.value, "confirm", landed.proven), failure },
+    { success: (landed) => onDone(landed.value, "confirm", provenBy(landed)), failure },
   );
   const dispute = useAsyncAction(
     () => resultWrite(bookingId, () => playEndpoints.dispute(bookingId, result.version, note.trim() || undefined), landedAs.disputed(result, me)),
-    { success: (landed) => onDone(landed.value, "dispute", landed.proven), failure },
+    { success: (landed) => onDone(landed.value, "dispute", provenBy(landed)), failure },
   );
   return { mode, setMode, note, setNote, confirm, dispute };
 }

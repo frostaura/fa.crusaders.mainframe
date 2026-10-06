@@ -177,7 +177,7 @@ function useCancelFlow(props: FlowProps) {
         }
         const [b] = bookings;
         const who = b.mine ? null : b.memberFirstName ?? "the member";
-        push?.({ tone: "success", text: cancellationOutcome(result.single.refunded, result.single.penalty, who, result.single.split) });
+        push?.({ tone: "success", text: cancellationOutcome(result.single.refunded, result.single.penalty, who, result.single.split, result.single.answered) });
         onClose();
       },
       failure: (error) => {

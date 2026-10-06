@@ -346,12 +346,12 @@ export default function AdminWebhooksPage() {
   // deleted; with it → nothing changed; unreadable → not known (said in the dialog, see below).
   const remove = async (id: string) => {
     try {
-      const { proven } = await writeOrReadBack(
+      const { proven, answered } = await writeOrReadBack(
         async () => { await endpoints.adminWebhooksDelete(id); return {}; },
         async () => ((await endpoints.adminWebhooksList()).some((w) => w.id === id) ? null : {}),
       );
       await load();
-      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(REMOVED) : REMOVED });
+      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(REMOVED, answered) : REMOVED });
     } catch (err) {
       // The list is re-read so the page shows the record; its own failure is its own banner.
       if (err instanceof UnsureOutcome) load().catch(() => {});

@@ -19,7 +19,7 @@ import {
   type ScheduleOccurrence, type ScheduleOccurrencesResponse, type ScheduleRow, type Weekday,
 } from "../lib/adminApi";
 import { describeFailure } from "../lib/errors";
-import { UnsureOutcome, unsureSentence, writeOrReadBack, type UnsureWords } from "../lib/lostReply";
+import { UnsureOutcome, unsureSentence, writeOrReadBack, type Landed, type UnsureWords } from "../lib/lostReply";
 import { LOST_REPLY } from "../lib/lostReplyCopy";
 import { endCheck, hoursCheck, skipCheck, type ScheduleCheck } from "../lib/scheduleReadBack";
 import {
@@ -366,14 +366,14 @@ export function AdminScheduleDetailPage() {
     setWriteError(null);
     setClampedTo(null);
     try {
-      const landed = check ? await writeOrReadBack(work, check.readBack) : { value: await work(), proven: false };
+      const landed: Landed<unknown> = check ? await writeOrReadBack(work, check.readBack) : { value: await work(), proven: false };
       const result = landed.value as { effective_from_clamped_to?: string } | null;
       // `effective_from` is clamped, never refused — an admin typing last Tuesday means "from
       // now on" — and the screen has to say it moved, or the admin believes the past changed.
       if (result?.effective_from_clamped_to) setClampedTo(result.effective_from_clamped_to);
       setChanging(null);
       afterWrite();
-      return landed.proven ? LOST_REPLY.proven("Done.") : "Done.";
+      return landed.proven ? LOST_REPLY.proven("Done.", landed.answered) : "Done.";
     } catch (err) {
       setWriteError({ error: err, words: check?.words });
       // An unsure outcome is not a "no": the reads are refreshed so the page shows the record.

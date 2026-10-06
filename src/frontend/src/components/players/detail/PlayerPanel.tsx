@@ -197,9 +197,9 @@ function LeaveDialog(props: LeaveProps) {
     {
       // R1 F2.9 — off the game, this page is a 404 to them: re-reading it put "Booking not found"
       // beside the success. Back to Bookings instead, with the outcome said there.
-      success: ({ proven }) => {
+      success: ({ proven, answered }) => {
         onClose();
-        toast.push({ tone: "success", text: proven ? PLAYERS_LOST(copy.done) : copy.done });
+        toast.push({ tone: "success", text: proven ? PLAYERS_LOST(copy.done, answered) : copy.done });
         void refresh();
         navigate("/bookings", { replace: true });
       },

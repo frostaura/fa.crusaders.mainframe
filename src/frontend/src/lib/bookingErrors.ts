@@ -1,6 +1,7 @@
 import { ApiError } from "./api";
 import { NotSent, UnsureOutcome } from "./bookingOutcome";
 import { answerReasonOf, unsureReasonOf, type UnsureReason } from "./lostReply";
+import { PROVEN_LEAD } from "./lostReplyCopy";
 import type { SplitCancel } from "./bookingsApi";
 import { minutesSpoken } from "./minutes";
 import { rateLimitedSentence } from "./errors";
@@ -623,13 +624,15 @@ function splitBack(refunded: number, penalty: number, split: SplitCancel): numbe
  * </p>
  */
 export function cancellationOutcome(
-  refunded: number | null, penalty: number | null, member?: string | null, split?: SplitCancel | null,
+  refunded: number | null, penalty: number | null, member?: string | null, split?: SplitCancel | null, why?: UnsureReason,
 ): string {
   const whose = member ? `${member}'s balance` : "your balance";
   // F1.1 — the schedule shows it gone but the reply with the figures was lost. R15 X15-7 — it
   // claims nothing about the screen under it: a booking's own page re-reads and shows the refund.
   if (refunded === null || penalty === null) {
-    return `Booking cancelled. The club's reply didn't arrive, so its figures aren't in this message — ${member ? `${member}'s` : "your"} wallet shows what came back.`;
+    // R19 — a reply that DID arrive (an error, busy, a clash) is said as what it said.
+    const lead = why && why !== "silent" ? `${PROVEN_LEAD[why]}, but the schedule shows it gone` : "The club's reply didn't arrive";
+    return `Booking cancelled. ${lead}, so its figures aren't in this message — ${member ? `${member}'s` : "your"} wallet shows what came back.`;
   }
   if (refunded <= 0 && penalty <= 0) {
     return member

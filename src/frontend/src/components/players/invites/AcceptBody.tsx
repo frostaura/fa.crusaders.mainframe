@@ -18,6 +18,7 @@ import type { AcceptAnswer } from "@/lib/playersApi";
 import type { AcceptFlow } from "./useAcceptFlow";
 import { useDailyCap } from "./useDailyCap";
 import { cn } from "@/lib/utils";
+import type { ProvenBy } from "@/lib/lostReply";
 
 /**
  * What an invite asks, and what saying yes would do — the accept sheet's body, and the whole of
@@ -239,26 +240,26 @@ function Problem({ flow }: { flow: AcceptFlow }) {
 function OutcomeView({ flow, headed }: { flow: AcceptFlow; headed: boolean }) {
   const name = organiserName(flow.invite);
   const outcome = flow.outcome;
-  if (outcome?.kind === "declined") return <DeclinedView name={name} headed={headed} proven={outcome.proven === true} />;
+  if (outcome?.kind === "declined") return <DeclinedView name={name} headed={headed} proven={outcome.proven || false} />;
   return <AcceptedView flow={flow} name={name} headed={headed} />;
 }
 
-function DeclinedView({ name, headed, proven }: { name: string; headed: boolean; proven: boolean }) {
+function DeclinedView({ name, headed, proven }: { name: string; headed: boolean; proven: ProvenBy }) {
   return (
     <div role="status" className="flex flex-col gap-1" data-outcome="declined">
       {headed ? null : <p className="text-base font-semibold text-text-primary">{INVITES_COPY.declinedTitle}</p>}
       <p className="text-sm text-text-secondary">{declinedLine(name)}</p>
-      {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.declineProvenNote}</p> : null}
+      {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.declineProvenNoteAfter(proven || undefined)}</p> : null}
     </div>
   );
 }
 
 /** R15 J15-11 — what this accept paid, with the seat's total beside it when it is more. */
-function acceptedWords(outcome: AcceptFlow["outcome"], name: string): { line: string; answer: AcceptAnswer | null; proven: boolean } {
+function acceptedWords(outcome: AcceptFlow["outcome"], name: string): { line: string; answer: AcceptAnswer | null; proven: ProvenBy } {
   if (outcome?.kind !== "accepted") return { line: acceptedLine(0, name, 0), answer: null, proven: false };
   const total = outcome.answer.paid_minutes ?? 0;
   const paidNow = Math.min(outcome.paidNow ?? total, total);
-  return { line: acceptedLine(paidNow, name, total), answer: outcome.answer, proven: outcome.proven === true };
+  return { line: acceptedLine(paidNow, name, total), answer: outcome.answer, proven: outcome.proven || false };
 }
 
 function AcceptedView({ flow, name, headed }: { flow: AcceptFlow; name: string; headed: boolean }) {
@@ -270,7 +271,7 @@ function AcceptedView({ flow, name, headed }: { flow: AcceptFlow; name: string; 
         {title}
         {headed ? line : ` — ${line}`}
       </Alert>
-      {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.provenNote}</p> : null}
+      {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.provenNoteAfter(proven || undefined)}</p> : null}
       <TextLink to={`/bookings/${answer?.booking_id ?? flow.invite.booking_id}`} variant="standalone">
         {INVITES_COPY.seeBooking}
       </TextLink>

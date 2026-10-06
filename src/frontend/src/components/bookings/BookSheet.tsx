@@ -330,7 +330,7 @@ function ResultView({ flow }: { flow: BookFlow }) {
         </span>
       </div>
       {after !== null && !run.hold ? <HeldNote flow={flow} /> : null}
-      {run.proven ? <Alert tone="info" live="polite">{BOOK_SHEET.provenNote}</Alert> : null}
+      {run.proven ? <Alert tone="info" live="polite">{BOOK_SHEET.provenNoteAfter(run.proven)}</Alert> : null}
       {run.halted === "insufficient_balance" ? (
         <Alert tone="warning" live="polite">
           {admin ? BOOK_SHEET.haltedShortAdmin(forName ?? BOOK_SHEET.you) : BOOK_SHEET.haltedShort}

@@ -77,9 +77,9 @@ async function write(court: AdminCourt | "new", draft: Draft) {
       ...(name !== court.name ? { name } : {}),
       ...(draft.active !== court.is_active ? { isActive: draft.active } : {}),
     });
-  const { proven } = await writeOrReadBack(async () => { await send(); return {}; }, () => courtAsDrafted(court, draft));
+  const { proven, answered } = await writeOrReadBack(async () => { await send(); return {}; }, () => courtAsDrafted(court, draft));
   const done = court === "new" ? COURTS_COPY.added(name) : COURTS_COPY.saved(name);
-  return proven ? LOST_REPLY.proven(done) : done;
+  return proven ? LOST_REPLY.proven(done, answered) : done;
 }
 
 function CourtForm({ court, onDone }: { court: AdminCourt | "new"; onDone: () => void }) {

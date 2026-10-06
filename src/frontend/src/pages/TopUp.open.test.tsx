@@ -81,7 +81,8 @@ describe("Buy minutes — purchases waiting on PayFast", () => {
       { path: SHELF, body: both },
     ]);
     fireEvent.click(await cancelOne());
-    expect(await screen.findByText(CANCEL_SAID.lostStillWaiting)).toBeInTheDocument();
+    // R19 X19-2 — a plain 500 is the club's system answering with an error, not a lost reply.
+    expect(await screen.findByText(CANCEL_SAID.errorStillWaiting)).toBeInTheDocument();
     expect(await cancelOne()).toBeInTheDocument();
   });
 

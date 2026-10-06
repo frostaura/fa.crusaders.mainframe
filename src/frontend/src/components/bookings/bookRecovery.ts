@@ -3,6 +3,7 @@ import { UnsureOutcome, landedOn, outcomeUnknown, type Payer, type Reread } from
 import { BOOK_SHEET, RESULT_WORD } from "@/lib/bookingsCopy";
 import { slotKey, type BookAs, type BookRun } from "./bookFlow";
 import type { SelectedSlot } from "./types";
+import { answerReasonOf, type ProvenBy } from "@/lib/lostReply";
 
 /**
  * A booking whose answer was lost, or that was refused as "taken" (review round 1, F1.1).
@@ -34,7 +35,7 @@ export function worthRereading(e: unknown): boolean {
 }
 
 /** The run the schedule proves: what is there in the payer's name, and what is not. */
-function provenRun(sent: readonly SelectedSlot[], landed: readonly SelectedSlot[], face: Face, hold: boolean): BookRun {
+function provenRun(sent: readonly SelectedSlot[], landed: readonly SelectedSlot[], face: Face, hold: boolean, proven: ProvenBy): BookRun {
   const ok = new Set(landed.map(slotKey));
   return {
     rows: sent.map((s) => {
@@ -45,7 +46,7 @@ function provenRun(sent: readonly SelectedSlot[], landed: readonly SelectedSlot[
         detail: mine ? BOOK_SHEET.confirmedFromSchedule : BOOK_SHEET.notOnSchedule,
       };
     }),
-    booked: [...landed], balanceAfter: null, halted: null, hold, proven: true,
+    booked: [...landed], balanceAfter: null, halted: null, hold, proven,
   };
 }
 
@@ -60,6 +61,6 @@ export async function recoverBooking(
   const day = await reread();
   if (!day) throw outcomeUnknown(error) ? new UnsureOutcome(error, false) : error;
   const landed = sent.filter((s) => landedOn(day, s, payerOf(who)));
-  if (landed.length > 0) return provenRun(sent, landed, face, who.kind === "hold");
+  if (landed.length > 0) return provenRun(sent, landed, face, who.kind === "hold", answerReasonOf(error));
   throw outcomeUnknown(error) ? new UnsureOutcome(error, true) : error;
 }

@@ -940,11 +940,11 @@ function useDeviceActions(reload: () => Promise<void>) {
     words: { done: string; failed: string; still: string; whether: string },
   ): Promise<boolean> => {
     try {
-      const { proven } = await writeOrReadBack(
+      const { proven, answered } = await writeOrReadBack(
         async () => { await send(); return {}; },
         async () => (holds((await endpoints.adminDevicesList()).find((d) => d.id === id)) ? {} : null),
       );
-      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(words.done) : words.done, durationMs: 8000 });
+      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(words.done, answered) : words.done, durationMs: 8000 });
       await reload();
       return true;
     } catch (e) {

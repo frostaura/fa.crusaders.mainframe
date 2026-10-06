@@ -87,10 +87,10 @@ export function ChangeSplitDialog(props: Props) {
       return splitOrProve(detail.booking_id, sent, expected, () => playersEndpoints.changeSplit(detail.booking_id, sent));
     },
     {
-      success: ({ value, proven }) => {
+      success: ({ value, proven, answered }) => {
         onBusyChange?.(false); // answered: the close that follows is not a way out mid-flight
         const text = splitDoneWords(detail, value.shares);
-        onDone({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
+        onDone({ tone: "success", text: proven ? PLAYERS_LOST(text, answered) : text });
         void refresh({ expectSelf: true });
       },
       failure: (error) => { if (error instanceof UnsureOutcome) { onStale?.(); void refresh({ expectSelf: true }); } },

@@ -137,7 +137,7 @@ function useAdminRoleChange(props: AdminRoleDialogProps, self: boolean) {
   const [confirmSelf, setConfirmSelf] = useState(false);
 
   const run = async () => {
-    const { value: result, proven } = await writeOrReadBack(
+    const { value: result, proven, answered } = await writeOrReadBack(
       () => memberDetailEndpoints.setAdmin(userId, { grant, reason: reason.trim(), ...(!grant && self ? { confirmSelf } : {}) }),
       async () => {
         const now = await memberDetailEndpoints.detail(userId);
@@ -145,7 +145,7 @@ function useAdminRoleChange(props: AdminRoleDialogProps, self: boolean) {
       },
     );
     const said = !result.changed ? COPY.unchanged(name, result.is_admin) : grant ? COPY.granted(name) : COPY.revoked(name);
-    toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(said) : said });
+    toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(said, answered) : said });
     await onChanged(result);
     if (!grant && self) void auth.retryConnection();
   };

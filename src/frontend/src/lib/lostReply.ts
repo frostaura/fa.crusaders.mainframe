@@ -29,7 +29,23 @@ import { ApiError } from "./api";
  * The same shape as `useAcceptFlow`'s accept (R2 F2-1), `cancelFlow`'s cancel and the desk's
  * `adjustmentAttempt`; this is the generic form for a screen with a record to read back.
  */
-export type Landed<T> = { value: T; proven: boolean };
+/**
+ * `answered` (R19): why the outcome was unsure when it was proven — the club's system answered
+ * with an error, busy or a clash, or nothing answered (`silent`) — so the proven sentence says
+ * what really happened to the reply (`LOST_REPLY.proven(done, answered)`). Absent on an answer.
+ */
+export type Landed<T> = { value: T; proven: boolean; answered?: UnsureReason };
+
+/**
+ * R19 — a write proven to have landed, and why its outcome had been unsure: `false` when the answer
+ * arrived plainly. Truthy exactly when the old `proven` flag was, so a caller's `proven ? … : …`
+ * reads the same; the proven sentence takes it (`LOST_REPLY.proven(done, proven || undefined)`).
+ */
+export type ProvenBy = false | UnsureReason;
+
+export function provenBy(landed: { proven: boolean; answered?: UnsureReason }): ProvenBy {
+  return landed.proven ? landed.answered ?? "silent" : false;
+}
 
 export async function writeOrReadBack<T>(
   write: () => Promise<T>,
@@ -46,7 +62,7 @@ export async function writeOrReadBack<T>(
       throw new UnsureOutcome(error, false);
     }
     if (found === null || found === undefined) throw new UnsureOutcome(error, true);
-    return { value: found, proven: true };
+    return { value: found, proven: true, answered: answerReasonOf(error) };
   }
 }
 

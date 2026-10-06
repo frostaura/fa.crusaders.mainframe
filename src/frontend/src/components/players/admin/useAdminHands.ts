@@ -2,6 +2,7 @@ import { useState } from "react";
 import { type AddPlayersAnswer, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
 import { focusAfterAction } from "@/lib/focusAfterAction";
 import { DETAIL_ACTIONS, DETAIL_ADMIN, PLAYERS_LOST } from "@/lib/playersCopy";
+import type { ProvenBy } from "@/lib/lostReply";
 import type { AdminAct } from "../detail/detailModel";
 import type { ShareTarget } from "../detail/ShareLinkDialog";
 import type { Notice } from "../detail/useOrganiserHands";
@@ -29,9 +30,9 @@ export function useAdminHands(detail: BookingDetail, reload: () => void, say: (n
     adding,
     openAdd: () => setAdding(true),
     closeAdd: () => setAdding(false),
-    added: (answer: AddPlayersAnswer, kind: string, proven = false) => {
+    added: (answer: AddPlayersAnswer, kind: string, proven: ProvenBy = false) => {
       setAdding(false);
-      say({ tone: "success", text: proven ? PLAYERS_LOST(DETAIL_ADMIN.added) : DETAIL_ADMIN.added });
+      say({ tone: "success", text: proven ? PLAYERS_LOST(DETAIL_ADMIN.added, proven) : DETAIL_ADMIN.added });
       // A link seat found by a read-back (R3) has no token to show: the dialog makes a new link.
       const seat = kind === "link" ? answer.participants.find((p) => p.invite_path) ?? (proven ? answer.participants[0] : undefined) : undefined;
       if (seat) setSharing({ name: DETAIL_ACTIONS.openSeatName, participantId: seat.participant_id, path: seat.invite_path ?? null });

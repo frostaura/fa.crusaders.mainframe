@@ -111,9 +111,9 @@ async function write(pkg: AdminPackage | "new", draft: Draft): Promise<Written> 
   const send = pkg === "new"
     ? () => adminEndpoints.packageCreate({ ...body, groupId: draft.shelf })
     : () => adminEndpoints.packageUpdate(pkg.id, { ...body, reason: draft.reason });
-  const { value, proven } = await writeOrReadBack(send, () => asDrafted(pkg, draft));
+  const { value, proven, answered } = await writeOrReadBack(send, () => asDrafted(pkg, draft));
   const done = pkg === "new" ? COPY.added(name) : COPY.saved(name);
-  return { saved: value, said: proven ? LOST_REPLY.proven(done) : done };
+  return { saved: value, said: proven ? LOST_REPLY.proven(done, answered) : done };
 }
 
 export function PackageEditor(props: PackageEditorProps) {

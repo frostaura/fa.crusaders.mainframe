@@ -61,9 +61,9 @@ function useActFlow(props: Props) {
       bookingId: detail.booking_id, participantId: player.participant_id ?? "", reason: reason.trim(), allowNegativeBalance: authorised,
     }), spec.landed),
     {
-      success: ({ value, proven }) => {
+      success: ({ value, proven, answered }) => {
         const text = spec.done(name, value, firstName(detail.organiser.name));
-        onDone({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
+        onDone({ tone: "success", text: proven ? PLAYERS_LOST(text, answered) : text });
       },
       failure: (error) => {
         if (error instanceof UnsureOutcome) onStale?.();

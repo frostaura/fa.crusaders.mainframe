@@ -128,7 +128,8 @@ export type CancelRequest = {
 };
 
 /** What one cancel moved. Null figures: it was cancelled, but the reply that said how much was lost. */
-export type CancelFigures = { refunded: number | null; penalty: number | null; split?: SplitCancel | null };
+/** `answered` (R19): figures lost after an unsure answer — why it was unsure. */
+export type CancelFigures = { refunded: number | null; penalty: number | null; split?: SplitCancel | null; answered?: UnsureReason };
 
 /** The split a cancel moved: from its own answer when it says, else from the quote the sheet showed. */
 function splitFor(b: GridBooking, answer: unknown, req: CancelRequest): SplitCancel | null {
@@ -273,7 +274,7 @@ async function cancelSingle(b: GridBooking, req: CancelRequest): Promise<CancelR
     const day = await req.reread();
     if (!day) throw new UnsureOutcome(error, false);
     if (!goneFrom(day, b.bookingId)) throw new UnsureOutcome(error, true);
-    return { rows: [okRow(b, null, null)], cancelledIds: [b.bookingId], single: { refunded: null, penalty: null } };
+    return { rows: [okRow(b, null, null)], cancelledIds: [b.bookingId], single: { refunded: null, penalty: null, answered: answerReasonOf(error) } };
   }
 }
 

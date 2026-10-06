@@ -11,6 +11,7 @@ import { clubClock, clubShortDate } from "@/lib/clubClock";
 import { refusalReason, RESULT_WORD } from "@/lib/bookingsCopy";
 import { playersEndpoints, type PlayersPayload } from "@/lib/playersApi";
 import type { SelectedSlot } from "./types";
+import type { ProvenBy } from "@/lib/lostReply";
 import type { BulkResultRow } from "./BulkResults";
 import { fromBulkWithPlayers, fromSingleWithPlayers, type PlayersOutcome } from "./playersOutcome";
 
@@ -246,8 +247,8 @@ export type BookRun = {
   hold: boolean;
   /** Set when the booking went out with players: the links to share, per booking. */
   players?: PlayersOutcome | null;
-  /** Read off the schedule after the club's answer was lost (`bookRecovery`), not from a reply. */
-  proven?: boolean;
+  /** Read off the schedule after the club's answer was unsure (`bookRecovery`), and why (R19). */
+  proven?: ProvenBy;
 };
 
 type Face = (slot: SelectedSlot) => string;

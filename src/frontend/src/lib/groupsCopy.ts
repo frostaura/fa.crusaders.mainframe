@@ -1,6 +1,6 @@
 import { ApiError } from "./api";
-import { unsureWords } from "./lostReplyCopy";
-import { unsureSentence } from "./lostReply";
+import { PROVEN_LEAD, unsureWords } from "./lostReplyCopy";
+import { unsureSentence, type UnsureReason } from "./lostReply";
 import { describeFailure } from "./errors";
 import type { GroupAddResult, GroupAddRow, Weekday } from "./adminApi";
 import {
@@ -517,6 +517,10 @@ export function addResultHeading(result: GroupAddResult): string {
 /** The note beside a result the reply of which was lost and the members list was read instead. */
 export const ADD_LOST = {
   proven: "The club's reply didn't arrive, so we checked who is in the group now.",
+  /** R19 — by why the reply was unsure: one that arrived (an error, busy, a clash) is said as what it said. */
+  provenAfter: (why: UnsureReason | undefined) => (why && why !== "silent"
+    ? `${PROVEN_LEAD[why]}, but we checked who is in the group now.`
+    : ADD_LOST.proven),
   /** Said through `unsureSentence`, so a conflict_retry reads as a clash, not silence (R17 X17-1). */
   words: (name: string) => unsureWords(`nobody new is in ${name}`, `they were added to ${name}`, "the group"),
 } as const;

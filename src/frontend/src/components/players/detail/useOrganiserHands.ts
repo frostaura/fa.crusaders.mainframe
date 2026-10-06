@@ -122,8 +122,8 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, pag
   const invite = useAsyncAction(
     ({ pick, figure }: InviteRequest) => addOrProve(detail, pick, () => playersEndpoints.add(bookingId, { players: [specOf(pick, figure)] })),
     {
-      success: ({ value, proven }, { pick }) => {
-        say({ tone: "success", text: proven ? PLAYERS_LOST(addedSentence(pick)) : addedSentence(pick) });
+      success: ({ value, proven, answered }, { pick }) => {
+        say({ tone: "success", text: proven ? PLAYERS_LOST(addedSentence(pick), answered) : addedSentence(pick) });
         // A link seat found by the read-back has no link: its token was in the lost reply, so the
         // dialog offers to make one (path null) rather than showing nothing.
         if (pick.kind === "link") setSharing(proven ? linkSeatToMake(value) : newLinkSeat(value));
@@ -161,11 +161,11 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, pag
   const remove = useAsyncAction(
     (p: DetailPlayer) => removeOrProve(bookingId, p.participant_id ?? ""),
     {
-      success: ({ proven }, p) => {
+      success: ({ proven, answered }, p) => {
         removeGuard.setBusy(false); // answered: the close below is not a way out mid-flight
         setRemoving(null);
         const text = DETAIL_ACTIONS.removed(seatName(p, detail.players));
-        say({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
+        say({ tone: "success", text: proven ? PLAYERS_LOST(text, answered) : text });
         // R2 F2-12 — the dialog and the seat's Remove button are both gone: the Players heading
         // takes focus, never <body>.
         focusAfterAction(() => document.querySelector<HTMLElement>("[data-players-section] h2"));

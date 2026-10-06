@@ -1,4 +1,4 @@
-import type { UnsureWords } from "./lostReply";
+import type { UnsureReason, UnsureWords } from "./lostReply";
 
 /**
  * The words for a write whose reply was lost (see `lib/lostReply.ts`), built from the screen's
@@ -40,8 +40,21 @@ const errorChecked = (stillTrue: string) => `${ERROR_LEAD}, so we checked: ${sti
 const errorUnchecked = (whether: string, lookAt = "the page") =>
   `${ERROR_LEAD} and we couldn't check either, so we can't tell whether ${whether}. Refresh ${lookAt} before trying again.`;
 
+/** R19 — what a reply that arrived said, before the record proved the write landed anyway. */
+export const PROVEN_LEAD: Record<Exclude<UnsureReason, "silent">, string> = {
+  error: "The club's system hit an error",
+  busy: "The club's system said it was too busy",
+  conflict: "The club said someone else was changing the same thing",
+};
+
 export const LOST_REPLY = {
-  proven: (done: string) => `${done} The club's reply didn't arrive, so we checked its record.`,
+  /**
+   * R19 — with why the outcome was unsure: a reply that DID arrive (an error, busy, a clash) is said
+   * as what it said, then that the record shows the write went through; silence keeps its words.
+   */
+  proven: (done: string, why?: UnsureReason) => (why && why !== "silent"
+    ? `${done} ${PROVEN_LEAD[why]}, but we checked its record: it went through.`
+    : `${done} The club's reply didn't arrive, so we checked its record.`),
   checked: (stillTrue: string) => `The club didn't answer, so we checked: ${stillTrue} — nothing changed. Try again in a moment.`,
   unchecked: (whether: string, lookAt = "the page") =>
     `The club didn't answer and we couldn't check either, so we can't tell whether ${whether}. Refresh ${lookAt} before trying again.`,

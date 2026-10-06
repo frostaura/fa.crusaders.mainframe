@@ -174,12 +174,12 @@ export function DeviceApiKeyPanel() {
     try {
       // A lost reply is looked up (review round 3): the key read again differs from the one on
       // screen → it was replaced; the same key → nothing changed; unreadable → not known.
-      const { value, proven } = await writeOrReadBack(
+      const { value, proven, answered } = await writeOrReadBack(
         () => endpoints.adminDeviceApiKeyRegenerate(),
         async () => { const now = await endpoints.adminDeviceApiKey(); return now.api_key !== before ? now : null; },
       );
       setKey(value);
-      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(KEY_ISSUED) : KEY_ISSUED, durationMs: 10000 });
+      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(KEY_ISSUED, answered) : KEY_ISSUED, durationMs: 10000 });
     } catch (e) {
       // Loud, because the failure this stops is silent: an admin who believes the key
       // rotated goes and flashes a fleet with a key the API never issued.

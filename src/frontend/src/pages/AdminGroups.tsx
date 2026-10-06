@@ -25,7 +25,7 @@ import {
   ADD_LOST, ARCHIVE_COPY, ARCHIVED_HEADING, GROUPS_EMPTY_TITLE, GROUPS_READ_FAILED, GROUP_LOST, GROUP_SHEET, MOST_RESTRICTIVE_STANDING,
   deleteRefusalSentence, explainGroupRefusal, groupChangeConsequence, type PaintedWeek,
 } from "../lib/groupsCopy";
-import { UnsureOutcome, unsureSentence, writeOrReadBack } from "../lib/lostReply";
+import { UnsureOutcome, unsureSentence, writeOrReadBack, type Landed } from "../lib/lostReply";
 import { LOST_REPLY } from "../lib/lostReplyCopy";
 import { typography } from "../lib/typography";
 
@@ -213,8 +213,8 @@ function capsReadAs(g: MemberGroup, body: GroupSaveBody): boolean {
 }
 
 /** A success sentence, with the reply-lost note when the list had to be asked. */
-function saidOnce(done: string, proven: boolean): string {
-  return proven ? LOST_REPLY.proven(done) : done;
+function saidOnce(done: string, landed: Landed<unknown>): string {
+  return landed.proven ? LOST_REPLY.proven(done, landed.answered) : done;
 }
 
 function useGroupWrites(
@@ -232,7 +232,7 @@ function useGroupWrites(
     // this create's (R4 carry-over: a second press after a lost reply said the name was taken).
     const known = new Set((listed() ?? []).map((g) => g.id));
     try {
-      const { proven } = await writeOrReadBack(
+      const landed = await writeOrReadBack(
         async () => {
           // until the integrator drops pricing (P13 ask F3→integrator): `MemberGroupBody.pricing` is
           // still typed as required, and the console must not send it (contract §3.3).
@@ -243,7 +243,7 @@ function useGroupWrites(
         () => savedAccordingToList(id, body, known),
       );
       const done = id === "" ? GROUP_SHEET.created(body.name) : GROUP_SHEET.saved(body.name);
-      toast.push({ tone: "success", text: saidOnce(done, proven) });
+      toast.push({ tone: "success", text: saidOnce(done, landed) });
       setSheet(null);
       await load();
     } catch (err) {
@@ -258,11 +258,11 @@ function useGroupWrites(
   // found as asked → done, with the reply-lost note; not → "nothing changed"; unreadable → not known.
   const archive = async (group: MemberGroup, reason: string) => {
     try {
-      const { proven } = await writeOrReadBack(
+      const landed = await writeOrReadBack(
         async () => { await adminEndpoints.memberGroupUpdate(group.id, { status: "archived", reason }); return {}; },
         () => groupNow(group.id, (g) => g?.status === "archived"),
       );
-      toast.push({ tone: "success", text: saidOnce(ARCHIVE_COPY.archived(group.name), proven) });
+      toast.push({ tone: "success", text: saidOnce(ARCHIVE_COPY.archived(group.name), landed) });
       await load();
     } catch (err) {
       if (err instanceof UnsureOutcome) void load();
@@ -272,11 +272,11 @@ function useGroupWrites(
 
   const restore = async (group: MemberGroup) => {
     try {
-      const { proven } = await writeOrReadBack(
+      const landed = await writeOrReadBack(
         async () => { await adminEndpoints.memberGroupUpdate(group.id, { status: "active" }); return {}; },
         () => groupNow(group.id, (g) => g !== undefined && g.status !== "archived"),
       );
-      toast.push({ tone: "success", text: saidOnce(ARCHIVE_COPY.restored(group.name), proven) });
+      toast.push({ tone: "success", text: saidOnce(ARCHIVE_COPY.restored(group.name), landed) });
       await load();
     } catch (err) {
       if (err instanceof UnsureOutcome) void load();
@@ -286,12 +286,12 @@ function useGroupWrites(
 
   const remove = async (group: MemberGroup) => {
     try {
-      const { proven } = await writeOrReadBack(
+      const landed = await writeOrReadBack(
         async () => { await adminEndpoints.memberGroupDelete(group.id); return {}; },
         () => groupNow(group.id, (g) => g === undefined),
       );
       await load();
-      return saidOnce(`${group.name} is deleted.`, proven);
+      return saidOnce(`${group.name} is deleted.`, landed);
     } catch (err) {
       const unsure = unsureSentence(err, GROUP_LOST.remove(group.name));
       if (unsure) { void load(); setRefusal(unsure); return "It isn't known yet whether that happened."; }
@@ -595,12 +595,12 @@ function GroupMembersPanel({ group, clubMembers, timezone, onChanged, onChangeGr
       // Per item, never all-or-nothing — and shown as a screen, because four seconds of toast
       // is not long enough to read six outcomes. A lost reply reads the group back (R4 carry-over):
       // one save adds everybody or nobody, so anybody new in the group proves the press landed.
-      const { value, proven } = await writeOrReadBack(
+      const { value, proven, answered } = await writeOrReadBack(
         () => adminEndpoints.memberGroupAddMembers(group.id, userIds),
         () => addedAccordingToGroup(group.id, userIds, before),
       );
       setResult(value);
-      if (proven) setAddNote({ tone: "info", text: ADD_LOST.proven });
+      if (proven) setAddNote({ tone: "info", text: ADD_LOST.provenAfter(answered) });
       await read();
       onChanged();
     } catch (err) {

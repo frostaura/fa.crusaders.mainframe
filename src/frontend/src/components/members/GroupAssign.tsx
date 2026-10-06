@@ -165,13 +165,13 @@ function useAssignState({ userId, name, current, onSaved, onClose }: GroupAssign
     setSaveError(null);
     try {
       // A lost reply reads the member back (R4 carry-over): their groups are the set sent → saved.
-      const { value: result, proven } = await writeOrReadBack(
+      const { value: result, proven, answered } = await writeOrReadBack(
         () => adminEndpoints.memberGroupsSet(userId, { groupIds: selected, reason }),
         () => groupsAccordingToMember(userId, selected),
       );
       const discountGroup = result.groups.find((g) => g.id === result.tariff?.discount_group_id)?.name ?? null;
       const said = `${ASSIGN_COPY.saved(name, result.groups.length)}${result.tariff ? ` ${tariffLine(result.tariff, discountGroup)}.` : ""}`;
-      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(said) : said });
+      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(said, answered) : said });
       onSaved(result);
       onClose();
     } catch (err) {

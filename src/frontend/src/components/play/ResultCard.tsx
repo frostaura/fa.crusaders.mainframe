@@ -21,7 +21,7 @@ import { ResultScore } from "./ResultScore";
 import { ResultSheet } from "./ResultSheet";
 import { confirmingNames, isViewer, outcomeLine, STATUS_TONE } from "./resultFacts";
 import { landedAs, resultWrite } from "./resultReadBack";
-import { UnsureOutcome, unsureSentence } from "@/lib/lostReply";
+import { UnsureOutcome, unsureSentence, type ProvenBy } from "@/lib/lostReply";
 import { useResult, type EarlyResult, type ResultRead } from "./useResult";
 
 /**
@@ -99,9 +99,9 @@ function useCardHands(read: ResultRead) {
       setParams(next, { replace: true });
     }
   };
-  const done = (result: MatchResult, text: string, proven: boolean) => {
+  const done = (result: MatchResult, text: string, proven: ProvenBy) => {
     close();
-    say(proven ? RESULT_LOST(text) : text);
+    say(proven ? RESULT_LOST(text, proven) : text);
     read.adopt(result);
     // R2 F2-12 — the Record button that opened the sheet is replaced by the result it recorded, so
     // Radix has nothing to return focus to: the card's own heading takes it, never <body>.
@@ -133,7 +133,7 @@ type SheetsProps = {
   view: BookingResultView;
   open: Open;
   close: () => void;
-  done: (result: MatchResult, text: string, proven: boolean) => void;
+  done: (result: MatchResult, text: string, proven: ProvenBy) => void;
   stale: () => void;
 };
 
@@ -268,7 +268,7 @@ function Actions({ view, read, choose, say }: BodyProps) {
     if (!result) throw new Error("no result");
     return resultWrite(view.booking_id, () => playEndpoints.confirm(view.booking_id, result.version), landedAs.confirmed(result));
   }, {
-    success: (landed) => { say(landed.proven ? RESULT_LOST(CONFIRM_SHEET.confirmed) : CONFIRM_SHEET.confirmed); read.adopt(landed.value); },
+    success: (landed) => { say(landed.proven ? RESULT_LOST(CONFIRM_SHEET.confirmed, landed.answered) : CONFIRM_SHEET.confirmed); read.adopt(landed.value); },
     failure: () => read.reload(),
   });
   const any = permissions.can_record || permissions.can_confirm || permissions.can_dispute || permissions.can_edit || permissions.can_withdraw;
@@ -308,7 +308,7 @@ function Withdraw({ result, read, say }: { result: MatchResult; read: ResultRead
       onConfirm={async () => {
         try {
           const landed = await resultWrite(result.booking_id, () => playEndpoints.withdraw(result.booking_id, result.version), landedAs.withdrawn(result));
-          say(landed.proven ? RESULT_LOST(RESULT_CARD.withdrawn) : RESULT_CARD.withdrawn);
+          say(landed.proven ? RESULT_LOST(RESULT_CARD.withdrawn, landed.answered) : RESULT_CARD.withdrawn);
           read.adopt(landed.value);
         } catch (error) {
           // Known not to have landed: nothing to re-read. Anything else may have moved the card.

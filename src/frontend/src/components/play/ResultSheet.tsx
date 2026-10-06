@@ -13,7 +13,7 @@ import { useAuth } from "@/lib/useAuth";
 import {
   MATCH_FORMATS, playEndpoints, type BookingResultView, type MatchFormat, type MatchResult, type ResultPlayer, type Side,
 } from "@/lib/playApi";
-import { UnsureOutcome } from "@/lib/lostReply";
+import { UnsureOutcome, provenBy, type ProvenBy } from "@/lib/lostReply";
 import { FORMAT_LABEL, GAME_REASON, playRefusal, progressLine, RESULT_SHEET, RESULT_UNSURE } from "@/lib/playCopy";
 import { MAX_POINTS, matchProgress, rowState, type DraftGame } from "@/lib/playScore";
 import { useAsyncAction } from "@/lib/useAsyncAction";
@@ -42,8 +42,8 @@ export type ResultSheetProps = {
   view: BookingResultView;
   /** Set to edit that pending result; absent to record a new one. */
   editing?: MatchResult | null;
-  /** `proven` — the reply was lost and the result was read back (R3 I-1). */
-  onDone: (result: MatchResult, proven: boolean) => void;
+  /** `proven` — the result was read back after an unsure reply (R3 I-1), and why it was unsure (R19). */
+  onDone: (result: MatchResult, proven: ProvenBy) => void;
   /** The result changed under the sheet (someone else recorded, or edited) — re-read the card. */
   onStale: () => void;
 };
@@ -77,7 +77,7 @@ function useSheet(props: ResultSheetProps) {
     return resultWrite(view.booking_id, () => playEndpoints.record(view.booking_id, { ...body, idempotencyKey: key }),
       landedAs.recorded(me, view.result?.result_id ?? null));
   }, {
-    success: (landed) => onDone(landed.value, landed.proven),
+    success: (landed) => onDone(landed.value, provenBy(landed)),
     // A lost reply that was read back and had not landed: the card is read again too.
     failure: (error) => { if (error instanceof UnsureOutcome || STALE.has(errorCode(error) ?? "")) onStale(); },
   });

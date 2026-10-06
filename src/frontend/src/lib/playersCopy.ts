@@ -5,8 +5,8 @@ import { describeFailure } from "./errors";
 import { minutesSpoken } from "./minutes";
 import { SOMEONE } from "./playersNames";
 import { BUY_MINUTES_ACTION } from "./gridCopy";
-import { unsureSentence, type UnsureWords } from "./lostReply";
-import { BUSY_LEAD, ERROR_LEAD, LOST_REPLY, unsureWords } from "./lostReplyCopy";
+import { unsureSentence, type UnsureReason, type UnsureWords } from "./lostReply";
+import { BUSY_LEAD, ERROR_LEAD, LOST_REPLY, PROVEN_LEAD, unsureWords } from "./lostReplyCopy";
 
 /**
  * Every word the players feature says (P11, D11–D13): the BookSheet's Players and Split steps,
@@ -1227,6 +1227,14 @@ export const INVITE_UNSURE = {
   provenNote: "The club's reply didn't arrive, so we checked your invite — you're in. Your wallet is being re-read.",
   /** R3 I-3 — the decline landed although its reply was lost. */
   declineProvenNote: "The club's reply didn't arrive, so we checked your invite — your answer went through.",
+  /** R19 — the accept's note by why its outcome was unsure: a reply that arrived is said as what it said. */
+  provenNoteAfter: (why: UnsureReason | undefined) => (why && why !== "silent"
+    ? `${PROVEN_LEAD[why]}, but we checked your invite — you're in. Your wallet is being re-read.`
+    : INVITE_UNSURE.provenNote),
+  /** R19 — the decline's, the same way. */
+  declineProvenNoteAfter: (why: UnsureReason | undefined) => (why && why !== "silent"
+    ? `${PROVEN_LEAD[why]}, but we checked your invite — your answer went through.`
+    : INVITE_UNSURE.declineProvenNote),
 } as const;
 
 export const INVITE_REFUSAL: Record<string, string> = {
