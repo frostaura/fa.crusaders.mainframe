@@ -112,9 +112,10 @@ export function quotaBannerTitle(maxSlots: number, day: string, accepted = 0): s
   const slots = maxSlots === 1 ? "slot" : "slots";
   // R11 E11-6 — games the member SAID YES TO count toward the limit too; a member whose slots are
   // all accepted invites booked nothing, so "You've booked" is not true of them.
-  if (accepted >= maxSlots) return `Your ${maxSlots} ${slots} for ${weekdayName(day)} ${maxSlots === 1 ? "is a game" : "are games"} you said yes to.`;
+  // R17 X17-2 — `accepted` counts SLOTS, and one game can fill several: "in" a game, never "is" one.
+  if (accepted >= maxSlots) return `Your ${maxSlots} ${slots} for ${weekdayName(day)} ${maxSlots === 1 ? "is in a game" : "are in games"} you said yes to.`;
   if (accepted > 0) {
-    const them = accepted === 1 ? "1 of them is a game" : `${accepted} of them are games`;
+    const them = accepted === 1 ? "1 of them is in a game" : `${accepted} of them are in games`;
     return `You've booked your ${maxSlots} ${slots} for ${weekdayName(day)} — ${them} you said yes to.`;
   }
   return `You've booked your ${maxSlots} ${slots} for ${weekdayName(day)}.`;

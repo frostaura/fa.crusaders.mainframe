@@ -33,13 +33,13 @@ describe("R11 E11-6 — games said yes to, on the quota banner", () => {
   it("all four were games said yes to: never 'You've booked' and never 'Cancel one of them'", () => {
     const d = day([slot("partner"), slot("partner"), slot("partner"), slot("partner")]);
     const notice = ruleNotice(readViewerRules(d), "2026-10-03", true, acceptedSlotsOn(d))!;
-    expect(notice.title).toBe("Your 4 slots for Saturday are games you said yes to.");
+    expect(notice.title).toBe("Your 4 slots for Saturday are in games you said yes to.");
     expect(notice.body).toBe("Games you said yes to count toward your daily limit of 4 slots, so everyone gets court time. Pick another day.");
     expect(`${notice.title} ${notice.body}`).not.toMatch(/You've booked|Cancel one/);
   });
 
   it("some were said yes to: cancel one of YOUR bookings, and the yes-games named", () => {
-    expect(quotaBannerTitle(4, "2026-10-03", 1)).toBe("You've booked your 4 slots for Saturday — 1 of them is a game you said yes to.");
+    expect(quotaBannerTitle(4, "2026-10-03", 1)).toBe("You've booked your 4 slots for Saturday — 1 of them is in a game you said yes to.");
     expect(quotaBannerBody(4, 1)).toBe("Cancel one of your own bookings, or pick another day. Games you said yes to count toward your daily limit of 4 slots, so everyone gets court time.");
   });
 

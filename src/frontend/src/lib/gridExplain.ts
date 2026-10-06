@@ -197,7 +197,15 @@ function buildNotices(
  * cannot cancel them.
  */
 export function acceptedSlotsOn(day: ScheduleDay | null): number {
-  return day ? day.slots.filter((s) => s.isMine && s.role === "partner").length : 0;
+  if (!day) return 0;
+  // R17 X17-2 — the cap is in SLOTS (the server adds each booking's slice count), so a 45-minute
+  // game on a 15-minute grid is three of them, never one.
+  const slice = day.sliceMinutes > 0 ? day.sliceMinutes * 60_000 : 0;
+  const slicesOf = (s: ScheduleDay["slots"][number]) => {
+    const span = Date.parse(s.endsAtUtc) - Date.parse(s.startsAtUtc);
+    return slice > 0 && span > 0 ? Math.max(1, Math.round(span / slice)) : 1;
+  };
+  return day.slots.filter((s) => s.isMine && s.role === "partner").reduce((n, s) => n + slicesOf(s), 0);
 }
 
 /** At most one rule notice: the empty intersection outranks the cap, because it outlasts it. */
