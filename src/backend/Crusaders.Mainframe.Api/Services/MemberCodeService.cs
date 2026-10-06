@@ -9,7 +9,14 @@ using Microsoft.EntityFrameworkCore;
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>A claim on one acting use (§4.4). <paramref name="Fresh"/> is false for a claim re-entered by the same act retried.</summary>
-public sealed record MemberCodeClaim(Guid Id, bool Fresh);
+public sealed record MemberCodeClaim(Guid Id, bool Fresh)
+{
+    /// <summary>What was claimed, so a re-entered claim can be held again (<see cref="MemberCodeService.HoldAgainAsync"/>).</summary>
+    public MemberCodeClaimTerms? Terms { get; init; }
+}
+
+/// <summary>The terms of one claim: the code and class it uses, the board, the act's kind and its idempotency key.</summary>
+public sealed record MemberCodeClaimTerms(MemberCodeMatch Match, string UseClass, Guid? DeviceId, string Kind, string? Key);
 
 /// <summary>A v1 code the server checked and accepted: whose it is, and the step it was accepted at.</summary>
 public sealed record MemberCodeMatch(Guid UserId, int RefValue, string Ref, long Step, int Generation);
@@ -445,13 +452,55 @@ public sealed class MemberCodeService
     /// them <c>code_used</c> for a purchase that went through. A re-entered claim is never
     /// released by the request that re-entered it; it belongs to the one that made it.
     /// </para>
+    ///
+    /// <para>
+    /// R19 BE19L: <b>a use given back between the insert and the read is free.</b> The insert met a
+    /// row (ON CONFLICT DO NOTHING) and the read that follows found none: the request holding it gave
+    /// it back in between (its act failed — a lost connection, a refusal). That is not "already
+    /// used"; it was answered <c>code_used</c> to a box retrying a purchase nobody had made. The
+    /// claim is tried again, a bounded number of times.
+    /// </para>
     /// </summary>
     public async Task<MemberCodeClaim?> TryClaimAsync(
         MemberCodeMatch match, string useClass, Guid? deviceId, string kind, CancellationToken ct, string? claimKey = null)
     {
+        var key = claimKey is { Length: > MemberCodeUse.ClaimKeyMaxLength } ? claimKey[..MemberCodeUse.ClaimKeyMaxLength] : claimKey;
+        var terms = new MemberCodeClaimTerms(match, useClass, deviceId, kind, key);
+        for (var attempt = 1; ; attempt++)
+        {
+            if (await InsertUseAsync(terms, ct) is { } id) return new MemberCodeClaim(id, Fresh: true) { Terms = terms };
+
+            var taken = await FindUseAsync(match, useClass, ct);
+            if (taken is null && attempt < ClaimAttempts) continue;
+            if (taken is null || key is null || deviceId is null) return null;
+            return taken.DeviceId == deviceId && taken.ClaimKey == key
+                ? new MemberCodeClaim(taken.Id, Fresh: false) { Terms = terms }
+                : null;
+        }
+    }
+
+    /// <summary>How many times a claim is tried when the use it met keeps being given back before it can be read.</summary>
+    private const int ClaimAttempts = 3;
+
+    /// <summary>
+    /// R19 BE19L: holds a RE-ENTERED claim's use again once its act has committed. The request that
+    /// made the claim may have given it back after this one re-entered it (its own attempt failed,
+    /// and its "did the act commit?" read came before this one's commit), leaving an act with no use
+    /// behind it — and the code free to act again. Re-claimed under the same terms: restored when it
+    /// is gone, a no-op when it is still there. A fresh claim needs nothing; only its maker releases it.
+    /// </summary>
+    public async Task HoldAgainAsync(MemberCodeClaim? claim, CancellationToken ct)
+    {
+        if (claim is not { Fresh: false, Terms: { } t }) return;
+        await TryClaimAsync(t.Match, t.UseClass, t.DeviceId, t.Kind, ct, t.Key);
+    }
+
+    /// <summary>Inserts the use row; its id when this request took it, null when the code already holds one in this class.</summary>
+    private async Task<Guid?> InsertUseAsync(MemberCodeClaimTerms t, CancellationToken ct)
+    {
         var id = Guid.NewGuid();
         var now = _clock.GetUtcNow().Storable();
-        var key = claimKey is { Length: > MemberCodeUse.ClaimKeyMaxLength } ? claimKey[..MemberCodeUse.ClaimKeyMaxLength] : claimKey;
+        var (match, useClass, deviceId, kind, key) = t;
 
         bool inserted;
         if (!_db.Database.IsRelational())
@@ -484,13 +533,7 @@ public sealed class MemberCodeService
                 """, ct) == 1;
         }
 
-        if (inserted) return new MemberCodeClaim(id, Fresh: true);
-        if (key is null || deviceId is null) return null;
-
-        var taken = await FindUseAsync(match, useClass, ct);
-        return taken is not null && taken.DeviceId == deviceId && taken.ClaimKey == key
-            ? new MemberCodeClaim(taken.Id, Fresh: false)
-            : null;
+        return inserted ? id : null;
     }
 
     /// <summary>The use row this code already holds in this class, or null.</summary>

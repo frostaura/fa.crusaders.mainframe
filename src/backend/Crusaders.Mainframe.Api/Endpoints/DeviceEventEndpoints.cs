@@ -1827,6 +1827,11 @@ public static class DeviceEventEndpoints
             return Refusal(created);
         }
 
+        // R19 BE19L: bought on a twin's claim (re-entered), the use may have been given back under
+        // this purchase — the twin failed and its "did it commit?" read came first. Hold it again,
+        // or the purchase stands with no use behind it and the same code buys a second walk-up.
+        await services.MemberCodes.HoldAgainAsync(claim, ct);
+
         // Straight into the one activation path, so attendance, the audit row and
         // booking.lights_on all come from the place that is allowed to produce them. Not
         // wrapped like the purchase above: past CreateWalkUpAsync's commit the money has moved,
