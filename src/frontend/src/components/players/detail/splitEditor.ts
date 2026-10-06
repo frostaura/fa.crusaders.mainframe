@@ -80,8 +80,17 @@ export function splitEffects(d: BookingDetail, shares: readonly SplitPreviewShar
     const next = shares.find((s) => s.seat === p.seat)?.share_minutes;
     if (next === undefined) continue;
     const name = seatName(p, d.players);
-    if (p.status !== "accepted") {
+    if (p.settled_outside) {
+      // R17 J17-3 — paid by hand: the seat's target is 0 whatever its share, so nothing is asked
+      // and nothing goes back. Its paid_minutes is 0 after the settle, which read as "asked for more".
+      if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.settledByHand(name));
+    } else if (p.status !== "accepted") {
       if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.askedFor(name, minutesSpoken(next)));
+    } else if (next > p.paid_minutes && p.paid_minutes === 0) {
+      // R17 J17-3 — nothing paid yet: "more" has no base. They are asked for the share.
+      if (next !== p.share_minutes || p.unpaid_minutes > 0) {
+        lines.push(CHANGE_SPLIT.askedFor(name, minutesSpoken(next), next > p.consented_minutes));
+      }
     } else if (next > p.paid_minutes) {
       if (next !== p.share_minutes || p.unpaid_minutes > 0) {
         lines.push(CHANGE_SPLIT.askedMore(name, minutesSpoken(next - p.paid_minutes), next > p.consented_minutes));

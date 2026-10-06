@@ -567,9 +567,13 @@ export const CHANGE_SPLIT = {
   sending: "Saving the split — waiting for the club. This stays open until it answers.",
   /** R2 F2-3 — what saving does to a booking that already stands: money that moves, not booking-time words. */
   effectsTitle: "What saving does",
-  askedFor: (name: string, amount: string) => `${name} is asked for ${amount}.`,
+  /** R17 J17-3 — `consent`: an accepted seat that has paid nothing yet, asked past what it agreed. */
+  askedFor: (name: string, amount: string, consent = false) =>
+    consent ? `${name} is asked for ${amount} — once they say yes to it.` : `${name} is asked for ${amount}.`,
   askedMore: (name: string, amount: string, consent: boolean) =>
     consent ? `${name} is asked for ${amount} more — once they say yes to it.` : `${name} is asked for ${amount} more.`,
+  /** R17 J17-3 — a share the club recorded as paid by hand: the new figure moves nothing in the app. */
+  settledByHand: (name: string) => `${name} paid by hand — nothing moves for them in the app.`,
   goesBack: (name: string, amount: string) => `${amount} ${agrees(amount, "goes", "go")} back to ${name}.`,
   youCover: (amount: string) => `You cover ${amount} in the end.`,
   noChange: "Nobody's share changes.",
