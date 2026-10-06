@@ -11,7 +11,7 @@ import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn } from "@/lib/utils";
 import { clubRowTime } from "@/lib/clubClock";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
-import { plainMovementSentence, type MovementPart, type MovementWho } from "@/lib/walletCopy";
+import { flyoutHeldNote, plainMovementSentence, type MovementPart, type MovementWho } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/useAuth";
 import { phoneIsOffline } from "@/lib/api";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
@@ -192,7 +192,7 @@ function chipTitle(state: string, loading: boolean, balance: number | null, f: C
  */
 const BURST_MS = 1_000;
 
-type Burst = { from: number | null; last: number | null; at: number; startedAt: number };
+type Burst = { from: number | null; last: number | null; at: number; startedAt: number; fromBalance: number | null; lastBalance: number | null };
 
 /**
  * What the flyout says: the NET change of the figure the chip shows, across the current burst —
@@ -205,22 +205,27 @@ type Burst = { from: number | null; last: number | null; at: number; startedAt: 
  * renders" pattern), because the figure and the movement arrive in the same update.
  * </p>
  */
-function useFlyoutAmount(shown: number | null, delta: BalanceDelta | null): { amount: number; key: number } | null {
-  const [burst, setBurst] = useState<Burst>({ from: shown, last: shown, at: 0, startedAt: 0 });
+function useFlyoutAmount(shown: number | null, balance: number | null, delta: BalanceDelta | null): Flyout | null {
+  const [burst, setBurst] = useState<Burst>({ from: shown, last: shown, at: 0, startedAt: 0, fromBalance: balance, lastBalance: balance });
   if (delta && delta.at !== burst.at) {
     const fresh = burst.from === null || delta.at - burst.at > BURST_MS;
     setBurst(fresh
-      ? { from: burst.last, last: shown, at: delta.at, startedAt: delta.at }
-      : { ...burst, last: shown, at: delta.at });
-  } else if (shown !== burst.last) {
-    setBurst({ ...burst, last: shown });
+      ? { from: burst.last, last: shown, at: delta.at, startedAt: delta.at, fromBalance: burst.lastBalance, lastBalance: balance }
+      : { ...burst, last: shown, at: delta.at, lastBalance: balance });
+  } else if (shown !== burst.last || balance !== burst.lastBalance) {
+    setBurst({ ...burst, last: shown, lastBalance: balance });
   }
   if (!delta || shown === null || burst.from === null) return null;
   const net = shown - burst.from;
+  // R18 E18-12 — the part of the movement that went into (or came out of) what is held: the toast
+  // says the wallet's movement, the chip the spendable one, and the difference was unexplained.
+  const held = balance !== null && burst.fromBalance !== null ? Math.trunc(balance - burst.fromBalance - net) : 0;
   // Keyed by the burst, so a new movement replays the rise and one burst's frames do not restart it.
   // Whole minutes (P13): a net of less than one is no movement the chip shows.
-  return Math.abs(net) >= 1 ? { amount: Math.trunc(net), key: burst.startedAt } : null;
+  return Math.abs(net) >= 1 ? { amount: Math.trunc(net), held, key: burst.startedAt } : null;
 }
+
+type Flyout = { amount: number; held: number; key: number };
 
 /**
  * The figure — or, while it is loading, a neutral placeholder the width of one (D1). Never a
@@ -275,7 +280,7 @@ export function MinutesChip() {
     if (location.pathname.startsWith("/wallet")) entice.stop("arrived");
   }, [location.pathname, entice]);
 
-  const flyout = useFlyoutAmount(figures.shown, delta);
+  const flyout = useFlyoutAmount(figures.shown, balance, delta);
   const showFlyout = !reduceMotion && flyout !== null;
 
   return (
@@ -319,12 +324,13 @@ export function MinutesChip() {
           aria-hidden="true"
           data-balance-flyout=""
           className={cn(
-            "pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 text-xs font-semibold tabular-nums",
+            "pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-semibold tabular-nums",
             "animate-flyout-rise motion-reduce:animate-none",
             flyout!.amount > 0 ? "text-success-strong" : "text-text-secondary",
           )}
         >
           {minutesSigned(flyout!.amount)}
+          {flyout!.held !== 0 ? <span data-flyout-held="" className="whitespace-nowrap font-medium text-text-secondary">{` · ${flyoutHeldNote(minutesCompact(Math.abs(flyout!.held)), flyout!.held > 0)}`}</span> : null}
         </span>
       ) : null}
     </div>

@@ -145,6 +145,16 @@ export function minutesLeftSentence(amount: number, entryType: LedgerEntryType |
 }
 
 /**
+ * R18 E18-12 — beside the chip's flyout, when the spendable figure moved by a different amount than
+ * the wallet did: the difference went into what is held for partners ("6 min held") or came out of
+ * it ("6 min freed"). The toast says the wallet's movement; this says why the chip's differs. The
+ * figure comes formatted (the flyout is the chip's compact paint, aria-hidden like it).
+ */
+export function flyoutHeldNote(figure: string, intoHeld: boolean): string {
+  return `${figure} ${intoHeld ? "held" : "freed"}`;
+}
+
+/**
  * The plain sentence for a movement — worded by the frame's reason and its sign alone, true
  * whoever caused it. The precise ones (a no-show settled, a cancel with its partners' shares, a
  * pay-for …) are `lib/movementCopy`'s, out of the entry chunk; this is what the chip says when

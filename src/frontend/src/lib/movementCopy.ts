@@ -42,13 +42,21 @@ function causedSentence(reason: string, said: Said, parts: readonly MovementPart
   const rows = parts ?? [];
   // R14 E14-7 — a cancel the frame places ("on Court 3 · Mon 5 Oct") is said with its place.
   if (reason === "cancellation_refund" && (club || rows.length > 1 || said.where)) return cancelSentence(said, parts, club);
-  // R14 J14-4 — a late cancel of a split booking comes as `mixed`: its partners' shares went back
-  // to them, they are not the penalty ("11 minutes went on a charge" for a 4-minute penalty).
-  if (reason === "mixed" && rows.some((p) => p.delta_minutes > 0) && rows.some((p) => p.reason === "share_transfer" && p.delta_minutes < 0)) {
-    return cancelSentence(said, parts, club);
-  }
+  if (reason === "mixed" && mixedIsCancel(rows, club)) return cancelSentence(said, parts, club);
   const precise = PRECISE_MOVEMENT[reason];
   return settledWithShares(reason, said, parts ?? []) ?? (precise ? precise(said) : null);
+}
+
+/**
+ * Whether a `mixed` frame is a cancellation, said as one. R14 J14-4 — a late cancel of a split
+ * booking: its partners' shares went back to them, they are not the penalty ("11 minutes went on a
+ * charge" for a 4-minute penalty). R18 E18-1 — the desk's late cancel: refund and penalty, cancelled
+ * by the club — "The club cancelled your booking: …", never an anonymous "came back and went on a charge".
+ */
+function mixedIsCancel(rows: readonly MovementPart[], club: boolean): boolean {
+  const back = rows.some((p) => p.delta_minutes > 0);
+  const sharesOut = rows.some((p) => p.reason === "share_transfer" && p.delta_minutes < 0);
+  return (back && sharesOut) || (club && rows.some((p) => p.reason === "cancellation_refund"));
 }
 
 /**
