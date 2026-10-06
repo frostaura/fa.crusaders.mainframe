@@ -184,6 +184,13 @@ public readonly record struct TraceFacts
     /// "Their check-in reached the club late", never their own name in the third person.
     /// </summary>
     public bool BySelf { get; init; }
+
+    /// <summary>
+    /// R19 E19-3: the row is a pay-for at the box by a member with no accepted seat on the booking — they
+    /// paid for the court and lit it ("Pons Partner paid for Court 1 at the court box and lit it"), and
+    /// never "checked in": they were not a player on it.
+    /// </summary>
+    public bool PaidAndLit { get; init; }
 }
 
 /// <summary>
@@ -684,15 +691,18 @@ public static class TraceKinds
             LightsOnAction => LightsOn,
             // R18 E18-3: and came back on after a power cut — the same booker's row, the same players.
             LightsRestoredAction => LightsRestored,
+            // R19 E19-2: and went off — a session the partner played ends on their Night too.
+            LightsOffAction => LightsOff,
             _ => null,
         };
     }
 
     /// <summary>
     /// The audit actions a partner's Night reads off the booking they paid into (R15 J15-4) — and
-    /// R17 E17-4 the lights coming on, for an accepted partner and the payer at the box only.
+    /// R17 E17-4 the lights coming on (R19 E19-2: and going off), for an accepted partner and the payer
+    /// at the box only.
     /// </summary>
-    public static readonly string[] PartnersViewActions = ["booking.no_show", "booking.no_show_reversed", LightsOnAction, LightsRestoredAction];
+    public static readonly string[] PartnersViewActions = ["booking.no_show", "booking.no_show_reversed", LightsOnAction, LightsRestoredAction, LightsOffAction];
 
     /// <summary>
     /// The seat acts an organiser's Night reads off the game's partners (R13 E13-4, R15 E15-3) — and
@@ -1424,11 +1434,25 @@ public static class TraceKinds
     /// </summary>
     private static string CheckedIn(string court, TraceFacts facts)
     {
+        if (facts.PaidAndLit) return PaidAndLit(court, facts);
         if (facts.ByOther && !string.IsNullOrWhiteSpace(facts.ActorName)) return $"{facts.ActorName.Trim()} checked in at {court}";
         if (facts.ForOther && !string.IsNullOrWhiteSpace(facts.SubjectName)) return $"Checked in at {court} for {facts.SubjectName.Trim()}'s booking";
         // R17 J17-4: their own seat's check-in on somebody else's game.
         if (!string.IsNullOrWhiteSpace(facts.SeatOfName)) return $"Checked in at {court} for {facts.SeatOfName.Trim()}'s booking";
         return $"Checked in at {court}";
+    }
+
+    /// <summary>
+    /// R19 E19-3: a payer at the box who holds no seat — "Pons Partner paid for Court 1 at the court box and
+    /// lit it" on the organiser's Night, "Paid for Court 1 at the court box and lit it for Olga Organiser's
+    /// booking" on their own.
+    /// </summary>
+    private static string PaidAndLit(string court, TraceFacts facts)
+    {
+        const string What = " at the court box and lit it";
+        if (facts.ByOther && !string.IsNullOrWhiteSpace(facts.ActorName)) return $"{facts.ActorName.Trim()} paid for {court}{What}";
+        if (facts.ForOther && !string.IsNullOrWhiteSpace(facts.SubjectName)) return $"Paid for {court}{What} for {facts.SubjectName.Trim()}'s booking";
+        return $"Paid for {court}{What}";
     }
 
     /// <summary>" — their share is now 8 minutes", when the record carries the new share; empty otherwise.</summary>

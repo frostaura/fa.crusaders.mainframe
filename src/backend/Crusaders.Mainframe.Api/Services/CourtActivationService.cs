@@ -491,7 +491,10 @@ public class CourtActivationService
         // R13: announced under the court's cue lock, AFTER the check-in committed above — so the
         // lights-off sweep either already sees this booking lit (and sends no off over it), or has
         // already sent its off before this on (CourtCueLock).
-        await EmitUnderCueLockAsync(court, LightsOnEvent(court, booking, (payerUserId, identifiedUserId), method, now), ct);
+        // R19 E19-2: said at the instant the Night prints the lighting (the lights row's ScanAt, the
+        // request's own instant) — not at this later read of the clock, 60–200 ms after it.
+        var onAt = occurredAt < now ? await ReversalOnAtAsync(booking, occurredAt, ct) : now;
+        await EmitUnderCueLockAsync(court, LightsOnEvent(court, booking, (payerUserId, identifiedUserId), method, onAt, occurredAt), ct);
 
         return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: false);
     }
@@ -613,6 +616,11 @@ public class CourtActivationService
     /// R16 E16-2: when the reversal's <c>lights_on</c> is said — now, when an off for this court was
     /// already said after the scan and the restored session is still running; else the scan.
     /// </summary>
+    /// <remarks>
+    /// R19 E19-2: the same rule for every lighting, so a <c>lights_on</c>'s <c>occurred_at</c> is the
+    /// Night's instant (its <c>scanned_at</c>) unless an off for the court was said in between — then it
+    /// is now, because a consumer ordering by <c>occurred_at</c> must not read the court dark after it.
+    /// </remarks>
     private async Task<DateTimeOffset> ReversalOnAtAsync(Booking booking, DateTimeOffset scannedAt, CancellationToken ct)
     {
         var now = _clock.GetUtcNow();

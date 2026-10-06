@@ -277,7 +277,8 @@ public sealed class R18BookingNightHttpTests(PostgresFixture pg) : IClassFixture
 
         var night = await NightAsync(r, c.Olga);
         Assert.Contains(night, e => Kind(e) == TraceKinds.CourtCheckedIn && Headline(e) == "Checked in at Court 2");
-        Assert.Contains(night, e => Kind(e) == TraceKinds.CourtCheckedIn && Headline(e) == "Pam Payer checked in at Court 2");
+        // R19 E19-3: Pam holds no seat — she paid for the court at the box and lit it; she did not check in.
+        Assert.Contains(night, e => Kind(e) == TraceKinds.CourtCheckedIn && Headline(e) == "Pam Payer paid for Court 2 at the court box and lit it");
     }
 
     [SkippableFact]

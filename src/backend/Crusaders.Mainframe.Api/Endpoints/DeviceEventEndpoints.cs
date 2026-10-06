@@ -1219,9 +1219,11 @@ public static class DeviceEventEndpoints
             var row = await services.Lights.RecordOffAsync(evidence, ct);
             if (row is not null)
             {
+                // R19 E19-2: printed at the release the box reported, as its receipt is — a partner's Night
+                // reads this row and the organiser's the receipt, and one release has one instant.
                 services.Lights.Audit(
                     CourtLightStateService.LightsOffAction, court.Id, court.CourtNumber, booking.UserId,
-                    new { device_id = device.Id, relay, booking_id = booking.Id, minutes = window.Minutes }, device.Id);
+                    new { device_id = device.Id, relay, booking_id = booking.Id, minutes = window.Minutes }, device.Id).ScanAt = occurredAt;
             }
         }
 

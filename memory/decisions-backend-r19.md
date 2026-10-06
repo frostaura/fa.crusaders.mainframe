@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-backend-r19
-description: "Backend round 19 (lane BE19): two-board device bodies filed against no board; power-dip restore served and confirmed once per boot; restore rows about the organiser."
+description: "Backend round 19 (lane BE19): two-board device bodies filed against no board; power-dip restore once per boot; one instant per lighting on every Night and the webhook; a seatless pay-for payer paid and lit."
 type: decision
 last_verified: 2026-10-06
 ---
@@ -39,3 +39,20 @@ last_verified: 2026-10-06
 - **Restore rows are about the organiser (E19-4):** `RelayRestoreItem.OrganiserUserId` (= `booking.UserId`) is the
   audit subject; the light state's `CausedByUserId` stays the payer (`PaidByUserId ?? UserId`).
 - Test model fixed: `DeviceRelayRestoreHttpTests` walks boots on a movable clock with the count sticky per boot.
+
+- **One instant per lighting (E19-2).** An activation receipt with a server `court.lights_on` twin prints at the
+  TWIN's instant (`ReceiptAtOf`) — the box's queue re-uploads scans answered online with its own clock, which moved
+  the organiser's "lights came on" off every other Night's instant once it drained. A twinless receipt (offline
+  only) keeps its own. Every receipt row's subject is the booking's organiser (`ReceiptRow.OrganiserUserId`;
+  JSON + CSV). The release's `court.lights_off` row now has `ScanAt` = the release instant (= its receipt's).
+- **Partners who played see lights off:** `LightsOffAction` joins `TraceKinds.PartnersViewActions` /
+  `OfPartnersView` / `IsLightsRow` (same accepted-partner-or-payer gate as lights on).
+- **`booking.lights_on` `occurred_at` = the Night's instant** for every activation (`CourtActivationService`
+  passes `occurredAt`, `scanned_at` = it), unless an off for the court was said after it and the booking still
+  runs — then now (`ReversalOnAtAsync`, the R16 E16-2 rule, so a consumer ordering by `occurred_at` never reads
+  the court dark after an off). Was the service's second clock read, 60–200 ms after the row.
+- **A seatless pay-for payer paid and lit (E19-3 wording):** `court.activated` whose `payer_user_id` is the actor,
+  on somebody else's booking, with no accepted seat (`Strands.AcceptedSeats`) → `TraceFacts.PaidAndLit`:
+  "Pam Payer paid for Court 2 at the court box and lit it" / own Night "Paid for Court 2 at the court box and lit
+  it for Olga Organiser's booking". Kind stays `court.checked_in` (frontend landmark list keys on it). With a seat:
+  "checked in" as before. Counting (AttendanceQuery/PlayersQuery) is BE19c's.

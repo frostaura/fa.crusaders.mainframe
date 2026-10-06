@@ -60,12 +60,13 @@ public static partial class AdminMemberTraceAssembly
     }
 
     /// <summary>
-    /// Review round 11, E11-3: whose code the board read for an ACTIVATION receipt, taken from its
-    /// server-written <c>court.lights_on</c> twin — the row <see cref="IsReceiptTwin"/> drops. The
-    /// receipt keeps its place as the measurement, but it knows no person, so a late check-in that
-    /// reversed a refund read "reported by the court's board" while the twin named the scanner.
+    /// Review round 11, E11-3: the server-written <c>court.lights_on</c> twin of an ACTIVATION receipt —
+    /// the row <see cref="IsReceiptTwin"/> drops — or null. The receipt keeps its place as the
+    /// measurement, but it knows no person, so its twin says whose code the board read (a late
+    /// check-in that reversed a refund read "reported by the court's board" while the twin named the
+    /// scanner) and, R19 E19-2, when the server lit the court.
     /// </summary>
-    private static Guid? TwinCodeHolderOf(ReceiptRow r, Strands s)
+    private static (AuditLog Row, JsonElement? Details)? TwinOf(ReceiptRow r, Strands s)
     {
         if (r.Kind != DeviceEventEndpoints.ActivationKind) return null;
         foreach (var row in s.Audit)
@@ -74,9 +75,41 @@ public static partial class AdminMemberTraceAssembly
             var details = DoorActivityView.Details(row.DetailsJson);
             var inner = Inner(details);
             if (GuidOf(inner, "booking_id") != r.BookingId || DoorTrail.DeviceIdOf(details) != r.DeviceId) continue;
-            if (SameEvent(r.Kind, r, inner) && GuidOf(inner, "identified_user_id") is { } holder) return holder;
+            if (SameEvent(r.Kind, r, inner)) return (row, details);
         }
         return null;
+    }
+
+    /// <summary>R11 E11-3: whose code the board read, off the receipt's twin; null without one.</summary>
+    private static Guid? TwinCodeHolderOf((AuditLog Row, JsonElement? Details)? twin)
+    {
+        return twin is { } t ? GuidOf(Inner(t.Details), "identified_user_id") : null;
+    }
+
+    /// <summary>
+    /// R19 E19-2: when an activation receipt prints — its twin's instant when the server lit the court
+    /// itself. A scan answered online is then uploaded from the box's queue with the box's own clock;
+    /// printing the receipt there moved the organiser's "lights came on" off the instant every other
+    /// Night (and the <c>booking.lights_on</c> webhook) shows, the moment the queue drained. One lighting,
+    /// one instant: the server's. A receipt with no twin (a scan only the box saw) keeps its own.
+    /// </summary>
+    private static DateTimeOffset ReceiptAtOf(ReceiptRow r, (AuditLog Row, JsonElement? Details)? twin)
+    {
+        return twin is { } t ? AtOf(t.Row, t.Details) : r.OccurredAt;
+    }
+
+    /// <summary>
+    /// R19 E19-3: whether a <c>court.activated</c> row is a pay-for at the box — the scanner paid
+    /// (<c>payer_user_id</c> is the actor) for somebody else's booking — by a member holding no accepted
+    /// seat on it. They paid for the court and lit it; they were not a player checking in. A payer who
+    /// holds a seat is a player, and their scan is their check-in as before.
+    /// </summary>
+    private static bool PaidAndLitOf(AuditLog row, JsonElement? details, Strands s)
+    {
+        if (row.Action != ActivatedAction) return false;
+        if (row.SubjectUserId is not { } organiser || organiser == row.ActorUserId) return false;
+        if (GuidOf(details, "payer_user_id") != row.ActorUserId) return false;
+        return GuidOf(details, "booking_id") is not { } booking || !s.AcceptedSeats.Contains((booking, row.ActorUserId));
     }
 
     /// <summary>The event half of <see cref="IsReceiptTwin"/>. Block body for the lizard reason.</summary>

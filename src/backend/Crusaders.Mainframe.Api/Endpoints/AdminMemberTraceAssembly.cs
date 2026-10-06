@@ -127,6 +127,9 @@ public static partial class AdminMemberTraceAssembly
     {
         /// <summary>The board's sequence number, which a reversal's <c>court.lights_on</c> row repeats (E7-1).</summary>
         public long Seq { get; init; }
+
+        /// <summary>R19 E19-2: the booking's organiser — whom the lights row is about, as every lights row is.</summary>
+        public Guid? OrganiserUserId { get; init; }
     }
 
     /// <summary>Everything the three reads produced, before any of it is a sentence.</summary>
@@ -155,6 +158,9 @@ public static partial class AdminMemberTraceAssembly
 
         /// <summary>R15 E15-3 / J15-4: every share row's partner, organiser, direction and cause, by ledger id.</summary>
         public Dictionary<Guid, ShareRowWhy> ShareWhys { get; init; } = [];
+
+        /// <summary>R19 E19-3: (booking, member) for every accepted seat on the bookings the rows name.</summary>
+        public HashSet<(Guid BookingId, Guid UserId)> AcceptedSeats { get; init; } = [];
     }
 
     public static async Task<TraceNight> BuildAsync(
@@ -218,11 +224,17 @@ public static partial class AdminMemberTraceAssembly
             .ToListAsync(ct);
         var bookingCourts = bookingRows.ToDictionary(b => b.Id, b => b.CourtId);
         var withdrawals = await WithdrawalsAsync(db, ledger, ct);
+        // R19 E19-3: who holds an accepted seat on each booking — a pay-for payer who does is a player who checked in.
+        var seats = await db.BookingParticipants.AsNoTracking()
+            .Where(p => bookingIds.Contains(p.BookingId) && p.Status == ParticipantStatus.Accepted)
+            .Select(p => new { p.BookingId, p.UserId })
+            .ToListAsync(ct);
         var shareWhys = await ShareRowCauses.ForAsync(db, ledger, ct);
 
         var people = audit.SelectMany(a => new Guid?[] { a.ActorUserId, a.SubjectUserId, CodeHolderOf(a), OrganiserOf(a) })
             .Concat(ledger.SelectMany(l => new Guid?[] { l.ActorUserId, l.UserId }))
             .Concat(bookingRows.Select(b => b.UserId))
+            .Concat(receipts.Select(r => r.OrganiserUserId))
             .Concat(withdrawals.Values.Select(w => (Guid?)w.UserId))
             .Concat(shareWhys.Values.SelectMany(w => new Guid?[] { w.PartnerUserId, w.OrganiserUserId }));
         var names = await PersonNames.ForAsync(db, people, ct);
@@ -242,6 +254,7 @@ public static partial class AdminMemberTraceAssembly
             BookingOwners = bookingRows.ToDictionary(b => b.Id, b => b.UserId),
             Withdrawals = withdrawals,
             ShareWhys = shareWhys,
+            AcceptedSeats = [.. seats.Where(p => p.UserId != null).Select(p => (p.BookingId, p.UserId!.Value))],
         };
     }
 
@@ -359,9 +372,9 @@ public static partial class AdminMemberTraceAssembly
         return [.. rows.Where(r => PartnerBookingOf(r) is { } b && (IsLightsRow(r.Action) ? played : ids).Contains(b))];
     }
 
-    /// <summary>R17 E17-4 / R18 E18-3: a lights row a partner's Night reads only for a session they were in — on, or restored after a power cut.</summary>
+    /// <summary>R17 E17-4 / R18 E18-3 / R19 E19-2: a lights row a partner's Night reads only for a session they were in — on, restored after a power cut, or off.</summary>
     private static bool IsLightsRow(string action) =>
-        action == TraceKinds.LightsOnAction || action == TraceKinds.LightsRestoredAction;
+        action is TraceKinds.LightsOnAction or TraceKinds.LightsRestoredAction or TraceKinds.LightsOffAction;
 
     /// <summary>One booking somebody else made that this member is on: as a partner (any seat status), or as the payer at the box.</summary>
     private sealed record PartnerGame(Guid Id, Guid Booker, bool Played);
@@ -423,11 +436,12 @@ public static partial class AdminMemberTraceAssembly
     {
         var bookings = await db.Bookings.AsNoTracking()
             .Where(b => b.UserId == q.UserId && b.StartsAt < q.To && b.EndsAt >= q.From)
-            .Select(b => new { b.Id, b.CourtId })
+            .Select(b => new { b.Id, b.CourtId, b.UserId })
             .ToListAsync(ct);
         if (bookings.Count == 0) return [];
 
         var byBooking = bookings.ToDictionary(b => b.Id, b => b.CourtId);
+        var organisers = bookings.ToDictionary(b => b.Id, b => b.UserId);
         var ids = byBooking.Keys.ToList();
 
         // E7-1: a receipt the server REFUSED still names the booking it was refused for, and is
@@ -444,7 +458,7 @@ public static partial class AdminMemberTraceAssembly
 
         return [.. rows.Select(r => new ReceiptRow(
             r.Id, r.OccurredAt, r.Kind, r.BookingId!.Value, byBooking[r.BookingId!.Value],
-            r.Court, r.DeviceId) { Seq = r.Seq })];
+            r.Court, r.DeviceId) { Seq = r.Seq, OrganiserUserId = organisers[r.BookingId!.Value] })];
     }
 
     /// <summary>
@@ -553,6 +567,8 @@ public static partial class AdminMemberTraceAssembly
                     SeatOfName = PersonNames.Of(SeatOfOther(row, q.UserId), s.Names),
                     // R18 E18-8: this member did it themselves.
                     BySelf = row.ActorUserId == q.UserId,
+                    // R19 E19-3: a payer at the box with no seat paid for the court and lit it; they did not check in.
+                    PaidAndLit = PaidAndLitOf(row, details, s),
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -736,9 +752,11 @@ public static partial class AdminMemberTraceAssembly
             if (kind is null || kind == TraceKinds.Unrecognised) continue;
 
             s.Courts.TryGetValue(row.CourtId, out var court);
-            var holder = TwinCodeHolderOf(row, s);
+            var twin = TwinOf(row, s);
+            var holder = TwinCodeHolderOf(twin);
+            var at = ReceiptAtOf(row, twin);
             yield return new TraceEventRow(
-                At: row.OccurredAt,
+                At: at,
                 SourceId: row.Id,
                 Source: ReceiptSource,
                 Kind: kind,
@@ -746,8 +764,9 @@ public static partial class AdminMemberTraceAssembly
                 ActorUserId: Guid.Empty,
                 ActorKind: TraceActors.Device,
                 ActorName: null,
-                SubjectUserId: null,
-                SubjectName: null,
+                // R19 E19-2: about the booking's organiser, as the server's own lights rows are (CSV subject too).
+                SubjectUserId: row.OrganiserUserId,
+                SubjectName: PersonNames.Of(row.OrganiserUserId, s.Names),
                 Court: court,
                 AmountMinutes: null,
                 BalanceAfterMinutes: null,
@@ -757,7 +776,7 @@ public static partial class AdminMemberTraceAssembly
                     ("device_id", row.DeviceId)))
             {
                 DeviceCode = s.DeviceCodes.GetValueOrDefault(row.DeviceId),
-                OutageId = OutageAt(s, row.DeviceId, row.OccurredAt),
+                OutageId = OutageAt(s, row.DeviceId, at),
                 CodeHolderUserId = holder,
                 CodeHolderName = holder is { } h ? PersonNames.Of(h, s.Names) : null,
             };
