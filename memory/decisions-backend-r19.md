@@ -16,8 +16,7 @@ last_verified: 2026-10-06
   **Why:** R18 D18-5 refused the body but filed it against the FIRST-named MAC, so box-then-gate blamed the
   box and gate-then-box the door for a body either may have sent; "the charged board" is no better, since the
   charged MAC is just the first `"mac"` the regex saw. Same rule for an unreadable (cut) body naming two.
-- `TopLevelMacs` now tolerates a body that stops parsing (returns what it read); `NamesTwoBoards` only ever
-  calls it on parsed JSON, so its D18-5 behaviour is unchanged.
+- `TopLevelMacs` tolerates a body that stops parsing; `NamesTwoBoards` (D18-5) only calls it on parsed JSON.
 - Console: the two-board detail is not in `deviceFaultCopy.ts`'s `BODY_FAULT` table, so it renders as the raw
   detail (as R18's `TwoBoardsDetail` already did). A cut body naming two boards no longer maps to the
   "dropped" explanation line for the same reason.
@@ -40,8 +39,7 @@ last_verified: 2026-10-06
   Not 400 (a diagnostic counter must never take the roster down), not clamp (a clamped 9e18 would "confirm").
   `no_push`/`events_lost` were already clamped into int; `uptime_ms` out of range gives no boot.
 - **Restore rows are about the organiser (E19-4):** `RelayRestoreItem.OrganiserUserId` (= `booking.UserId`) is the
-  audit subject; the light state's `CausedByUserId` stays the payer (`PaidByUserId ?? UserId`). Tests walk boots
-  on a movable clock with the count sticky per boot (`DeviceRelayRestoreHttpTests`).
+  audit subject; the light state's `CausedByUserId` stays the payer. Tests: boots on a movable clock, count sticky.
 
 - **One instant per lighting (E19-2).** An activation receipt with a server `court.lights_on` twin prints at the
   TWIN's instant (`ReceiptAtOf`) — the box's queue re-uploads scans answered online with its own clock, which moved
