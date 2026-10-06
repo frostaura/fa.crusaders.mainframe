@@ -149,7 +149,9 @@ public sealed partial class PlayersQuery
         var owed = await _shares.OwedAsync(booking, ct);
         var people = await MembersAsync(seats.Select(s => s.UserId).Append(booking.UserId).Append(booking.PaidByUserId), ct);
         var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
-        var table = await TableAsync(new DetailContext(booking, seats, people, owed, role, mySeat?.Id, settings), ct);
+        // R19 E19-3: a seatless game's organiser row and its count read the organiser's OWN check-in.
+        var organiserIn = await SeatlessOrganiserInAsync(booking, seats, ct);
+        var table = await TableAsync(new DetailContext(booking, seats, people, owed, role, mySeat?.Id, settings) { OrganiserIn = organiserIn }, ct);
         var (refunded, penalty) = await SettledAsync(booking, ct);
         var cost = await OrganiserCostAsync(booking, owed, ct);
         var (cancelledBy, cancelCause, cancelReason) = BookingCancellation.Wire(await BookingCancellation.ForAsync(_db, booking, ct));
@@ -199,7 +201,7 @@ public sealed partial class PlayersQuery
             attendance = new
             {
                 checked_in_at = booking.CheckedInAt,
-                players_checked_in = await PlayersCheckedInAsync(booking, seats, ct),
+                players_checked_in = PlayersCheckedIn(seats, organiserIn),
             },
             permissions = Permissions(booking, settings, role, mySeat),
 
@@ -218,17 +220,19 @@ public sealed partial class PlayersQuery
     /// <remarks>
     /// R18 (FX18, BE18b's E18-6 rule): <c>CheckedInAt</c> is whoever LIT the court — the money rule — and a
     /// pay-for payer with no accepted seat is not a player. After only the payer's scan a seatless game read
-    /// "1 of 1 checked in" while the organiser had not arrived. When somebody else paid, the organiser counts
-    /// only from their own check-in row (<see cref="SeatCheckIn.AlreadyRecordedAsync"/>: their own
-    /// <c>court.activated</c>, or the seatless <c>court.checked_in</c> their later scan writes).
+    /// "1 of 1 checked in" while the organiser had not arrived. R19 E19-3: the count and the organiser row
+    /// read ONE value, the organiser's own check-in (<see cref="PlayerEvidence.SeatlessOrganiserCheckInAsync"/>)
+    /// — the row printed the payer's instant while the count said nobody had arrived.
     /// </remarks>
-    private async Task<int> PlayersCheckedInAsync(Booking booking, List<BookingParticipant> seats, CancellationToken ct)
+    private static int PlayersCheckedIn(List<BookingParticipant> seats, DateTimeOffset? seatlessOrganiserIn)
     {
         if (seats.Count != 0) return seats.Count(s => s.CheckedInAt is not null);
-        if (booking.CheckedInAt is null) return 0;
-        if (booking.UserId is not { } organiser || booking.PaidByUserId is not { } payer || payer == organiser) return 1;
-        return await SeatCheckIn.AlreadyRecordedAsync(_db, booking, organiser, ct) ? 1 : 0;
+        return seatlessOrganiserIn is null ? 0 : 1;
     }
+
+    /// <summary>R19 E19-3: the organiser's own check-in on a game with no seats; null on one with seats (each seat carries its own).</summary>
+    private Task<DateTimeOffset?> SeatlessOrganiserInAsync(Booking booking, List<BookingParticipant> seats, CancellationToken ct) =>
+        seats.Count == 0 ? PlayerEvidence.SeatlessOrganiserCheckInAsync(_db, booking, ct) : Task.FromResult<DateTimeOffset?>(null);
 
     /// <summary>What the organiser is out on this booking, and who else paid for it — null when nobody did.</summary>
     private sealed record OrganiserCost(int Owed, Guid? PaidBy);
@@ -271,7 +275,11 @@ public sealed partial class PlayersQuery
 
     private sealed record DetailContext(
         Booking Booking, List<BookingParticipant> Seats, Dictionary<Guid, PublicMember> People, int Owed, string Role, Guid? MySeatId,
-        TenantSettingsView Settings);
+        TenantSettingsView Settings)
+    {
+        /// <summary>R19 E19-3: on a game with no seats, the organiser's own check-in (null on one with seats).</summary>
+        public DateTimeOffset? OrganiserIn { get; init; }
+    }
 
     private sealed record DetailTable(List<object> Players, int Received, int Unpaid);
 
@@ -295,7 +303,7 @@ public sealed partial class PlayersQuery
                 s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct, CancelledSince(d.Booking)) : 0);
             players.Add(SeatView(d.Booking, s, d.People, money, await SeatToldAsync(d, s, ct)));
         }
-        if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
+        if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People, d.OrganiserIn));
         return new DetailTable(players, received, unpaid);
     }
 
@@ -412,8 +420,11 @@ public sealed partial class PlayersQuery
         };
     }
 
-    /// <summary>A booking nobody added players to is "just the booker": one seat, the whole price.</summary>
-    private static object ImplicitOrganiser(Booking b, Dictionary<Guid, PublicMember> people)
+    /// <summary>
+    /// A booking nobody added players to is "just the booker": one seat, the whole price — checked in at
+    /// <paramref name="checkedIn"/>, the organiser's OWN check-in, never a pay-for payer's (R19 E19-3).
+    /// </summary>
+    private static object ImplicitOrganiser(Booking b, Dictionary<Guid, PublicMember> people, DateTimeOffset? checkedIn)
     {
         var member = people.TryGetValue(b.UserId!.Value, out var m) ? m : null;
         return new
@@ -436,7 +447,7 @@ public sealed partial class PlayersQuery
             needs_consent = false,
             settled_outside = false,
             lapsed = false,
-            checked_in_at = b.CheckedInAt,
+            checked_in_at = checkedIn,
             invited_at = b.CreatedAt,
             responded_at = b.CreatedAt,
         };
@@ -604,8 +615,9 @@ public sealed partial class PlayersQuery
 
         var rows = await _db.BookingParticipants.AsNoTracking()
             .Where(p => mine.Contains(p.BookingId) && p.UserId != null && p.UserId != me && p.Status == ParticipantStatus.Accepted)
-            .Join(_db.Bookings.Where(b => b.StartsAt >= since && b.StartsAt <= now && b.CheckedInAt != null
-                                          && b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.AdminBlock),
+            // R19 E19-3: checked in by a PLAYER — a pay-for payer's scan alone is not a game anybody played.
+            .Join(PlayerEvidence.CheckedInByAPlayer(_db, _db.Bookings.Where(b => b.StartsAt >= since && b.StartsAt <= now
+                                          && b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.AdminBlock)),
                 p => p.BookingId, b => b.Id, (p, b) => new { UserId = p.UserId!.Value, b.StartsAt })
             .ToListAsync(ct);
 
@@ -672,8 +684,8 @@ public sealed partial class PlayersQuery
         if (ids.Count == 0) return [];
         var now = DateTimeOffset.UtcNow;
         var mine = _db.BookingParticipants.Where(p => p.UserId == me && p.Status == ParticipantStatus.Accepted).Select(p => p.BookingId);
-        var games = _db.Bookings.Where(b => b.CheckedInAt != null && b.StartsAt <= now && b.Status != BookingStatus.Cancelled
-                                            && b.Status != BookingStatus.AdminBlock && (b.UserId == me || mine.Contains(b.Id)));
+        var games = PlayerEvidence.CheckedInByAPlayer(_db, _db.Bookings.Where(b => b.StartsAt <= now && b.Status != BookingStatus.Cancelled
+                                            && b.Status != BookingStatus.AdminBlock && (b.UserId == me || mine.Contains(b.Id))));
         var seated = await _db.BookingParticipants.AsNoTracking()
             .Where(p => p.UserId != null && ids.Contains(p.UserId!.Value) && p.Status == ParticipantStatus.Accepted)
             .Join(games, p => p.BookingId, b => b.Id, (p, b) => new { UserId = p.UserId!.Value, b.Id, b.StartsAt })

@@ -7,7 +7,7 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <summary>
 /// One attended booking from one member's point of view — a <b>session</b> (§1).
 /// </summary>
-/// <param name="EvidenceAt">The member's own seat check-in when set, else the booking's — what orders sessions (§5.6).</param>
+/// <param name="EvidenceAt">The member's own seat check-in when set, else the game's player evidence (R19 E19-3) — what orders sessions (§5.6).</param>
 /// <param name="PlayedMinutes"><c>max(0, min(EndsAt, CancelledAt ?? EndsAt) − StartsAt)</c> in whole minutes.</param>
 /// <param name="OtherPlayers">The OTHER members who were players of the booking (§5.1 <c>partners</c>).</param>
 public sealed record AttendedSession(
@@ -38,12 +38,20 @@ public sealed record AttendedSession(
 /// Who attended what, for play (<c>docs/specs/play.md</c> §1). Attendance is <c>CheckedInAt</c> —
 /// set only by the court box's identification or a no-show reversal on box evidence — never the
 /// clock, never <c>ChargedAt</c>, and never a door scan. A member attended a booking when their own
-/// seat carries a check-in (whatever the seat's status now), or when the booking carries one and
-/// they are a player of it — and (R17 J17-5) the booking was not cancelled: only the club can cancel
+/// seat carries a check-in (whatever the seat's status now), or when a PLAYER's scan checked the
+/// booking in and they are a player of it — and (R17 J17-5) the booking was not cancelled: only the club can cancel
 /// a session once somebody has checked in, and a session the club called off is not one the member
 /// attended. That is the ONE definition of attended — stats, the streak, partners, badges and their
 /// progress, the monthly ring and the member's time-on-court reports all read it here, so no two of
 /// them can disagree about a club-cancelled session again.
+///
+/// <para>
+/// <b>R19 E19-3: a pay-for payer's scan is nobody's attendance.</b> <c>bookings.CheckedInAt</c> is
+/// whoever lit the court, and a payer with no accepted seat is not a player (R18 E18-6) — so after
+/// only the payer's scan the organiser of a seatless game had a session at the payer's instant and an
+/// accepted partner who never came had one too. Where somebody other than the booker paid, the game's
+/// evidence is now its players' own scans only (<see cref="PlayerEvidence"/>).
+/// </para>
 ///
 /// <para>
 /// <b>A player</b> is exactly P11's rule: the booker, or a member holding an ACCEPTED seat. A
@@ -101,25 +109,19 @@ public static class AttendanceQuery
             .Where(b => b.UserId != null && b.UserId != userId
                         && db.BookingParticipants.Any(p => p.BookingId == b.Id && p.UserId == userId));
         var candidates = await booked.Concat(seatedOn)
-            .Select(b => new { b.Id, UserId = b.UserId!.Value, b.StartsAt, b.EndsAt, b.CancelledAt, b.CheckedInAt })
+            .Where(b => b.CancelledAt == null)
+            .Select(b => new PlayerEvidence.Candidate(b.Id, b.UserId!.Value, b.PaidByUserId, b.StartsAt, b.EndsAt, b.CancelledAt, b.CheckedInAt))
             .ToListAsync(ct);
+        // R19 E19-3: where somebody other than the booker paid, the booking's check-in may be the payer's.
+        var arrivals = await PlayerEvidence.ArrivalsAsync(
+            db, candidates.Where(c => c.CheckedInAt != null && !PlayerEvidence.CheckInIsAPlayersScan(c.UserId, c.PaidByUserId)).ToList(), ct);
         var rows = candidates
-            .Select(b => new
-            {
-                b.Id,
-                b.UserId,
-                b.StartsAt,
-                b.EndsAt,
-                b.CancelledAt,
-                b.CheckedInAt,
-                Own = ownCheckIn.TryGetValue(b.Id, out var own) ? own : (DateTimeOffset?)null,
-            })
-            .Where(x => x.CancelledAt == null)
-            .Where(x => x.Own != null || (x.CheckedInAt != null && (x.UserId == userId || acceptedOn.Contains(x.Id))))
+            .Select(c => PlayerEvidence.Of(c, userId, ownCheckIn.TryGetValue(c.Id, out var own) ? own : null, acceptedOn.Contains(c.Id), arrivals))
+            .Where(x => x.At != null)
             .ToList();
         if (rows.Count == 0) return [];
 
-        var ids = rows.Select(r => r.Id).ToList();
+        var ids = rows.Select(r => r.Booking.Id).ToList();
         var seats = await db.BookingParticipants.AsNoTracking()
             .Where(p => ids.Contains(p.BookingId) && p.UserId != null && p.Status == ParticipantStatus.Accepted)
             .Select(p => new { p.BookingId, UserId = p.UserId!.Value })
@@ -127,12 +129,14 @@ public static class AttendanceQuery
         var seated = seats.ToLookup(s => s.BookingId, s => s.UserId);
 
         return rows
-            .Select(r => new AttendedSession(
-                r.Id, r.StartsAt, AttendedAt(r.StartsAt, (r.Own ?? r.CheckedInAt)!.Value), PlayedMinutes(r.StartsAt, r.EndsAt, r.CancelledAt),
-                seated[r.Id].Prepend(r.UserId).Where(u => u != userId).Distinct().ToList())
+            .Select(x => (x.Booking, x.At!.Value))
+            .Select(x => new AttendedSession(
+                x.Booking.Id, x.Booking.StartsAt, AttendedAt(x.Booking.StartsAt, x.Value),
+                PlayedMinutes(x.Booking.StartsAt, x.Booking.EndsAt, x.Booking.CancelledAt),
+                seated[x.Booking.Id].Prepend(x.Booking.UserId).Where(u => u != userId).Distinct().ToList())
             {
-                EndedAt = r.CancelledAt is { } c && c < r.EndsAt ? c : r.EndsAt,
-                Cancelled = r.CancelledAt is not null,
+                EndedAt = x.Booking.CancelledAt is { } c && c < x.Booking.EndsAt ? c : x.Booking.EndsAt,
+                Cancelled = x.Booking.CancelledAt is not null,
             })
             .OrderBy(s => s.EvidenceAt).ThenBy(s => s.BookingId)
             .ToList();

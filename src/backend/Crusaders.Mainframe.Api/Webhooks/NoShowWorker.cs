@@ -238,13 +238,14 @@ public sealed class NoShowWorker : BackgroundService
         var penalty = PenaltyFor(b, tSettings, wasCharged, courtWasDark);
         var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == b.CourtId, ct);
 
+        var (verdictAt, moneyAt) = CauseThenMoney(now);   // R19 E19-5: the no-show row before the money it moved
         var postings = new List<LedgerPosting>(2);
         if (wasCharged && b.AmountChargedMinutes > 0)
         {
             postings.Add(new LedgerPosting(
                 UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountMinutes: b.AmountChargedMinutes,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: RefundReason(courtWasDark, court))
-            { StreamReason = SweepStreamReason(courtWasDark), At = now });
+            { StreamReason = SweepStreamReason(courtWasDark), At = moneyAt });
         }
 
         // A penalty is only collectable against money that moved: charging one for a booking never
@@ -255,7 +256,7 @@ public sealed class NoShowWorker : BackgroundService
                 UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountMinutes: -penalty,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
                 Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Min(b.AmountChargedMinutes)})")
-            { StreamReason = SweepStreamReason(courtWasDark), At = now });
+            { StreamReason = SweepStreamReason(courtWasDark), At = moneyAt });
         }
 
         // Status FIRST, then one save carrying it and both movements together.
@@ -295,7 +296,7 @@ public sealed class NoShowWorker : BackgroundService
         // grows forward into the next booking on the court and the exclusion constraint
         // throws — stalling the sweep for every tenant.
         if (now < b.EndsAt) b.EndsAt = now;
-        var marked = StageNoShowRow(db, b, courtWasDark, penalty);   // E7-1: rides the money's save
+        var marked = StageNoShowRow(db, b, (courtWasDark, penalty), verdictAt);   // E7-1: rides the money's save
 
         try
         {
@@ -373,6 +374,19 @@ public sealed class NoShowWorker : BackgroundService
     }
 
     /// <summary>
+    /// R19 E19-5: the cause before its effects, as a cancellation's has been since R15 (E15-4). The
+    /// <c>booking.no_show</c> row is stamped at the sweep's instant and its refund and penalty one
+    /// microsecond — the stored precision — after it, so the Night, the CSV and the webhooks never read
+    /// the money ahead of the verdict that moved it. The row used to take the wall clock at its
+    /// construction, which is after the sweep's instant the money is posted at (R15 D14-4).
+    /// </summary>
+    internal static (DateTimeOffset Verdict, DateTimeOffset Money) CauseThenMoney(DateTimeOffset now)
+    {
+        var verdict = now.Storable();
+        return (verdict, verdict.AddMicroseconds(1));
+    }
+
+    /// <summary>
     /// The refund row's words (review round 7, E7-2). A refund because the court's box was
     /// offline is not a no-show: the member was told "you have not been marked down for missing
     /// it", and the wallet, the club's ledger and the <c>minutes.refunded</c> webhook all read
@@ -395,11 +409,15 @@ public sealed class NoShowWorker : BackgroundService
     /// "The club took a no-show back" on a member's night followed no row saying it was marked,
     /// and a refund for the club's own outage read as nothing at all.
     /// </summary>
-    private static AuditLog StageNoShowRow(MainframeDbContext db, Booking b, bool courtWasDark, int penalty)
+    /// <remarks>R19 E19-5: at <paramref name="at"/>, the sweep's instant — before the money it moved.</remarks>
+    private static AuditLog StageNoShowRow(MainframeDbContext db, Booking b, (bool CourtWasDark, int Penalty) verdict, DateTimeOffset at)
     {
+        var (courtWasDark, penalty) = verdict;
         var row = new AuditLog
         {
             TenantId = b.TenantId,
+            CreatedAt = at,
+            ScanAt = at,
             ActorUserId = Guid.Empty,
             SubjectUserId = b.UserId,
             Action = "booking.no_show",
