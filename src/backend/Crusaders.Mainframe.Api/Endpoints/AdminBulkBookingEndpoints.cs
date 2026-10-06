@@ -85,11 +85,10 @@ public static class AdminBulkBookingEndpoints
             return Results.BadRequest(new { error = "duplicate_item", booking_id = duplicate.Key });
 
         var actorId = ctx.User.Id() ?? Guid.Empty;
-        // Review round 1 (lane F1): what each partner had paid, so each item can say what went
-        // back to them and what the organiser keeps — the member cancel's truth, in bulk.
+        // Review round 1 (lane F1): each item says what went back to each partner and what the
+        // organiser keeps — the member cancel's truth, in bulk. Read after the cancels settled, never
+        // before them (R19 J19-4: an accept landing mid-cancel was missed by a before-read).
         var split = ctx.RequestServices.GetRequiredService<SplitCancelView>();
-        var paidBefore = new Dictionary<Guid, Dictionary<Guid, int>>();
-        foreach (var item in items) paidBefore[item.BookingId] = await split.PaidByPartnerAsync(item.BookingId, ct);
         // R12 X12-1: each booking's refund and the shares that follow it reach a wallet as ONE frame.
         var holds = items.Select(i => BookingEndpoints.OneWalletFrame(ctx, i.BookingId)).ToList();
         BulkCancelOutcome outcome;
@@ -111,7 +110,7 @@ public static class AdminBulkBookingEndpoints
         var refunds = new Dictionary<Guid, List<PartnerRefund>>();
         foreach (var r in outcome.Results.Where(r => r.Succeeded))
         {
-            refunds[r.BookingId] = await split.AfterAsync(r.BookingId, paidBefore.GetValueOrDefault(r.BookingId) ?? [], ct);
+            refunds[r.BookingId] = await split.AfterAsync(r.BookingId, ct);
         }
 
         // ONE summary row per BATCH — the INTENT, the admin's own words about why a list of courts

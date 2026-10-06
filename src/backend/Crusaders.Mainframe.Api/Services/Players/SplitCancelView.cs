@@ -40,18 +40,6 @@ public sealed class SplitCancelView
     }
 
     /// <summary>
-    /// What each member partner has paid towards this booking, now. Not what a cancel's answer is
-    /// built from any more (R19 J19-4 — see <see cref="AfterAsync(Guid, CancellationToken)"/>).
-    /// </summary>
-    public async Task<Dictionary<Guid, int>> PaidByPartnerAsync(Guid bookingId, CancellationToken ct)
-    {
-        var seats = await PartnerSeatsAsync(bookingId, ct);
-        var paid = new Dictionary<Guid, int>();
-        foreach (var s in seats) paid[s.Id] = await _shares.PaidAsync(s, ct);
-        return paid;
-    }
-
-    /// <summary>
     /// The refunds a cancellation that returns <paramref name="netRefund"/> to the organiser would
     /// send on to the partners, per the share rule.
     /// </summary>
@@ -117,17 +105,6 @@ public sealed class SplitCancelView
             refunds[s.Id] = paidAtCancel - target;
         }
         return await NameAsync(seats, s => refunds[s.Id], ct);
-    }
-
-    /// <summary>
-    /// <see cref="AfterAsync(Guid, CancellationToken)"/> for a caller that still reads
-    /// <see cref="PaidByPartnerAsync"/> first (the bulk cancel). The pre-read is no longer consulted
-    /// (R19 J19-4): it is what missed an accept landing mid-cancel.
-    /// </summary>
-    public Task<List<PartnerRefund>> AfterAsync(Guid bookingId, IReadOnlyDictionary<Guid, int> paidBefore, CancellationToken ct)
-    {
-        _ = paidBefore;
-        return AfterAsync(bookingId, ct);
     }
 
     private Task<List<BookingParticipant>> PartnerSeatsAsync(Guid bookingId, CancellationToken ct) =>

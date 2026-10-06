@@ -24,8 +24,7 @@ last_verified: 2026-10-06
   lock (BookingService, another owner, and the accept's own reconcile can post the return before the
   cancel's hook does, so "the cancel's own moves" is not reliable either). A collection cannot land after
   a cancel commits, so it is always in "still paid"; a waiting return is still paid in, so still reported.
-  The 3-arg `AfterAsync(id, paidBefore, ct)` ignores its snapshot (bulk cancel still passes one; asked the
-  integrator to drop that pre-read).
+  All three answers (member, desk, bulk cancel) call `AfterAsync(id, ct)`; the pre-read and its overload are gone.
 - **No room is said as no room (J19-5).** `PlayersService.FullRefusal` in `AddAsync` (organiser and desk,
   member/guest/link): four live seats (organiser counted, written or not) → `409 booking_full {max_players: 4}`;
   fewer free seats than players asked → `409 too_many_players {max_players: 3, free_seats}`. A NAMED seat
