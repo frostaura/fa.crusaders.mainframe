@@ -42,3 +42,11 @@ last_verified: 2026-10-06
   ~13k of ~28k upstream ports in TIME_WAIT (pool 64 × workers overflows); `keepalive 256` + `listen 80
   backlog=4096` + `worker_connections 8192` cut it to ~4.5k — not applied (not needed to pass, needs a main
   nginx.conf in the image).
+
+## Follow-up, lane FX18 (044e984c, 5477f65e)
+- **"N checked in" follows E18-6:** a seatless booking someone else paid for counts the organiser only from
+  their own row (`SeatCheckIn.AlreadyRecordedAsync`, now public) — `CheckedInAt` is who lit it, not who came.
+  Organiser-paid/club bookings keep `CheckedInAt`; seated games count seat stamps. Test `R18xPlayersCheckedIn*`.
+- **Client Night:** a board kind that reads no code (`lights.restored`) never falls back to `subject` →
+  "reported by Court N's board"; `admin_inherited` → "when they signed in"; `account.*` rows never fold,
+  restores fold only with restores (`nightCopy.actorClause` takes the row as its 5th arg).
