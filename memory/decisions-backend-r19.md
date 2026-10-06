@@ -40,8 +40,8 @@ last_verified: 2026-10-06
   Not 400 (a diagnostic counter must never take the roster down), not clamp (a clamped 9e18 would "confirm").
   `no_push`/`events_lost` were already clamped into int; `uptime_ms` out of range gives no boot.
 - **Restore rows are about the organiser (E19-4):** `RelayRestoreItem.OrganiserUserId` (= `booking.UserId`) is the
-  audit subject; the light state's `CausedByUserId` stays the payer (`PaidByUserId ?? UserId`).
-- Test model fixed: `DeviceRelayRestoreHttpTests` walks boots on a movable clock with the count sticky per boot.
+  audit subject; the light state's `CausedByUserId` stays the payer (`PaidByUserId ?? UserId`). Tests walk boots
+  on a movable clock with the count sticky per boot (`DeviceRelayRestoreHttpTests`).
 
 - **One instant per lighting (E19-2).** An activation receipt with a server `court.lights_on` twin prints at the
   TWIN's instant (`ReceiptAtOf`) — the box's queue re-uploads scans answered online with its own clock, which moved
