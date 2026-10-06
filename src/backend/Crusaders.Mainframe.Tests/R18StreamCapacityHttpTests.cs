@@ -141,7 +141,8 @@ public sealed class R18StreamCapacityHttpTests(PostgresFixture pg) : IClassFixtu
         }
 
         Assert.Equal((500, InternalErrors.Code), InternalErrors.Classify(new NpgsqlException("boom", new IOException()), ctx.Request));
-        Assert.Equal((500, InternalErrors.Code), InternalErrors.Classify(new PostgresException("x", "ERROR", "ERROR", "23505"), ctx.Request));
+        // R18 J18-2 (BE18b): a unique violation is a lost race now (503 conflict_retry) — a check violation is still a fault.
+        Assert.Equal((500, InternalErrors.Code), InternalErrors.Classify(new PostgresException("x", "ERROR", "ERROR", "23514"), ctx.Request));
     }
 
     /// <summary>The gate never lets more stream-side reads run at once than it has permits, however many streams ask.</summary>

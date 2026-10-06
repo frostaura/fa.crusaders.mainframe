@@ -356,8 +356,12 @@ public static partial class AdminMemberTraceAssembly
             .Where(a => a.CreatedAt >= q.From && a.CreatedAt < q.To)
             .Take(q.StrandRows)
             .ToListAsync(ct);
-        return [.. rows.Where(r => PartnerBookingOf(r) is { } b && (r.Action == TraceKinds.LightsOnAction ? played : ids).Contains(b))];
+        return [.. rows.Where(r => PartnerBookingOf(r) is { } b && (IsLightsRow(r.Action) ? played : ids).Contains(b))];
     }
+
+    /// <summary>R17 E17-4 / R18 E18-3: a lights row a partner's Night reads only for a session they were in — on, or restored after a power cut.</summary>
+    private static bool IsLightsRow(string action) =>
+        action == TraceKinds.LightsOnAction || action == TraceKinds.LightsRestoredAction;
 
     /// <summary>One booking somebody else made that this member is on: as a partner (any seat status), or as the payer at the box.</summary>
     private sealed record PartnerGame(Guid Id, Guid Booker, bool Played);
@@ -547,12 +551,14 @@ public static partial class AdminMemberTraceAssembly
                     ByOther = ByOtherOf(row, view, q.UserId),
                     ForOther = row.ActorUserId == q.UserId && row.SubjectUserId is { } subject && subject != q.UserId,
                     SeatOfName = PersonNames.Of(SeatOfOther(row, q.UserId), s.Names),
+                    // R18 E18-8: this member did it themselves.
+                    BySelf = row.ActorUserId == q.UserId,
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
                 ActorName: actorName,
-                SubjectUserId: row.SubjectUserId,
-                SubjectName: PersonNames.Of(row.SubjectUserId, s.Names),
+                SubjectUserId: SubjectOf(row),
+                SubjectName: PersonNames.Of(SubjectOf(row), s.Names),
                 Court: court,
                 AmountMinutes: null,
                 BalanceAfterMinutes: null,
@@ -576,6 +582,18 @@ public static partial class AdminMemberTraceAssembly
     {
         if (row.ActorUserId == traced || row.SubjectUserId == traced) return TraceView.Own;
         return OrganiserOf(row) == traced ? TraceView.Organiser : TraceView.Partner;
+    }
+
+    /// <summary>
+    /// R18 E18-4: the row's subject column, one rule for every check-in — the booking's organiser, whose
+    /// booking was checked in. <c>court.activated</c> stores it so; a seat's <c>court.checked_in</c> stores
+    /// the seat holder (the scanner, already the actor) and names the organiser in its details. Every
+    /// other row: as stored.
+    /// </summary>
+    private static Guid? SubjectOf(AuditLog row)
+    {
+        if (row.Action != TraceKinds.SeatCheckedInAction) return row.SubjectUserId;
+        return OrganiserOf(row) ?? row.SubjectUserId;
     }
 
     /// <summary>

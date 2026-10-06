@@ -411,10 +411,17 @@ public sealed class CourtLightStateService
     /// scan that lit a court read on the night as "the club's own automatic check" with no board
     /// code (review round 6, E6-8). Null for a change no board made.
     /// </para>
+    ///
+    /// <para>
+    /// R18 E18-7: returns the staged row so a caller that knows WHEN the lights moved stamps it
+    /// (<see cref="AuditLog.ScanAt"/>) — a lights-on row prints at the scan that lit the court on every
+    /// Night, as the receipt and the <c>booking.lights_on</c> webhook's <c>occurred_at</c> do, never at
+    /// the upload that delivered it.
+    /// </para>
     /// </summary>
-    public void Audit(string action, Guid courtId, int courtNumber, Guid? subjectUserId, object details, Guid? deviceId = null)
+    public AuditLog Audit(string action, Guid courtId, int courtNumber, Guid? subjectUserId, object details, Guid? deviceId = null)
     {
-        _db.AuditLogs.Add(new AuditLog
+        var row = new AuditLog
         {
             TenantId = _tenant.TenantId,
             ActorUserId = Guid.Empty,
@@ -427,6 +434,8 @@ public sealed class CourtLightStateService
                 device_id = deviceId,
                 details,
             }),
-        });
+        };
+        _db.AuditLogs.Add(row);
+        return row;
     }
 }

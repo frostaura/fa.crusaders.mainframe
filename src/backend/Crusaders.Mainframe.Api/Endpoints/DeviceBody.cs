@@ -86,8 +86,43 @@ public static partial class DeviceBody
         }
 
         if (value is null) throw await RefuseAsync(ctx, bytes, NotJsonDetail);
+        // R18 D18-5: the board the limiter charged (the FIRST "mac" in the text) must be the board the
+        // route acts as (the LAST one, which the JSON reader keeps). Two, or one the limiter did not read,
+        // is a body naming two boards — refused, so a flood cannot be charged to A while acting as B.
+        if (NamesTwoBoards(ctx, bytes)) throw await RefuseAsync(ctx, bytes, TwoBoardsDetail);
         if (replaced) await FileAsync(ctx, bytes, ReplacedDetail);
         return value;
+    }
+
+    /// <summary>R18 D18-5: the fault's detail when a body names its board more than once, or differently from what was charged.</summary>
+    public const string TwoBoardsDetail = "the message named more than one board, so nothing in it was used";
+
+    /// <summary>
+    /// R18 D18-5: whether the body's top-level <c>mac</c> appears more than once, or differs from the MAC
+    /// the rate limiter charged this request to (<see cref="Security.DeviceRateKey.ChargedMac"/>).
+    /// </summary>
+    internal static bool NamesTwoBoards(HttpContext ctx, byte[] bytes)
+    {
+        var macs = TopLevelMacs(bytes);
+        if (macs.Count > 1) return true;
+        if (Security.DeviceRateKey.ChargedMac(ctx) is not { } charged) return false;
+        return macs.Count == 1 && DeviceRegistryService.NormaliseMacAddress(macs[0]) != charged;
+    }
+
+    /// <summary>Every value of a top-level <c>"mac"</c> property (any case), in order. Empty for a body that is not an object.</summary>
+    internal static List<string> TopLevelMacs(byte[] bytes)
+    {
+        var found = new List<string>();
+        var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+        while (reader.Read())
+        {
+            // Any spelling the binder would take for it: the device routes bind case-insensitively.
+            if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1
+                || !string.Equals(reader.GetString(), "mac", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!reader.Read()) break;
+            found.Add(reader.TokenType == JsonTokenType.String ? reader.GetString() ?? "" : "");
+        }
+        return found;
     }
 
     /// <summary>

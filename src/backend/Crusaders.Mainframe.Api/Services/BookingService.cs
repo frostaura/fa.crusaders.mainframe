@@ -1364,8 +1364,10 @@ public sealed class BookingService
 
         // R17 E17-6 / J17-7: the desk is told WHY a booking it can see is not cancellable — already
         // cancelled is 409 booking_not_open (the split and add routes' word), a played or no-show row
-        // 409 not_cancellable with its status. A member's own stays "not found", as it always was.
-        if (booking.Status != BookingStatus.Booked) return actorIsAdmin ? Refused(booking.Status) : new CancellationResult.NotFound();
+        // 409 not_cancellable with its status. R18 J18-8: and so is the member about their OWN booking
+        // (a stranger was answered "not found" above) — a second tap on a cancelled game read "That
+        // booking is no longer there".
+        if (booking.Status != BookingStatus.Booked) return Refused(booking.Status);
 
         // The member's own refusals. The ADMIN route is the club acting, so neither applies to it —
         // not even when the admin owns the booking (R15 J15-2: the desk cancels a started session).
@@ -1627,41 +1629,18 @@ public sealed class BookingService
     private sealed record Checker(Guid UserId, string? OtherName);
 
     /// <summary>
-    /// R16 E16-3: whose scan checked this booking in — the seat stamped at the booking's check-in
-    /// (activation and the reversal both stamp the scanner's own seat), else the scanner on the
-    /// booking's <c>court.activated</c> row (a pay-for payer holds no seat), else the booker. Null when
-    /// nobody checked in. The name is only filled for somebody other than the booker.
+    /// R16 E16-3: whose scan checked this booking in, and their name when that was not the booker. Null
+    /// when nobody checked in. R18 (BE18a's ask): the rule is <see cref="ClubCancelNotices.CheckedInByAsync"/>
+    /// — the one the partners' <c>cancelled_share_stands</c> frame names — so the organiser's and the
+    /// partners' frames of one cancel can never name two different people.
     /// </summary>
     private async Task<Checker?> CheckedInByAsync(Booking booking, CancellationToken ct)
     {
-        if (booking.CheckedInAt is not { } at) return null;
-        var seat = await _db.BookingParticipants.AsNoTracking()
-            .Where(p => p.BookingId == booking.Id && p.CheckedInAt == at && p.UserId != null)
-            .OrderBy(p => p.Seat).Select(p => p.UserId).FirstOrDefaultAsync(ct);
-        var scanner = seat ?? await ActivatedByAsync(booking, ct);
-        if ((scanner ?? booking.UserId) is not { } who) return null;
+        if (await ClubCancelNotices.CheckedInByAsync(_db, booking, ct) is not { } who) return null;
         var name = who == booking.UserId
             ? null
             : await _db.Memberships.AsNoTracking().Where(m => m.UserId == who).Select(m => m.FullName).FirstOrDefaultAsync(ct);
         return new Checker(who, name);
-    }
-
-    /// <summary>The first scanner on this booking's <c>court.activated</c> rows (jsonb containment on Postgres).</summary>
-    private async Task<Guid?> ActivatedByAsync(Booking booking, CancellationToken ct)
-    {
-        var rows = _db.AuditLogs.AsNoTracking()
-            .Where(a => a.Action == "court.activated" && a.SubjectUserId == booking.UserId
-                && a.ActorUserId != Guid.Empty && a.DetailsJson != null);
-        if (_db.Database.IsNpgsql())
-        {
-            var containment = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id });
-            return await rows.Where(a => EF.Functions.JsonContains(a.DetailsJson!, containment))
-                .OrderBy(a => a.CreatedAt).Select(a => (Guid?)a.ActorUserId).FirstOrDefaultAsync(ct);
-        }
-        var id = booking.Id.ToString();
-        return (await rows.ToListAsync(ct))
-            .Where(a => a.DetailsJson!.Contains(id, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(a => a.CreatedAt).Select(a => (Guid?)a.ActorUserId).FirstOrDefault();
     }
 
     /// <summary>

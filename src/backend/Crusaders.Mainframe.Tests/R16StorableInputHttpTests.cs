@@ -411,7 +411,7 @@ public sealed class R16StorableInputHttpTests(PostgresFixture pg) : IClassFixtur
     [InlineData("22001", "/api/v1/admin/webhooks", 400, "invalid_body")]
     [InlineData("22021", "/api/v1/auth/login", 400, "invalid_body")]
     [InlineData("22021", "/api/v1/device/heartbeat", 400, "malformed_body")]
-    [InlineData("23505", "/api/v1/admin/webhooks", 500, "internal_error")]
+    [InlineData("23514", "/api/v1/admin/webhooks", 500, "internal_error")]   // R18: 23505 is now 503 conflict_retry
     public void A_value_postgres_cannot_store_is_400_not_500(string sqlState, string path, int status, string code)
     {
         var pgError = new Npgsql.PostgresException("refused", "ERROR", "ERROR", sqlState);

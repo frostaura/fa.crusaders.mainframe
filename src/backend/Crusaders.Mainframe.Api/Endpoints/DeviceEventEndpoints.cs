@@ -707,8 +707,16 @@ public static class DeviceEventEndpoints
             await NoteRelayAsync(services, court.Id, device.Id, e.Court, ct);
         }
 
-        return new ActivationOutcome(settled.Code, booking.Id, ActivationKind, settled.RelatedBookingId);
+        // R18 E18-8: an accepted upload names its member on its rows, as a refusal always has — the
+        // device activity showed "reversed a no-show" with nobody on it. Not a refusal on any Night
+        // (TraceKinds.AcceptedVerdictActions); a settlement refusal keeps its rows as they were.
+        var accepted = settled.Code == ActivationOutcome.Ok || Array.IndexOf(AcceptedCodes, settled.Code) >= 0;
+        return new ActivationOutcome(settled.Code, booking.Id, ActivationKind, settled.RelatedBookingId, SubjectUserId: accepted ? userId : null);
     }
+
+    /// <summary>R18 E18-8: the settled codes that are not refusals — the lights came on and the server took it.</summary>
+    private static readonly string[] AcceptedCodes =
+        [ActivationOutcome.ReversedNoShow, ActivationOutcome.AfterCancel, ActivationOutcome.DisplacedCollision];
 
     /// <summary>
     /// The booking an activation event is evidence for, and whose attendance it is — or the
@@ -798,8 +806,11 @@ public static class DeviceEventEndpoints
                 seq = evidence.Seq,
                 // E10-2: whose code the board read.
                 identified_user_id = userId,
+                // R18 E18-7: the scan, as the online path's row carries it.
+                occurred_at = evidence.At,
             },
-            evidence.DeviceId);
+            // R18 E18-7: printed at the scan the box reported, on every Night — never at the upload.
+            evidence.DeviceId).ScanAt = evidence.At;
     }
 
     /// <summary>
@@ -1489,10 +1500,9 @@ public static class DeviceEventEndpoints
         };
         var detailsJson = WithCourtNumber(System.Text.Json.JsonSerializer.Serialize(details), outcome?.CourtNumber ?? RelayCourtOf(device, e));
 
-        // Named when the handler could name them. Only the gate-open path sets this today:
-        // an activation names its member through the booking on the receipt, while a door
-        // open has no booking to reach one through, so the audit row is the only place the
-        // identity can live at all.
+        // Named when the handler could name them: a door open (no booking to reach one through, so
+        // the row is the only place the identity can live), a refusal that resolved its member, and
+        // (R18 E18-8) an activation the server accepted — the device activity names who scanned.
         var subject = outcome?.SubjectUserId;
 
         var rows = AuditRowsOf(tenant.TenantId, time, outcome, subject, detailsJson);

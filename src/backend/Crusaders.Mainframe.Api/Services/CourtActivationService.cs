@@ -461,11 +461,12 @@ public class CourtActivationService
 
         if (lightRow is not null)
         {
+            // R18 E18-7: printed at the scan that lit it, on every Night.
             _lights.Audit(
                 CourtLightStateService.LightsOnAction, court.Id, court.CourtNumber, booking.UserId,
                 // E10-2: whose code lit it — a partner or a pay-for payer on the organiser's booking.
                 new { method, payer_user_id = payerUserId, booking_id = booking.Id, occurred_at = occurredAt, identified_user_id = identifiedUserId },
-                request.DeviceId);
+                request.DeviceId).ScanAt = occurredAt;
         }
 
         // Saved before the event so a failure here cannot leave a cued light with no
@@ -518,9 +519,16 @@ public class CourtActivationService
     /// <c>court.checked_in</c> row (R17 J17-4: a partner who scanned after the court was lit left no
     /// trace on anybody's Night).
     /// </summary>
+    /// <remarks>
+    /// R18 E18-6: the booker of a seatless game whose court somebody else lit — a pay-for payer at the
+    /// box — has no seat to stamp, so their own later scan left nothing on any record ("activated", and
+    /// no row on their Night). It is recorded once, seatless (<see cref="SeatCheckIn.StageBookerArrivalAsync"/>).
+    /// </remarks>
     private async Task RecordRepeatArrivalAsync(Booking booking, SeatScan scan, CancellationToken ct)
     {
-        if (await SeatCheckIn.StampAsync(_db, booking, scan, ct) is not null) await DatabaseRetry.SaveAsync(_db, ct);
+        var recorded = await SeatCheckIn.StampAsync(_db, booking, scan, ct) is not null
+                       || await SeatCheckIn.StageBookerArrivalAsync(_db, booking, scan, ct);
+        if (recorded) await DatabaseRetry.SaveAsync(_db, ct);
     }
 
     /// <summary>
@@ -773,12 +781,45 @@ public static class SeatCheckIn
         return seat;
     }
 
-    private static AuditLog Row(Booking booking, BookingParticipant seat, SeatScan scan)
+    /// <summary>
+    /// R18 E18-6: the booker's own arrival on a game that holds no seat of theirs, scanned after somebody
+    /// else lit it (a pay-for payer) — one seatless <c>court.checked_in</c> row, once. Nothing when the
+    /// scanner is not the booker, when the booker holds a seat (<see cref="StampAsync"/> records that), or
+    /// when the booker's check-in is already on the record (their own <c>court.activated</c> or an
+    /// earlier row of this kind). Staged, not saved; whether a row was staged.
+    /// </summary>
+    public static async Task<bool> StageBookerArrivalAsync(MainframeDbContext db, Booking booking, SeatScan scan, CancellationToken ct)
+    {
+        if (booking.UserId != scan.UserId) return false;
+        if (await db.BookingParticipants.AnyAsync(p => p.BookingId == booking.Id && p.UserId == scan.UserId, ct)) return false;
+        if (await AlreadyRecordedAsync(db, booking, scan.UserId, ct)) return false;
+        db.AuditLogs.Add(Row(booking, null, scan));
+        return true;
+    }
+
+    /// <summary>Whether this member's check-in on this booking is already a <c>court.activated</c> or <c>court.checked_in</c> row.</summary>
+    private static async Task<bool> AlreadyRecordedAsync(MainframeDbContext db, Booking booking, Guid userId, CancellationToken ct)
+    {
+        var rows = db.AuditLogs.AsNoTracking()
+            .Where(a => (a.Action == Action || a.Action == ActivatedAction) && a.ActorUserId == userId && a.DetailsJson != null);
+        if (db.Database.IsNpgsql())
+        {
+            var containment = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id });
+            return await rows.AnyAsync(a => EF.Functions.JsonContains(a.DetailsJson!, containment), ct);
+        }
+        var id = booking.Id.ToString();
+        return (await rows.ToListAsync(ct)).Any(a => a.DetailsJson!.Contains(id, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The check-in that lit a court — the first scanner's row (<see cref="CourtActivationService"/>).</summary>
+    public const string ActivatedAction = "court.activated";
+
+    private static AuditLog Row(Booking booking, BookingParticipant? seat, SeatScan scan)
     {
         var details = new Dictionary<string, object?>
         {
             ["booking_id"] = booking.Id,
-            ["participant_id"] = seat.Id,
+            ["participant_id"] = seat?.Id,
             ["organiser_user_id"] = booking.UserId,
             ["court_number"] = scan.CourtNumber,
             ["method"] = scan.Method,
@@ -790,7 +831,7 @@ public static class SeatCheckIn
         {
             TenantId = booking.TenantId,
             ActorUserId = scan.UserId,
-            SubjectUserId = seat.UserId,
+            SubjectUserId = seat?.UserId ?? scan.UserId,
             Action = Action,
             ScanAt = scan.At,
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(details),

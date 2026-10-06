@@ -265,7 +265,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
             .CancelAsync(bookingId, club.MemberId, actorIsAdmin: false, waivePenalty: false, default);
 
         Assert.IsType<CancellationResult.Ok>(first);
-        Assert.IsType<CancellationResult.NotFound>(second);
+        // R18 J18-8: the member's second cancel is told the booking is no longer open, not "not found".
+        Assert.IsType<CancellationResult.NotOpen>(second);
 
         // Back where they started, not a booking's worth better off.
         Assert.Equal(200, await BalanceAsync(factory, club, club.MemberId));

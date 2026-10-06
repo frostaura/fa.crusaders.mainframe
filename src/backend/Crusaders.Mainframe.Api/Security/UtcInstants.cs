@@ -62,6 +62,8 @@ public sealed class UtcInstantConverter : JsonConverter<DateTimeOffset>
 /// route. Nothing the request did committed — the database rolled it back — so asking again is the
 /// right answer, and a box (which keeps an event on any 5xx and backs off) and a screen both read it
 /// as "try again", never as a fault in the server.</item>
+/// <item>R18 J18-2: a unique violation (23505) no route answered itself — the same answer as a lost
+/// race, <c>503 {"error":"conflict_retry"}</c> with <c>Retry-After</c>; never 500.</item>
 /// <item>R18: a request that could not get a database connection — the pool exhausted for its whole
 /// wait, the server full (53300) or starting (57P03): <c>503 {"error":"service_busy"}</c> with
 /// <c>Retry-After</c> (<see cref="Persistence.DatabasePool"/>).</item>
@@ -147,6 +149,15 @@ public static class InternalErrors
             return (StatusCodes.Status503ServiceUnavailable, Persistence.DatabaseRetry.ConflictRetry);
         }
 
+        // R18 J18-2 (BE18a's ask): a unique violation (23505) the route did not answer itself — two
+        // requests inserting the same dedupe key, the same seat, the same reference at once. The
+        // loser's whole save rolled back and the winner's stands, so it is a lost race like the one
+        // above: ask again, and the re-read sees what won. Never a 500; a box keeps its event on a 5xx.
+        if (IsUniqueViolation(error))
+        {
+            return (StatusCodes.Status503ServiceUnavailable, Persistence.DatabaseRetry.ConflictRetry);
+        }
+
         // R18 (scalability): the request could not get a database connection at all — the pool stayed
         // exhausted for its whole wait, or the server was full or starting. Nothing ran; the server is
         // busy, not broken. See Persistence.DatabasePool.
@@ -156,6 +167,16 @@ public static class InternalErrors
         }
 
         return (StatusCodes.Status500InternalServerError, Code);
+    }
+
+    /// <summary>R18 J18-2: a PostgreSQL unique violation (23505), wrapped by EF or bare.</summary>
+    private static bool IsUniqueViolation(Exception? error)
+    {
+        for (var e = error; e is not null; e = e.InnerException)
+        {
+            if (e is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation }) return true;
+        }
+        return false;
     }
 
     /// <summary>The <c>Retry-After</c> seconds a 503 code carries; null for every other code.</summary>

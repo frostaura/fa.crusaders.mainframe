@@ -68,6 +68,13 @@ public static class DeviceRateKey
         return ctx.Items[TenantItemKey] is Guid id ? KeyOf(ctx, id) : null;
     }
 
+    /// <summary>
+    /// R18 D18-5: the board MAC this request was charged to (normalised), or null when none was read —
+    /// <see cref="Endpoints.DeviceBody"/> refuses a body whose own MAC differs, so the limiter and the
+    /// route can never act on two different boards.
+    /// </summary>
+    public static string? ChargedMac(HttpContext ctx) => ctx.Items[ItemKey] as string;
+
     private static string KeyOf(HttpContext ctx, Guid tenantId)
     {
         return ctx.Items[ItemKey] is string mac ? $"device:{tenantId:N}:{mac}" : $"tenant:{tenantId:N}";

@@ -178,6 +178,12 @@ public readonly record struct TraceFacts
     /// that game's organiser, named ("Checked in at Court 1 for Olive's booking"). Null otherwise.
     /// </summary>
     public string? SeatOfName { get; init; }
+
+    /// <summary>
+    /// R18 E18-8: the person whose night this is did it themselves — their own late check-in reads
+    /// "Their check-in reached the club late", never their own name in the third person.
+    /// </summary>
+    public bool BySelf { get; init; }
 }
 
 /// <summary>
@@ -442,6 +448,13 @@ public static class TraceKinds
     /// <summary>A court's lights went off.</summary>
     public const string LightsOff = "lights.off";
 
+    /// <summary>
+    /// R18 E18-3: a box re-energised a court's relay after a power cut, from the heartbeat's restore
+    /// answer (<c>court.lights_restored</c>). <b>Added beyond D2 §6.2</b>: it read "no word for
+    /// this" on the booker's Night, once per confirmed restore.
+    /// </summary>
+    public const string LightsRestored = "lights.restored";
+
     /// <summary>Money in.</summary>
     public const string WalletToppedUp = "wallet.topped_up";
 
@@ -502,6 +515,24 @@ public static class TraceKinds
     /// <summary>They put their member code on a phone for the first time (review round 8, E8-3).</summary>
     public const string AccountCodeSetUp = "account.code_set_up";
 
+    /// <summary>R18 E18-3 sweep: they set their own court PIN (<c>user.pin_set</c>).</summary>
+    public const string AccountPinSet = "account.pin_set";
+
+    /// <summary>R18 E18-3 sweep: the desk set their court PIN for them (<c>user.pin_set_by_admin</c>).</summary>
+    public const string AccountPinSetForThem = "account.pin_set_for_them";
+
+    /// <summary>R18 E18-3 sweep: they cleared their own court PIN (<c>user.pin_cleared</c>).</summary>
+    public const string AccountPinCleared = "account.pin_cleared";
+
+    /// <summary>R18 E18-3 sweep: the desk enrolled their fingerprint (<c>biometric.enrolled</c>).</summary>
+    public const string AccountFingerprintEnrolled = "account.fingerprint_enrolled";
+
+    /// <summary>
+    /// R18 E18-3 sweep: they became an administrator because the club's configuration names their
+    /// address (<c>user.admin_inherited</c>, written by their own sign-in) — nobody granted it.
+    /// </summary>
+    public const string AccountAdminInherited = "account.admin_inherited";
+
     /// <summary>
     /// A row this server wrote that this vocabulary has no word for.
     ///
@@ -529,12 +560,13 @@ public static class TraceKinds
         BookingInvited, BookingInvitedPlayer, BookingAccepted, BookingPartnerAccepted, BookingDeclined, BookingPartnerDeclined,
         WalkUpBought, WalkUpRefunded,
         CourtCheckedIn, CourtRefused,
-        LightsOn, LightsOff,
+        LightsOn, LightsOff, LightsRestored,
         WalletToppedUp, WalletToppedUpAtTheDesk, WalletSpent, WalletRefunded, WalletPenalised,
         WalletAdjustedByAdmin, WalletReversed, WalletShareMoved,
         AccountApplied, AccountApproved, AccountRejected, AccountSuspended, AccountReactivated,
         AccountMadeAdmin, AccountAdminRemoved, AccountCodeReset, AccountPasskeysRemoved,
         AccountPasswordChanged, AccountPasswordReset, AccountGroupsChanged, AccountCodeSetUp,
+        AccountPinSet, AccountPinSetForThem, AccountPinCleared, AccountFingerprintEnrolled, AccountAdminInherited,
         Unrecognised,
     ];
 
@@ -581,6 +613,16 @@ public static class TraceKinds
         "credit.adjusted",
         DoorAuditActions.EventTimeClamped,
         Endpoints.AdminMemberDoorEndpoints.ViewedAction,
+        // R18 E18-3 sweep: the club's own console acts — no member is their subject. Each is on the
+        // club's change log already; on the acting admin's Night they read "no word for this".
+        Endpoints.AdminDoorFleetEndpoint.ShutAllAction,
+        Endpoints.AdminDoorFleetEndpoint.ReopenedAllAction,
+        Endpoints.AdminDoorLogEndpoint.ExportedAction,
+        Endpoints.AdminMonitoringEndpoints.ResolvedAction,
+        Endpoints.AdminMonitoringEndpoints.ExportedAction,
+        MemberCodeRollout.PhaseChangedAction,
+        // The retention sweep's own record — its actor is the anonymised sentinel, never a person.
+        "retention.anonymised",
     ];
 
     // ------------------------------------------------------------------ mapping
@@ -640,6 +682,8 @@ public static class TraceKinds
             "booking.no_show_reversed" => BookingGameNoShowReversed,
             // R17 E17-4: the court they played on lit — the lights row is about the booker.
             LightsOnAction => LightsOn,
+            // R18 E18-3: and came back on after a power cut — the same booker's row, the same players.
+            LightsRestoredAction => LightsRestored,
             _ => null,
         };
     }
@@ -648,7 +692,7 @@ public static class TraceKinds
     /// The audit actions a partner's Night reads off the booking they paid into (R15 J15-4) — and
     /// R17 E17-4 the lights coming on, for an accepted partner and the payer at the box only.
     /// </summary>
-    public static readonly string[] PartnersViewActions = ["booking.no_show", "booking.no_show_reversed", LightsOnAction];
+    public static readonly string[] PartnersViewActions = ["booking.no_show", "booking.no_show_reversed", LightsOnAction, LightsRestoredAction];
 
     /// <summary>
     /// The seat acts an organiser's Night reads off the game's partners (R13 E13-4, R15 E15-3) — and
@@ -674,6 +718,7 @@ public static class TraceKinds
             SeatCheckedInAction => CourtCheckedIn,
             LightsOnAction => LightsOn,
             LightsOffAction => LightsOff,
+            LightsRestoredAction => LightsRestored,
             ActivationRefusedAction => CourtRefused,
 
             "booking.created" or "booking.created_overdrawn" => BookingMade,
@@ -745,6 +790,11 @@ public static class TraceKinds
             "user.password_reset_by_admin" => AccountPasswordReset,
             Endpoints.MemberGroupAudit.GroupsChanged => AccountGroupsChanged,
             MemberCodeService.EnrolledAction => AccountCodeSetUp,
+            "user.pin_set" => AccountPinSet,
+            "user.pin_set_by_admin" => AccountPinSetForThem,
+            "user.pin_cleared" => AccountPinCleared,
+            "biometric.enrolled" => AccountFingerprintEnrolled,
+            InherentAdminService.PromotionAction => AccountAdminInherited,
             _ => Unrecognised,
         };
     }
@@ -760,6 +810,9 @@ public static class TraceKinds
 
     /// <summary>The other half of the pair. See <see cref="LightsOnAction"/>.</summary>
     public const string LightsOffAction = "court.lights_off";
+
+    /// <summary>R18 E18-3: a box re-energised the relay after a power cut (<c>CourtLightStateService.LightsRestoredAction</c>).</summary>
+    public const string LightsRestoredAction = CourtLightStateService.LightsRestoredAction;
 
     /// <summary>D2 §6.4's refusal row — today every refusal branch writes nothing at all (§1.6).</summary>
     public const string ActivationRefusedAction = "court.activation_refused";
@@ -793,6 +846,10 @@ public static class TraceKinds
         // so; an accepted one is `court.activated` (the check-in) and the receipt (the lights). Read
         // as "Checked in", a forged or bookingless upload claimed a check-in that never counted.
         if (action == ActivationAction) return null;
+        // R18 E18-8: a verdict the server ACCEPTED — a late scan that reversed a no-show, lit time
+        // charged after a cancel, a displaced booking's collision — names its member (the device
+        // activity shows who), and is no refusal: court.activated, the reversal and the money tell it.
+        if (Array.IndexOf(AcceptedVerdictActions, action) >= 0) return null;
         if (Matches(action, ActivationAction)) return CourtRefused;
         if (Matches(action, ReleaseAction)) return LightsOff;
         return null;
@@ -800,6 +857,17 @@ public static class TraceKinds
 
     /// <summary>The uploaded activation's own action.</summary>
     public const string ActivationAction = "device.activation";
+
+    /// <summary>
+    /// R18 E18-8: the verdict rows of uploaded activations the server ACCEPTED (<c>DeviceEventEndpoints.ActivationOutcome</c>'s
+    /// non-refusal codes) — every other <c>device.activation_{outcome}</c> is a refusal.
+    /// </summary>
+    public static readonly string[] AcceptedVerdictActions =
+    [
+        ActivationAction + "_reversed_no_show",
+        ActivationAction + "_after_cancel",
+        ActivationAction + "_displaced_collision",
+    ];
 
     /// <summary>The uploaded release's own action — the only measurement of what the lights did.</summary>
     private const string ReleaseAction = "device.release";
@@ -907,6 +975,7 @@ public static class TraceKinds
 
             LightsOn => $"{court} lights came on",
             LightsOff => $"{court} lights went off",
+            LightsRestored => $"{court} lights came back on after a power cut",
 
             WalletToppedUp => $"Bought {Amount(facts)}",
             WalletToppedUpAtTheDesk => ToppedUpAtTheDesk(facts),
@@ -1249,6 +1318,11 @@ public static class TraceKinds
             AccountPasswordReset => $"{Who(facts)} gave them a temporary password",
             AccountGroupsChanged => $"{Who(facts)} changed their member groups",
             AccountCodeSetUp => "Set up their member code",
+            AccountPinSet => "Set their court PIN",
+            AccountPinSetForThem => $"{Who(facts)} set their court PIN",
+            AccountPinCleared => "Cleared their court PIN",
+            AccountFingerprintEnrolled => $"{Who(facts)} enrolled their fingerprint",
+            AccountAdminInherited => "Became an administrator — the club's set-up names their address",
             _ => $"Something this club's records have no word for ({facts.RawAction ?? kind})",
         };
     }
@@ -1298,13 +1372,15 @@ public static class TraceKinds
             var court = string.IsNullOrWhiteSpace(facts.CourtName) ? "a court" : facts.CourtName.Trim();
             return $"Their check-in reached the club late — the {settled} on {facts.SubjectName.Trim()}'s game on {court} was reversed";
         }
+        var what = facts.CourtWasDark ? "outage refund reversed" : "no-show reversed";
+        // R18 E18-8: the member's own scan, on their own Night — their voice, as every own row reads.
+        if (facts.BySelf && !BySystem(facts)) return $"Their check-in reached the club late — {what}";
         if (BySystem(facts) || string.IsNullOrWhiteSpace(facts.ActorName))
         {
             return facts.CourtWasDark
                 ? "The club took back an outage refund — the check-in arrived late"
                 : "The club took a no-show back";
         }
-        var what = facts.CourtWasDark ? "outage refund reversed" : "no-show reversed";
         return $"{facts.ActorName.Trim()}'s check-in reached the club late — {what}";
     }
 

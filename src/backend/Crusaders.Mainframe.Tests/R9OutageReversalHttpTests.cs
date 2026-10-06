@@ -173,8 +173,8 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         Assert.All(await ReversalRowsAsync(r), l => Assert.StartsWith("No-show", l.Reason, StringComparison.Ordinal));
         Assert.Contains(r.Mail.Sent, m => m.Subject.StartsWith("No-show reversed", StringComparison.Ordinal));
         var night = await NightAsync(r, r.Club.Organiser, scannedAt);
-        // R14 E14-3: the reversal is the scanner's (here the organiser's own scan), and the Night names them.
-        Assert.Equal("Olive Organiser's check-in reached the club late — no-show reversed",
+        // R14 E14-3: the reversal is the scanner's — R18 E18-8: here the organiser's own scan, so in their own voice.
+        Assert.Equal("Their check-in reached the club late — no-show reversed",
             Assert.Single(night, e => e.GetProperty("kind").GetString() == TraceKinds.BookingNoShowReversed).GetProperty("headline").GetString());
     }
 

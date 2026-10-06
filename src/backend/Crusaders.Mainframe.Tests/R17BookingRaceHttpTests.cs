@@ -354,9 +354,9 @@ public sealed class R17BookingRaceHttpTests(PostgresFixture pg) : IClassFixture<
         Assert.Equal(0, await ChangeRecordsAsync(r));
     }
 
-    /// <summary>Already cancelled: the desk reads 409 booking_not_open (the split and add routes' word); the member's own still 404.</summary>
+    /// <summary>Already cancelled: the desk reads 409 booking_not_open (the split and add routes' word) — R18 J18-8: and so does its member.</summary>
     [SkippableFact]
-    public async Task Cancelling_a_cancelled_booking_is_409_booking_not_open_at_the_desk_and_404_for_its_member()
+    public async Task Cancelling_a_cancelled_booking_is_409_booking_not_open_at_the_desk_and_for_its_member()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var r = await RigAsync("r17nopen");
@@ -370,7 +370,8 @@ public sealed class R17BookingRaceHttpTests(PostgresFixture pg) : IClassFixture<
 
         Assert.Equal(HttpStatusCode.Conflict, desk.StatusCode);
         Assert.Equal("""{"error":"booking_not_open"}""", await desk.Content.ReadAsStringAsync());
-        Assert.Equal(HttpStatusCode.NotFound, member.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, member.StatusCode);
+        Assert.Equal("""{"error":"booking_not_open"}""", await member.Content.ReadAsStringAsync());
         Assert.Equal(balance, await c.BalanceAsync(r.App, c.Olga));
         Assert.Single(await RowsOfAsync(r, booking.Id), l => l.Type == LedgerEntryType.CancellationRefund);
     }
@@ -441,7 +442,8 @@ public sealed class R17BookingRaceHttpTests(PostgresFixture pg) : IClassFixture<
             : c.Member(r.App, c.Olga).PostAsJsonAsync($"/api/v1/bookings/{booking.Id}/cancel", new { })));
 
         var codes = answers.Select(a => a.StatusCode).Order().ToList();
-        Assert.Equal([HttpStatusCode.OK, desk ? HttpStatusCode.Conflict : HttpStatusCode.NotFound], codes);
+        // R18 J18-8: the member's losing twin says why too (409 booking_not_open), as the desk's does.
+        Assert.Equal([HttpStatusCode.OK, HttpStatusCode.Conflict], codes);
         Assert.Equal(before + 60, await c.BalanceAsync(r.App, c.Olga));
         Assert.Single(await RowsOfAsync(r, booking.Id), l => l.Type == LedgerEntryType.CancellationRefund);
         Assert.Single(await AuditsAsync(r, "booking.cancelled"));
