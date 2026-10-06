@@ -12,7 +12,7 @@ import { PRIVACY_COPY } from "../src/lib/playersCopy";
 type Recorder = { puts: unknown[] };
 
 function privacyRoutes(recorder: Recorder, prefs: Record<string, unknown> = {}): ApiRoute[] {
-  const stored = { findable: false, show_in_leaderboards: false, ...prefs };
+  const stored = { findable: true, show_in_leaderboards: false, ...prefs };
   return [
     { path: "/api/v1/me/preferences", body: stored },
     { method: "PUT", path: "/api/v1/me/preferences", respond: (r) => { recorder.puts.push(r.body); return { ...stored, ...(r.body as object) }; } },
@@ -24,7 +24,7 @@ function privacyRoutes(recorder: Recorder, prefs: Record<string, unknown> = {}):
   ];
 }
 
-test.describe("P11: privacy, off until the member says otherwise", () => {
+test.describe("P11: findable by default, off when the member says so", () => {
   // The first visit of a worker compiles the wizard and Profile on the dev server.
   test.setTimeout(60_000);
   test("the welcome wizard ends on the privacy choice, and a flip is saved", async ({ page }) => {
@@ -39,12 +39,12 @@ test.describe("P11: privacy, off until the member says otherwise", () => {
     await expect(page.getByText(GET_STARTED.stepOf(7, 7))).toBeVisible();
 
     const findable = page.getByRole("switch", { name: PRIVACY_COPY.findableLabel });
-    await expect(findable).toHaveAttribute("aria-checked", "false");
+    await expect(findable).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel })).toHaveCount(0);
 
     await findable.click();
-    await expect(findable).toHaveAttribute("aria-checked", "true");
-    await expect.poll(() => recorder.puts).toEqual([{ findable: true }]);
+    await expect(findable).toHaveAttribute("aria-checked", "false");
+    await expect.poll(() => recorder.puts).toEqual([{ findable: false }]);
     await expect(page.getByRole("button", { name: GET_STARTED.finish })).toBeVisible();
   });
 
@@ -59,7 +59,7 @@ test.describe("P11: privacy, off until the member says otherwise", () => {
     await findable.click();
     // R19 X19-2: a plain 500 is the club's system answering with an error, not a bare refusal.
     await expect(page.getByRole("alert").filter({ hasText: PRIVACY_COPY.saveError(PRIVACY_COPY.findableLabel) })).toBeVisible();
-    await expect(findable).toHaveAttribute("aria-checked", "false");
+    await expect(findable).toHaveAttribute("aria-checked", "true");
   });
 
   test("Profile shows the same switch, reading what the server holds, and never sends leaderboards", async ({ page }) => {

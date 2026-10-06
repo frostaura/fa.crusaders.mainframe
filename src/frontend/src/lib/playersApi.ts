@@ -2,7 +2,7 @@ import { api, type BulkBookItemBody, type MemberBulkBookResponse } from "./api";
 
 /**
  * P11 — the players-and-splits wire (D11–D13): the players on a booking and who pays what,
- * invites and links, recent partners, favourites and the opt-in directory, the member's own
+ * invites and links, recent partners, favourites and the opt-out directory, the member's own
  * inbox, the social preferences, and the admin's god mode over a booking's seats.
  *
  * <p>
@@ -422,7 +422,7 @@ export type MemberNotificationPage = {
 
 /* ─────────────────────────────── preferences (D13) ─────────────────────────────── */
 
-/** The social half of `/me/preferences`. Both off by default; both opt-in. */
+/** The social half of `/me/preferences`. `findable` is on by default (switch off); leaderboards are opt-in. */
 export type SocialPrefs = {
   findable: boolean;
   show_in_leaderboards: boolean;

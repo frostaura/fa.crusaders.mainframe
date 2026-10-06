@@ -400,7 +400,7 @@ reads its subject as the booking's organiser since R18 E18-4, §6),
   member answers 404, like a token that names nothing.
 - **Member invites by mail** link to `/invites/{participantId}` (signed in) — never a token, because
   a token written into an outbox payload would be a credential stored in clear.
-- **Directory (D13)** — opted-in (`findable`), active members only, never the caller, id + name +
+- **Directory (D13)** — every active member who has not switched `findable` off (it defaults ON, 2026-10-06; no preferences row means on; admins are members and are listed like anyone), never never the caller, id + name +
   photo plus what tells two namesakes apart from the caller's own history (R16 J16-3, below) —
   never an email, phone or membership number — a query of at least 2 characters (a LIKE wildcard is a literal), and a per-member
   budget of `directory_searches_per_minute`.

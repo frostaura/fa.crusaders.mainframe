@@ -99,7 +99,7 @@ public static class MemberRefs
 /// <para>
 /// <b>Photo and name only, for every other member.</b> The booking grid's invariant — no email,
 /// no phone, no membership number visible to other players — holds on every projection here, and
-/// the directory adds the opt-in on top: a member is findable by name only once they said so.
+/// the directory adds the opt-out on top: a member is findable by name unless they switched it off.
 /// </para>
 /// </summary>
 public sealed partial class PlayersQuery
@@ -734,8 +734,9 @@ public sealed partial class PlayersQuery
     public const int MaxResults = 20;
 
     /// <summary>
-    /// D13 — members who opted in to being found, whose name contains <paramref name="q"/>. Active
-    /// members only, never the caller, id + name + photo only. Nobody is findable by default.
+    /// D13 — members who have not opted out of being found, whose name contains <paramref name="q"/>.
+    /// Active members only (admins are members), never the caller, id + name + photo only. Everybody
+    /// is findable by default; no preferences row means the default, so only an explicit off hides.
     /// </summary>
     public async Task<List<PublicMember>> DirectoryAsync(Guid me, string q, CancellationToken ct)
     {
@@ -743,7 +744,7 @@ public sealed partial class PlayersQuery
         var query = _db.Memberships.AsNoTracking()
             .Where(m => m.UserId != me && m.Status == MembershipStatus.Active
                         && _db.Users.Any(u => u.Id == m.UserId && u.Status == "active")
-                        && _db.UserPreferences.Any(p => p.UserId == m.UserId && p.Findable));
+                        && !_db.UserPreferences.Any(p => p.UserId == m.UserId && !p.Findable));
 
         query = _db.Database.IsNpgsql()
             ? query.Where(m => EF.Functions.ILike(m.FullName, pattern, "\\"))

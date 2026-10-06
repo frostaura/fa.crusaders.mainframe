@@ -5,7 +5,7 @@ import { refuse, renderPage, signIn, signOut, stubFetch, type StubRoute } from "
 import { PrivacySwitches } from "./PrivacySwitches";
 
 /**
- * D13 — the two social switches: off by default, a flip shows at once and is written as a
+ * D13 — the social switches: findable on by default, a flip shows at once and is written as a
  * one-field PUT, and a refusal puts the switch back and says so beside it.
  */
 
@@ -22,11 +22,11 @@ const switchNamed = (label: string) => screen.findByRole("switch", { name: label
 afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
 describe("the privacy switches", () => {
-  it("is off by default, labelled and described — and the leaderboards switch waits for leaderboards", async () => {
+  it("is on by default, labelled and described — and the leaderboards switch waits for leaderboards", async () => {
     stubFetch(routes({ theme: "system" }, () => ({})));
     renderPage(<PrivacySwitches />, { reactStrictMode: true });
     const findable = await switchNamed(COPY.findableLabel);
-    expect(findable).toHaveAttribute("aria-checked", "false");
+    expect(findable).toHaveAttribute("aria-checked", "true");
     expect(findable).toHaveAccessibleDescription(COPY.findableHint);
     expect(screen.queryByRole("switch", { name: COPY.leaderboardsLabel })).toBeNull();
     expect(screen.getAllByRole("switch")).toHaveLength(1);

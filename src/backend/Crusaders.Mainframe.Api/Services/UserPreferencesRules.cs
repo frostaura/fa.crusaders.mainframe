@@ -133,7 +133,7 @@ public sealed class UserPreferencesView
     /// seen the current one, and the frontend decides from the pair whether to offer it again.
     /// </summary>
     [JsonPropertyName("current_onboarding_version")] public int CurrentOnboardingVersion { get; init; } = UserPreferences.CurrentOnboardingVersion;
-    [JsonPropertyName("findable")] public bool Findable { get; init; }
+    [JsonPropertyName("findable")] public bool Findable { get; init; } = true;
     [JsonPropertyName("show_in_leaderboards")] public bool ShowInLeaderboards { get; init; }
     [JsonPropertyName("rating_opt_in")] public bool RatingOptIn { get; init; }
     [JsonPropertyName("weekly_recap")] public bool WeeklyRecap { get; init; }

@@ -345,7 +345,7 @@ export const PICKER = {
   searchFound: (count: number) => (count === 1 ? "1 member found" : `${count} members found`),
   searchNoneFound: "No one found.",
   searchEmptyHint:
-    "Only members who've chosen to be findable appear here. Anyone else can join through a share link.",
+    "Members who've hidden themselves from this search don't appear here. Anyone else can join through a share link.",
   linkTitle: "An open seat",
   linkBody: "Anyone with the link can take this seat.",
   linkAfter: "You'll get the link to share once the seat is added — send it on WhatsApp or anywhere else.",
@@ -1329,14 +1329,14 @@ export const REPORT_SHARES_COPY = {
 } as const;
 
 /**
- * D13 — the social switches. Both OFF by default and opt-in: nobody is findable or ranked
- * because they never said no.
+ * D13 — the social switches. Findable is ON by default and the member switches it off; being
+ * ranked stays opt-in, so nobody is ranked because they never said no.
  */
 export const PRIVACY_COPY = {
   title: "Privacy",
-  description: "Who can find you by name when adding players. It's off until you turn it on.",
+  description: "Who can find you by name when adding players. Club members can by default; turn it off any time.",
   findableLabel: "Let other members find me",
-  findableHint: "Club members can find you by name when adding players. Invite links and people you've played with work either way.",
+  findableHint: "Club members can find you by name when adding players. Turn this off to hide your name from that search. Invite links and people you've played with work either way.",
   leaderboardsLabel: "Show me on leaderboards",
   leaderboardsHint: "For when leaderboards arrive. Off means you're never listed.",
   readAction: "read your privacy settings",

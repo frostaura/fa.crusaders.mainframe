@@ -390,7 +390,7 @@ public partial class MainframeDbContext : DbContext
             e.Property(p => p.Theme).HasMaxLength(16).IsRequired().HasDefaultValue("system");
             e.Property(p => p.MemberOnboardingLastStep).HasMaxLength(UserPreferencesRules.MaxStepLength);
             e.Property(p => p.OnboardingVersion).HasDefaultValue(1);
-            e.Property(p => p.Findable).HasDefaultValue(false);
+            e.Property(p => p.Findable).HasDefaultValue(true);
             e.Property(p => p.ShowInLeaderboards).HasDefaultValue(false);
             e.Property(p => p.RatingOptIn).HasDefaultValue(false);
             e.Property(p => p.WeeklyRecap).HasDefaultValue(false);

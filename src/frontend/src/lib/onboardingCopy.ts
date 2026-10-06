@@ -422,10 +422,10 @@ export const GET_STARTED = {
     },
     /** D13 — the switches themselves carry their own labels (`PRIVACY_COPY` in `playersCopy`). */
     privacy: {
-      title: "You choose who finds you",
+      title: "Members can find you by name",
       body: [
         "Partners can always add you with an invite link, or because you've played together before.",
-        "Being findable by name is up to you. It starts off, and you can change it any time on your profile.",
+        "Other members can find you by name when they pick players. It starts on, and you can switch it off right here or any time on your profile.",
       ],
     },
   },

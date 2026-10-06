@@ -20,10 +20,11 @@ namespace Crusaders.Mainframe.Api.Domain;
 /// </para>
 ///
 /// <para>
-/// <b>Every privacy-shaped flag defaults to OFF</b> — findable, leaderboards, ratings, the
-/// weekly recap. A member is invisible to other members until they say otherwise, which is the
-/// direction the booking grid's "photo and name only" rule already points: being seen is opted
-/// into, never assumed.
+/// <b>Findable defaults to ON</b> (2026-10-06): every member can be found by name — id, name and
+/// photo only — so a partner can be invited, and each member can switch it off in their profile.
+/// An admin is a member and a player too and carries the same flag. <b>The other privacy-shaped
+/// flags default to OFF</b> — leaderboards, ratings, the weekly recap: being ranked or rated is
+/// opted into, never assumed.
 /// </para>
 /// </summary>
 public sealed class UserPreferences : ITenantScoped
@@ -58,8 +59,8 @@ public sealed class UserPreferences : ITenantScoped
     /// <summary>The <see cref="CurrentOnboardingVersion"/> in force when a tour was last completed.</summary>
     public int OnboardingVersion { get; set; } = 1;
 
-    /// <summary>May other members find this person in the club directory. Off until they say so.</summary>
-    public bool Findable { get; set; }
+    /// <summary>May other members find this person in the club directory. On until they switch it off.</summary>
+    public bool Findable { get; set; } = true;
 
     public bool ShowInLeaderboards { get; set; }
     public bool RatingOptIn { get; set; }
