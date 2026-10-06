@@ -105,7 +105,9 @@ public sealed partial class DemoDataGenerator
             _pendingResults.Add(r);
             return;
         }
-        if (w.Chance(0.03))
+        // Only the last fortnight holds an open dispute: an older one would have been settled by an
+        // admin, and 3% of three months' results put ~28 on the Overview, which no real club carries.
+        if (r.SubmittedAt > w.Now - TimeSpan.FromDays(14) && w.Chance(0.04))
         {
             r.Status = MatchResultStatus.Disputed;
             r.DisputedAt = (r.SubmittedAt + w.Between(TimeSpan.FromHours(1), TimeSpan.FromHours(20))).Storable();
