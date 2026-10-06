@@ -67,7 +67,7 @@ function burstKey(event: TraceEvent): string {
   return `${event.strand ?? ""}:${family}:${placeOf(event)}:${attempt}`;
 }
 
-/** R14 — the booking kinds that are one person acting on another's place in a game. */
+/** R14 — the kinds that are one person acting on a place in a game (R17: and each own check-in). */
 const PLAYER_ACTS: ReadonlySet<string> = new Set([
   "booking.taken_off", "booking.took_player_off", "booking.split_changed", "booking.changed_split",
   "booking.game_cancelled", "booking.cancelled_by_club",
@@ -80,6 +80,14 @@ const PLAYER_ACTS: ReadonlySet<string> = new Set([
   "booking.game_no_show", "booking.game_no_show_reversed",
   // R16 E16-1 (BE16b) — the club accepted a seat on someone's behalf: partner · organiser · admin.
   "booking.accepted_for_them", "booking.club_accepted_player", "booking.accepted_for_player",
+  // R17 E17-8 (BE17c) — a member's own seat acts, from each side: invited · invited a player,
+  // accepted · a partner accepted, declined · a partner declined.
+  "booking.invited", "booking.invited_player", "booking.accepted", "booking.partner_accepted",
+  "booking.declined", "booking.partner_declined",
+  // R17 J17-4 (BE17b/BE17c) — each partner's own check-in ("Sam checked in at Court 1"): three
+  // partners scanning in a minute are three people, never "3 in 1 minute". The scanner's own
+  // first scan is folded into court.activated by the server.
+  "court.checked_in",
 ]);
 
 /** A row about minutes: the wallet strand, a ledger row, or any row carrying an amount. */
