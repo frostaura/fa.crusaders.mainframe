@@ -2,6 +2,7 @@ import { createContext, useContext, useMemo, useRef, type ComponentProps, type F
 import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { toggleVariants, type ToggleVariantProps } from "./toggle-variants";
+import { glueFigureLabel } from "./figure-text";
 
 /**
  * ToggleGroup — Radix, roving focus. `type="single"` is the week strip's and every segmented
@@ -59,7 +60,9 @@ export function ToggleGroup(props: ComponentProps<typeof ToggleGroupPrimitive.Ro
 }
 
 export function ToggleGroupItem(props: ComponentProps<typeof ToggleGroupPrimitive.Item> & ToggleVariantProps) {
-  const { className, variant, size, onFocus, ...rest } = props;
+  const { className, variant, size, onFocus, children, ...rest } = props;
+  // R17 — "+15 / minutes" never splits at 200 % text: glued for paint, named plainly.
+  const glued = glueFigureLabel(children, rest);
   const group = useContext(ToggleGroupContext);
   const selectIfArrowed = (event: FocusEvent<HTMLButtonElement>) => {
     onFocus?.(event);
@@ -72,7 +75,10 @@ export function ToggleGroupItem(props: ComponentProps<typeof ToggleGroupPrimitiv
       data-slot="toggle-group-item"
       className={cn(toggleVariants({ variant: variant ?? group.variant, size: size ?? group.size }), className)}
       onFocus={selectIfArrowed}
+      aria-label={glued.name}
       {...rest}
-    />
+    >
+      {glued.label}
+    </ToggleGroupPrimitive.Item>
   );
 }

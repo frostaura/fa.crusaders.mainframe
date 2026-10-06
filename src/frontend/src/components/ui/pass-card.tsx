@@ -144,6 +144,8 @@ export function PassCard(props: PassCardProps) {
         <div aria-hidden="true" data-perforation="" className="absolute inset-x-4 top-0 border-t-2 border-dashed border-border" />
         <div data-pass-body="" className="flex flex-col items-center gap-4 px-[20px] pb-5 pt-[24px]">
           {/*
+            R17 L17-4 — the plate is white in BOTH themes, so a ring drawn on it is pinned to the
+            brand navy (#00498D in both): the dark theme's accent (navy 300) measured 2.02:1 on it.
             The panel takes the body's width, capped, and centres whatever QR it is given — so a
             caller's `w-full` symbol is sized by the CARD (whose width is pixels, see above) and
             never by the root font. Every length between the card's edge and the symbol — the
@@ -153,7 +155,7 @@ export function PassCard(props: PassCardProps) {
           */}
           <div
             data-qr-panel=""
-            className="flex w-full max-w-[304px] justify-center rounded-xl p-[12px] forced-color-adjust-none"
+            className="flex w-full max-w-[304px] justify-center rounded-xl p-[12px] forced-color-adjust-none [&_:focus-visible]:outline-brand-strong"
             style={{ backgroundColor: QR_PAPER }}
           >
             {qr}

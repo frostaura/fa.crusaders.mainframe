@@ -1,16 +1,18 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert } from "../Alert";
 import { ConfirmDialog } from "../admin/ConfirmDialog";
 import { Button } from "../ui/button";
-import { Field, FieldDescription, FieldLabel } from "../ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "../ui/field";
+import { focusFirstComplaint } from "../members/saleFocus";
 import { Input } from "../ui/input";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { BatchResultList, type BatchResultRow } from "./BatchResultList";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
-  NOTHING_CHANGED_YET, clearAllDescription, clearAllLabel, conflictRefundPhrase, conflictRefundedLine, conflictsHeadline,
+  CONFLICT_REASON, NOTHING_CHANGED_YET, clearAllDescription, clearAllLabel, conflictRefundPhrase, conflictRefundedLine, conflictsHeadline,
 } from "../../lib/scheduleCopy";
 import { describeFailure } from "../../lib/errors";
+import { cancelRefusal } from "../../lib/bookingErrors";
 import { adminEndpoints, type ScheduleConflict } from "../../lib/adminApi";
 
 /**
@@ -86,6 +88,21 @@ export function ConflictPanel({
   const others = conflicts.length - cancellable.length;
   const total = knownRefundTotal(cancellable);
   const reasonGiven = reason.trim().length > 0;
+  // R17 X17-7 — a press without a reason opens nothing: the field says why and takes the keyboard,
+  // after the commit that marks it invalid (the Cancel / Sell sheets' rule).
+  const [confirming, setConfirming] = useState(false);
+  const [refusals, setRefusals] = useState(0);
+  useEffect(() => {
+    if (refusals > 0) focusFirstComplaint("[data-conflict-panel]");
+  }, [refusals]);
+  const reasonMissing = refusals > 0 && !reasonGiven;
+  const openConfirm = (next: boolean) => {
+    if (next && !reasonGiven) {
+      setRefusals((n) => n + 1);
+      return;
+    }
+    setConfirming(next);
+  };
 
   async function cancelThese(targets: ScheduleConflict[]): Promise<string> {
     setBusy(true);
@@ -106,7 +123,7 @@ export function ConflictPanel({
           id: conflict.booking_id as string,
           label,
           ok: false,
-          detail: describeFailure(err, { action: "cancel that booking" }),
+          detail: cancelRefusal(err) ?? describeFailure(err, { action: "cancel that booking" }),
         });
       }
     }
@@ -120,7 +137,7 @@ export function ConflictPanel({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div data-conflict-panel="" className="flex flex-col gap-4">
       <Alert tone="warning" live="polite">
         <strong>{conflictsHeadline(conflicts.length)}</strong>{" "}
         <strong>{NOTHING_CHANGED_YET}</strong>{" "}
@@ -168,25 +185,24 @@ export function ConflictPanel({
             {"Cancelling from here refunds each member in full — the late-cancellation penalty is "}
             {"waived, because the club moved, not them. Each member is emailed the reason you type."}
           </p>
-          <Field>
-            <FieldLabel>Reason (the members will read this)</FieldLabel>
+          <Field invalid={reasonMissing}>
+            <FieldLabel>{CONFLICT_REASON.label}</FieldLabel>
             <Input
               value={reason}
               maxLength={512}
+              aria-required="true"
               onChange={(e) => setReason(e.target.value)}
               placeholder="Court 1–3 are held for league from 6 October"
             />
-            {!reasonGiven && (
-              <FieldDescription>
-                A reason is required — it is what the member is told, and it is what the change
-                record keeps.
-              </FieldDescription>
-            )}
+            {!reasonGiven && !reasonMissing && <FieldDescription>{CONFLICT_REASON.hint}</FieldDescription>}
+            {reasonMissing ? <FieldError>{CONFLICT_REASON.missing}</FieldError> : null}
           </Field>
 
           <ConfirmDialog
+            open={confirming}
+            onOpenChange={openConfirm}
             trigger={(
-              <Button variant="danger" className="self-start" disabled={!reasonGiven || busy}>
+              <Button variant="danger" className="self-start" disabled={busy}>
                 {clearAllLabel(cancellable.length, total)}
               </Button>
             )}

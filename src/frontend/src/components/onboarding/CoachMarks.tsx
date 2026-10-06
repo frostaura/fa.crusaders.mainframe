@@ -160,9 +160,9 @@ type MarkContentProps = {
  * `--app-bottom-bar-height`. Radix keeps the mark inside the viewport less this padding, so a mark
  * never sits under the bar, and its `max-h` (the popover's available height) leaves Next on screen.
  */
-function bottomChrome(): number {
+function chrome(property: "--app-bottom-bar-height" | "--app-chrome-height"): number {
   if (typeof window === "undefined") return 8;
-  const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height"));
+  const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(property));
   return (Number.isFinite(value) ? value : 0) + 8;
 }
 
@@ -208,7 +208,11 @@ function MarkContent(props: MarkContentProps) {
       aria-labelledby={titleId}
       aria-describedby={bodyId}
       tabIndex={-1}
-      collisionPadding={{ top: 8, right: 8, left: 8, bottom: bottomChrome() }}
+      collisionPadding={{ top: chrome("--app-chrome-height"), right: 8, left: 8, bottom: chrome("--app-bottom-bar-height") }}
+      // R17 L17-7 — the rail scrolls on its own (1280 / 150 %): "partial" let the mark ride its
+      // anchor off the top of the screen, Next and all. "always" keeps it on screen, under the top
+      // bar and over the tab bar, wherever the anchor has scrolled to.
+      sticky="always"
       className="flex w-80 flex-col gap-3"
       onOpenAutoFocus={(event) => { event.preventDefault(); box.current?.focus(); }}
       onEscapeKeyDown={() => onFinish("skipped")}

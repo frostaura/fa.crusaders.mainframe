@@ -67,7 +67,9 @@ function AccordionContent({
     <AccordionPrimitive.Content
       data-slot="accordion-content"
       className={cn(
-        "overflow-hidden text-sm text-text-secondary",
+        // R17 L17-3 — the panel clips while it animates: `-m-1 p-1` gives a control at its edge room
+        // for the outward ring (an inset one would vanish on a primary button's fill).
+        "-m-1 overflow-hidden p-1 text-sm text-text-secondary",
         "data-[state=closed]:animate-collapse-up data-[state=open]:animate-collapse-down motion-reduce:animate-none",
       )}
       {...props}

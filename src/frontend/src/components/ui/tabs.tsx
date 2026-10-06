@@ -5,6 +5,7 @@ import {
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { CaretLeft, CaretRight } from "./icons";
+import { glueFigureLabel } from "./figure-text";
 
 /**
  * Tabs — Radix (roving focus; the arrow keys move and, in the default automatic mode, select).
@@ -216,14 +217,19 @@ const TRIGGER: Record<TabsVariant, string> = {
   ),
 };
 
-export function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsPrimitive.Trigger>) {
+export function TabsTrigger({ className, children, ...props }: ComponentProps<typeof TabsPrimitive.Trigger>) {
   const variant = useContext(TabsVariantContext);
+  // R17 — a figure stays with its unit when a tab's label wraps: glued for paint, named plainly.
+  const glued = glueFigureLabel(children, props);
   return (
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(TRIGGER_BASE, TRIGGER[variant], className)}
+      aria-label={glued.name}
       {...props}
-    />
+    >
+      {glued.label}
+    </TabsPrimitive.Trigger>
   );
 }
 

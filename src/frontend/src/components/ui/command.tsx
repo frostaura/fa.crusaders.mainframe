@@ -1,7 +1,6 @@
 import * as React from "react";
 import { Command as CommandPrimitive } from "cmdk";
 import { MagnifyingGlass } from "@/components/ui/icons";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,28 +17,12 @@ function Command({ className, ...props }: React.ComponentProps<typeof CommandPri
   return (
     <CommandPrimitive
       data-slot="command"
-      className={cn("flex h-full w-full flex-col overflow-hidden bg-bg-raised text-text-primary", className)}
+      // R17 L17-3 — the root clips (rounded popover corners), and its top edge cut the input's ring
+      // by 4px in every member combobox. Rings inside are drawn inset; nothing in a command list is
+      // a filled button whose own fill would swallow an inset ring (options are highlighted, not focused).
+      className={cn("flex h-full w-full flex-col overflow-hidden bg-bg-raised text-text-primary [&_:focus-visible]:-outline-offset-2", className)}
       {...props}
     />
-  );
-}
-
-type CommandDialogProps = React.ComponentProps<typeof Dialog> & {
-  title?: string;
-  description?: string;
-  children: React.ReactNode;
-};
-
-/** A command palette in our dialog: the title and description exist for screen readers. */
-function CommandDialog({ title = "Search", description = "Type to filter, then choose.", children, ...props }: CommandDialogProps) {
-  return (
-    <Dialog {...props}>
-      <DialogContent className="overflow-hidden p-0" guardTyped={false}>
-        <DialogTitle className="sr-only">{title}</DialogTitle>
-        <DialogDescription className="sr-only">{description}</DialogDescription>
-        <Command className="pt-2">{children}</Command>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -50,7 +33,8 @@ function CommandInput({ className, ...props }: React.ComponentProps<typeof Comma
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "flex h-touch w-full bg-transparent text-base text-text-primary placeholder:text-text-muted",
+          // `-mx-1 px-1`: the inset ring (see Command) keeps clear of the first letter.
+          "-mx-1 flex h-touch w-full bg-transparent px-1 text-base text-text-primary placeholder:text-text-muted",
           "disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
@@ -124,7 +108,6 @@ function CommandShortcut({ className, ...props }: React.ComponentProps<"span">) 
 
 export {
   Command,
-  CommandDialog,
   CommandInput,
   CommandList,
   CommandEmpty,

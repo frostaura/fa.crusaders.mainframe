@@ -247,6 +247,16 @@ export function conflictsHeadline(count: number): string {
 export const NOTHING_CHANGED_YET = "Nothing has changed yet.";
 
 /**
+ * R17 X17-7 — the conflict panel's reason: the button is never disabled (a dead button gave no
+ * reason and left the tab order); a press without one says this and focuses the field.
+ */
+export const CONFLICT_REASON = {
+  label: "Reason (the members will read this)",
+  hint: "A reason is required — it is what the member is told, and it is what the change record keeps.",
+  missing: "Type a reason first — each member is emailed it, and the change record keeps it.",
+} as const;
+
+/**
  * What cancelling this one booking would pay back — with the arm for a quote we have not got.
  *
  * `would_refund_minutes` comes from the server's own `QuoteCancellationAsync`, so when it is

@@ -4,7 +4,7 @@ import type { VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { Spinner } from "./spinner";
 import { buttonVariants } from "./button-variants";
-import { keepFiguresWhole } from "./figure-text";
+import { glueFigureLabel } from "./figure-text";
 
 /**
  * Button (design-system.md, Components → button).
@@ -59,19 +59,6 @@ export type ButtonProps = ComponentProps<"button"> &
 // The icon-to-label gap is pixels, like the side padding: at 200 % text the room goes to the words.
 const LAYER = "col-start-1 row-start-1 inline-flex items-center justify-center gap-[min(0.5rem,8px)]";
 
-/**
- * A label's figure glued to the word after it with a no-break space (R11): a button now wraps, and
- * "Book · 15 / minutes" splits a number from its unit. Only a plain-text label is touched, and a
- * glued one keeps its plain spelling as the accessible name — the name a reader hears (and every
- * test asks for) does not change because the paint learned to keep two words together.
- */
-function glueFigures(children: ReactNode, props: ComponentProps<"button">): { label: ReactNode; name?: string } {
-  if (typeof children !== "string") return { label: children };
-  const label = keepFiguresWhole(children);
-  const named = props["aria-label"] !== undefined || props["aria-labelledby"] !== undefined;
-  return { label, name: label === children || named ? undefined : children };
-}
-
 function PendingLayer({ pending, children }: Pick<ButtonProps, "pending" | "children">) {
   const text = typeof children === "string" || typeof children === "number" ? String(children) : null;
   return (
@@ -116,7 +103,8 @@ export function Button(allProps: ButtonProps) {
     }
     onClick?.(event);
   };
-  const glued = glueFigures(children, props);
+  // R11: "Book · 15 / minutes" never splits a number from its unit (`glueFigureLabel`).
+  const glued = glueFigureLabel(children, props);
   return (
     <button
       data-slot="button"

@@ -8,6 +8,7 @@ import { Input } from "../ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { TimeSelect } from "../ui/time-select";
+import { keepFiguresWhole } from "../ui/figure-text";
 
 /**
  * The inline controls the rule editor is built out of — D3 §5.2's `SentenceField`.
@@ -192,7 +193,7 @@ export function SentenceChoices(props: SentenceChoicesProps) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`${label}: ${summary}`}
+          aria-label={`${label}: ${keepFiguresWhole(summary)}`}
           aria-invalid={invalid || undefined}
           className={cn(
             "no-lift inline-flex min-h-touch items-center gap-2 rounded-lg border border-control bg-bg-surface px-3 align-middle",

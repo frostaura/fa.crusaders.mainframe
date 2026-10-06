@@ -94,6 +94,8 @@ export function ledgerCategory(row: LedgerRow): string {
   }
   if (row.type === "AdminTopUp") return deskCategory(row as LedgerRowWithActor, label);
   if (row.type === "CancellationRefund") return refundCategory(row, label);
+  if (row.type === "NoShowPenalty" && row.signedAmountMinutes > 0) return LEDGER_CATEGORY.noShowPenaltyReturned;
+  if (row.type === "LateCancellationPenalty" && row.signedAmountMinutes > 0) return LEDGER_CATEGORY.latePenaltyReturned;
   // R11 E11-5: the payer's leg of a pay-for at the court, beside its refund leg's own words.
   if (row.type === "BookingCharge" && PAY_FOR_CHARGE_REASON.test(row.comment?.trim() ?? "")) return LEDGER_CATEGORY.payForCharge;
   return label;
@@ -127,6 +129,10 @@ export const LEDGER_CATEGORY = {
   displacedRefund: "Refund — the court was already in use",
   reinstated: "Refund taken back — booking reinstated",
   refundReversed: "Refund reversed",
+  // R17 E17-5 — a penalty given back (the row runs INTO the member): attendance arrived after the
+  // no-show sweep, or the desk returned a late-cancellation penalty.
+  noShowPenaltyReturned: "No-show penalty returned",
+  latePenaltyReturned: "Late-cancellation penalty returned",
 } as const;
 
 /** The stored reason of a pay-for's charge leg (`BookingService`, stream `pay_for_charge`). */

@@ -22,6 +22,7 @@ import {
 } from "../../lib/memberDoorCopy";
 import { spokenCountdown, useCountdownSeconds, useMinutesSince } from "./useCountdownSeconds";
 import { MEMBER_DOOR_ACTION_LINK, MEMBER_DOOR_BUTTON } from "./links";
+import { keepFiguresWhole } from "../ui/figure-text";
 
 /**
  * The member's own last door decision, as advice with one next action.
@@ -146,7 +147,7 @@ function DecisionPeek({ headline, tone }: { headline: string; tone: DecisionTone
            holds that rule with no exemptions, which is how this was caught at 36px. */
         className={cn("flex min-h-11 w-full items-center gap-2 rounded-lg border-l-4 px-3 py-2 text-left text-sm", PEEK_TONE[tone])}
       >
-        <span className="flex-1">{headline}</span>
+        <span className="flex-1">{keepFiguresWhole(headline)}</span>
         <span className="shrink-0 text-xs text-text-muted">{"▾"}</span>
       </button>
     </div>

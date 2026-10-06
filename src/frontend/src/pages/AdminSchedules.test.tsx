@@ -8,7 +8,7 @@ import {
   scheduleCreateResponse, scheduleRowFixture, sessionRoutes,
 } from "../test/scheduleFixtures";
 import { forgetClubZone } from "../lib/clubZone";
-import { LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_TITLE } from "../lib/scheduleCopy";
+import { CONFLICT_REASON, LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_TITLE } from "../lib/scheduleCopy";
 import { serverRecordFields } from "../test/serverContract";
 // The date picker's calendar is a lazy chunk (P10). Loaded here, once, so opening a picker in a
 // test resolves from the module cache instead of racing a cold transform under a loaded runner.
@@ -443,9 +443,16 @@ describe("creating one", () => {
     await userEvent.click(screen.getByRole("button", { name: "Check 11 Tuesdays" }));
     await screen.findByText(/1 booking is in the way\./);
 
-    // The reason is required: it is what the member is told and what the record keeps.
+    // The reason is required: it is what the member is told and what the record keeps. R17 X17-7:
+    // the button is never dead — a press without one opens nothing, sends nothing, says why and
+    // puts the keyboard on the reason.
     const clear = screen.getByRole("button", { name: /Cancel 1 booking and refund 36 minutes in full/ });
-    expect(clear).toBeDisabled();
+    expect(clear).toBeEnabled();
+    await userEvent.click(clear);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByText(CONFLICT_REASON.missing)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText(/Reason/)).toHaveFocus());
+    expect(stub.calls.some((c) => c.path.endsWith("/cancel"))).toBe(false);
     await userEvent.type(screen.getByLabelText(/Reason/), "Courts held for league");
     await userEvent.click(clear);
     // Confirmed in a dialog (P3): the consequence is its description, read before the press.

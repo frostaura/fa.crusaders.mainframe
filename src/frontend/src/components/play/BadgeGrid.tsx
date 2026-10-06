@@ -6,6 +6,7 @@ import type { BadgeView } from "@/lib/playApi";
 import { BADGES_COPY } from "@/lib/playCopy";
 import { cn } from "@/lib/utils";
 import { playDate } from "./playDates";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 
 /**
  * Badges (§9.1.5, §5.6): the whole catalogue in the server's order, earned ones in colour with
@@ -88,7 +89,7 @@ function BadgeTile({ badge, timezone }: { badge: BadgeView; timezone?: string })
             <span data-badge-name="" className={cn("break-words text-sm font-semibold", badge.earned ? "text-text-primary" : "text-text-secondary")}>
               {badge.name}
             </span>
-            <span className="break-words text-xs tabular-nums text-text-secondary">{status}</span>
+            <span className="break-words text-xs tabular-nums text-text-secondary">{keepFiguresWhole(status)}</span>
           </span>
         </PopoverTrigger>
         <PopoverContent className="w-72" aria-label={badge.name}>
