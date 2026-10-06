@@ -77,13 +77,21 @@ rule of its own:
 | State | Partner's target |
 | --- | --- |
 | not accepted (invited, declined, withdrawn, removed, lapsed) | 0 |
-| settled outside the app (admin) | 0 |
+| paid by hand (the desk's settle-outside) | 0 |
 | displaced (S8) | 0 |
 | cancelled before anybody checked in | 0 — **the late-cancel penalty is the organiser's alone** |
-| cancelled after check-in (S4) | the full share |
+| cancelled after check-in (S4) | the full share — but the unpaid figure of a cancelled game is 0 (below) |
 | no-show (S5) | pro rata of the penalty, rounded down; the organiser keeps the remainder. A 30% penalty on a 32-minute booking is `⌊32 × 30 / 100⌋ = 9`, and a partner holding 16 of the 32 owes `⌊9 × 16 / 32⌋ = 4` |
 | no-show with no reachable box (S5a) | 0 |
 | no-show reversed (S6), live, played | the full share |
+
+**A cancelled game asks nobody for anything (R17 E17-2).** `ShareLedger.UnpaidAsync` — the "unpaid"
+of every screen, reminder and sweep — treats a `Cancelled` booking as closed, even when asked
+`evenIfClosed`, so no seat of it reads as owing; and `PlayerNotices.NeedsConsent(booking, seat)` is
+false on it (there is no overload without the booking, so no caller can forget it). The reconcile's
+own `IsClosed` is NOT changed. *Why:* a cancelled court that lit after all still collects the
+partners' shares through `Owed` (the table above); only the asking stops — the detail read
+"10 unpaid" and asked for consent on a game that was off.
 | **closed** — the seat lapsed, or the share deadline passed | the above, but never more than already paid: a return is still made, a collection never is |
 
 **What the organiser is told on a split cancel (review round 1, B3).** The member's
@@ -257,7 +265,7 @@ unanswered seats), so an invite outlives no worker outage.
 
 Decided 2026-09-28 (reversible; `memory/decisions-players.md`). A share can come back: the partner
 withdraws, the organiser lowers or re-splits (adding a player re-splits an equal booking), removes
-them, the desk settles it outside the app, or the organiser cancels late (the penalty is theirs
+them, the desk records it as paid by hand, or the organiser cancels late (the penalty is theirs
 alone, so the refund falls short of the returns). Each return debits the organiser, so minutes an
 organiser receives as shares are **held**:
 
@@ -304,8 +312,8 @@ organiser receives as shares are **held**:
 - **Raising a share needs re-consent.** A re-split that raises a partner above their consent
   collects nothing; the seat reads `needs_consent: true`, the partner is mailed, and their next
   accept collects the difference. **One rule decides it everywhere** (R16 J16-1,
-  `PlayerNotices.NeedsConsent`): an accepted seat, NOT settled outside the app, whose share is above
-  its consent — the same answer on the booking detail, the invite view, `GET /me/invites/{pid}` and
+  `PlayerNotices.NeedsConsent(booking, seat)`): an accepted seat, NOT recorded as paid by hand, on a
+  game that is not cancelled (R17 E17-2), whose share is above its consent — the same answer on the booking detail, the invite view, `GET /me/invites/{pid}` and
   the split's answer. A share the club settled by hand never asks. **Lowering refunds** at once, and lowers the consent with it, so a
   later raise is a new question rather than a debit they agreed to about a different figure.
 - An **admin's accept on a member's behalf records no consent** — the reconcile collects nothing.
@@ -337,6 +345,19 @@ organiser receives as shares are **held**:
   `CourtActivationService.FindForUserAsync` (QR / code), `CandidatesAsync` + `PlayersOfAsync`
   (PIN, biometric). Their scan checks the booking in and stamps their OWN seat's `CheckedInAt`; it
   never makes them the payer — **a payer override on a split booking is ignored**.
+  **Every seat stamp is on the record (R17 J17-4):** `SeatCheckIn.StampAsync` stamps the seat AND
+  stages one `court.checked_in` audit row in the same save — actor = subject = the scanner,
+  `ScanAt` the scan, details `{booking_id, participant_id, organiser_user_id, court_number, method,
+  occurred_at, lit_court, reversed_no_show}` (`lit_court`: the same scan also wrote
+  `court.activated`). It is written on the first activation, on a repeat arrival at a lit court and
+  on a late upload that reverses a no-show; a booking with no seats writes none. *Why:* only the
+  first scanner's check-in reached the record, so a partner who scanned after the court was lit was
+  "checked in" on the booking page and on nobody's Night. **Players scanning at once are each
+  checked in (R17 J17-1):** a scan whose save loses the booking (or seat) row to another scan is
+  decided again on the rows as they now are (`DatabaseRetry.ReDecideOnLostRaceAsync`, up to 3
+  attempts) — the court is lit by then, so the second look is a repeat arrival that stamps only the
+  scanner's seat; charged once either way. Five parallel scans of one booking gave 1 OK and four
+  500s, and lost the partners' stamps.
 - **At the door**: an accepted partner passes `GateAccess`'s booking-window test exactly as the
   organiser does. An invited seat admits nobody.
 - **Pay-for at the box (P7)** refuses a split booking with `split_booking` — the code the box
@@ -377,9 +398,15 @@ organiser receives as shares are **held**:
 - **The picker tiebreak (R16 J16-3).** Directory, favourites and recent-partner rows carry
   `played_with_you` (games the caller and that member both played — each the booker or an accepted
   seat — on a booking the box checked in, that has started and is not cancelled; all time; 0 when
-  never), `last_played_with_you_at` (the latest such game's start, or null) and `member_since`
-  (`yyyy-MM-dd`, the earliest membership's creation date, or null). `PlayersQuery.PlayedWithAsync`;
-  nothing private.
+  never), `last_played_with_you_at` (the latest such game's start, or null), `member_since`
+  (`yyyy-MM-dd`, the earliest membership's creation date **in the club's zone** — R17; it was the
+  UTC date, so a member who joined 00:00–02:00 in Johannesburg read the day before — or null) and
+  **`member_ref`** (R17 L17-2): four Crockford base-32 characters (no I, L, O, U), stable for one
+  member at one club, derived by hash (`MemberRefs.Of(tenant, user)`: SHA-256 of the two ids, 20
+  bits). It is **never** the membership number, an email or a phone, and says nothing the row's
+  `user_id` does not; it exists only so two namesakes are never the same line — a pre-launch club
+  joins in one month, so "Member since Oct 2026" told nobody apart. The picker escalates month →
+  day → ref among the rows it shows together. `PlayersQuery.PlayedWithAsync`; nothing private.
 - **The inbox** (`member_notifications`) and member mail share the R23 outbox, generalised with an
   `Audience` (admins · member) and a `RecipientUserId`. Each notice is staged in the same save as
   its event — the inbox line and the outbox row together. Non-urgent kinds wait for the end of
@@ -434,7 +461,7 @@ Since review round 13:
   `share_returned` is only "the partner withdrew"; `player_added` (a player joined and an
   `equal`/`ratio` split went down — R16); `organiser_removed` (the organiser took them
   off); `split_changed` (the organiser lowered their share while they stay on the game); an admin's
-  removal stays `club_removed`; the club recording a share as paid outside the app is `club_settled`;
+  removal stays `club_removed`; the club recording a share as paid by hand is `club_settled`;
   a return that no record explains (a desk adjustment to the booking, a removal from before R14) is
   `share_back`, which names nobody. A cause and its actor come **only from a record** — the
   removal's or the split's own audit row, newer than the seat's last share move — never from the
@@ -471,15 +498,21 @@ Since review round 13:
     - `booking.game_no_show` and `booking.game_no_show_reversed`, which put the organiser's no-show and its reversal on the Night of a partner who paid into it.
 
     Share rows state the direction, the other person and the cause, read off the record; the ledger still stores no cause. `players.game_cancelled` is saved before its share rows.
-  - **A split change on a settled seat.** For a share the club settled outside the app, a split change moves nothing in the app and asks for no consent.
-  - **The partner's word on a started session.** When the club cancels a session that had started, the partner is told their share stands.
+  - **A split change on a settled seat.** For a share the club recorded as paid by hand, a split change moves nothing in the app and asks for no consent.
+  - **The partner's word on a started session.** When the club cancels a session that had started, a partner who paid a share is told it stands (R17 E17-2 narrows this — below).
 - **Every seat act is on the record and in every voice (R16).**
   - **An add's share move is the adder's (J16-2).** When an add lowers an `equal`/`ratio` split, each partner whose share moved gets a `players.split_changed` audit row in the add's own save, details `{share_minutes, previous_share_minutes, because: "player_added", joined, by_club}` (`joined` names who joined: "Jo Partner", "Jo Partner and Kim"). The reconcile after the add runs with the adder — the organiser, or the admin — as ledger actor, the organiser's own receipt born read. The share cause is `player_added` (`WalletShareCauses.PlayerAdded`) on the frame, the wallet row, the inbox, the mail, the Night and the CSV: "Jo Partner joined Court 1, Mon 5 Oct, 18:00, so the split went down". The frame's `actor_name` names the organiser when they added; it is null when the club did ("the club"). The reconciles after an accept, a decline or a club accept-on-behalf carry NO actor: a waiting return of another seat retried there would otherwise be put down to them.
   - **Who changed a share (J16-1).** Booking-detail seat rows, `GET /me/invites/{pid}` and the invite rows carry `share_changed_by: "organiser" | "club" | null` and `share_changed_by_name` (the organiser's name; null for the club), off the seat's newest `players.split_changed` record (`ShareChanger`); null/null when nothing has changed it since the invite. A split change on a settled seat tells the partner the organiser changed the split and that, paid by hand, nothing moves in the app.
   - **Accept-on-behalf (E16-1).** Writes `players.accepted_by_club` (subject the partner, actor the admin, organiser in the details) in the act's own save. The Night reads `booking.accepted_for_them` (the partner), `booking.club_accepted_player` (the organiser) and `booking.accepted_for_player` (the admin). The organiser's inbox gains a `players.response` line: "The club accepted Sam Partner's place in your game — Court 1, Thu 8 Oct, 08:00".
-  - **Settle-outside tells both (J16-6).** `players.game_changed` (payload `SettledByHand`) to the partner (mailed: "The club recorded that you paid Olive Organiser by hand for Court 1, Thu 8 Oct, 08:00 — nothing moves in the app") and to the organiser (inbox only: "The club recorded that Sam Partner paid you by hand for …"), deduped per act — the desk may record one seat twice. A later cancellation tells a settled partner "you paid Olive Organiser by hand, so that is between you and Olive Organiser", never that anything comes back.
-  - **A started session the club cancelled (J16-7).** Besides the inbox line, each accepted partner not settled by hand gets a balance-neutral wallet frame `reason: "cancelled_share_stands"` (`delta_minutes` 0, `parts: []`, the booking, `cancelled_by: "club"`). The booker keeps `cancelled_no_refund`.
+  - **Settle-outside tells both (J16-6).** `players.game_changed` (payload `SettledByHand`) to the partner (mailed: "The club recorded that you paid Olive Organiser by hand for Court 1, Thu 8 Oct, 08:00 — nothing moves in the app") and to the organiser (inbox only: "The club recorded that Sam Partner paid you by hand for …"), deduped per act. **"Nothing moves" only when nothing came back (R17 L17-8):** when the partner had paid in the app, that goes back with its own receipt and the lines say so — the partner's "— the 10 minutes you paid in the app go back to you", the organiser's "— the 10 minutes they paid in the app go back to them"; the payload carries `ReturnedMinutes` (null when none) and the mail's callout reads "The 10 minutes you paid in the app for this share go back to your balance — you will get a separate receipt for it. Nothing more moves in the app: the rest is between you and Olive Organiser." `PlayerNotices.SettledOutsideAsync(…, paidInApp, …)` — the desk may record one seat twice. A later cancellation tells a settled partner "you paid Olive Organiser by hand, so that is between you and Olive Organiser", never that anything comes back.
+  - **A started session the club cancelled (J16-7).** Besides the inbox line, each accepted partner not settled by hand **who paid a share** (`PaidAsync > 0` — R17 E17-2) gets a balance-neutral wallet frame `reason: "cancelled_share_stands"` (`delta_minutes` 0, `parts: []`, the booking, `cancelled_by: "club"`). The booker keeps `cancelled_no_refund`.
   - **Share lines name the court and the day (E16-4)** — the withdrawal, no-show and club-refund receipts too — and a club removal its cause on both sides ("the club took you off …" / "the club took them off …"). The organiser's collect mail is titled as the club's (E16-5).
+- **Money words true per seat, and every seat act on the Night (R17).**
+  - **"Your share stands" only to a partner who paid one (E17-2).** On a started game the club cancels, the `cancelled_share_stands` frame, the inbox ending and the mail's "stands" go only to a live seat whose `PaidAsync > 0`. A partner who paid nothing (the desk accepted for them at consent 0; an unanswered invite) reads "— it had started, but you had paid no share, so nothing moves" (inbox) and "The session had started, but you had not paid a share, so nothing moves in your balance." (mail); the payload flag is `GameCancelledPayload.PaidNoShare` (false on older rows). A share paid by hand keeps its own ending (J16-6). *Why:* "stands" was about minutes they never paid.
+  - **One wording: "paid by hand" (L17-8).** Every server surface — the Night, receipts and share causes, mail subjects and callouts, the change-log label ("Recorded a share as paid by hand") — says "paid by hand", never "outside the app"; the partner's share-moved mail subject is "Your share came back: paid by hand — Court 1". The wire codes (`settle-outside`, `settled_outside`, `club_settled`, `booking.share_settled_outside`) keep their names.
+  - **Every seat check-in is on the Night (J17-4).** Each seat stamp writes `court.checked_in` (§5). The Night maps it to `court.checked_in`: on the scanner's own Night "Checked in at Court 1 for Olive Organiser's booking" when it is somebody else's game (`TraceFacts.SeatOfName`), "Checked in at Court 1" on their own; on the organiser's Night "Sam Partner checked in at Court 1". A row whose scan also lit the court (`lit_court`, or the same scanner's `court.activated` for the booking) folds into that activation — one check-in, one row.
+  - **The lights coming on is on every player's Night (E17-4).** `court.lights_on` joins the partner view (`TraceKinds.PartnersViewActions`), but only for a member who was in the session — an accepted seat, or the payer at the box (D10, who holds no seat) — never an invitee who declined or never answered. Nothing new is written; the existing lights row is read off the booker.
+  - **A member's own invite, accept and decline are on the record (E17-8).** Audit rows `players.invited` (actor the organiser, subject the invitee; organiser-made adds only — the club's add stays `players.added_by_club`), `players.accepted` (a fresh self-accept; details add `share_minutes`, `paid_minutes`) and `players.declined` (details add `share_minutes`), each with `{booking_id, participant_id, organiser_user_id, starts_at}`, in the act's own save. Six Night kinds: `booking.invited` / `booking.invited_player`, `booking.accepted` / `booking.partner_accepted`, `booking.declined` / `booking.partner_declined` (the member's side / the organiser's side) — "Olive Organiser invited them to a game on Court 1", "Sam Partner accepted a place in their game on Court 1".
 
 ## 7. Endpoints
 
@@ -505,12 +538,12 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `GET /api/v1/invites/{token}/preview` | **anonymous** — `{organiser_first_name, court_name, starts_at, ends_at, share_minutes, timezone}` and nothing else; `404 invite_not_found` for an unknown or other club's token, an answered seat, a game that is not `Booked`, or a closed share window. The token is the credential; global per-address limiter (review round 1, F2) |
 | `GET /api/v1/invites/{token}` | → `invite`; 404 `invite_not_found`, 409 `invite_closed`, 409 `already_in_booking`, 409 `player_previously_removed` |
 | `POST /api/v1/invites/{token}/accept` · `…/decline` | as the seat routes (accept takes `{expectedShareMinutes}`) |
-| `GET /api/v1/me/partners/recent` | → `{items: [{user_id, name, photo_url, last_played_at, games, played_with_you, last_played_with_you_at, member_since}]}` (the last three: §6's picker tiebreak, R16 J16-3) — only games that have started AND the box checked in (review round 1, B11) |
+| `GET /api/v1/me/partners/recent` | → `{items: [{user_id, name, photo_url, last_played_at, games, played_with_you, last_played_with_you_at, member_since, member_ref}]}` (the last four: §6's picker tiebreak, R16 J16-3 / R17 L17-2) — only games that have started AND the box checked in (review round 1, B11) |
 | `GET /api/v1/me/bookings/upcoming` | → `{timezone, items: [{booking_id, court_name, starts_at, ends_at, role: organiser\|partner, status, players [{name, photo_url, status}], my_share_minutes, needs_action}]}` — every `Booked` game whose end is ahead where the caller is organiser or on an ACCEPTED partner seat, soonest first, at most 50 (review round 1, B2). `my_share_minutes`: a partner's own share; the organiser's is the price less the live partners' shares. `needs_action`: a partner asked for more than they consented to, or still owing on an open seat. The schedule marks an accepted partner's game `isMine: true` with `role: "partner"` (`"organiser"` on the booker's own; null otherwise). |
 | `GET /api/v1/me/bookings/recent` | → `{timezone, items: [ …the upcoming item…, result_status: none\|pending\|confirmed\|disputed, can_record }]}` — every `Booked`/`Completed`/`NoShow` game that ENDED within `result_record_days` (7) where the caller is the organiser or holds an accepted partner seat, newest first, at most 50 (review round 2, C3). `result_status` is the live result (a pending one past its deadline reads `confirmed`); `can_record` is play.md §3.1's test with no live result. The upcoming list does not carry the two fields. |
 | *(notice)* `players.club_seat` | review round 1, B8: the club added the member to a game (`Accepted: false`, links the invite; keyed `invited:club:` so the invite loop's collapse applies) or put them in it (admin add with `accepted`, or accept-on-behalf; links the booking; nothing collected until they accept their share). Mailed. A club collect's receipts say the club collected it and, below zero, where the partner's balance stands; a received share's receipt says it is held and until when (B12). |
-| `GET /api/v1/me/partners/favourites` · `PUT`/`DELETE /api/v1/me/partners/favourites/{userId}` | → `{items: [{user_id, name, photo_url, played_with_you, last_played_with_you_at, member_since}]}` / `{user_id, favourite}` |
-| `GET /api/v1/members/directory?q=` | → `{items: [{user_id, name, photo_url, played_with_you, last_played_with_you_at, member_since}]}`; `400 query_too_short`, `429 directory_rate_limited {retry_after_seconds}` |
+| `GET /api/v1/me/partners/favourites` · `PUT`/`DELETE /api/v1/me/partners/favourites/{userId}` | → `{items: [{user_id, name, photo_url, played_with_you, last_played_with_you_at, member_since, member_ref}]}` / `{user_id, favourite}` |
+| `GET /api/v1/members/directory?q=` | → `{items: [{user_id, name, photo_url, played_with_you, last_played_with_you_at, member_since, member_ref}]}`; `400 query_too_short`, `429 directory_rate_limited {retry_after_seconds}` |
 | `GET /api/v1/me/notifications?cursor&limit` | → `{items: [{id, kind, headline, link, booking_id, created_at, read_at}], unread_count, next_cursor, timezone}` |
 | `GET /api/v1/me/notifications/unread-count` | → `{unread_count}` |
 | `POST /api/v1/me/notifications/{id}/read` · `POST …/read-all` | → `{id, read}` / `{marked}` |

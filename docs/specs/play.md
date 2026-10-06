@@ -29,10 +29,20 @@ beyond a result on a booking they both played. `show_in_leaderboards` and `share
      status now; or
   2. the booking carries `bookings.CheckedInAt` and they are a player of it (the booker, or an
      accepted seat) — one scan lights the court for everybody on it, and partners who walked in
-     behind the scanner played.
+     behind the scanner played;
 
-  Booking status is not consulted: a cancellation after check-in (S4) and a reversed no-show (S6)
-  were attended; a no-show and a displaced booking (S8) were not, because they carry no check-in.
+  **and the booking was not cancelled** (`CancelledAt` null — R17 J17-5). A reversed no-show (S6)
+  was attended; a no-show and a displaced booking (S8) were not, because they carry no check-in;
+  **a session the club cancelled after check-in (S4) was not attended, and counts nowhere** — not in
+  stats, the streak, partners, badges or their progress, the monthly ring, or the member's
+  time-on-court reports (`reporting.md`). Only the club can cancel once somebody has checked in.
+
+  **This reverses the earlier rule** (P12 to R16) that booking status was not consulted and that "a
+  cancellation after check-in only stops the clock" — the session stayed attended, counted up to
+  the cancellation, in stats, the streak and the ring, while badges (R16 E16-9) already ignored it.
+  *Why (decision R17 J17-5):* one definition of attended across badges and stats — Profile and
+  reports must never disagree about a club-cancelled session (E8-4). `AttendanceQuery.SessionsAsync`
+  drops it, so every reader agrees by construction.
 
   **From when** (review round 2, B-11): a session counts from its court time or its check-in,
   whichever is later (`AttendanceQuery.AttendedAt`) — the rule a result already keeps (§3.1). A
@@ -49,6 +59,8 @@ beyond a result on a booking they both played. `show_in_leaderboards` and `share
 - **Session** — one attended booking, from one member's point of view.
 - **Played minutes** of an attended booking — `max(0, min(EndsAt, CancelledAt ?? EndsAt) − StartsAt)`
   in whole minutes, from the row as it stands (a released tail has already truncated `EndsAt`).
+  Since R17 an attended booking is never cancelled, so `CancelledAt` no longer shortens anything
+  `AttendanceQuery` returns; the term is kept for sessions built by hand.
 - **Club week** — Monday 00:00 to the next Monday 00:00, club-local (IANA zone from
   `tenant_settings.timezone` through `ClubClock`). **A week's key is its Monday's club-local
   date** (`DateOnly`), never `(year, ISO week number)` and never an instant plus 7 × 24 h. A
@@ -473,17 +485,16 @@ Ordering sessions uses `(CheckedInAt of the member's evidence, BookingId)` — t
 **Badges are earned when a session ENDS, never for one the club cancelled (R16 E16-9).** The badge
 rules read only sessions that have ended and were not cancelled
 (`AttendedSession.EarnsBadgesAt(now)`: no `CancelledAt`, and `EndsAt` — or the cancellation that
-stopped it — at or before now; `PlayRecord.BadgeInputs`). Stats, the streak and the ring are
-unchanged: a session cancelled after check-in (S4) is still attended (§1) and still counted there.
-It earns no badge itself and is not one of the sessions the session-count, `partners_5`,
-`early_bird` and `night_owl` rules count; a streak badge still reads the whole streak walk, but is
-awarded only when a finished, uncancelled session lies in the week the streak reached its mark.
+stopped it — at or before now; `PlayRecord.BadgeInputs`). Since R17 J17-5 a session cancelled
+after check-in (S4) is not attended at all (§1), so stats, the streak and the ring drop it too and
+the `CancelledAt` test here is belt to that brace. A streak badge reads the whole streak walk, but
+is awarded only when a finished session lies in the week the streak reached its mark.
 *Why:* badges are never taken back (§3.3), and once a session has started only the club can cancel
 it — awarding at the start handed out "First court" and "Night owl" for a session the club then
 cancelled half way, kept for good. The qualifying instant (`AwardedAt`) is still the check-in in
 the table above; only the moment of award moves to the end. A locked badge's `progress` (§6.2) is
-not filtered — it counts every attended session, so it may read ahead of the award while a
-session is still on court, or after the club cancelled one. The marker that makes the award happen at the end is §7.3's re-arm.
+not filtered by the end — it counts every attended session, so it may read ahead of the award while a
+session is still on court; a session the club cancelled is not attended, so it is never counted (R17). The marker that makes the award happen at the end is §7.3's re-arm.
 
 ## 6. HTTP API
 
@@ -857,7 +868,7 @@ you earn a badge or reach your goal.`
   after the deadline → `result_not_pending`; lazy auto-confirm on read; a removed seat can no
   longer confirm; S4 and reversed-no-show bookings are recordable, a no-show is not.
 - `PlayStatsHttpTests` — attendance by own scan vs by the booking's check-in; played minutes after
-  a release and after an S4 cancel; stats move on void; partners/opponents/form; `GET /me/play`
+  a release, and an S4-cancelled session not attended (R17); stats move on void; partners/opponents/form; `GET /me/play`
   for a member with nothing.
 - `PlayStreakHttpTests` — a `Europe/London` club (`UseSetting` on the tenant's timezone) walking
   examples A and C through real bookings and check-ins; pause on/off/allowance errors.
