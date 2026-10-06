@@ -39,7 +39,8 @@ async function mount(balance: number) {
   await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
   return {
     push: (f: BalanceFrame) => act(async () => { live?.onFrame(f); }),
-    flyout: () => view.container.querySelector("[data-balance-flyout]")?.textContent ?? null,
+    // R19 L19-2 — the paint glues each figure to its unit; the words are compared plain.
+    flyout: () => view.container.querySelector("[data-balance-flyout]")?.textContent?.replace(/\u00a0/g, " ") ?? null,
   };
 }
 

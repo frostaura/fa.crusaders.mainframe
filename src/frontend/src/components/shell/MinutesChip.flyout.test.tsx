@@ -40,7 +40,8 @@ function mount(startingBalance: number) {
     </MemoryRouter>,
   );
   const push = (f: BalanceFrame) => act(async () => { live?.onFrame(f); });
-  const flyout = () => view.container.querySelector("[data-balance-flyout]")?.textContent ?? null;
+  // R19 L19-2 — the paint glues each figure to its unit (no-break spaces); the words are compared plain.
+  const flyout = () => view.container.querySelector("[data-balance-flyout]")?.textContent?.replace(/\u00a0/g, " ") ?? null;
   return { push, flyout };
 }
 

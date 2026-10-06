@@ -11,7 +11,8 @@ import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn } from "@/lib/utils";
 import { clubRowTime } from "@/lib/clubClock";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
-import { flyoutHeldNote, plainMovementSentence, type MovementPart, type MovementWho } from "@/lib/walletCopy";
+import { flyoutBackNote, flyoutHeldNote, plainMovementSentence, type MovementPart, type MovementWho } from "@/lib/walletCopy";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 import { useAuth } from "@/lib/useAuth";
 import { phoneIsOffline } from "@/lib/api";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
@@ -57,6 +58,14 @@ const ICON_TONE = { zero: "", low: "", fine: "text-success-strong" } as const;
 const CANCEL_MERGE_MS = 1_000;
 
 type PendingCancel = { delta: BalanceDelta; timer: number };
+
+/**
+ * R19 L19-2 — the flyout's box under the chip. Its widest is a pixel cap, so large text wraps it
+ * rather than widening it past the bar; its gap is the rise (`flyout-rise` ends 10px up) plus 2px,
+ * so even at the end of the rise it never reaches back into the bar's row — the bell, the chip, the
+ * avatar.
+ */
+const FLYOUT_BOX = { maxWidth: "min(14rem, 220px)", marginTop: "12px" } as const;
 
 /**
  * R16 — the precise sentence, from `lib/movementCopy` (out of the entry chunk, fetched with the
@@ -192,13 +201,47 @@ function chipTitle(state: string, loading: boolean, balance: number | null, f: C
  */
 const BURST_MS = 1_000;
 
-type Burst = { from: number | null; last: number | null; at: number; startedAt: number; fromBalance: number | null; lastBalance: number | null };
+/**
+ * `sharedOut` (R19 L19-4): the partners' shares that LEFT the wallet in this burst — their minutes
+ * and each row's partner — so held minutes that went back to partners are not called "freed".
+ */
+type Burst = {
+  from: number | null; last: number | null; at: number; startedAt: number; fromBalance: number | null; lastBalance: number | null;
+  sharedOut: { minutes: number; partners: (string | null)[] };
+};
+
+/** The share rows of a frame that went OUT to partners (an older frame without rows: the frame itself). */
+function sharesOutOf(delta: BalanceDelta, into: Burst["sharedOut"]): Burst["sharedOut"] {
+  const rows = (delta.parts ?? [{ reason: delta.reason ?? "", delta_minutes: delta.amount }])
+    .filter((p) => p.reason === "share_transfer" && p.delta_minutes < 0);
+  return {
+    minutes: into.minutes - rows.reduce((n, p) => n + p.delta_minutes, 0),
+    partners: [...into.partners, ...rows.map((p) => p.counterparty_name ?? null)],
+  };
+}
+
+const NO_SHARES: Burst["sharedOut"] = { minutes: 0, partners: [] };
+
+/**
+ * The notes beside the figure (R18 E18-12, R19 L19-4): what went into what is held ("10 min held"),
+ * what left it as partners' shares ("15 min back to Sam") and what was simply released ("6 min
+ * freed"). Each figure glued to its unit — the flyout may wrap, a figure never splits.
+ */
+function heldNotes(held: number, shared: Burst["sharedOut"]): string[] {
+  if (held > 0) return [keepFiguresWhole(flyoutHeldNote(minutesCompact(held), true))];
+  const out = -held;
+  const back = Math.min(out, shared.minutes);
+  return [
+    ...(back >= 1 ? [flyoutBackNote(minutesCompact(back), shared.partners)] : []),
+    ...(out - back >= 1 ? [flyoutHeldNote(minutesCompact(out - back), false)] : []),
+  ].map(keepFiguresWhole);
+}
 
 /**
  * What the flyout says: the NET change of the figure the chip shows, across the current burst —
  * not the last frame's `delta_minutes`. That read "−33" while the chip counted 235 → 335. Null
- * when there is no movement to show, or the burst nets to nothing the chip shows (a partner's paid
- * share that is only HELD moves the balance but not the spendable figure on the chip).
+ * when there is no movement to show. R19 L19-4 — a partner's paid share that is only HELD moves
+ * the balance and not the spendable figure: that is shown as its note alone ("10 min held").
  *
  * <p>
  * Derived during render from the previous render's figure (React's "information from previous
@@ -206,26 +249,27 @@ type Burst = { from: number | null; last: number | null; at: number; startedAt: 
  * </p>
  */
 function useFlyoutAmount(shown: number | null, balance: number | null, delta: BalanceDelta | null): Flyout | null {
-  const [burst, setBurst] = useState<Burst>({ from: shown, last: shown, at: 0, startedAt: 0, fromBalance: balance, lastBalance: balance });
+  const [burst, setBurst] = useState<Burst>({ from: shown, last: shown, at: 0, startedAt: 0, fromBalance: balance, lastBalance: balance, sharedOut: NO_SHARES });
   if (delta && delta.at !== burst.at) {
     const fresh = burst.from === null || delta.at - burst.at > BURST_MS;
     setBurst(fresh
-      ? { from: burst.last, last: shown, at: delta.at, startedAt: delta.at, fromBalance: burst.lastBalance, lastBalance: balance }
-      : { ...burst, last: shown, at: delta.at, lastBalance: balance });
+      ? { from: burst.last, last: shown, at: delta.at, startedAt: delta.at, fromBalance: burst.lastBalance, lastBalance: balance, sharedOut: sharesOutOf(delta, NO_SHARES) }
+      : { ...burst, last: shown, at: delta.at, lastBalance: balance, sharedOut: sharesOutOf(delta, burst.sharedOut) });
   } else if (shown !== burst.last || balance !== burst.lastBalance) {
     setBurst({ ...burst, last: shown, lastBalance: balance });
   }
   if (!delta || shown === null || burst.from === null) return null;
-  const net = shown - burst.from;
+  const net = Math.trunc(shown - burst.from);
   // R18 E18-12 — the part of the movement that went into (or came out of) what is held: the toast
   // says the wallet's movement, the chip the spendable one, and the difference was unexplained.
   const held = balance !== null && burst.fromBalance !== null ? Math.trunc(balance - burst.fromBalance - net) : 0;
+  const notes = heldNotes(held, burst.sharedOut);
   // Keyed by the burst, so a new movement replays the rise and one burst's frames do not restart it.
   // Whole minutes (P13): a net of less than one is no movement the chip shows.
-  return Math.abs(net) >= 1 ? { amount: Math.trunc(net), held, key: burst.startedAt } : null;
+  return Math.abs(net) >= 1 || notes.length > 0 ? { amount: net, notes, key: burst.startedAt } : null;
 }
 
-type Flyout = { amount: number; held: number; key: number };
+type Flyout = { amount: number; notes: string[]; key: number };
 
 /**
  * The figure — or, while it is loading, a neutral placeholder the width of one (D1). Never a
@@ -318,19 +362,25 @@ export function MinutesChip() {
       </Link>
       {showFlyout ? (
         // Up is success; down is secondary, deliberately not red — spending your own minutes on a
-        // court you chose is not an error.
+        // court you chose is not an error. R19 L19-2 — UNDER the chip, from its right edge, and it
+        // wraps: centred over it and nowrap, "+30 min · 15 min freed" ran 37px past a 1024 / 150 %
+        // screen, over the avatar and the bell, above the top of the screen. The cap is pixels
+        // (and the 320 px bar's room under the chip), so large text wraps it rather than widens it.
         <span
           key={flyout!.key}
           aria-hidden="true"
           data-balance-flyout=""
           className={cn(
-            "pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-semibold tabular-nums",
+            "pointer-events-none absolute right-0 top-full z-raised w-max rounded-md bg-bg-surface px-1.5 py-0.5 text-right text-xs font-semibold tabular-nums shadow-xs",
             "animate-flyout-rise motion-reduce:animate-none",
             flyout!.amount > 0 ? "text-success-strong" : "text-text-secondary",
           )}
+          style={FLYOUT_BOX}
         >
-          {minutesSigned(flyout!.amount)}
-          {flyout!.held !== 0 ? <span data-flyout-held="" className="whitespace-nowrap font-medium text-text-secondary">{` · ${flyoutHeldNote(minutesCompact(Math.abs(flyout!.held)), flyout!.held > 0)}`}</span> : null}
+          {flyout!.amount !== 0 ? keepFiguresWhole(minutesSigned(flyout!.amount)) : null}
+          {flyout!.notes.map((note, i) => (
+            <span key={note} data-flyout-held="" className="font-medium text-text-secondary">{`${i > 0 || flyout!.amount !== 0 ? " \u00b7\u00a0" : ""}${note}`}</span>
+          ))}
         </span>
       ) : null}
     </div>

@@ -155,6 +155,17 @@ export function flyoutHeldNote(figure: string, intoHeld: boolean): string {
 }
 
 /**
+ * R19 L19-4 — held minutes that LEFT the wallet as partners' shares (a cancel, a partner withdrawing)
+ * were not freed: the toast says they "went back to Sam for their share", and so does this — "15 min
+ * back to Sam", "back to your partner" unnamed, "back to your partners" for more than one.
+ */
+export function flyoutBackNote(figure: string, partners: readonly (string | null | undefined)[]): string {
+  const named = [...new Set(partners.map((p) => p?.trim()).filter(Boolean))];
+  const who = partners.length > 1 && named.length !== 1 ? "your partners" : named.length === 1 ? named[0]!.split(" ")[0] : "your partner";
+  return `${figure} back to ${who}`;
+}
+
+/**
  * The plain sentence for a movement — worded by the frame's reason and its sign alone, true
  * whoever caused it. The precise ones (a no-show settled, a cancel with its partners' shares, a
  * pay-for …) are `lib/movementCopy`'s, out of the entry chunk; this is what the chip says when
