@@ -34,8 +34,12 @@ last_verified: 2026-10-06
 - **A final cancel refusal is headed "Not cancelled"** (L19-5, `lib/cancelSheetCopy.ts`), and
   "The schedule behind this is up to date now." becomes the place the sheet was opened over, read
   off the route via `UNSAFE_LocationContext`: schedule · `/bookings/:id` · a member's bookings.
+- **A message naming two boards has its own fault words** (D19-4 console, `deviceFaultCopy`):
+  `TwoBoardsDetail` is "named more than one board" (it WAS read; title ours, never "could not
+  read"); D19-4's " (boards named: a, b)" suffix is parsed off any detail and listed, "filed
+  against neither". A suffixed row's title is ours: `HeadlineOf`'s EndsWith does not see past it.
 - **The door card's margin is `min(1.5rem,24px,4vw)`** (L19-6): ≥ 70 % column at 320/390 · 200 %.
 - Proof: `pages/admin-members-partial.r19.test.tsx`, `components/shell/ConnectionLostBusy.r19.test.tsx`,
   `components/member-door/doorBusyLead.r19.test.tsx`, `lib/lostReply.serverError.r19.test.ts`,
   `components/toast-announcer.r19.test.tsx`, `components/bookings/__tests__/cancelEndedR19.test.tsx`,
-  `e2e/shell-r19-fe19x.spec.ts` (mobile + desktop).
+  `lib/deviceFaultCopy.r19.test.ts`, `e2e/shell-r19-fe19x.spec.ts` (mobile + desktop).
