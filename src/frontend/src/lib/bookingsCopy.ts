@@ -409,6 +409,10 @@ export const REFUSAL_REASON: Record<string, string> = {
   /** R15 D15-5 — a member's own checked-in booking: only the club may cancel it now. */
   already_checked_in: "You've checked in to it — only the club can cancel it now.",
   already_cancelled: "Was already cancelled.",
+  /** R17 E17-6 / J17-7 (BE17b) — the desk's cancel of a booking already cancelled. */
+  booking_not_open: "Was already cancelled.",
+  /** R17 E17-6 (BE17b) — not Booked (played, a no-show, a club hold); a bulk row carries the code only. */
+  not_cancellable: "It isn't open any more — played, a no-show or a club hold.",
 };
 
 export function refusalReason(code: string | null | undefined): string {
