@@ -199,7 +199,7 @@ public sealed partial class PlayersQuery
             attendance = new
             {
                 checked_in_at = booking.CheckedInAt,
-                players_checked_in = PlayersCheckedIn(booking, seats),
+                players_checked_in = await PlayersCheckedInAsync(booking, seats, ct),
             },
             permissions = Permissions(booking, settings, role, mySeat),
 
@@ -215,10 +215,20 @@ public sealed partial class PlayersQuery
     /// seat to stamp, so its one player — the organiser — is counted from the booking's own
     /// <c>CheckedInAt</c>: a solo game checked in read "0 of 1 player checked in" (review round 6, E6-7).
     /// </summary>
-    private static int PlayersCheckedIn(Booking booking, List<BookingParticipant> seats) =>
-        seats.Count == 0
-            ? (booking.CheckedInAt is null ? 0 : 1)
-            : seats.Count(s => s.CheckedInAt is not null);
+    /// <remarks>
+    /// R18 (FX18, BE18b's E18-6 rule): <c>CheckedInAt</c> is whoever LIT the court — the money rule — and a
+    /// pay-for payer with no accepted seat is not a player. After only the payer's scan a seatless game read
+    /// "1 of 1 checked in" while the organiser had not arrived. When somebody else paid, the organiser counts
+    /// only from their own check-in row (<see cref="SeatCheckIn.AlreadyRecordedAsync"/>: their own
+    /// <c>court.activated</c>, or the seatless <c>court.checked_in</c> their later scan writes).
+    /// </remarks>
+    private async Task<int> PlayersCheckedInAsync(Booking booking, List<BookingParticipant> seats, CancellationToken ct)
+    {
+        if (seats.Count != 0) return seats.Count(s => s.CheckedInAt is not null);
+        if (booking.CheckedInAt is null) return 0;
+        if (booking.UserId is not { } organiser || booking.PaidByUserId is not { } payer || payer == organiser) return 1;
+        return await SeatCheckIn.AlreadyRecordedAsync(_db, booking, organiser, ct) ? 1 : 0;
+    }
 
     /// <summary>What the organiser is out on this booking, and who else paid for it — null when nobody did.</summary>
     private sealed record OrganiserCost(int Owed, Guid? PaidBy);

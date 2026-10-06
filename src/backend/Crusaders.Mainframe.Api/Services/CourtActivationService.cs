@@ -797,8 +797,11 @@ public static class SeatCheckIn
         return true;
     }
 
-    /// <summary>Whether this member's check-in on this booking is already a <c>court.activated</c> or <c>court.checked_in</c> row.</summary>
-    private static async Task<bool> AlreadyRecordedAsync(MainframeDbContext db, Booking booking, Guid userId, CancellationToken ct)
+    /// <summary>
+    /// Whether this member's check-in on this booking is already a <c>court.activated</c> or <c>court.checked_in</c> row.
+    /// Also the booking page's "checked in" for a seatless game a pay-for payer lit (R18 FX18, <c>PlayersQuery</c>).
+    /// </summary>
+    public static async Task<bool> AlreadyRecordedAsync(MainframeDbContext db, Booking booking, Guid userId, CancellationToken ct)
     {
         var rows = db.AuditLogs.AsNoTracking()
             .Where(a => (a.Action == Action || a.Action == ActivatedAction) && a.ActorUserId == userId && a.DetailsJson != null);
