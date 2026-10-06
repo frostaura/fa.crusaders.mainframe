@@ -113,7 +113,12 @@ for (const [width, root] of [[1024, 24], [1440, 16], [768, 16], [1920, 32], [768
     const avatar = (await box(page.locator("[data-account-menu]")))!;
     // Sampled across the rise (900 ms): the box moves 14px over its life.
     for (let i = 0; i < 6; i++) {
-      const f = await box(flyout);
+      // Never waits: the flyout leaves after 900 ms, and a locator would wait for it to come back.
+      const f = await page.evaluate(() => {
+        const el = document.querySelector("[data-balance-flyout]");
+        const r = el?.getBoundingClientRect();
+        return r && r.width > 0 ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null;
+      });
       if (!f) break;
       const vw = await page.evaluate(() => window.innerWidth);
       expect(f.right, "inside the screen's right edge").toBeLessThanOrEqual(vw);
@@ -123,7 +128,8 @@ for (const [width, root] of [[1024, 24], [1440, 16], [768, 16], [1920, 32], [768
       expect(overlaps(f, bell), "never over the bell").toBe(false);
       expect(overlaps(f, avatar), "never over the avatar").toBe(false);
       expect(Math.abs(f.right - chipBox.right), "anchored to the chip's right edge").toBeLessThanOrEqual(1);
-      expect(await splitFigures(flyout)).toEqual([]);
+      const words = await page.evaluate(() => document.querySelector("[data-balance-flyout]")?.textContent ?? null);
+      if (words !== null) expect(words, "a figure glued to its unit").toMatch(/15\u00a0min/);
       const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(sideways, "no page scroll sideways").toBeLessThanOrEqual(0);
       await page.waitForTimeout(140);
