@@ -13,11 +13,11 @@ import { PICKER, PLAYERS_REFUSAL } from "@/lib/playersCopy";
 
 export function LinkTab({ onPick }: { onPick: () => void }) {
   return (
-    <div className="grid justify-items-start gap-3 rounded-xl border border-border bg-bg-surface p-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-3 rounded-xl border border-border bg-bg-surface p-4">
       <span aria-hidden="true" className="flex size-10 items-center justify-center rounded-full bg-accent-soft text-accent-strong">
         <Export size={20} />
       </span>
-      <p className="grid gap-1">
+      <p className="grid grid-cols-[minmax(0,1fr)] gap-1">
         <span className="text-sm font-semibold text-text-primary">{PICKER.linkBody}</span>
         <span className="text-sm text-text-secondary">{PICKER.linkAfter}</span>
       </p>
@@ -45,7 +45,7 @@ export function GuestTab({ onPick }: { onPick: (name: string) => void }) {
     onPick(name.trim());
   };
   return (
-    <form className="grid justify-items-start gap-3" onSubmit={submit} noValidate>
+    <form className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-3" onSubmit={submit} noValidate>
       <Field invalid={problem} className="w-full">
         <FieldLabel>{PICKER.guestLabel}</FieldLabel>
         <Input

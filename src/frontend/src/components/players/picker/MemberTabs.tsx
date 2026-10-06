@@ -43,7 +43,7 @@ export function FavouritesTab(props: MemberTabProps) {
       emptyIcon={Star}
       skeleton={<MemberRowsSkeleton />}
     >
-      <ul aria-label={PICKER.favourites} className="grid gap-1">
+      <ul aria-label={PICKER.favourites} className="grid grid-cols-[minmax(0,1fr)] gap-1">
         {favourites.listed.map((m) => (
           <MemberRow key={m.user_id} member={m} added={excluded.has(m.user_id)} favourites={favourites} onPick={onPick} />
         ))}
@@ -77,7 +77,7 @@ export function RecentTab(props: MemberTabProps & { recent: ReturnType<typeof us
       emptyIcon={UsersThree}
       skeleton={<MemberRowsSkeleton />}
     >
-      <ul aria-label={PICKER.recent} className="grid gap-1">
+      <ul aria-label={PICKER.recent} className="grid grid-cols-[minmax(0,1fr)] gap-1">
         {rows.map((p) => (
           <MemberRow
             key={p.user_id} member={p} detail={recentDetail(p)}
@@ -109,7 +109,7 @@ export function MembersTab(props: MemberTabProps) {
   const rows = state.status === "ready" ? state.data : [];
   const resultsId = useId();
   return (
-    <div className="grid gap-3">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
       <Field>
         <FieldLabel>{PICKER.searchLabel}</FieldLabel>
         <div className="relative">
@@ -143,7 +143,7 @@ export function MembersTab(props: MemberTabProps) {
             emptyIcon={UsersThree}
             skeleton={<MemberRowsSkeleton />}
           >
-            <ul aria-label={PICKER.members} className="grid gap-1">
+            <ul aria-label={PICKER.members} className="grid grid-cols-[minmax(0,1fr)] gap-1">
               {rows.map((m) => (
                 <MemberRow key={m.user_id} member={m} added={excluded.has(m.user_id)} favourites={favourites} onPick={onPick} />
               ))}

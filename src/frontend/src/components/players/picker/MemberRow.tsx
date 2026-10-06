@@ -52,7 +52,7 @@ export function MemberRow(props: MemberRowProps) {
           {member.photo_url ? <AvatarImage src={member.photo_url} alt="" /> : null}
           <AvatarFallback name={member.name} />
         </Avatar>
-        <span className="grid min-w-0 flex-1 gap-0.5">
+        <span className="grid grid-cols-[minmax(0,1fr)] min-w-0 flex-1 gap-0.5">
           <span className="truncate text-sm font-semibold text-text-primary">{member.name}</span>
           {detail ? <span id={detailId} className="break-words text-xs text-text-secondary">{detail}</span> : null}
         </span>
@@ -106,11 +106,11 @@ function StarButton({ member, favourites }: { member: PublicMember; favourites: 
 /** Three rows shaped like the answer, while it is read. */
 export function MemberRowsSkeleton() {
   return (
-    <ul aria-hidden="true" className="grid gap-1">
+    <ul aria-hidden="true" className="grid grid-cols-[minmax(0,1fr)] gap-1">
       {[0, 1, 2].map((i) => (
         <li key={i} className="flex min-h-touch items-center gap-3 px-2 py-1.5">
           <Skeleton className="size-10 rounded-full" />
-          <span className="grid flex-1 gap-1.5">
+          <span className="grid grid-cols-[minmax(0,1fr)] flex-1 gap-1.5">
             <Skeleton className="h-4 w-32 rounded-sm" />
             <Skeleton className="h-3 w-24 rounded-sm" />
           </span>

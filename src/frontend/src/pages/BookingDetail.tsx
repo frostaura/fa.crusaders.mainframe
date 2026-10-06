@@ -64,7 +64,7 @@ export default function BookingDetailPage() {
   // R3 M-2 / I-8 — re-read at the start and end, on coming back, on a wallet movement, and on a
   // slow poll while the game is live and nobody is in yet.
   useDetailLiveness(read.data, read.readAt, read.reload);
-  const { shown, setNotice } = useDetailNotice(read.data);
+  const { shown, setNotice, noticeId } = useDetailNotice(read.data);
   // R5 M5-8 — the member's own seat, when the link that opened the page names it.
   const seatId = new URLSearchParams(useLocation().search).get("seat");
   return (
@@ -78,7 +78,7 @@ export default function BookingDetailPage() {
         actions={<RefreshButton onRefresh={read.reload} loading={read.loading} label={DETAIL_COPY.refresh} />}
         freshness={<Freshness at={read.readAt} />}
       />
-      {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice="">{shown.text}</Alert> : null}
+      {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice={noticeId}>{shown.text}</Alert> : null}
       <DetailBody read={read} say={setNotice} earlyResult={earlyResult} bookingId={bookingId} seatId={seatId} />
     </PageShell>
   );
@@ -100,7 +100,29 @@ export default function BookingDetailPage() {
 function useDetailNotice(detail: BookingDetail | null) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const shown = notice && !(notice.text === DETAIL_CANCEL.cancelled && detail && isCancelled(detail)) ? notice : null;
-  return { shown, setNotice };
+  const noticeId = useId();
+  useRefusalInView(shown, noticeId);
+  return { shown, setNotice, noticeId };
+}
+
+/**
+ * R17 L17-6 — a refusal is taken to the reader. An invite refused (at_daily_limit) said so in the
+ * page's notice, under the floating Invite bar at 320 px / 200 % text, while the keyboard went back
+ * to Invite with the picker's close. The notice is brought to the middle of the screen (clear of the
+ * bar) and focused, a task after it renders — after the closing dialog has put focus back.
+ */
+function useRefusalInView(shown: Notice | null, noticeId: string) {
+  useEffect(() => {
+    if (shown?.tone !== "danger") return undefined;
+    const timer = window.setTimeout(() => {
+      const el = [...document.querySelectorAll<HTMLElement>("[data-detail-notice]")].find((n) => n.dataset.detailNotice === noticeId);
+      if (!el) return;
+      el.tabIndex = -1;
+      el.scrollIntoView?.({ block: "center" });
+      el.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [shown, noticeId]);
 }
 
 /**
@@ -112,7 +134,7 @@ function useDetailNotice(detail: BookingDetail | null) {
 export function BookingDetailPanel({ bookingId, seatId = null }: { bookingId: string; seatId?: string | null }) {
   const read = useBookingDetail(bookingId);
   useDetailLiveness(read.data, read.readAt, read.reload);
-  const { shown, setNotice } = useDetailNotice(read.data);
+  const { shown, setNotice, noticeId } = useDetailNotice(read.data);
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} data-booking-panel={bookingId} className="@container/page flex min-w-0 flex-col gap-6">
@@ -126,7 +148,7 @@ export function BookingDetailPanel({ bookingId, seatId = null }: { bookingId: st
           <RefreshButton onRefresh={read.reload} loading={read.loading} label={DETAIL_COPY.refresh} />
         </div>
       </div>
-      {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice="">{shown.text}</Alert> : null}
+      {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice={noticeId}>{shown.text}</Alert> : null}
       <DetailBody read={read} say={setNotice} earlyResult={null} bookingId={bookingId} seatId={seatId} />
     </section>
   );

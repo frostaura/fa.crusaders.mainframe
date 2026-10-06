@@ -239,10 +239,15 @@ export function WeekStrip(props: WeekStripProps) {
         value={value}
         onValueChange={(next) => { if (next) onChange(next); }}
         aria-label={label}
-        // F1.16 — as many chips per row as fit whole (at least 2.25rem each), never seven
-        // squeezed into a row they overflow: at 200% text on a 390px phone the chips overlapped.
-        // At the ordinary size seven fit even a 320px screen.
-        className="grid grid-cols-[repeat(auto-fit,minmax(2.25rem,1fr))] gap-0.5 sm:gap-1"
+        // F1.16 — as many chips per row as fit whole, never seven squeezed into a row they
+        // overflow: at 200% text on a 390px phone the chips overlapped.
+        // R17 X17-3 — each chip is a 44px target (2.75rem), and seven still fit a 320px phone: a
+        // row narrower than seven of them (310px) reaches up to 12px into the page's 16px gutters,
+        // with no gap between chips until there is room for one (the chips have no fill at rest).
+        className={cn(
+          "grid grid-cols-[repeat(auto-fit,minmax(2.75rem,1fr))] gap-0",
+          "mx-[clamp(-12px,calc((100%_-_310px)_/_2),0px)] min-[25rem]:gap-0.5 sm:gap-1",
+        )}
       >
         {days.map((day) => (
           <DayChip key={day.date} day={day} markedLabel={markedLabel} mutePast={disablePast} />
