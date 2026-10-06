@@ -27,7 +27,8 @@ const routes = (extra: StubRoute[] = [], packages: AdminPackage[] = PACKAGES): S
   ...extra,
 ];
 
-const minutesShown = (el: HTMLElement) => [...el.querySelectorAll("[aria-hidden='true']")].map((n) => n.textContent);
+// R19 L19-3 — the paint glues figures to their units; compared as words.
+const minutesShown = (el: HTMLElement) => [...el.querySelectorAll("[aria-hidden='true']")].map((n) => n.textContent?.replace(/\u00a0/g, " "));
 
 describe("the shelves", () => {
   it("lists the club's shelf first, then each group's, with minutes, price, rate and saving", async () => {

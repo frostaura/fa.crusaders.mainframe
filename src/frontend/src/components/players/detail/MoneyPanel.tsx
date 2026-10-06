@@ -7,6 +7,7 @@ import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_MONEY, DETAIL_NO_SHOW, playersWhen } from "@/lib/playersCopy";
 import { isCancelled, isLive, isNoShow, isViewerSeat, keepAmounts, organiserName, seatName, settlementOf, statusKey } from "./detailModel";
 import { useAuth } from "@/lib/useAuth";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 
 /**
  * Who paid what. The organiser covered the court at booking; each partner is ASKED for a share,
@@ -26,7 +27,7 @@ export function MoneyPanel({ detail, actions }: { detail: BookingDetail; actions
   const deadline = playersWhen(money.share_deadline);
   if (money.paid_by) return <PaidAtBoxMoney detail={detail} actions={actions} />;
   return (
-    <Section title={DETAIL_MONEY.title} description={money.is_split ? DETAIL_MONEY.deadline(deadline) : DETAIL_MONEY.notSplit} actions={actions} data-money-panel="">
+    <Section title={DETAIL_MONEY.title} description={money.is_split ? keepFiguresWhole(DETAIL_MONEY.deadline(deadline)) : DETAIL_MONEY.notSplit} actions={actions} data-money-panel="">
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
         <Row term={DETAIL_MONEY.price} value={money.price_minutes} />
         <Row term={DETAIL_MONEY.organiserPaid(who)} value={money.organiser_owed_minutes} />
@@ -124,7 +125,8 @@ function unpaidSentence(p: DetailPlayer, name: string, deadline: string, toWhom:
   if (p.paid_minutes > 0) {
     return DETAIL_MONEY.askedMoreSentence(name, minutesSpoken(p.paid_minutes), minutesSpoken(p.unpaid_minutes), deadline, toWhom);
   }
-  return DETAIL_MONEY.unpaidSentence(name, deadline, toWhom);
+  // R19 L19-3 — "7 Oct" stays one piece when the sentence wraps.
+  return keepFiguresWhole(DETAIL_MONEY.unpaidSentence(name, deadline, toWhom));
 }
 
 function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: string }) {

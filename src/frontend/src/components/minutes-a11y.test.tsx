@@ -17,7 +17,8 @@ function parts(ui: ReturnType<typeof render>) {
 describe("<Minutes>", () => {
   it("shows the compact form, hidden from assistive tech, and says the long form", () => {
     const { root, shown, spoken } = parts(render(<Minutes value={90} />));
-    expect(shown.textContent).toBe("1 h 30 min");
+    // R19 L19-3 — each figure glued to its unit (no-break spaces): a wrap never splits "30 / min".
+    expect(shown.textContent).toBe("1\u00a0h 30\u00a0min");
     expect(shown.getAttribute("aria-hidden")).toBe("true");
     expect(spoken.textContent).toBe("1 hour 30 minutes");
     expect(root.className).toContain("tabular-nums");
@@ -25,13 +26,13 @@ describe("<Minutes>", () => {
 
   it("a signed movement: '+1 h' to the eye, 'plus 1 hour' to the ear", () => {
     const { shown, spoken } = parts(render(<Minutes value={60} signed />));
-    expect(shown.textContent).toBe("+1 h");
+    expect(shown.textContent).toBe("+1\u00a0h");
     expect(spoken.textContent).toBe("plus 1 hour");
   });
 
   it("a negative value wears the negative tone and is spoken with 'minus'", () => {
     const { root, shown, spoken } = parts(render(<Minutes value={-45} />));
-    expect(shown.textContent).toBe(`${MINUS_SIGN}45 min`);
+    expect(shown.textContent).toBe(`${MINUS_SIGN}45\u00a0min`);
     expect(spoken.textContent).toBe("minus 45 minutes");
     expect(root.className).toContain("text-danger-strong");
   });
@@ -41,13 +42,13 @@ describe("<Minutes>", () => {
       expect(parts(render(<Minutes value={value} />)).root.className).not.toContain("text-danger-strong");
     }
     const { shown, spoken } = parts(render(<Minutes value={0} signed />));
-    expect(shown.textContent).toBe("0 min");
+    expect(shown.textContent).toBe("0\u00a0min");
     expect(spoken.textContent).toBe("0 minutes");
   });
 
   it("a fraction that truncates to zero is neither red nor signed", () => {
     const { root, shown } = parts(render(<Minutes value={-0.5} signed />));
-    expect(shown.textContent).toBe("0 min");
+    expect(shown.textContent).toBe("0\u00a0min");
     expect(root.className).not.toContain("text-danger-strong");
   });
 

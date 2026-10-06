@@ -1,5 +1,6 @@
 import { cn } from "../lib/utils";
 import { minutesCompact, minutesSigned, minutesSpoken } from "../lib/minutes";
+import { keepFiguresWhole } from "./ui/figure-text";
 
 export type MinutesProps = {
   /** Whole minutes; a fraction is truncated toward zero (`lib/minutes`). */
@@ -24,7 +25,8 @@ export function Minutes({ value, signed = false, className }: MinutesProps) {
   const spoken = minutesSpoken(value, { signed });
   return (
     <span className={cn("tabular-nums", Math.trunc(value) < 0 && "text-danger-strong", className)}>
-      <span aria-hidden="true">{shown}</span>
+      {/* R19 L19-3 — each figure glued to its unit: a wrap never leaves "30 / min". */}
+      <span aria-hidden="true">{keepFiguresWhole(shown)}</span>
       <span className="sr-only">{spoken}</span>
     </span>
   );

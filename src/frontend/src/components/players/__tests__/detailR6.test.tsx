@@ -20,7 +20,8 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const fig = (n: number) => `${minutesCompact(n)}${minutesSpoken(n)}`;
 const money = () => document.querySelector<HTMLElement>("[data-money-panel]") as HTMLElement;
 function figure(term: string): string | null {
-  return within(money()).getByText(term).parentElement?.querySelector("dd")?.textContent ?? null;
+  // R19 L19-3 — the paint glues figures to their units; compared as words.
+  return within(money()).getByText(term).parentElement?.querySelector("dd")?.textContent?.replace(/\u00a0/g, " ") ?? null;
 }
 
 describe("E6-2 — paid for at the court box by somebody else", () => {

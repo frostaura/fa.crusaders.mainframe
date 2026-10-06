@@ -367,7 +367,7 @@ describe("Reports — the member's summary reconciles to their balance", () => {
     // R7 X7-6: each is the compact figure for the eye with its spoken twin beside it.
     expect(screen.getAllByText("3 h 45 min")).toHaveLength(2);
     expect(screen.getAllByText("3 hours 45 minutes")).toHaveLength(2);
-    expect(screen.getByText("Bookings played").nextElementSibling?.textContent).toBe("14 · 3 h 45 min3 hours 45 minutes");
+    expect(screen.getByText("Bookings played").nextElementSibling?.textContent?.replace(/\u00a0/g, " ")).toBe("14 · 3 h 45 min3 hours 45 minutes");
   });
 
   it("fetches the wallet CSV with the session token rather than navigating to it", async () => {

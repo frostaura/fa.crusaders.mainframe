@@ -33,7 +33,8 @@ const money = () => document.querySelector<HTMLElement>("[data-money-panel]") as
 /** A `dl` row's figure, by its term. */
 function figure(term: string): string | null {
   const row = within(money()).getByText(term).parentElement;
-  return row?.querySelector("dd")?.textContent ?? null;
+  // R19 L19-3 — the paint glues figures to their units; compared as words.
+  return row?.querySelector("dd")?.textContent?.replace(/\u00a0/g, " ") ?? null;
 }
 
 function wideScreen() {

@@ -191,7 +191,8 @@ describe("LedgerTable — what survives a 375px screen", () => {
   it("carries the counterparty under the amount, so folding From/To loses no information", () => {
     render(<LedgerTable rows={rows} label="Ledger" />);
     const amounts = cellsOf("Amount");
-    const text = amounts.map((c) => c.textContent);
+    // R19 L19-3 — the paint glues figures to their units; compared as words.
+    const text = amounts.map((c) => c.textContent?.replace(/\u00a0/g, " "));
 
     // A debit's counterparty is who was paid; a credit's is who paid. Picking by sign is
     // what makes one line enough — the member is always the other end. And the amount
