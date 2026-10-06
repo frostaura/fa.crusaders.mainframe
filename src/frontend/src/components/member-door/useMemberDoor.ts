@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NetworkError, endpoints, type MemberDoor } from "../../lib/api";
+import { ApiError, NetworkError, endpoints, errorCode, type MemberDoor } from "../../lib/api";
 import { readLastKnown, rememberDoor } from "../../lib/lastKnown";
 import type { ReadFailure } from "../../lib/memberDoorCopy";
 
@@ -72,7 +72,14 @@ export type MemberDoorRead = {
  * </p>
  */
 function classify(error: unknown): ReadFailure {
-  return error instanceof NetworkError ? "network" : "server";
+  if (error instanceof NetworkError) return "network";
+  // R19 X19-1.3 — the club answered, but busy (429, 503 service_busy) or mid-clash (503
+  // conflict_retry): both pass by themselves, and neither is "an error".
+  if (error instanceof ApiError && error.status === 429) return "busy";
+  const code = error instanceof ApiError && error.status === 503 ? errorCode(error) : null;
+  if (code === "service_busy") return "busy";
+  if (code === "conflict_retry") return "clash";
+  return "server";
 }
 
 function isVisible(): boolean {

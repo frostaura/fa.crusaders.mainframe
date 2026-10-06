@@ -1385,13 +1385,27 @@ function standingActiveMember(
  * line to the club ✗" over an HTTP 500. Both were false.
  * </p>
  */
-export type ReadFailure = "network" | "server";
+export type ReadFailure = "network" | "server" | "busy" | "clash";
 
-/** The half of every failed-read sentence that says whose fault it was. */
+/**
+ * The half of every failed-read sentence that says whose fault it was.
+ *
+ * <p>
+ * R19 X19-1.3: <b>a busy club and a clash are not errors.</b> A 429 or a `503 service_busy` is
+ * the club ANSWERING that it is too busy this second, and a `503 conflict_retry` is a change that
+ * gave way to another landing at the same instant — both pass by themselves, and the page asks
+ * again on its own. "Answered with an error" sent a member at the door to report a moment.
+ * </p>
+ */
+export const DOOR_FAILURE_LEADS: Record<ReadFailure, string> = {
+  network: "Your phone can't reach the club.",
+  server: "The club's system answered with an error — this is not your phone.",
+  busy: "The club's system is very busy right now — this is not your phone, and it passes in a moment.",
+  clash: "The club's system was busy with another change at that exact moment — this is not your phone, and it passes in a moment.",
+};
+
 function failureLead(failure: ReadFailure): string {
-  return failure === "network"
-    ? "Your phone can't reach the club."
-    : "The club's system answered with an error — this is not your phone.";
+  return DOOR_FAILURE_LEADS[failure];
 }
 
 /**
@@ -1698,6 +1712,23 @@ function windowRow(input: DiagnosisInput): DiagnosisRow {
 }
 
 /**
+ * Why the checklist could not finish, by who failed: the phone's line (something to do: move),
+ * the club's system erroring (nothing on the phone to fix), or the club too busy or mid-clash for
+ * a moment (R19 X19-1.3: neither an error nor the phone — the page asks again by itself).
+ */
+function unansweredConclusion(failure: ReadFailure, scope: string): string {
+  if (failure === "network") {
+    return `Your phone can't reach the club, so ${scope}. Move somewhere with signal, or reach the club another way.`;
+  }
+  if (failure === "busy" || failure === "clash") {
+    return `The club's system was too busy to answer just then, so ${scope}. That part is not your phone — it passes`
+      + " in a moment, and this page asks again by itself.";
+  }
+  return `The club's system answered with an error, so ${scope}. That part is not your phone, and there's nothing on`
+    + " it to fix.";
+}
+
+/**
  * The phone's own line to the club — and the row that blamed the wrong party.
  *
  * <p>
@@ -1710,6 +1741,9 @@ function windowRow(input: DiagnosisInput): DiagnosisRow {
 function connectionRow(input: DiagnosisInput): DiagnosisRow {
   if (input.connection === "ok") return row("connection", "passed", "working");
   if (input.connection === "network") return row("connection", "failed", "not reaching the club");
+  if (input.connection === "busy" || input.connection === "clash") {
+    return row("connection", "neutral", "working — the club's system was too busy to answer just then", "Not what failed here");
+  }
   return row(
     "connection", "neutral",
     "working — it was the club's system that answered with an error",
@@ -1878,13 +1912,7 @@ function concludeFrom(input: DiagnosisInput): Sentence {
     const scope = input.standingKnown
       ? "this check is guessing about half of it"
       : "four of these six are unanswered rather than fine";
-    return input.connection === "network"
-      ? withReach(`Your phone can't reach the club, so ${scope}. Move somewhere with signal, or reach the club`
-        + " another way.", input.contact)
-      // The other half of the same silence, and a different thing to do about it. The
-      // member's phone worked; the answer it brought back was an error.
-      : withReach(`The club's system answered with an error, so ${scope}. That part is not your phone, and`
-        + " there's nothing on it to fix.", input.contact);
+    return withReach(unansweredConclusion(input.connection, scope), input.contact);
   }
   // Nothing below this line is knowable without the club's answer, and three of the four
   // arms would fire off a DEFAULT if it were let through. Unreachable in practice — an
