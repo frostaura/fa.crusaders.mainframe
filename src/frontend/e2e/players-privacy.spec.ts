@@ -57,7 +57,8 @@ test.describe("P11: privacy, off until the member says otherwise", () => {
     await page.goto("/get-started?step=privacy");
     const findable = page.getByRole("switch", { name: PRIVACY_COPY.findableLabel });
     await findable.click();
-    await expect(page.getByRole("alert").filter({ hasText: PRIVACY_COPY.saveFailed(PRIVACY_COPY.findableLabel) })).toBeVisible();
+    // R19 X19-2: a plain 500 is the club's system answering with an error, not a bare refusal.
+    await expect(page.getByRole("alert").filter({ hasText: PRIVACY_COPY.saveError(PRIVACY_COPY.findableLabel) })).toBeVisible();
     await expect(findable).toHaveAttribute("aria-checked", "false");
   });
 
