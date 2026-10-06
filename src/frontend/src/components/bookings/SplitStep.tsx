@@ -32,7 +32,10 @@ export function SplitStep({ players, hidePayNow = false }: { players: SplitEdito
             nothing changed. Focus now selects, as a radio's arrow does. */}
         <ToggleGroup
           type="single" variant="outline" value={draft.mode} onValueChange={pick}
-          role="radiogroup" aria-labelledby={labelId} className="grid w-full grid-cols-3"
+          role="radiogroup" aria-labelledby={labelId}
+          // R18 L18-3 — three across while each holds its word, else one under another: "Amount"
+          // ran 7px past its third of a 320 / 200 % sheet. A rem minimum, so it is text size that decides.
+          className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,5rem),1fr))]"
         >
           {SPLIT_MODES.map((mode) => (
             <ToggleGroupItem key={mode} value={mode} onFocus={() => { if (draft.mode !== mode) pick(mode); }}>
@@ -53,7 +56,7 @@ function SeatFigures({ players }: { players: SplitEditor }) {
   const { draft } = players;
   const ratio = draft.mode === "ratio";
   return (
-    <ul aria-label={BOOK_SPLIT.sharesLabel} className="grid gap-3 rounded-xl border border-border bg-bg-surface p-3">
+    <ul aria-label={BOOK_SPLIT.sharesLabel} className="grid gap-3 rounded-xl border border-border bg-bg-surface p-3 [container-type:inline-size]">
       <li>
         {ratio ? (
           <FigureField
@@ -94,9 +97,9 @@ function SeatFigure({ seat, players }: { seat: DraftSeat; players: SplitEditor }
 
 function FixedFigure({ name, text }: { name: string; text: string }) {
   return (
-    <div className="flex min-h-touch items-center justify-between gap-3">
-      <span className="truncate text-sm font-semibold text-text-primary">{name}</span>
-      <span className="text-sm text-text-secondary">{text}</span>
+    <div className="flex min-h-touch flex-wrap items-center justify-between gap-x-3">
+      <span className="min-w-0 break-words text-sm font-semibold text-text-primary">{name}</span>
+      <span className="ml-auto text-sm text-text-secondary">{text}</span>
     </div>
   );
 }
@@ -107,12 +110,22 @@ type FigureFieldProps = {
   error?: string;
 };
 
+/**
+ * R18 L18-3 — the input is sized in `ch` (a figure of up to six digits and its padding), not a rem
+ * `w-24` that was 192 px at 200 % text and left the name "B." — and where the card is narrow for its
+ * text (a rem container query) the name stands whole above its input instead of beside it.
+ */
+const FIGURE_INPUT = { width: "calc(7ch + 1.5rem)", maxWidth: "100%" } as const;
+
 /** A name on the left, its figure on the right; the field's name is the full "Weight for Sam". */
 function FigureField(props: FigureFieldProps) {
   const { label, name, value, numeric = false, onChange, error } = props;
   return (
-    <Field invalid={Boolean(error)} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
-      <FieldLabel className="truncate font-semibold">{name}</FieldLabel>
+    <Field
+      invalid={Boolean(error)}
+      className="grid grid-cols-[minmax(0,1fr)] items-center gap-x-3 gap-y-1 [@container(min-width:16rem)]:grid-cols-[minmax(0,1fr)_auto]"
+    >
+      <FieldLabel className="break-words font-semibold">{name}</FieldLabel>
       <Input
         aria-label={label}
         value={value}
@@ -120,10 +133,11 @@ function FigureField(props: FigureFieldProps) {
         inputMode="numeric"
         autoComplete="off"
         maxLength={numeric ? 3 : 6}
-        className="w-24 text-right tabular-nums"
+        style={FIGURE_INPUT}
+        className="text-right tabular-nums"
         onChange={(e) => onChange(e.target.value)}
       />
-      {error ? <FieldError className="col-span-2">{error}</FieldError> : null}
+      {error ? <FieldError className="col-span-full">{error}</FieldError> : null}
     </Field>
   );
 }

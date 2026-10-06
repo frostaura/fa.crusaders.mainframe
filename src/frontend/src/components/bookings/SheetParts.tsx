@@ -74,13 +74,22 @@ function SlotPrice({ line }: { line: SlotLine }) {
   );
 }
 
+/**
+ * R18 L18-1 — the racquet box is a 40 px box, not `size-10`: in rem it was 80 px of a 236 px card at
+ * 320 / 200 % and the words beside it broke mid-token ("21:00–" / "21:30"). It is decoration
+ * (aria-hidden), so where the ROW is narrow for its text (a rem container query — large text on a
+ * phone) it steps aside and the words take the width.
+ */
+const RACQUET_BOX = { width: 40, height: 40 } as const;
+
 function SlotItem({ line, refusedWord }: { line: SlotLine; refusedWord: string }) {
   return (
-    <li className="flex items-start gap-3 p-3">
+    <li className="flex items-start gap-3 p-3 [container-type:inline-size]">
       <span
         aria-hidden="true"
+        style={RACQUET_BOX}
         className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-lg",
+          "flex shrink-0 items-center justify-center rounded-lg [@container(max-width:12rem)]:hidden",
           line.refusal ? "bg-bg-muted text-text-muted" : "bg-accent-soft text-accent-strong",
         )}
       >
@@ -96,7 +105,8 @@ function SlotItem({ line, refusedWord }: { line: SlotLine; refusedWord: string }
           <span className="ml-auto whitespace-nowrap"><SlotPrice line={line} /></span>
         </span>
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
-          <span>{`${line.day} · ${line.time}`}</span>
+          {/* The time range is kept whole: the line wraps between words, never inside "21:00–21:30". */}
+          <span>{`${line.day} · `}<span className="whitespace-nowrap">{line.time}</span></span>
           <Badge tone="neutral"><KeptMinutes value={line.minutes} /></Badge>
         </span>
         {line.detailLoading ? <Skeleton className="mt-1 h-4 w-40 rounded-sm" /> : null}
@@ -141,7 +151,7 @@ export function SlotSummary({ lines, label, more }: { lines: readonly SlotLine[]
         <li key={line.key} className="flex items-baseline justify-between gap-3">
           <span className="min-w-0 break-words">
             <span className="font-semibold text-text-primary">{line.courtName}</span>
-            <span className="text-text-secondary">{` · ${line.day} · ${line.time}`}</span>
+            <span className="text-text-secondary">{` · ${line.day} · `}<span className="whitespace-nowrap">{line.time}</span></span>
           </span>
           <SlotPrice line={line} />
         </li>
@@ -218,3 +228,4 @@ export function SendingNote({ text, refused }: { text: string | null; refused: n
     </p>
   );
 }
+

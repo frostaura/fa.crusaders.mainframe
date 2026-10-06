@@ -199,11 +199,13 @@ function CardBlock({ title, children }: { title: string; children: React.ReactNo
   return (
     <section className="mt-5">
       <h2 className="text-sm font-semibold">{title}</h2>
-      {/* B8 / R3-27: `break-all` as well. The club contact block goes through here and an
-          email address is one unbreakable token — `break-words` breaks a LINE, not a word
-          that has no break opportunity in it, and at 320 px with a 32 px root font that
-          token is wider than the sheet. This one is printed on a wall, so it cannot spill. */}
-      <p className="min-w-0 break-all text-sm">{children}</p>
+      {/* B8 / R3-27: the club contact block goes through here and an email address is one
+          unbreakable token — `break-words` breaks a LINE, not a word that has no break opportunity
+          in it, and at 320 px with a 32 px root font that token is wider than the sheet. This one
+          is printed on a wall, so it cannot spill. R18 L18-5: `overflow-wrap: anywhere`, not
+          `break-all` — break-all split ORDINARY words that fit a line of their own ("cupb/oard");
+          anywhere breaks only a token too wide for any line. */}
+      <p className="min-w-0 text-sm [overflow-wrap:anywhere]">{children}</p>
     </section>
   );
 }

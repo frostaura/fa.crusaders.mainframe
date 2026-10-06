@@ -85,6 +85,23 @@ function useSpotlight(element: HTMLElement | null) {
   }, [element]);
 }
 
+/**
+ * R18 L18-6 — the anchor as the popover measures it, held inside the visible band (under the top
+ * bar, over the tab bar). On a phone and a tablet the mark sits BELOW the section bar, and Radix's
+ * `sticky` only shifts along the alignment axis — so a real scroll of the page carried the bar, and
+ * the mark with it, clean off the top of the screen (−368 px measured, Next and Close with it). A
+ * rect scrolled past an edge is pinned to that edge as a zero-height line; the popover follows it
+ * there (flipping if it must) and Next stays reachable. The outline stays on the real control.
+ */
+function clampedRect(element: HTMLElement): DOMRect {
+  const r = element.getBoundingClientRect();
+  const top = chrome("--app-chrome-height");
+  const bottom = window.innerHeight - chrome("--app-bottom-bar-height");
+  if (r.bottom < top) return new DOMRect(r.left, top, r.width, 0);
+  if (r.top > bottom) return new DOMRect(r.left, bottom, r.width, 0);
+  return r;
+}
+
 function useAnchor(mark: CoachMark | undefined) {
   const [element, setElement] = useState<HTMLElement | null>(null);
   useEffect(() => {
@@ -95,7 +112,7 @@ function useAnchor(mark: CoachMark | undefined) {
   }, [mark]);
   useSpotlight(element);
   const virtual = useMemo<Measurable>(
-    () => (element ? { getBoundingClientRect: () => element.getBoundingClientRect(), contextElement: element } : fallbackAnchor()),
+    () => (element ? { getBoundingClientRect: () => clampedRect(element), contextElement: element } : fallbackAnchor()),
     [element],
   );
   return { element, virtual };
