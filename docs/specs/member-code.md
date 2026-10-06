@@ -228,6 +228,15 @@ can send it as a buyer). Idempotent retries are
 checked **before** the use table: a walk-up or pay-for replaying its own nonce is answered with the
 first result (`replayed: true`), never `code_used`. Rows older than a day are purged.
 
+**A claim given back mid-race is claimed again** (R19, BE19L). A request that claims the money use
+and is then refused a database connection gives the claim back (its transaction rolls back), so
+its in-flight retry twin can meet the row on insert and find it gone on read. `TryClaimAsync`
+claims again (up to 3 tries) when the row vanishes between insert and read — for every claimant,
+door and activate included — rather than answer `code_used` for a purchase nobody made. And a
+walk-up that bought on a claim taken over that way holds the money use again once its purchase
+commits (`MemberCodeService.HoldAgainAsync`), so the same code can never buy a second walk-up.
+Pay-for serialises same-nonce twins before any claim and needs neither.
+
 **Money is refused across the court class too** (review round 8, D8-1). A photo of the code that
 has just lit a court is a code whose `court` use is spent and whose `money` use is not, so per
 class alone it bought a walk-up or paid for somebody's court on the member whose court it lit. A
