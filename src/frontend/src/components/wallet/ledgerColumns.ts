@@ -34,14 +34,14 @@ export type Column = "time" | "from" | "to" | "amount" | "comment" | "category" 
  * </p>
  */
 export const CELL_CLASS = {
-  time: "hidden whitespace-nowrap align-top text-xs tabular-nums text-text-secondary @[36rem]/ledger:table-cell",
-  from: "hidden max-w-44 truncate align-top @[60rem]/ledger:table-cell",
-  to: "hidden align-top @[60rem]/ledger:table-cell",
-  comment: "break-words align-top text-sm text-text-primary @[36rem]/ledger:max-w-xs @[36rem]/ledger:truncate @[36rem]/ledger:text-text-secondary",
-  amount: "hidden whitespace-nowrap text-right align-top font-semibold tabular-nums @[16rem]/ledger:table-cell",
+  time: "hidden whitespace-nowrap align-baseline text-xs tabular-nums text-text-secondary @[36rem]/ledger:table-cell",
+  from: "hidden max-w-44 truncate align-baseline @[60rem]/ledger:table-cell",
+  to: "hidden align-baseline @[60rem]/ledger:table-cell",
+  comment: "break-words align-baseline text-sm text-text-primary @[36rem]/ledger:max-w-xs @[36rem]/ledger:truncate @[36rem]/ledger:text-text-secondary",
+  amount: "hidden whitespace-nowrap text-right align-baseline font-semibold tabular-nums @[16rem]/ledger:table-cell",
   // F3.8 — admin ledgers only: what kind of movement, and who made it.
-  category: "hidden align-top text-text-secondary @[44rem]/ledger:table-cell",
-  actor: "hidden max-w-40 truncate align-top text-text-secondary @[68rem]/ledger:table-cell",
+  category: "hidden align-baseline text-text-secondary @[44rem]/ledger:table-cell",
+  actor: "hidden max-w-40 truncate align-baseline text-text-secondary @[68rem]/ledger:table-cell",
 } as const;
 
 /** The same folds for the column heads (`hidden` until the box has room; written whole for the scanner). */

@@ -134,8 +134,9 @@ export function StatTiles({ tiles, label }: { tiles: Tile[]; label: string }) {
 export function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     // px-2 under a 16rem list (R9 L9-6): at 320 / 200 % text the cell's 24px sides left "Adjustments"
-    // no line of its own even in sentence case.
-    <div className="@container flex min-w-0 flex-col gap-0.5 rounded-lg bg-bg-muted px-2 py-2.5 @[16rem]:px-3">
+    // no line of its own even in sentence case. `justify-between`: a label that wraps to two lines makes its tile
+    // the tallest of the row; the figures of the others then sit at the bottom beside it, on one line.
+    <div className="@container flex min-w-0 flex-col justify-between gap-0.5 rounded-lg bg-bg-muted px-2 py-2.5 @[16rem]:px-3">
       {/* The overline's look, spelled out: its tracking class would outrank LABEL_STEPS' plain one. */}
       <dt className={cn("break-words text-xs font-semibold text-text-secondary", LABEL_STEPS)}>{label}</dt>
       <dd className={cn("font-semibold tabular-nums text-text-primary", FIGURE_FITS.stat)}>{value}</dd>
