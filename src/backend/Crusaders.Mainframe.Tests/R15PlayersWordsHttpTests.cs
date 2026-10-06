@@ -330,7 +330,7 @@ public sealed class R15PlayersWordsHttpTests(PostgresFixture pg) : IClassFixture
             new { reason = "Paid cash at the bar" })).EnsureSuccessStatusCode();
         await DeliverAsync(g.App);
 
-        var receipt = Assert.Single(MailTo(g, "sam.partner"), m => m.Subject.Contains("settled outside the app", StringComparison.Ordinal));
+        var receipt = Assert.Single(MailTo(g, "sam.partner"), m => m.Subject.StartsWith("Your share came back: paid by hand", StringComparison.Ordinal));
         Assert.Contains("Reason given by the club: Paid cash at the bar", Flat(receipt.PlainBody), StringComparison.Ordinal);
         var olives = Assert.Single(MailTo(g, "olive.organiser"), m => m.Subject.StartsWith("Share returned to Sam Partner", StringComparison.Ordinal));
         Assert.Contains("Reason given by the club: Paid cash at the bar", Flat(olives.PlainBody), StringComparison.Ordinal);
@@ -346,13 +346,13 @@ public sealed class R15PlayersWordsHttpTests(PostgresFixture pg) : IClassFixture
         await DeliverAsync(g.App);
 
         var change = Assert.Single(MailTo(g, "sam.partner"), m => m.Subject.StartsWith("Your share has changed", StringComparison.Ordinal));
-        Assert.Contains("The club has recorded your share as paid outside the app, so nothing is taken or returned in the app for this change.",
+        Assert.Contains("The club has recorded your share as paid by hand, so nothing is taken or returned in the app for this change.",
             Flat(change.PlainBody), StringComparison.Ordinal);
         Assert.DoesNotContain("Nothing more is taken until you accept", Flat(change.PlainBody), StringComparison.Ordinal);
         if (partners == 2)
         {
             var alex = Assert.Single(MailTo(g, "alex.partner"), m => m.Subject.StartsWith("Your share has changed", StringComparison.Ordinal));
-            Assert.DoesNotContain("paid outside the app", Flat(alex.PlainBody), StringComparison.Ordinal);
+            Assert.DoesNotContain("paid by hand", Flat(alex.PlainBody), StringComparison.Ordinal);
         }
     }
 }

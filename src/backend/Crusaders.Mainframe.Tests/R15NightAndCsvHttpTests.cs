@@ -105,18 +105,18 @@ public sealed class R15NightAndCsvHttpTests(PostgresFixture pg) : IClassFixture<
         Assert.Equal(g.SeatOf[g.Club.Sam], details.GetProperty("participant_id").GetGuid());
 
         var sam = await NightAsync(g, g.Club.Sam);
-        Assert.Equal("Ada Admin recorded their share of Olive Organiser's game on Court 1 as paid outside the app",
+        Assert.Equal("Ada Admin recorded their share of Olive Organiser's game on Court 1 as paid by hand",
             Headline(Assert.Single(sam, e => Kind(e) == "booking.share_settled_outside")));
-        Assert.Equal($"{share} minutes of their share of Court 1 came back from Olive Organiser — the club recorded their share as paid outside the app",
+        Assert.Equal($"{share} minutes of their share of Court 1 came back from Olive Organiser — the club recorded their share as paid by hand",
             Headline(LastOwnShare(sam)));
 
         var olive = await NightAsync(g, g.Club.Organiser);
-        Assert.Equal("Ada Admin recorded Sam Partner's share of their game on Court 1 as paid outside the app",
+        Assert.Equal("Ada Admin recorded Sam Partner's share of their game on Court 1 as paid by hand",
             Headline(Assert.Single(olive, e => Kind(e) == "booking.partner_share_settled_outside")));
-        Assert.Equal($"{share} minutes went back to Sam Partner for their share of Court 1 — the club recorded Sam Partner's share as paid outside the app",
+        Assert.Equal($"{share} minutes went back to Sam Partner for their share of Court 1 — the club recorded Sam Partner's share as paid by hand",
             Headline(LastOwnShare(olive)));
 
-        Assert.Equal("Recorded Sam Partner's share of Olive Organiser's game on Court 1 as paid outside the app",
+        Assert.Equal("Recorded Sam Partner's share of Olive Organiser's game on Court 1 as paid by hand",
             Headline(Assert.Single(await NightAsync(g, g.Club.Admin), e => Kind(e) == "booking.settled_share_outside")));
     }
 

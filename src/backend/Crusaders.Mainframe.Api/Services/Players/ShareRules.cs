@@ -38,7 +38,7 @@ public sealed record ShareFacts(
 /// <list type="table">
 ///   <item><term>not a partner (organiser, guest)</term><description>0 — they transfer nothing</description></item>
 ///   <item><term>not accepted (invited, declined, withdrawn, removed, lapsed)</term><description>0 — nobody pays for a seat they did not take</description></item>
-///   <item><term>settled outside the app</term><description>0 — the club was told it was paid by hand</description></item>
+///   <item><term>paid by hand</term><description>0 — the club was told it was paid by hand</description></item>
 ///   <item><term>displaced</term><description>0 — <c>Owed = 0</c> (settlement model S8)</description></item>
 ///   <item><term>cancelled before anybody checked in</term><description>0 — the organiser cancelled, so any late-cancel penalty (and any lit time after it) is theirs alone</description></item>
 ///   <item><term>otherwise</term><description><c>min(consented, ⌊Owed × share / P⌋)</c> in whole minutes — a no-show's penalty is shared pro rata; a played or live court is shared in full</description></item>

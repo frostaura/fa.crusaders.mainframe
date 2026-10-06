@@ -342,25 +342,53 @@ public static partial class AdminMemberTraceAssembly
     /// </summary>
     private static async Task<List<AuditLog>> PartnerRowsAsync(MainframeDbContext db, AdminMemberTraceQuery q, CancellationToken ct)
     {
-        var floor = q.From - SettledLate;
-        var games = await db.BookingParticipants.AsNoTracking()
-            .Where(p => p.UserId == q.UserId && p.Seat > 1)
-            .Join(db.Bookings.AsNoTracking(), p => p.BookingId, b => b.Id, (p, b) => b)
-            .Where(b => b.StartsAt < q.To && b.EndsAt >= floor && b.UserId != null)
-            .Select(b => new { b.Id, Booker = b.UserId!.Value })
-            .Distinct()
-            .ToListAsync(ct);
+        var games = await PartnerGamesAsync(db, q, ct);
         if (games.Count == 0) return [];
 
         var bookers = games.Select(g => g.Booker).Distinct().ToList();
         var ids = games.Select(g => g.Id).ToHashSet();
+        // R17 E17-4: the lights only on the Night of somebody who was in the session — an accepted
+        // partner or the payer at the box — never an invitee who said no or never answered.
+        var played = games.Where(g => g.Played).Select(g => g.Id).ToHashSet();
         var actions = TraceKinds.PartnersViewActions;
         var rows = await db.AuditLogs.AsNoTracking()
             .Where(a => a.SubjectUserId != null && bookers.Contains(a.SubjectUserId!.Value) && actions.Contains(a.Action))
             .Where(a => a.CreatedAt >= q.From && a.CreatedAt < q.To)
             .Take(q.StrandRows)
             .ToListAsync(ct);
-        return [.. rows.Where(r => GuidOf(DoorActivityView.Details(r.DetailsJson), "booking_id") is { } b && ids.Contains(b))];
+        return [.. rows.Where(r => PartnerBookingOf(r) is { } b && (r.Action == TraceKinds.LightsOnAction ? played : ids).Contains(b))];
+    }
+
+    /// <summary>One booking somebody else made that this member is on: as a partner (any seat status), or as the payer at the box.</summary>
+    private sealed record PartnerGame(Guid Id, Guid Booker, bool Played);
+
+    /// <summary>
+    /// R15 J15-4: the bookings this member holds a partner seat on — R17 E17-4: and the ones they paid
+    /// for at the box (D10), which hold no seat — that could have been settled or lit in the window.
+    /// <see cref="PartnerGame.Played"/> says they were in the session: an accepted seat, or the payer.
+    /// </summary>
+    private static async Task<List<PartnerGame>> PartnerGamesAsync(MainframeDbContext db, AdminMemberTraceQuery q, CancellationToken ct)
+    {
+        var floor = q.From - SettledLate;
+        var window = db.Bookings.AsNoTracking().Where(b => b.StartsAt < q.To && b.EndsAt >= floor && b.UserId != null && b.UserId != q.UserId);
+        var seated = await db.BookingParticipants.AsNoTracking()
+            .Where(p => p.UserId == q.UserId && p.Seat > 1)
+            .Join(window, p => p.BookingId, b => b.Id, (p, b) => new { b.Id, Booker = b.UserId!.Value, p.Status })
+            .ToListAsync(ct);
+        var paidFor = await window.Where(b => b.PaidByUserId == q.UserId)
+            .Select(b => new { b.Id, Booker = b.UserId!.Value })
+            .ToListAsync(ct);
+        return [.. seated.Select(x => new PartnerGame(x.Id, x.Booker, x.Status == ParticipantStatus.Accepted))
+            .Concat(paidFor.Select(x => new PartnerGame(x.Id, x.Booker, true)))
+            .GroupBy(g => g.Id)
+            .Select(g => g.OrderByDescending(x => x.Played).First())];
+    }
+
+    /// <summary>The booking a row the partner view reads names — top level, or inside a lights row's nested details.</summary>
+    private static Guid? PartnerBookingOf(AuditLog row)
+    {
+        var details = DoorActivityView.Details(row.DetailsJson);
+        return GuidOf(details, "booking_id") ?? GuidOf(Inner(details), "booking_id");
     }
 
     private static async Task<List<LedgerEntry>> LedgerRowsAsync(
@@ -475,6 +503,8 @@ public static partial class AdminMemberTraceAssembly
             // E7-1: the server's own lights row for a scan a board uploaded. The receipt already
             // says it, at the scan's instant; this row says it again at the upload's.
             if (IsReceiptTwin(row.Action, details, s)) continue;
+            // R17 J17-4: a seat's check-in by the scan that lit the court is court.activated's twin.
+            if (IsActivationTwin(row, details, s)) continue;
 
             var deviceId = DoorTrail.DeviceIdOf(details);
             var place = PlaceOf(row.Action, details, deviceId, s);
@@ -513,8 +543,10 @@ public static partial class AdminMemberTraceAssembly
                     // R16 J16-2: a split an add lowered names who joined.
                     JoinedName = row.Action == TraceKinds.SplitChangedAction ? Text(details, "joined") : null,
                     // R16 E16-6: whose voice — somebody else did it to this member, or this member did it to somebody else's booking.
-                    ByOther = OtherActed(row, q.UserId),
+                    // R17 J17-4: a partner's seat check-in on the organiser's Night is somebody else's act too.
+                    ByOther = ByOtherOf(row, view, q.UserId),
                     ForOther = row.ActorUserId == q.UserId && row.SubjectUserId is { } subject && subject != q.UserId,
+                    SeatOfName = PersonNames.Of(SeatOfOther(row, q.UserId), s.Names),
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -544,6 +576,15 @@ public static partial class AdminMemberTraceAssembly
     {
         if (row.ActorUserId == traced || row.SubjectUserId == traced) return TraceView.Own;
         return OrganiserOf(row) == traced ? TraceView.Organiser : TraceView.Partner;
+    }
+
+    /// <summary>
+    /// R16 E16-6: somebody other than this member did it — to them, or (R17 J17-4) to their game, seen
+    /// from the organiser's side ("Sam Partner checked in at Court 1").
+    /// </summary>
+    private static bool ByOtherOf(AuditLog row, TraceView view, Guid traced)
+    {
+        return OtherActed(row, traced) || (view == TraceView.Organiser && row.ActorUserId != Guid.Empty);
     }
 
     /// <summary>R16 E16-6: the row is about this member and a person other than them did it.</summary>

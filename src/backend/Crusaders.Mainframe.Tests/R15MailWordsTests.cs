@@ -103,7 +103,7 @@ public sealed class R15MailWordsTests
     [Theory]
     [InlineData(ShareActs.OrganiserRemoved, null, "Share returned to Sam Partner: you took them off the game — Court 1")]
     [InlineData(ShareActs.SplitChanged, null, "Share returned to Sam Partner: you lowered their share — Court 1")]
-    [InlineData(ShareActs.ClubSettled, null, "Share returned to Sam Partner: the club settled it outside the app — Court 1")]
+    [InlineData(ShareActs.ClubSettled, null, "Share returned to Sam Partner: the club recorded it as paid by hand — Court 1")]
     [InlineData(ShareActs.BookingCancelled, "club", "Share returned to Sam Partner: the club cancelled the game — Court 1")]
     [InlineData(ShareActs.BookingCancelled, "member", "Share returned to Sam Partner: you cancelled the game — Court 1")]
     public void The_organisers_share_subject_says_why_it_went_back(string cause, string? cancelledBy, string subject)
@@ -146,7 +146,7 @@ public sealed class R15MailWordsTests
             new PlayersChange("Olive Organiser", "Court 1", When, Removed: false, NewShareMinutes: 20, NeedsConsent: false, Url) { SettledOutside = true });
         var body = Flat(mail.PlainBody);
 
-        Assert.Contains("The club has recorded your share as paid outside the app, so nothing is taken or returned in the app for this change.",
+        Assert.Contains("The club has recorded your share as paid by hand, so nothing is taken or returned in the app for this change.",
             body, StringComparison.Ordinal);
     }
 

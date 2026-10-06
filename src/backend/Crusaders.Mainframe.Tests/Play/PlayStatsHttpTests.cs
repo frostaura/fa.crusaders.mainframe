@@ -77,7 +77,7 @@ public sealed class PlayStatsHttpTests(PostgresFixture pg) : IClassFixture<Postg
     }
 
     [SkippableFact]
-    public async Task Played_minutes_come_from_the_row_as_it_stands_after_a_release_and_after_an_S4_cancel()
+    public async Task Played_minutes_come_from_the_row_as_it_stands_after_a_release_and_a_cancelled_session_is_not_attended()
     {
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
@@ -97,9 +97,11 @@ public sealed class PlayStatsHttpTests(PostgresFixture pg) : IClassFixture<Postg
 
         var stats = (await MyGameAsync(club.Client(f, club.Sam))).GetProperty("stats");
         // An untouched game is PlayersClub's 4 slices of 8 minutes (P13: the fixture runs on 8-minute slices).
-        Assert.Equal(37 + 20 + 32, stats.GetProperty("minutes_on_court").GetInt32());
-        Assert.Equal(37 + 20, stats.GetProperty("minutes_this_year").GetInt32());
-        Assert.Equal(3, stats.GetProperty("sessions_attended").GetInt32());
+        // R17 J17-5: one definition of attended — a session the club cancelled after its check-in is not
+        // one (it was 37 + 20 + 32 and 3 sessions before), on every figure alike.
+        Assert.Equal(37 + 32, stats.GetProperty("minutes_on_court").GetInt32());
+        Assert.Equal(37, stats.GetProperty("minutes_this_year").GetInt32());
+        Assert.Equal(2, stats.GetProperty("sessions_attended").GetInt32());
     }
 
     [SkippableFact]

@@ -7,7 +7,7 @@ namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>
 /// Admin god mode on a booking's players (D11): add, remove, accept on a member's behalf, record
-/// a share as settled outside the app, and — only when asked for by name — collect a share below
+/// a share as paid by hand, and — only when asked for by name — collect a share below
 /// zero. Every one is written to the undeletable <c>admin_change_log</c>.
 ///
 /// <para>
@@ -177,7 +177,7 @@ public sealed class PlayersAdminService
         _db.AuditLogs.Add(PlayersService.SeatAuditFor(_tenant.TenantId, PlayersService.SettledOutsideAction, game!.Booking, seat, act.ActorId,
             new { share_minutes = seat.ShareMinutes, paid_in_app_minutes = paid }));
         // R16 J16-6: both players are told, in the same save — the partner that they paid the organiser by hand.
-        foreach (var notice in await PlayerNotices.SettledOutsideAsync(_db, game.Booking, seat, game.Settings, ct))
+        foreach (var notice in await PlayerNotices.SettledOutsideAsync(_db, game.Booking, seat, game.Settings, paid, ct))
         {
             MemberNotices.Stage(_db, _tenant.TenantId, notice, game.Settings);
         }

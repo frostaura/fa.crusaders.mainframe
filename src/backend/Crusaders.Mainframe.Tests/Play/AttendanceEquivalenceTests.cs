@@ -114,6 +114,8 @@ public sealed class AttendanceEquivalenceTests(PostgresFixture pg) : IClassFixtu
                     .Any(p => p.BookingId == b.Id && p.UserId == userId && p.Status == ParticipantStatus.Accepted),
             })
             .Where(x => x.Own != null || (x.CheckedInAt != null && (x.UserId == userId || x.Accepted)))
+            // R17 J17-5: a cancelled booking is not attended — the one change to the reference since P12.
+            .Where(x => x.CancelledAt == null)
             .ToListAsync();
         if (rows.Count == 0) return [];
 

@@ -253,6 +253,8 @@ public sealed partial class PlayersService
         }
         if (club is null)
         {
+            // R17 E17-8: the organiser's invite is on the record too — the invitee's and the organiser's Nights said nothing of it.
+            _db.AuditLogs.Add(SeatAudit(InvitedAction, game.Booking, seat, game.Booking.UserId!.Value, new { share_minutes = seat.ShareMinutes }));
             var invite = await PlayerNotices.InviteAsync(_db, game.Booking, seat, game.Settings, ct);
             MemberNotices.Stage(_db, _tenant.TenantId,
                 await PlayerNotices.CollapsedAsync(_db, invite, PlayerNotices.InvitedKeyPrefix, game.Settings, ct, game.Booking), game.Settings);
@@ -642,7 +644,7 @@ public sealed partial class PlayersService
                 share_minutes = s.ShareMinutes,
                 weight = s.ShareWeight,
                 // R16 J16-1: the one rule — a share the club settled by hand asks nothing.
-                needs_consent = s.Seat > 1 && PlayerNotices.NeedsConsent(s),
+                needs_consent = s.Seat > 1 && PlayerNotices.NeedsConsent(game.Booking, s),
             }).ToList(),
         });
     }
@@ -699,7 +701,16 @@ public sealed partial class PlayersService
     /// <summary>R16 E16-1: the desk accepted a partner's invite on their behalf.</summary>
     public const string AcceptedByClubAction = "players.accepted_by_club";
 
-    /// <summary>R15 E15-3: the desk recorded a partner's share as paid outside the app.</summary>
+    /// <summary>R17 E17-8: the organiser invited a member (actor the organiser, subject the invitee).</summary>
+    public const string InvitedAction = TraceKinds.InvitedAction;
+
+    /// <summary>R17 E17-8: a member accepted their invite themselves (actor and subject the member).</summary>
+    public const string AcceptedAction = TraceKinds.AcceptedAction;
+
+    /// <summary>R17 E17-8: a member declined their invite (actor and subject the member).</summary>
+    public const string DeclinedAction = TraceKinds.DeclinedAction;
+
+    /// <summary>R15 E15-3: the desk recorded a partner's share as paid by hand.</summary>
     public const string SettledOutsideAction = "players.settled_outside";
 
     /// <summary>R15 E15-3: the desk collected a partner's share by hand.</summary>

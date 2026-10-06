@@ -18,7 +18,7 @@ public sealed record SeatAct(Guid? ActorUserId, bool ByClub)
 /// <summary>
 /// What a share movement's receipts need to know of its seat: whether the partner withdrew (R13
 /// E13-4), the seat to link them to once they are off the game (J13-3), its status, whether the
-/// club recorded it settled outside the app, and — off the record, never assumed — who removed the
+/// club recorded it paid by hand, and — off the record, never assumed — who removed the
 /// seat or changed the split. A plain return's cause is decided from these (R14 X14-2, review M1/L1).
 /// </summary>
 public sealed record SeatFacts(bool Withdrew, Guid? OffGame, ParticipantStatus? Status, SeatAct? Removal)
@@ -29,7 +29,7 @@ public sealed record SeatFacts(bool Withdrew, Guid? OffGame, ParticipantStatus? 
     /// <summary>The audit action a split change writes per partner whose share moved (R14 E14-2).</summary>
     public const string SplitChangedAction = "players.split_changed";
 
-    /// <summary>The club recorded this seat's share as paid outside the app (review M1).</summary>
+    /// <summary>The club recorded this seat's share as paid by hand (review M1).</summary>
     public bool SettledOutside { get; init; }
 
     /// <summary>

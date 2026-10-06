@@ -137,7 +137,12 @@ public sealed partial class PlayersService
             }
             postings = await _p.Shares.StageCollectionAsync(game.Booking, seat, delta, me, ct);
         }
-        if (fresh) MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "accepted", ct), game.Settings);
+        if (fresh)
+        {
+            MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "accepted", ct), game.Settings);
+            // R17 E17-8: their own yes, on the record in the accept's own save — the Night had only its money.
+            _db.AuditLogs.Add(SeatAudit(AcceptedAction, game.Booking, seat, me, new { share_minutes = seat.ShareMinutes, paid_minutes = paid + Math.Max(0, delta) }));
+        }
         await PlayerNotices.AnsweredAsync(_db, game.Booking.Id, me, now, ct);
 
         // One save: the seat, the pair, the receipts. An empty posting list still saves the seat.
@@ -266,6 +271,8 @@ public sealed partial class PlayersService
         seat.RespondedAt = now.Storable();
         seat.UpdatedAt = now.Storable();
         MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "declined", ct), game.Settings);
+        // R17 E17-8: their own no, on the record in the decline's own save.
+        _db.AuditLogs.Add(SeatAudit(DeclinedAction, game.Booking, seat, me, new { share_minutes = seat.ShareMinutes }));
         await PlayerNotices.AnsweredAsync(_db, game.Booking.Id, me, now, ct);
         if (await SaveAsync(ct) is { } conflict) return conflict;
         await AbsorbFreedShareAsync(game.Booking, ct);

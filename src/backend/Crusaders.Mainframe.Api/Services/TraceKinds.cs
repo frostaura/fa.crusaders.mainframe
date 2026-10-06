@@ -172,6 +172,12 @@ public readonly record struct TraceFacts
     /// partner's own reversal reads in their voice, naming whose game it was.
     /// </summary>
     public bool ForOther { get; init; }
+
+    /// <summary>
+    /// R17 J17-4: the person whose night this is checked in on their own seat of somebody else's game —
+    /// that game's organiser, named ("Checked in at Court 1 for Olive's booking"). Null otherwise.
+    /// </summary>
+    public string? SeatOfName { get; init; }
 }
 
 /// <summary>
@@ -339,13 +345,13 @@ public static class TraceKinds
     /// <summary>R15 E15-3: the club took a partner off THEIR game — the organiser's side of an admin's removal.</summary>
     public const string BookingClubTookPlayerOff = "booking.club_took_player_off";
 
-    /// <summary>R15 E15-3: the club recorded their share as paid outside the app (the partner's side).</summary>
+    /// <summary>R15 E15-3: the club recorded their share as paid by hand (the partner's side).</summary>
     public const string BookingShareSettledOutside = "booking.share_settled_outside";
 
-    /// <summary>R15 E15-3: the club recorded a partner's share of THEIR game as paid outside the app (the organiser's side).</summary>
+    /// <summary>R15 E15-3: the club recorded a partner's share of THEIR game as paid by hand (the organiser's side).</summary>
     public const string BookingPartnerShareSettledOutside = "booking.partner_share_settled_outside";
 
-    /// <summary>R15 E15-3: they (an admin) recorded a partner's share as paid outside the app.</summary>
+    /// <summary>R15 E15-3: they (an admin) recorded a partner's share as paid by hand.</summary>
     public const string BookingSettledShareOutside = "booking.settled_share_outside";
 
     /// <summary>R15 E15-3: the club collected their share by hand (the partner's side).</summary>
@@ -365,6 +371,40 @@ public static class TraceKinds
 
     /// <summary>R16 E16-1: they (an admin) accepted a partner's invite on the partner's behalf.</summary>
     public const string BookingAcceptedForPlayer = "booking.accepted_for_player";
+
+    /// <summary>R17 E17-8: they were invited to somebody's game (the invitee's side).</summary>
+    public const string BookingInvited = "booking.invited";
+
+    /// <summary>R17 E17-8: they invited a member to their game (the organiser's side).</summary>
+    public const string BookingInvitedPlayer = "booking.invited_player";
+
+    /// <summary>R17 E17-8: they accepted their place in somebody's game.</summary>
+    public const string BookingAccepted = "booking.accepted";
+
+    /// <summary>R17 E17-8: a member accepted a place in THEIR game (the organiser's side).</summary>
+    public const string BookingPartnerAccepted = "booking.partner_accepted";
+
+    /// <summary>R17 E17-8: they declined a place in somebody's game.</summary>
+    public const string BookingDeclined = "booking.declined";
+
+    /// <summary>R17 E17-8: a member declined a place in THEIR game (the organiser's side).</summary>
+    public const string BookingPartnerDeclined = "booking.partner_declined";
+
+    /// <summary>R17 E17-8: the organiser invited a member (<c>PlayersService.InvitedAction</c>; actor the organiser, subject the invitee).</summary>
+    public const string InvitedAction = "players.invited";
+
+    /// <summary>R17 E17-8: a member accepted their invite themselves (<c>PlayersService.AcceptedAction</c>; actor and subject the member).</summary>
+    public const string AcceptedAction = "players.accepted";
+
+    /// <summary>R17 E17-8: a member declined their invite (<c>PlayersService.DeclinedAction</c>; actor and subject the member).</summary>
+    public const string DeclinedAction = "players.declined";
+
+    /// <summary>
+    /// R17 J17-4: one seat's check-in (BE17b, written beside every seat stamp; actor and subject the
+    /// scanner, the organiser in the details, <c>lit_court</c> when the same scan also wrote
+    /// <c>court.activated</c>). Mapped to <see cref="CourtCheckedIn"/>; a lit-court row folds into its twin.
+    /// </summary>
+    public const string SeatCheckedInAction = "court.checked_in";
 
     /// <summary>R16 E16-1: the desk accepted a partner's invite for them (<c>PlayersService.AcceptedByClubAction</c>).</summary>
     public const string AcceptedByClubAction = "players.accepted_by_club";
@@ -486,6 +526,7 @@ public static class TraceKinds
         BookingShareCollected, BookingPartnerShareCollected, BookingCollectedShare,
         BookingAddedToGame, BookingClubAddedPlayer, BookingAddedPlayer, BookingGameNoShow, BookingGameNoShowReversed,
         BookingAcceptedForThem, BookingClubAcceptedPlayer, BookingAcceptedForPlayer,
+        BookingInvited, BookingInvitedPlayer, BookingAccepted, BookingPartnerAccepted, BookingDeclined, BookingPartnerDeclined,
         WalkUpBought, WalkUpRefunded,
         CourtCheckedIn, CourtRefused,
         LightsOn, LightsOff,
@@ -583,6 +624,9 @@ public static class TraceKinds
             ShareCollectedAction => BookingPartnerShareCollected,
             AddedByClubAction => BookingClubAddedPlayer,
             AcceptedByClubAction => BookingClubAcceptedPlayer,
+            AcceptedAction => BookingPartnerAccepted,
+            DeclinedAction => BookingPartnerDeclined,
+            SeatCheckedInAction => CourtCheckedIn,
             _ => null,
         };
     }
@@ -594,16 +638,27 @@ public static class TraceKinds
         {
             "booking.no_show" => BookingGameNoShow,
             "booking.no_show_reversed" => BookingGameNoShowReversed,
+            // R17 E17-4: the court they played on lit — the lights row is about the booker.
+            LightsOnAction => LightsOn,
             _ => null,
         };
     }
 
-    /// <summary>The audit actions a partner's Night reads off the booking they paid into (R15 J15-4).</summary>
-    public static readonly string[] PartnersViewActions = ["booking.no_show", "booking.no_show_reversed"];
+    /// <summary>
+    /// The audit actions a partner's Night reads off the booking they paid into (R15 J15-4) — and
+    /// R17 E17-4 the lights coming on, for an accepted partner and the payer at the box only.
+    /// </summary>
+    public static readonly string[] PartnersViewActions = ["booking.no_show", "booking.no_show_reversed", LightsOnAction];
 
-    /// <summary>The seat acts an organiser's Night reads off the game's partners (R13 E13-4, R15 E15-3).</summary>
+    /// <summary>
+    /// The seat acts an organiser's Night reads off the game's partners (R13 E13-4, R15 E15-3) — and
+    /// R17 their own answers (E17-8) and their check-ins (J17-4).
+    /// </summary>
     public static readonly string[] OrganisersViewActions =
-        [PartnerWithdrewAction, PlayerRemovedAction, SettledOutsideAction, ShareCollectedAction, AddedByClubAction, AcceptedByClubAction];
+    [
+        PartnerWithdrewAction, PlayerRemovedAction, SettledOutsideAction, ShareCollectedAction, AddedByClubAction, AcceptedByClubAction,
+        AcceptedAction, DeclinedAction, SeatCheckedInAction,
+    ];
 
     private static string? OfOwnAudit(string action, bool actorIsSubject)
     {
@@ -616,6 +671,7 @@ public static class TraceKinds
             DoorTrail.OpenedAction => DoorOpened,
 
             "court.activated" => CourtCheckedIn,
+            SeatCheckedInAction => CourtCheckedIn,
             LightsOnAction => LightsOn,
             LightsOffAction => LightsOff,
             ActivationRefusedAction => CourtRefused,
@@ -641,6 +697,9 @@ public static class TraceKinds
             ShareCollectedAction => actorIsSubject ? BookingCollectedShare : BookingShareCollected,
             AddedByClubAction => actorIsSubject ? BookingAddedPlayer : BookingAddedToGame,
             AcceptedByClubAction => actorIsSubject ? BookingAcceptedForPlayer : BookingAcceptedForThem,
+            InvitedAction => actorIsSubject ? BookingInvitedPlayer : BookingInvited,
+            AcceptedAction => BookingAccepted,
+            DeclinedAction => BookingDeclined,
 
             _ => OfAccountAction(action),
         };
@@ -655,7 +714,7 @@ public static class TraceKinds
     /// <summary>The audit action a cancelled game writes per partner (R14, <c>ShareSweep.GameCancelledAction</c>).</summary>
     public const string GameCancelledAction = "players.game_cancelled";
 
-    /// <summary>R15 E15-3: the desk recorded a share paid outside the app (<c>PlayersService.SettledOutsideAction</c>).</summary>
+    /// <summary>R15 E15-3: the desk recorded a share paid by hand (<c>PlayersService.SettledOutsideAction</c>).</summary>
     public const string SettledOutsideAction = "players.settled_outside";
 
     /// <summary>R15 E15-3: the desk collected a share (<c>PlayersService.ShareCollectedAction</c>).</summary>
@@ -874,9 +933,9 @@ public static class TraceKinds
         return kind switch
         {
             BookingClubTookPlayerOff => $"{actor} took {partner} off their game on {court}",
-            BookingShareSettledOutside => $"{actor} recorded their share of {theirs} as paid outside the app",
-            BookingPartnerShareSettledOutside => $"{actor} recorded {partner}'s share of their game on {court} as paid outside the app",
-            BookingSettledShareOutside => $"Recorded {partner}'s share of {theirs} as paid outside the app",
+            BookingShareSettledOutside => $"{actor} recorded their share of {theirs} as paid by hand",
+            BookingPartnerShareSettledOutside => $"{actor} recorded {partner}'s share of their game on {court} as paid by hand",
+            BookingSettledShareOutside => $"Recorded {partner}'s share of {theirs} as paid by hand",
             BookingShareCollected => $"{actor} collected {Amount(facts)} from them for their share of {theirs}",
             BookingPartnerShareCollected => $"{actor} collected {partner}'s share of their game on {court}: {Amount(facts)}",
             BookingCollectedShare => $"Collected {Amount(facts)} from {partner} for their share of {theirs}",
@@ -890,6 +949,23 @@ public static class TraceKinds
                 ? $"The club refunded {theirs} in full — its box was offline"
                 : $"The club's automatic check marked {theirs} as a no-show",
             BookingGameNoShowReversed => GameNoShowReversed(theirs, facts),
+            _ => SeatAnswerHeadline(kind, court, facts),
+        };
+    }
+
+    /// <summary>R17 E17-8: a member's own invite, accept and decline — from their side and the organiser's; null for any other word.</summary>
+    private static string? SeatAnswerHeadline(string kind, string court, TraceFacts facts)
+    {
+        var theirs = OrganisersGame(facts, court);
+        var partner = ActorOr(facts, "A member");
+        return kind switch
+        {
+            BookingInvited => $"{ActorOr(facts, "Somebody")} invited them to a game on {court}",
+            BookingInvitedPlayer => $"Invited {Subject(facts)} to their game on {court}",
+            BookingAccepted => $"Accepted their place in {theirs}",
+            BookingPartnerAccepted => $"{partner} accepted a place in their game on {court}",
+            BookingDeclined => $"Declined a place in {theirs}",
+            BookingPartnerDeclined => $"{partner} declined a place in their game on {court}",
             _ => null,
         };
     }
@@ -1037,7 +1113,7 @@ public static class TraceKinds
             WalletShareCauses.ClubRemoved => $"the club took {partner.Object} off the game",
             WalletShareCauses.ShareReturned => $"{partner.Name} withdrew from the game",
             WalletShareCauses.SplitChanged => $"{organiser.Name} lowered {partner.Possessive} share",
-            WalletShareCauses.ClubSettled => $"the club recorded {partner.Possessive} share as paid outside the app",
+            WalletShareCauses.ClubSettled => $"the club recorded {partner.Possessive} share as paid by hand",
             WalletShareCauses.BookingCancelled => "the game was cancelled",
             WalletShareCauses.NoShow => "nobody checked in, so the club settled it as a no-show",
             WalletShareCauses.OutageRefund => "the court's box was offline, so the club refunded the session",
@@ -1274,6 +1350,8 @@ public static class TraceKinds
     {
         if (facts.ByOther && !string.IsNullOrWhiteSpace(facts.ActorName)) return $"{facts.ActorName.Trim()} checked in at {court}";
         if (facts.ForOther && !string.IsNullOrWhiteSpace(facts.SubjectName)) return $"Checked in at {court} for {facts.SubjectName.Trim()}'s booking";
+        // R17 J17-4: their own seat's check-in on somebody else's game.
+        if (!string.IsNullOrWhiteSpace(facts.SeatOfName)) return $"Checked in at {court} for {facts.SeatOfName.Trim()}'s booking";
         return $"Checked in at {court}";
     }
 

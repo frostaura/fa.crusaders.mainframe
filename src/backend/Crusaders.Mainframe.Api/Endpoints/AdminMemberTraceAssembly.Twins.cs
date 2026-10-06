@@ -219,11 +219,45 @@ public static partial class AdminMemberTraceAssembly
     private static Guid? OrganiserOf(AuditLog row)
     {
         // R14 E14-2: a removal, a split change and a cancelled game name the organiser the same way.
-        if (row.Action is not (TraceKinds.PartnerWithdrewAction or TraceKinds.PlayerRemovedAction
-            or TraceKinds.SplitChangedAction or TraceKinds.GameCancelledAction or TraceKinds.SettledOutsideAction
-            or TraceKinds.ShareCollectedAction or TraceKinds.AddedByClubAction or TraceKinds.AcceptedByClubAction)) return null;
+        if (Array.IndexOf(OrganiserNamingActions, row.Action) < 0) return null;
         return GuidOf(DoorActivityView.Details(row.DetailsJson), "organiser_user_id");
     }
+
+    /// <summary>The seat rows that name the game's organiser in their details (C13-4's <c>organiser_user_id</c>).</summary>
+    private static readonly string[] OrganiserNamingActions =
+    [
+        TraceKinds.PartnerWithdrewAction, TraceKinds.PlayerRemovedAction, TraceKinds.SplitChangedAction, TraceKinds.GameCancelledAction,
+        TraceKinds.SettledOutsideAction, TraceKinds.ShareCollectedAction, TraceKinds.AddedByClubAction, TraceKinds.AcceptedByClubAction,
+        // R17 E17-8 / J17-4.
+        TraceKinds.InvitedAction, TraceKinds.AcceptedAction, TraceKinds.DeclinedAction, TraceKinds.SeatCheckedInAction,
+    ];
+
+    /// <summary>
+    /// R17 J17-4: the organiser of the game whose seat this member checked in on — when it is somebody
+    /// else's game and the check-in is the member's own; null otherwise.
+    /// </summary>
+    private static Guid? SeatOfOther(AuditLog row, Guid traced)
+    {
+        if (row.Action != TraceKinds.SeatCheckedInAction || row.ActorUserId != traced) return null;
+        return OrganiserOf(row) is { } organiser && organiser != traced ? organiser : null;
+    }
+
+    /// <summary>
+    /// R17 J17-4: a seat's <c>court.checked_in</c> written by the same scan as a <c>court.activated</c>
+    /// on this Night (BE17b marks it <c>lit_court</c>; the same booking and scanner is the belt to that
+    /// brace) — one check-in, one row.
+    /// </summary>
+    private static bool IsActivationTwin(AuditLog row, JsonElement? details, Strands s)
+    {
+        if (row.Action != TraceKinds.SeatCheckedInAction) return false;
+        if (Flag(details, "lit_court")) return true;
+        var booking = GuidOf(details, "booking_id");
+        return s.Audit.Any(a => a.Action == ActivatedAction && a.ActorUserId == row.ActorUserId
+                                && GuidOf(DoorActivityView.Details(a.DetailsJson), "booking_id") == booking);
+    }
+
+    /// <summary>The check-in that lit a court (<c>CourtActivationService</c>).</summary>
+    private const string ActivatedAction = "court.activated";
 
     /// <summary>R13 E13-8: whose earlier booking displaced this one — its owner's name — on a displacement row; null otherwise.</summary>
     private static string? CauseOf(string action, JsonElement? details, Strands s)

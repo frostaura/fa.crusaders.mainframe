@@ -639,7 +639,7 @@ public sealed class R16NightBadgesPickerHttpTests(PostgresFixture pg) : IClassFi
         foreach (var item in items)
         {
             var keys = item.EnumerateObject().Select(p => p.Name).ToHashSet();
-            Assert.Equal(["user_id", "name", "photo_url", "played_with_you", "last_played_with_you_at", "member_since"], keys);
+            Assert.Equal(["user_id", "name", "photo_url", "played_with_you", "last_played_with_you_at", "member_since", "member_ref"], keys);
         }
         Assert.DoesNotContain("review.test", body.GetRawText(), StringComparison.Ordinal);
 

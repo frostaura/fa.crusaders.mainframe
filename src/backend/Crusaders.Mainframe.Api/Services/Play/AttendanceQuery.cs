@@ -19,7 +19,11 @@ public sealed record AttendedSession(
     /// </summary>
     public DateTimeOffset? EndedAt { get; init; }
 
-    /// <summary>R16 E16-9: the booking was cancelled after its check-in — only the club can, once a session has started.</summary>
+    /// <summary>
+    /// R16 E16-9: the booking was cancelled after its check-in — only the club can, once a session has
+    /// started. R17 J17-5: <see cref="AttendanceQuery.SessionsAsync"/> no longer returns such a session at
+    /// all; the flag stays for sessions built by hand.
+    /// </summary>
     public bool Cancelled { get; init; }
 
     /// <summary>
@@ -35,7 +39,11 @@ public sealed record AttendedSession(
 /// set only by the court box's identification or a no-show reversal on box evidence — never the
 /// clock, never <c>ChargedAt</c>, and never a door scan. A member attended a booking when their own
 /// seat carries a check-in (whatever the seat's status now), or when the booking carries one and
-/// they are a player of it. Booking status is not consulted.
+/// they are a player of it — and (R17 J17-5) the booking was not cancelled: only the club can cancel
+/// a session once somebody has checked in, and a session the club called off is not one the member
+/// attended. That is the ONE definition of attended — stats, the streak, partners, badges and their
+/// progress, the monthly ring and the member's time-on-court reports all read it here, so no two of
+/// them can disagree about a club-cancelled session again.
 ///
 /// <para>
 /// <b>A player</b> is exactly P11's rule: the booker, or a member holding an ACCEPTED seat. A
@@ -106,6 +114,7 @@ public static class AttendanceQuery
                 b.CheckedInAt,
                 Own = ownCheckIn.TryGetValue(b.Id, out var own) ? own : (DateTimeOffset?)null,
             })
+            .Where(x => x.CancelledAt == null)
             .Where(x => x.Own != null || (x.CheckedInAt != null && (x.UserId == userId || acceptedOn.Contains(x.Id))))
             .ToList();
         if (rows.Count == 0) return [];

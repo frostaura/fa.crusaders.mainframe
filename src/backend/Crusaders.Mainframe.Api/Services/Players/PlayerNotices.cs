@@ -113,7 +113,7 @@ public static class PlayerNotices
         var game = await GameText.ForAsync(db, booking, settings, ct);
         var organiser = await NameAsync(db, booking.UserId, "The organiser", ct);
         var removed = seat.Status == ParticipantStatus.Removed;
-        var needsConsent = !removed && NeedsConsent(seat);
+        var needsConsent = !removed && NeedsConsent(booking, seat);
         var where = $"{game.CourtName}, {game.StartsLocal}";
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.GameChanged, dedupeKey,
@@ -129,15 +129,18 @@ public static class PlayerNotices
     /// <summary>
     /// R16 J16-6: the club recorded a partner's share as paid to the organiser by hand — told to both,
     /// in the act's own save: the partner (mailed, as every club act on their seat is) and the
-    /// organiser (inbox only; any money that went back has its own receipt).
+    /// organiser (inbox only; any money that went back has its own receipt). R17 L17-8: when the
+    /// partner had paid in the app (<paramref name="paidInApp"/>), that goes back — said, never
+    /// "nothing moves in the app".
     /// </summary>
     public static async Task<IReadOnlyList<MemberNotice>> SettledOutsideAsync(
-        MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, CancellationToken ct)
+        MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, int paidInApp, CancellationToken ct)
     {
         var game = await GameText.ForAsync(db, booking, settings, ct);
         var organiser = await NameAsync(db, booking.UserId, "The organiser", ct);
         var partner = await NameAsync(db, seat.UserId, "Your partner", ct);
         var where = $"{game.CourtName}, {game.StartsLocal}";
+        var back = paidInApp > 0 ? MoneyFormat.Minutes(paidInApp) : null;
         // Per act: the desk may record the same seat again (a second hand payment, a corrected reason).
         var key = $"settled-outside:{seat.Id:N}:{DateTimeOffset.UtcNow.UtcTicks}";
         return
@@ -147,15 +150,21 @@ public static class PlayerNotices
                 new GameChangedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, false, null, false, seat.Id, ByClub: true, SettledOutside: true)
                 {
                     SettledByHand = true,
+                    ReturnedMinutes = paidInApp > 0 ? paidInApp : null,
                 },
-                $"The club recorded that you paid {organiser} by hand for {where} — nothing moves in the app", $"/bookings/{booking.Id}", booking.Id),
+                $"The club recorded that you paid {organiser} by hand for {where} — "
+                + (back is null ? "nothing moves in the app" : $"the {back} you paid in the app go back to you"),
+                $"/bookings/{booking.Id}", booking.Id),
             new MemberNotice(
                 booking.UserId!.Value, MemberEventCatalogue.GameChanged, $"{key}:organiser",
                 new GameChangedPayload(booking.Id, partner, game.CourtName, game.StartsLocal, false, null, false, seat.Id, ByClub: true, SettledOutside: true)
                 {
                     SettledByHand = true,
+                    ReturnedMinutes = paidInApp > 0 ? paidInApp : null,
                 },
-                $"The club recorded that {partner} paid you by hand for {where}", $"/bookings/{booking.Id}", booking.Id)
+                $"The club recorded that {partner} paid you by hand for {where}"
+                + (back is null ? "" : $" — the {back} they paid in the app go back to them"),
+                $"/bookings/{booking.Id}", booking.Id)
             {
                 Email = false,
             },
@@ -176,10 +185,12 @@ public static class PlayerNotices
 
     /// <summary>
     /// The partner has a new figure to say yes to: they accepted, their share went above what they
-    /// agreed, and the club has not settled it by hand (R15 J15-9 — a settled share asks nothing).
+    /// agreed, the club has not settled it by hand (R15 J15-9 — a settled share asks nothing), and
+    /// the game is not off (R17 E17-2 — a cancelled game asks nobody for anything).
     /// </summary>
-    public static bool NeedsConsent(BookingParticipant seat) =>
-        seat.Status == ParticipantStatus.Accepted && seat.SettledOutsideAt is null && seat.ShareMinutes > seat.ConsentedMinutes;
+    public static bool NeedsConsent(Booking booking, BookingParticipant seat) =>
+        booking.Status != BookingStatus.Cancelled
+        && seat.Status == ParticipantStatus.Accepted && seat.SettledOutsideAt is null && seat.ShareMinutes > seat.ConsentedMinutes;
 
     /// <summary>
     /// The club added the seat's member to the game, or accepted it for them (B8) — mailed, with

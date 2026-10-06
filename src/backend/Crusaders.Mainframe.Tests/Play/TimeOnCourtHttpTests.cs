@@ -44,18 +44,19 @@ public sealed class TimeOnCourtHttpTests(PostgresFixture pg) : IClassFixture<Pos
         {
             var client = club.Client(f, who);
             var wallet = await GetAsync(client, $"/api/v1/reports/me/wallet?{window}");
-            Assert.Equal(37 + 20, wallet.GetProperty("minutes_on_court").GetInt32());
-            Assert.Equal(2, wallet.GetProperty("attended_bookings").GetInt32());
+            // R17 J17-5: the session the club cancelled 20 minutes in is not attended — on the report as on the profile.
+            Assert.Equal(37, wallet.GetProperty("minutes_on_court").GetInt32());
+            Assert.Equal(1, wallet.GetProperty("attended_bookings").GetInt32());
 
             var daily = await GetAsync(client, $"/api/v1/reports/me/daily?{window}");
             var byDay = daily.EnumerateArray().ToDictionary(
                 d => d.GetProperty("date").GetString()!, d => (d.GetProperty("minutes_on_court").GetInt32(), d.GetProperty("attended").GetInt32()));
             Assert.Equal((37, 1), byDay[$"{start:yyyy-MM-dd}"]);
-            Assert.Equal((20, 1), byDay[$"{start.AddDays(1):yyyy-MM-dd}"]);
+            Assert.Equal((0, 0), byDay.GetValueOrDefault($"{start.AddDays(1):yyyy-MM-dd}"));
 
-            // The profile's all-time figure is the same rule over all time: the window's two plus the third.
+            // The profile's all-time figure is the same rule over all time: the window's one plus the third.
             var play = (await MyGameAsync(client)).GetProperty("stats");
-            Assert.Equal(37 + 20 + 32, play.GetProperty("minutes_on_court").GetInt32());
+            Assert.Equal(37 + 32, play.GetProperty("minutes_on_court").GetInt32());
         }
     }
 }

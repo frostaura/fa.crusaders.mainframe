@@ -42,7 +42,7 @@ public sealed record HeldPart(int Minutes, DateTimeOffset Until);
 ///
 /// <para>
 /// <b>Why.</b> A share can come BACK: the partner withdraws, the organiser lowers or re-splits,
-/// removes them, the desk settles it outside the app, or the organiser cancels late (the penalty
+/// removes them, the desk records it as paid by hand, or the organiser cancels late (the penalty
 /// is theirs alone, so the refund falls short of the returns). Each return debits the organiser.
 /// Had they spent the share in between, the return took them below zero — a debt to a friend by
 /// another name, which is the one thing D11 exists to prevent.

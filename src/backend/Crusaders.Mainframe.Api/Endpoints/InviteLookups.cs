@@ -78,7 +78,7 @@ public static class InviteLookups
             booking_id = booking.Id,
             status = PlayerViews.StatusName(seat.Status),
             // R16 J16-1: the one consent rule, and who last changed the share ("organiser" by name, or "club").
-            needs_consent = PlayerNotices.NeedsConsent(seat),
+            needs_consent = PlayerNotices.NeedsConsent(booking, seat),
             share_changed_by = changer.By,
             share_changed_by_name = changer.Name,
             lapsed = seat.LapsedAt is not null || seat.Status == ParticipantStatus.Lapsed,

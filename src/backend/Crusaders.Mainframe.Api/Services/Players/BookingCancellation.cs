@@ -14,8 +14,8 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <b>Read from the record, not stored on the booking.</b> <see cref="Booking.CancellationReason"/>
 /// is the displacement's money discriminator and must never carry prose (see
 /// <c>BookingService.CancelAsync</c>); the cancellation's own <c>booking.cancelled</c> audit row
-/// already holds the actor and the desk's words (<c>waive_reason</c> — the admin route passes its
-/// required reason there), written in the cancellation's save. The admin's NAME is not given to
+/// already holds the actor and the desk's words (<c>reason</c>; before R17 <c>waive_reason</c> — the
+/// admin route passes its required reason there), written in the cancellation's save. The admin's NAME is not given to
 /// members: "the club" cancelled it.
 /// </para>
 /// </summary>
@@ -85,12 +85,20 @@ public sealed record BookingCancellation(string By, string? Cause, string? Reaso
     /// <summary>The audit action every cancellation writes (<c>BookingService.CancelAsync</c>).</summary>
     private const string CancelledAction = "booking.cancelled";
 
+    /// <summary>
+    /// The desk's words: <c>reason</c> since R17 E17-7 (BE17b — <c>waive_reason</c> is now written only
+    /// when a penalty was waived), else <c>waive_reason</c>, which every row before R17 carries.
+    /// </summary>
     private static string? ReasonOf(string? details)
     {
         if (details is null) return null;
         using var doc = JsonDocument.Parse(details);
-        return doc.RootElement.TryGetProperty("waive_reason", out var r) && r.ValueKind == JsonValueKind.String
-               && r.GetString()?.Trim() is { Length: > 0 } words
+        return Words(doc.RootElement, "reason") ?? Words(doc.RootElement, "waive_reason");
+    }
+
+    private static string? Words(JsonElement root, string key)
+    {
+        return root.TryGetProperty(key, out var r) && r.ValueKind == JsonValueKind.String && r.GetString()?.Trim() is { Length: > 0 } words
             ? words
             : null;
     }

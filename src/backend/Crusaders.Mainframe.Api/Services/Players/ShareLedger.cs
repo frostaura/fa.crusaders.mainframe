@@ -197,6 +197,7 @@ public sealed class ShareLedger
     /// consented to all of it, less what they have paid. The "unpaid" of every screen and sweep.
     /// Nothing, once the seat has closed — unless <paramref name="evenIfClosed"/>: what the seat
     /// fell short by, for the lapse that records it and the admin collect that may still take it.
+    /// Nothing, always, on a cancelled game (R17 E17-2).
     /// </summary>
     public async Task<int> UnpaidAsync(Booking booking, BookingParticipant seat, CancellationToken ct, bool evenIfClosed = false)
     {
@@ -214,7 +215,10 @@ public sealed class ShareLedger
             SettledOutsideAt = seat.SettledOutsideAt,
         };
         var paid = await PaidAsync(seat, ct);
-        var closed = !evenIfClosed && IsClosed(booking, seat, await _settings.GetAsync(ct), DateTimeOffset.UtcNow);
+        // R17 E17-2: a cancelled game asks nobody for anything — its unpaid targets close with it,
+        // on every surface (the detail read "10 unpaid" and asked for consent on a game that was off).
+        var closed = booking.Status == BookingStatus.Cancelled
+                     || (!evenIfClosed && IsClosed(booking, seat, await _settings.GetAsync(ct), DateTimeOffset.UtcNow));
         var target = TargetFor(booking, asked, await OwedAsync(booking, ct), paid, closed);
         return Math.Max(0, target - paid);
     }
@@ -793,7 +797,7 @@ public sealed class ShareLedger
     /// <summary>
     /// R14 X14-2: a plain return, by what became of the seat — and only by what the record says
     /// (review M1/L1): the partner withdrew; the organiser took them off (the removal's record); the
-    /// club recorded the share paid outside the app; the organiser lowered it (the split's own record,
+    /// club recorded the share paid by hand; the organiser lowered it (the split's own record,
     /// newer than any share movement on the seat). Anything else — a desk adjustment to the booking,
     /// a removal from before the record existed — is <see cref="WalletShareCauses.ShareBack"/>.
     /// </summary>
@@ -868,9 +872,10 @@ public sealed class ShareLedger
             WalletShareCauses.PlayerAdded => $"{why.Joined ?? "another player"} joined {where}, so the split went down",
             // R16 E16-4: the club's removal, with its cause, on both sides (the organiser's said only "went back").
             WalletShareCauses.ClubRemoved => mine ? $"the club took you off {where}" : $"the club took them off {where}",
+            // R17 L17-8: one wording everywhere — "paid by hand".
             WalletShareCauses.ClubSettled => mine
-                ? $"the club recorded your share of {where} as paid outside the app"
-                : $"the club recorded their share of {where} as paid outside the app",
+                ? $"the club recorded your share of {where} as paid by hand"
+                : $"the club recorded their share of {where} as paid by hand",
             WalletShareCauses.BookingCancelled => CancelClause(why.CancelledByClub, mine, other, where),
             _ => null,
         };

@@ -49,14 +49,47 @@ public sealed record PublicMember(Guid UserId, string Name, string? PhotoUrl);
 /// <summary>
 /// R16 J16-3: what tells two members of one name apart in a picker, without anything the grid's
 /// rule forbids (no email, no phone, no membership number): how often the caller played with them,
-/// when last, and the month they joined the club.
+/// when last, and the CLUB date they joined (R17 J16-3: it was the UTC date). R17 L17-2: and
+/// <see cref="MemberRef"/>, for two who never played with the caller and joined the same day — a
+/// pre-launch club joins in one month, so "Member since Oct 2026" told nobody apart.
 /// </summary>
 public sealed record PlayedWith(int Games, DateTimeOffset? LastAt, DateOnly? MemberSince)
 {
     public static readonly PlayedWith Never = new(0, null, null);
 
-    /// <summary>The wire's <c>member_since</c>: <c>yyyy-MM-dd</c>, or null.</summary>
+    /// <summary>The wire's <c>member_since</c>: <c>yyyy-MM-dd</c> in the club's zone, or null.</summary>
     public string? MemberSinceText => MemberSince?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The wire's <c>member_ref</c> (<see cref="MemberRefs"/>); null only on <see cref="Never"/>.</summary>
+    public string? MemberRef { get; init; }
+}
+
+/// <summary>
+/// R17 L17-2: a member's short club reference — four Crockford base-32 characters (no I, L, O, U),
+/// stable for one member at one club, derived by hash from the club and the member's id. It is NOT
+/// the membership number, an email or a phone, and says nothing the <c>user_id</c> already on every
+/// picker row does not; it exists only so two namesakes are never the same line.
+/// </summary>
+public static class MemberRefs
+{
+    private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+    public const int Length = 4;
+
+    public static string Of(Guid tenantId, Guid userId)
+    {
+        Span<byte> input = stackalloc byte[32];
+        tenantId.TryWriteBytes(input[..16]);
+        userId.TryWriteBytes(input[16..]);
+        var hash = System.Security.Cryptography.SHA256.HashData(input);
+        var bits = ((uint)hash[0] << 16) | ((uint)hash[1] << 8) | hash[2];
+        var chars = new char[Length];
+        for (var i = 0; i < Length; i++)
+        {
+            chars[i] = Alphabet[(int)((bits >> (5 * (Length - 1 - i))) & 31)];
+        }
+        return new string(chars);
+    }
 }
 
 /// <summary>
@@ -250,7 +283,7 @@ public sealed partial class PlayersQuery
             var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
             var money = new SeatMoney(paid, ShareLedger.TargetFor(d.Booking, s, d.Owed, paid, closed), open,
                 s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct, CancelledSince(d.Booking)) : 0);
-            players.Add(SeatView(s, d.People, money, await SeatToldAsync(d, s, ct)));
+            players.Add(SeatView(d.Booking, s, d.People, money, await SeatToldAsync(d, s, ct)));
         }
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
         return new DetailTable(players, received, unpaid);
@@ -333,7 +366,7 @@ public sealed partial class PlayersQuery
         return await _ledger.GetSpendableAsync(partner, ct) < due;
     }
 
-    private static object SeatView(BookingParticipant s, Dictionary<Guid, PublicMember> people, SeatMoney money, SeatTold told)
+    private static object SeatView(Booking booking, BookingParticipant s, Dictionary<Guid, PublicMember> people, SeatMoney money, SeatTold told)
     {
         var (paid, target, unpaid) = (money.Paid, money.Target, money.Unpaid);
         var member = s.UserId is { } id && people.TryGetValue(id, out var m) ? m : null;
@@ -357,7 +390,7 @@ public sealed partial class PlayersQuery
             // cancelled game read "paid 0" with no word of the refund.
             returned_minutes = money.Returned,
             // R16 J16-1: the one rule (PlayerNotices.NeedsConsent) — a share settled by hand asks nothing.
-            needs_consent = s.IsPartner && PlayerNotices.NeedsConsent(s),
+            needs_consent = s.IsPartner && PlayerNotices.NeedsConsent(booking, s),
             share_changed_by = told.Changer.By,
             share_changed_by_name = told.Changer.Name,
             collect_needs_overdraft = told.CollectNeedsOverdraft,
@@ -494,7 +527,7 @@ public sealed partial class PlayersQuery
             players = Math.Max(players, 1),
             share_minutes = seat.ShareMinutes,
             to_pay_minutes = unpaid,
-            needs_consent = PlayerNotices.NeedsConsent(seat),
+            needs_consent = PlayerNotices.NeedsConsent(booking, seat),
             // R16 J16-1: who last changed the share — the page names them ("Owen changed your share…"),
             // never "the club has asked you" for the organiser's change.
             share_changed_by = changer.By,
@@ -583,6 +616,8 @@ public sealed partial class PlayersQuery
                 played_with_you = played[g.UserId].Games,
                 last_played_with_you_at = played[g.UserId].LastAt,
                 member_since = played[g.UserId].MemberSinceText,
+                // R17 L17-2: the namesake tiebreak of last resort.
+                member_ref = played[g.UserId].MemberRef,
             })
             .ToList();
     }
@@ -612,6 +647,8 @@ public sealed partial class PlayersQuery
             played_with_you = played.Games,
             last_played_with_you_at = played.LastAt,
             member_since = played.MemberSinceText,
+            // R17 L17-2: the namesake tiebreak of last resort (every listed member has a membership, so it is set).
+            member_ref = played.MemberRef,
         };
     }
 
@@ -634,12 +671,25 @@ public sealed partial class PlayersQuery
         var booked = await games.AsNoTracking().Where(b => b.UserId != null && ids.Contains(b.UserId!.Value))
             .Select(b => new { UserId = b.UserId!.Value, b.Id, b.StartsAt }).ToListAsync(ct);
         var since = await _db.Memberships.AsNoTracking().Where(m => ids.Contains(m.UserId))
-            .Select(m => new { m.UserId, m.CreatedAt }).ToListAsync(ct);
-        var joined = since.GroupBy(m => m.UserId).ToDictionary(g => g.Key, g => g.Min(m => m.CreatedAt));
+            .Select(m => new Joined(m.UserId, m.TenantId, m.CreatedAt)).ToListAsync(ct);
+        var joined = since.GroupBy(m => m.UserId).ToDictionary(g => g.Key, g => g.MinBy(m => m.At)!);
         var together = seated.Concat(booked).DistinctBy(x => (x.UserId, x.Id)).ToLookup(x => x.UserId);
-        return ids.Distinct().ToDictionary(id => id, id => new PlayedWith(
-            together[id].Count(), together[id].Select(x => (DateTimeOffset?)x.StartsAt).Max(),
-            joined.TryGetValue(id, out var at) ? DateOnly.FromDateTime(at.UtcDateTime) : null));
+        // R17 J16-3: the CLUB's date — a member who joined 00:00–02:00 in Johannesburg read the day before.
+        var zone = ClubClock.ZoneOf(await _settings.GetAsync(ct));
+        return ids.Distinct().ToDictionary(id => id, id => Played([.. together[id].Select(x => x.StartsAt)], joined.GetValueOrDefault(id), zone));
+    }
+
+    /// <summary>When and where a membership began — its club, for <see cref="MemberRefs"/>.</summary>
+    private sealed record Joined(Guid UserId, Guid TenantId, DateTimeOffset At);
+
+    private static PlayedWith Played(List<DateTimeOffset> games, Joined? joined, TimeZoneInfo zone)
+    {
+        return new PlayedWith(
+            games.Count, games.Count == 0 ? null : games.Max(),
+            joined is null ? null : DoorClock.LocalDateOf(zone, joined.At))
+        {
+            MemberRef = joined is null ? null : MemberRefs.Of(joined.TenantId, joined.UserId),
+        };
     }
 
     /// <summary>Active members only: a suspended or departed member drops out of every picker without anyone deleting anything.</summary>

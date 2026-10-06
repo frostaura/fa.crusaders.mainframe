@@ -73,19 +73,25 @@ public sealed record GameCancelledPayload(
 {
     /// <summary>R16 J16-6: the club had recorded the reader's share as paid to the organiser by hand. False on older rows.</summary>
     public bool SettledOutside { get; init; }
+
+    /// <summary>R17 E17-2: the session had started and the reader had paid no share — nothing of theirs stands. False on older rows.</summary>
+    public bool PaidNoShare { get; init; }
 }
 
 /// <summary>D14: a result the reader is asked to confirm, frozen at the first recording (§8).</summary>
 public sealed record ResultToConfirmPayload(
     Guid BookingId, string SubmitterName, string CourtName, string WhenLocal, string ScoreLine, string ConfirmDueLocal);
 
-/// <param name="SettledOutside">R15 J15-9: the club recorded the reader's share as paid outside the app. False on older rows.</param>
+/// <param name="SettledOutside">R15 J15-9: the club recorded the reader's share as paid by hand. False on older rows.</param>
 public sealed record GameChangedPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, int? NewShareMinutes, bool NeedsConsent,
     Guid? SeatId = null, bool ByClub = false, bool SettledOutside = false)
 {
     /// <summary>R16 J16-6: this notice IS the club recording the share as paid by hand — not a change to it. False on older rows.</summary>
     public bool SettledByHand { get; init; }
+
+    /// <summary>R17 L17-8: on that record, the minutes the partner had paid in the app, which go back to them. Null when none (and on older rows).</summary>
+    public int? ReturnedMinutes { get; init; }
 }
 
 /// <summary>Everything one member mail needs.</summary>
@@ -257,6 +263,7 @@ public static class MemberEventCatalogue
         return EmailTemplates.PlayersBookingCancelled(c.Club, c.To, new CancelledGame(p.OrganiserName, p.CourtName, p.StartsAtLocal, p.SessionStarted)
         {
             SettledOutside = p.SettledOutside,
+            PaidNoShare = p.PaidNoShare,
         }, by);
     }
 
@@ -285,6 +292,7 @@ public static class MemberEventCatalogue
             ByClub = p.ByClub,
             SettledOutside = p.SettledOutside,
             SettledByHand = p.SettledByHand,
+            ReturnedMinutes = p.ReturnedMinutes,
         });
     }
 }
