@@ -31,7 +31,7 @@ export function ResetPasswordControl({ membershipId, name, email }: { membership
         action={COPY.resetAction}
         onConfirm={async () => {
           const r = await endpoints.adminResetMemberPassword(membershipId);
-          setResult({ tempPassword: r.temp_password, emailed: r.email_sent_to, notified: r.member_notified });
+          setResult({ tempPassword: r.temp_password, emailed: r.email_queued_to, notified: r.member_email_queued });
         }}
       />
       <Dialog open={result !== null} onOpenChange={(next) => { if (!next) setResult(null); }}>

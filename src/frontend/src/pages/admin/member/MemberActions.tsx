@@ -31,7 +31,7 @@ import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
  * </p>
  *
  * <p>
- * <b>A committed transition whose email failed says so.</b> `member_notified: false` means the
+ * <b>A committed transition whose email failed says so.</b> `member_email_queued: false` means the
  * status changed and nobody told the member; a warning toast, never a success, never a failure.
  * </p>
  */
@@ -84,7 +84,7 @@ function useLifecycleItems({ detail, name, onChanged }: Props): LifecycleItems |
       onConfirm: async () => {
         try {
           const r = await endpoints.adminApprove(id);
-          say(r.member_notified, COPY.approved(name), COPY.approvedUnnotified(name));
+          say(r.member_email_queued, COPY.approved(name), COPY.approvedUnnotified(name));
         } catch (err) {
           // F3-3: ask the club before saying anything — the approval may have committed.
           const truth = await transitionTruth(detail.user_id, "Active", err);
@@ -102,7 +102,7 @@ function useLifecycleItems({ detail, name, onChanged }: Props): LifecycleItems |
       action: COPY.rejectAction, children: reasonField, notReady: !reason.trim(),
       onConfirm: async () => {
         const r = await endpoints.adminReject(id, reason.trim());
-        say(r.member_notified, COPY.rejected(name), COPY.rejectedUnnotified(name));
+        say(r.member_email_queued, COPY.rejected(name), COPY.rejectedUnnotified(name));
         await settle();
       },
     },
@@ -114,7 +114,7 @@ function useLifecycleItems({ detail, name, onChanged }: Props): LifecycleItems |
       tone: "primary", action: COPY.reactivateAction,
       onConfirm: async () => {
         const r = await endpoints.adminReactivate(id);
-        say(r.member_notified, COPY.reactivated(name), COPY.reactivatedUnnotified(name));
+        say(r.member_email_queued, COPY.reactivated(name), COPY.reactivatedUnnotified(name));
         await settle();
       },
     },
@@ -126,7 +126,7 @@ function useLifecycleItems({ detail, name, onChanged }: Props): LifecycleItems |
       action: COPY.suspendAction, children: reasonField, notReady: !reason.trim(),
       onConfirm: async () => {
         const r = await endpoints.adminSuspend(id, reason.trim());
-        say(r.member_notified, COPY.suspended(name), COPY.suspendedUnnotified(name));
+        say(r.member_email_queued, COPY.suspended(name), COPY.suspendedUnnotified(name));
         await settle();
       },
     },

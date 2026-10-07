@@ -25,13 +25,13 @@ public static class AdminMemberEndpoints
         {
             var actor = ctx.User.Id() ?? Guid.Empty;
             var r = await svc.ApproveAsync(memberId, actor, ct);
-            // `member_notified` is the honest half of this answer. The approval commits before
-            // the welcome email is attempted, so a dead SMTP host used to throw out of the
-            // service and hand the console a 500 for a member who was already Active — and the
-            // console then said "Approval failed." about somebody it had just approved. The
-            // transition is the status change; the mail is a consequence of it, and the console
-            // is told which of the two happened rather than being made to guess.
-            return r.Ok ? Results.Ok(new { approved = true, member_notified = r.MemberNotified }) : Results.NotFound();
+            // `member_email_queued` is the honest half of this answer. The approval commits, then
+            // the welcome email is QUEUED — a row in the email outbox, written in milliseconds,
+            // sent by a worker. A dead SMTP host used to be awaited here and, before that, to throw
+            // out of the service and hand the console a 500 for a member who was already Active.
+            // The transition is the status change; the mail is a consequence of it, and the answer
+            // says whether it was queued, never that it has arrived.
+            return r.Ok ? Results.Ok(new { approved = true, member_email_queued = r.EmailQueued }) : Results.NotFound();
         });
 
         g.MapPost("/{memberId:guid}/reject", async (Guid memberId, RejectRequest req, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
@@ -39,7 +39,7 @@ public static class AdminMemberEndpoints
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
             var actor = ctx.User.Id() ?? Guid.Empty;
             var r = await svc.RejectAsync(memberId, actor, req.Reason, ct);
-            return r.Ok ? Results.Ok(new { rejected = true, member_notified = r.MemberNotified }) : Results.NotFound();
+            return r.Ok ? Results.Ok(new { rejected = true, member_email_queued = r.EmailQueued }) : Results.NotFound();
         });
 
         // Suspend / reactivate (spec §8). The enum value and the console's "Suspended"
@@ -50,14 +50,14 @@ public static class AdminMemberEndpoints
         {
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
             var r = await svc.SuspendAsync(memberId, ctx.User.Id() ?? Guid.Empty, req.Reason.Trim(), ct);
-            return TransitionResult(r.Result, new { suspended = true, member_notified = r.MemberNotified }, "member_already_suspended", "member_not_active");
+            return TransitionResult(r.Result, new { suspended = true, member_email_queued = r.EmailQueued }, "member_already_suspended", "member_not_active");
         });
 
         g.MapPost("/{memberId:guid}/reactivate", async (
             Guid memberId, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
         {
             var r = await svc.ReactivateAsync(memberId, ctx.User.Id() ?? Guid.Empty, ct);
-            return TransitionResult(r.Result, new { reactivated = true, member_notified = r.MemberNotified }, "member_already_active", "member_not_suspended");
+            return TransitionResult(r.Result, new { reactivated = true, member_email_queued = r.EmailQueued }, "member_already_active", "member_not_suspended");
         });
 
         // Admin-initiated password reset. Generates a strong temporary password, sets it as
@@ -97,18 +97,18 @@ public static class AdminMemberEndpoints
             await db.SaveChangesAsync(ct);
             await memberCodes.CompleteRotationsAsync(ct);
 
-            // `email_sent_to` used to be printed whether or not the send threw, so the one
-            // screen an admin reaches for when "email delivery is uncertain" asserted that
-            // delivery had happened. Same shape as approve/reject, one layer down.
+            // The mail is queued, not sent: the admin's request no longer waits on SMTP, and the
+            // answer names the address only when the mail really was queued. The temporary
+            // password is on screen either way, for the admin to pass on out-of-band.
             var notified = true;
             try { await email.SendAsync(EmailTemplates.AdminPasswordReset(await club.GetAsync(ct), user.Email, membership.FullName, tempPassword), ct); }
-            catch (Exception ex) { notified = false; logger.LogWarning(ex, "Admin reset email failed for {UserId}", user.Id); }
+            catch (Exception ex) { notified = false; logger.LogWarning(ex, "Admin reset email could not be queued for {UserId}", user.Id); }
 
             return Results.Ok(new
             {
                 temp_password = tempPassword,
-                email_sent_to = notified ? user.Email : null,
-                member_notified = notified,
+                email_queued_to = notified ? user.Email : null,
+                member_email_queued = notified,
                 advice = "Share this with the member out-of-band if email delivery is uncertain. It only unlocks the change-password screen — they must choose a new password before they can do anything else.",
             });
         });
@@ -238,11 +238,11 @@ public static class AdminMemberEndpoints
             generation = row.Generation,
             passkeys_revoked = revokePasskeys,
             passkeys_removed = removed,
-            member_notified = notified,
+            member_email_queued = notified,
         });
     }
 
-    /// <summary>The member's mail about the desk's code reset (B6). A failed send is reported, never thrown: the reset has committed.</summary>
+    /// <summary>The member's mail about the desk's code reset (B6), queued. A mail that cannot be queued is reported, never thrown: the reset has committed.</summary>
     private static async Task<bool> TellMemberOfCodeResetAsync(
         HttpContext ctx, MainframeDbContext db, Membership membership, (string Reason, bool PasskeysRemoved) what, CancellationToken ct)
     {

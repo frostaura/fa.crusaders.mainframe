@@ -222,7 +222,7 @@ public static partial class TopUpEndpoints
         // Never a constant: this mail names an amount the member's card was asked for.
         var symbol = CurrencySymbol.For(await mailer.Settings.GetAsync(ct));
 
-        EmailDispatch.InBackground(
+        await EmailDispatch.QueueAsync(
             mailer.Email, mailer.Logger,
             EmailTemplates.PurchaseNotCompleted(
                 await mailer.Club.GetAsync(ct), recipient, new PackagePurchaseAttempt(
@@ -383,7 +383,7 @@ public static partial class TopUpEndpoints
             .Where(u => u.Id == pending.UserId).Select(u => u.Email).FirstOrDefaultAsync(ct);
         if (!string.IsNullOrEmpty(recipient))
         {
-            EmailDispatch.InBackground(
+            await EmailDispatch.QueueAsync(
                 c.Email, c.Logger,
                 EmailTemplates.PurchaseConfirmation(
                     await c.Club.GetAsync(ct), recipient, new PackagePurchaseReceipt(

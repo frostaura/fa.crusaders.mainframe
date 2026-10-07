@@ -227,7 +227,7 @@ describe("member detail — sign-in & biometrics", () => {
     serve(baseRoutes(detailFixture(), [
       {
         method: "POST", path: "/api/v1/admin/members/22222222-2222-2222-2222-222222222222/reset-password",
-        body: { temp_password: "Tmp-4821-xyz", email_sent_to: "thandi@example.com", member_notified: true, advice: "" },
+        body: { temp_password: "Tmp-4821-xyz", email_queued_to: "thandi@example.com", member_email_queued: true, advice: "" },
       },
     ]));
     renderMember(at("access"));

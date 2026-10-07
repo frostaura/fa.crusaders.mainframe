@@ -166,7 +166,7 @@ describe("member detail — the ⋯ menu", () => {
   it("suspends only with a reason, through the MEMBERSHIP id, and re-reads the member", async () => {
     const stub = serve([
       ...baseRoutes(detailFixture()),
-      { method: "POST", path: "/api/v1/admin/members/22222222-2222-2222-2222-222222222222/suspend", body: { suspended: true, member_notified: true } },
+      { method: "POST", path: "/api/v1/admin/members/22222222-2222-2222-2222-222222222222/suspend", body: { suspended: true, member_email_queued: true } },
     ]);
     renderMember();
     await screen.findByTestId("member-balance");

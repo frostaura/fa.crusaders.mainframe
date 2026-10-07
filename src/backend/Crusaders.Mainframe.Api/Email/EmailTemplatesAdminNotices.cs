@@ -20,6 +20,9 @@ public sealed record TopUpFailure(
     string Reason, decimal? AmountZar, string? MemberName, string? Reference, string Symbol, string ConsoleUrl,
     string? PackageName = null, int? Minutes = null);
 
+/// <summary>An email the outbox stopped trying to deliver.</summary>
+public sealed record EmailUndeliverable(string To, string Subject, string Reason, string ConsoleUrl);
+
 /// <summary>A club webhook the delivery worker has switched off.</summary>
 public sealed record WebhookDisabled(string Destination, string? Description, int Failures, bool Blocked, string ConsoleUrl);
 
@@ -163,6 +166,29 @@ public static partial class EmailTemplates
                 ]),
                 new Callout(CalloutTone.Warning, "Nothing is sent to it until somebody switches it back on. Events in between are not replayed."),
                 new CallToAction("Open Webhooks", w.ConsoleUrl),
+            ],
+            WhyThis: WhyAdmin));
+
+    /// <summary>
+    /// A message the club's system could not get past the mail server, after every retry. The
+    /// reason is the server's own wording, shortened; the member is named by address only.
+    /// </summary>
+    public static EmailMessage AdminEmailUndeliverable(ClubIdentity club, string to, EmailUndeliverable m) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: "An email could not be delivered",
+            Preheader: $"“{m.Subject}” to {m.To} did not go out.",
+            Heading: "An email did not go out",
+            Blocks:
+            [
+                new Paragraph($"{club.Name}'s system kept trying to send this message and the mail server kept refusing it, so it has stopped trying."),
+                new Facts(
+                [
+                    new FactRow("To", m.To),
+                    new FactRow("Subject", m.Subject),
+                    new FactRow("Server said", m.Reason),
+                ]),
+                new Callout(CalloutTone.Warning, "Check the club's mail settings and the address. The person may need telling another way."),
+                new CallToAction("Open Settings", m.ConsoleUrl),
             ],
             WhyThis: WhyAdmin));
 

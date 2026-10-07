@@ -43,7 +43,7 @@ export const DELETE_MEMBER_COPY = {
   notReadyReason: "Say why they are being deleted — it goes on the club's change record.",
   notReadyWriteOff: "Tick the write-off — what is left on their balance can't stay on a deleted account.",
   deleted: (name: string) => `${name} has been deleted.`,
-  deletedUnnotified: (name: string) => `${name} has been deleted, but the email couldn't be sent.`,
+  deletedUnnotified: (name: string) => `${name} has been deleted, but the email couldn't be queued.`,
   alreadyDeleted: (name: string) => `${name} had already been deleted.`,
 } as const;
 

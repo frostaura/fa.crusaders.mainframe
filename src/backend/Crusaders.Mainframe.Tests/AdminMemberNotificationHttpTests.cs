@@ -147,7 +147,7 @@ public sealed class AdminMemberNotificationHttpTests : IClassFixture<PostgresFix
 
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         Assert.True(body.GetProperty("approved").GetBoolean());
-        Assert.False(body.GetProperty("member_notified").GetBoolean());
+        Assert.False(body.GetProperty("member_email_queued").GetBoolean());
 
         // Committed, exactly as it was before the fix — the row was never the problem.
         Assert.Equal(MembershipStatus.Active, await StatusAsync(factory, seeded.ApplicantMembershipId));
@@ -169,13 +169,13 @@ public sealed class AdminMemberNotificationHttpTests : IClassFixture<PostgresFix
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         // Discriminating, not always-false: the same field answers true when the mail went.
-        Assert.True(body.GetProperty("member_notified").GetBoolean());
+        Assert.True(body.GetProperty("member_email_queued").GetBoolean());
         Assert.Contains(mail.Sent, m => m.Subject.Contains("Welcome to"));
     }
 
     /// <summary>
     /// The admin-issued temporary password, which is reached for precisely when "email
-    /// delivery is uncertain" — and which printed <c>email_sent_to</c> whether or not the
+    /// delivery is uncertain" — and which printed <c>email_queued_to</c> whether or not the
     /// send had thrown, so the one screen that exists for a broken mail channel asserted that
     /// the mail channel had worked.
     /// </summary>
@@ -194,7 +194,7 @@ public sealed class AdminMemberNotificationHttpTests : IClassFixture<PostgresFix
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("temp_password").GetString()));
-        Assert.False(body.GetProperty("member_notified").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, body.GetProperty("email_sent_to").ValueKind);
+        Assert.False(body.GetProperty("member_email_queued").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("email_queued_to").ValueKind);
     }
 }

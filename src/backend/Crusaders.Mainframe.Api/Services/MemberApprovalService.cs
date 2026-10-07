@@ -275,14 +275,15 @@ public sealed class MemberApprovalService
     }
 
     /// <summary>
-    /// Sends, and answers whether it went. The bool is not decoration: the caller is a
-    /// transition that has already committed, and the only two honest things it can do with
-    /// a dead mail server are carry on and say so. Swallowing the failure silently would put
-    /// a club in the position of believing a member was told when nobody was.
+    /// Queues the mail, and answers whether it was queued. The bool is not decoration: the caller
+    /// is a transition that has already committed, and the only honest things it can do with a
+    /// mail that could not even be queued are carry on and say so. Delivery is the email outbox's —
+    /// retried with backoff, and announced to the club's admins if it finally cannot go — so a dead
+    /// mail server no longer holds this request, and "queued" is all this can truthfully claim.
     /// </summary>
     private async Task<bool> SendOrLogAsync(EmailMessage message, string what, CancellationToken ct)
     {
-        try { await _email.SendAsync(message, ct); return true; }
+        try { await _email.SendAsync(message, ct); return true; }  // queues; see above
         catch (Exception ex) { _logger.LogWarning(ex, "Email failed: {What}", what); return false; }
     }
 
@@ -368,8 +369,8 @@ public enum MembershipTransition
 /// </para>
 /// </summary>
 /// <param name="Result">Whether the status changed, and if not, why not.</param>
-/// <param name="MemberNotified">Whether the notification email left the building.</param>
-public readonly record struct TransitionReport(MembershipTransition Result, bool MemberNotified)
+/// <param name="EmailQueued">Whether the notification email was queued for sending. Not whether it has arrived: delivery belongs to the email outbox.</param>
+public readonly record struct TransitionReport(MembershipTransition Result, bool EmailQueued)
 {
     /// <summary>A transition that never happened, so there was nothing to notify anyone about.</summary>
     public static TransitionReport Refused(MembershipTransition result) => new(result, false);

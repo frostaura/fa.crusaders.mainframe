@@ -21,7 +21,7 @@ import { OUTCOMES } from "../lib/membersCopy";
  *
  * <p>
  * Two separate repairs, and this file holds both. The API answers
- * <code>member_notified</code> so the console can say the true thing rather than choose
+ * <code>member_email_queued</code> so the console can say the true thing rather than choose
  * between two false ones; and the reload moved into <code>finally</code>, so what is on
  * screen after any transition is what the server says, whatever happened in between.
  * </p>
@@ -49,7 +49,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("AdminMembers — approving when the mail server is down", () => {
   it("says the member is approved AND that nobody was told", async () => {
-    stubFetch(routes([approveRoute({ approved: true, member_notified: false })]));
+    stubFetch(routes([approveRoute({ approved: true, member_email_queued: false })]));
     renderPage(<AdminMembersPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
@@ -57,7 +57,7 @@ describe("AdminMembers — approving when the mail server is down", () => {
     // Both halves in one sentence, because both are true and an admin acts on the second.
     // "Ada Lovelace approved." on its own is how a club leaves an active member waiting for
     // a welcome link that was never sent.
-    const toast = await screen.findByText(/Ada Lovelace is approved, but the welcome email couldn't be sent/i);
+    const toast = await screen.findByText(/Ada Lovelace is approved, but the welcome email couldn't be queued/i);
     expect(toast).toBeInTheDocument();
     expect(toast).toHaveTextContent(/Their membership is active/i);
     // And emphatically not the sentence that was on screen for an approved member.
@@ -65,13 +65,13 @@ describe("AdminMembers — approving when the mail server is down", () => {
   });
 
   it("says only that the member is approved when the email did go", async () => {
-    stubFetch(routes([approveRoute({ approved: true, member_notified: true })]));
+    stubFetch(routes([approveRoute({ approved: true, member_email_queued: true })]));
     renderPage(<AdminMembersPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
 
     expect(await screen.findByText("Ada Lovelace approved.")).toBeInTheDocument();
-    expect(screen.queryByText(/couldn't be sent/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be queued/i)).not.toBeInTheDocument();
   });
 
   it("re-reads the club from the server even when the call failed", async () => {
@@ -125,7 +125,7 @@ describe("AdminMembers — approving when the mail server is down", () => {
 
   it("tells the truth about a rejection nobody received", async () => {
     stubFetch(routes([
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reject`, body: { rejected: true, member_notified: false } },
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reject`, body: { rejected: true, member_email_queued: false } },
     ]));
     renderPage(<AdminMembersPage />);
 
@@ -136,6 +136,6 @@ describe("AdminMembers — approving when the mail server is down", () => {
 
     // A rejected applicant who was never emailed is refused at sign-in with no explanation,
     // and the club is the only party that knows why.
-    expect(await screen.findByText(/the email couldn't be sent/i)).toBeInTheDocument();
+    expect(await screen.findByText(/the email couldn't be queued/i)).toBeInTheDocument();
   });
 });

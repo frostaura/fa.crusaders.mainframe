@@ -174,8 +174,8 @@ function PasswordDialog({ result, onClose }: { result: ResetResult; onClose: () 
         <DialogHeader>
           <DialogTitle>{PASSWORD_DIALOG.title}</DialogTitle>
           <DialogDescription>
-            {result.emailSentTo
-              ? <>{`${PASSWORD_DIALOG.emailedTo} `}<strong className="text-text-primary">{result.emailSentTo}</strong>{". "}</>
+            {result.emailQueuedTo
+              ? <>{`${PASSWORD_DIALOG.emailedTo} `}<strong className="text-text-primary">{result.emailQueuedTo}</strong>{". "}</>
               : <><strong className="text-text-primary">{PASSWORD_DIALOG.notEmailed}</strong>{PASSWORD_DIALOG.notEmailedRest}</>}
             {PASSWORD_DIALOG.scope}
           </DialogDescription>

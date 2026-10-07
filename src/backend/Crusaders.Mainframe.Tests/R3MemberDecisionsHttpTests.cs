@@ -37,7 +37,7 @@ public sealed class R3MemberDecisionsHttpTests(PostgresFixture pg) : IClassFixtu
         var approved = await admin.PostAsync($"/api/v1/admin/members/{club.SidMembership}/approve", null);
 
         Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
-        Assert.True((await MemberCodeClub.JsonAsync(approved)).GetProperty("member_notified").GetBoolean());
+        Assert.True((await MemberCodeClub.JsonAsync(approved)).GetProperty("member_email_queued").GetBoolean());
         var row = await club.ReadAsync(app, db => db.Memberships.IgnoreQueryFilters().AsNoTracking().SingleAsync(m => m.Id == club.SidMembership));
         Assert.Equal(MembershipStatus.Active, row.Status);
         Assert.Null(row.RejectionReason);

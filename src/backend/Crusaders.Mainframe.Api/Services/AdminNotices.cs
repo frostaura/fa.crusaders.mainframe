@@ -211,6 +211,24 @@ public static class AdminNotices
         };
     }
 
+    /// <summary>
+    /// A mail the outbox gave up on. Keyed on the outbox row, which fails once; cooled down under
+    /// one scope for the whole club, so a mail server that is down for a day is one admin mail and
+    /// as many feed rows as there were messages.
+    /// </summary>
+    public static AdminNotice EmailUndeliverable(Guid outboxId, string to, string subject, string reason)
+    {
+        return new AdminNotice(
+            AdminEventCatalogue.EmailUndeliverable,
+            $"{AdminEventCatalogue.EmailUndeliverable}:{outboxId:N}",
+            new EmailUndeliverablePayload(to, subject, reason),
+            $"An email could not be delivered — {subject}",
+            "/admin/settings")
+        {
+            CooldownScope = "smtp",
+        };
+    }
+
     /// <summary>A club webhook switched off. Keyed on the delivery that switched it off, which happens once.</summary>
     public static AdminNotice WebhookAutoDisabled(WebhookEndpoint endpoint, Guid deliveryId, string destination, bool blocked)
     {

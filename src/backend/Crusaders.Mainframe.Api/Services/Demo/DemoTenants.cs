@@ -10,7 +10,7 @@ namespace Crusaders.Mainframe.Api.Services.Demo;
 /// <para>
 /// <b>Why an ambient flag.</b> The things a demo club must never do — send mail, reach PayFast,
 /// fire a webhook — are done by singletons that hold no tenant (the SMTP sender, the webhook
-/// sender) and are often called off the request (<c>EmailDispatch.InBackground</c>, the workers).
+/// sender) and are often called off the request (the email outbox sender, the workers).
 /// Every path into a club's data goes through <see cref="Multitenancy.ITenantContext.Set"/>, so
 /// that is where the flag is raised or lowered, and it flows with the execution context into every
 /// task started under it. A worker that moves from a demo club to a real one lowers it again on

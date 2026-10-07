@@ -74,6 +74,9 @@ public sealed class RetentionWorker : BackgroundService
         var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
         var settingsAccessor = scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>();
 
+        // The email outbox is a system queue, not a club's data: finished rows are cleared once, here.
+        await EmailOutboxRetention.PurgeAsync(db, DateTimeOffset.UtcNow, ct);
+
         var tenants = await db.Tenants.IgnoreQueryFilters().ToListAsync(ct);
         foreach (var tenant in tenants)
         {

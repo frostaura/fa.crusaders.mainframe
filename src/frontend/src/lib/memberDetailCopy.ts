@@ -97,7 +97,7 @@ export const ACTIONS_COPY = {
   approveConfirm: "Approve member",
   approveAction: "approve this application",
   approved: (name: string) => `${name} is now an active member.`,
-  approvedUnnotified: (name: string) => `${name} is active, but the email couldn't be sent. Tell them directly.`,
+  approvedUnnotified: (name: string) => `${name} is active, but the email couldn't be queued. Tell them directly.`,
   approvedAfterLostReply: (name: string) =>
     `${name} is approved — the reply got lost, so the club was asked, and their membership is active. Check with them that the welcome email arrived.`,
   approveUnknown: (name: string) =>
@@ -109,7 +109,7 @@ export const ACTIONS_COPY = {
   rejectConfirm: "Reject application",
   rejectAction: "reject this application",
   rejected: (name: string) => `${name}'s application was rejected.`,
-  rejectedUnnotified: (name: string) => `${name}'s application was rejected, but the email couldn't be sent. Tell them directly.`,
+  rejectedUnnotified: (name: string) => `${name}'s application was rejected, but the email couldn't be queued. Tell them directly.`,
 
   suspend: "Suspend membership",
   suspendTitle: (name: string) => `Suspend ${name}?`,
@@ -119,7 +119,7 @@ export const ACTIONS_COPY = {
   suspendAction: "suspend this member",
   suspended: (name: string) => `${name} is suspended.`,
   suspendedUnnotified: (name: string) =>
-    `${name} is suspended, but the email couldn't be sent. They'll find out at the door unless you tell them.`,
+    `${name} is suspended, but the email couldn't be queued. They'll find out at the door unless you tell them.`,
 
   reactivate: "Reactivate membership",
   reactivateTitle: (name: string) => `Reactivate ${name}?`,
@@ -127,7 +127,7 @@ export const ACTIONS_COPY = {
   reactivateConfirm: "Reactivate membership",
   reactivateAction: "reactivate this member",
   reactivated: (name: string) => `${name} is active again.`,
-  reactivatedUnnotified: (name: string) => `${name} is active again, but the email couldn't be sent. Tell them directly.`,
+  reactivatedUnnotified: (name: string) => `${name} is active again, but the email couldn't be queued. Tell them directly.`,
 
   reason: "Reason",
   reasonHint: "The member reads this in their email, so write it to them.",
@@ -355,8 +355,8 @@ export const ACCESS_COPY = {
   resetConfirm: "Reset password",
   resetAction: "reset the password",
   resetDoneTitle: "Temporary password",
-  resetDoneSent: (email: string) => `Emailed to ${email}. It works once; they choose their own at the next sign-in.`,
-  resetDoneUnsent: "The email couldn't be sent. Read this to them — it works once, and they choose their own at the next sign-in.",
+  resetDoneSent: (email: string) => `The email to ${email} is on its way. It works once; they choose their own at the next sign-in.`,
+  resetDoneUnsent: "The email couldn't be queued. Read this to them — it works once, and they choose their own at the next sign-in.",
   close: "Close",
   noMembershipNote: "This account has no membership row, so there is no password reset to offer from here.",
 

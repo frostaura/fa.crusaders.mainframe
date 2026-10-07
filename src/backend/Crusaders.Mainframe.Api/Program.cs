@@ -401,13 +401,19 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 builder.Services.AddScoped<IJwtIssuer, JwtIssuer>();
-// Singleton — SmtpEmailService is stateless (only depends on IConfiguration + logger),
-// and keeping it singleton lets the booking/cancel hot paths fire-and-forget the send
-// off the request thread without scope-disposal hazards.
-// Demo mode wraps it: nothing leaves for a demo club or a made-up address (DemoAwareEmailService).
+// Email never holds a request: IEmailService QUEUES into the email outbox (EmailOutboxService —
+// demo suppression is applied before a row is stored) and the EmailOutboxWorker sends it over
+// SMTP with backoff, raising an admin notice when a message finally cannot go.
+// IEmailTransport is the real SMTP door, demo-aware, used by that sender and by the admin notice
+// dispatcher (which is an outbox of its own and talks to SMTP directly). SmtpEmailService is
+// stateless (only IConfiguration + logger), so a singleton is safe.
 builder.Services.AddSingleton<SmtpEmailService>();
-builder.Services.AddSingleton<IEmailService>(sp => new DemoAwareEmailService(
+builder.Services.AddSingleton<IEmailTransport>(sp => new DemoAwareEmailService(
     sp.GetRequiredService<SmtpEmailService>(), sp.GetRequiredService<ILogger<DemoAwareEmailService>>()));
+builder.Services.AddSingleton<EmailOutboxSignal>();
+builder.Services.AddSingleton<IEmailService, EmailOutboxService>();
+builder.Services.AddSingleton<EmailOutboxDispatcher>();
+builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.EmailOutboxWorker>();
 builder.Services.AddScoped<TenantSettingsAccessor>();
 // Which club a message is from. One source for a fact that had four.
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Email.ClubIdentityResolver>();

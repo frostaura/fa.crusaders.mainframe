@@ -6,7 +6,7 @@ import type { MemberRow } from "./membersModel";
 import { transitionTruth } from "./lostTransition";
 import { focusAfterAction, pageHeading } from "@/lib/focusAfterAction";
 
-export type ResetResult = { tempPassword: string; emailSentTo: string | null };
+export type ResetResult = { tempPassword: string; emailQueuedTo: string | null };
 
 type Deps = {
   load: () => Promise<void>;
@@ -19,7 +19,7 @@ type Deps = {
  *
  * <p>
  * <b>Two different true things per transition.</b> The status change commits first; the email is
- * a consequence of it, and the API says which of the two happened (`member_notified`). So each
+ * a consequence of it, and the API says which of the two happened (`member_email_queued`). So each
  * success has two sentences, and a failure reloads the club anyway.
  * </p>
  *
@@ -52,7 +52,7 @@ export function useMemberLifecycle({ load }: Deps) {
   const approve = useCallback((m: MemberRow) => once(`approve:${m.user_id}`, async () => {
     try {
       const r = await endpoints.adminApprove(m.membership_id);
-      toast.push(r.member_notified
+      toast.push(r.member_email_queued
         ? { tone: "success", text: OUTCOMES.approved(m.full_name) }
         : { tone: "warning", text: OUTCOMES.approvedUnnotified(m.full_name) });
     } catch (err) {
@@ -73,7 +73,7 @@ export function useMemberLifecycle({ load }: Deps) {
   const reject = useCallback((m: MemberRow, reason: string) => once(`reject:${m.user_id}`, async () => {
     try {
       const r = await endpoints.adminReject(m.membership_id, reason.trim());
-      toast.push(r.member_notified
+      toast.push(r.member_email_queued
         ? { tone: "success", text: OUTCOMES.rejected }
         : { tone: "warning", text: OUTCOMES.rejectedUnnotified(m.full_name) });
     } finally {
@@ -84,7 +84,7 @@ export function useMemberLifecycle({ load }: Deps) {
   const suspend = useCallback((m: MemberRow, reason: string) => once(`suspend:${m.user_id}`, async () => {
     try {
       const r = await endpoints.adminSuspend(m.membership_id, reason.trim());
-      toast.push(r.member_notified
+      toast.push(r.member_email_queued
         ? { tone: "success", text: OUTCOMES.suspended(m.full_name) }
         : { tone: "warning", text: OUTCOMES.suspendedUnnotified(m.full_name) });
     } finally {
@@ -95,7 +95,7 @@ export function useMemberLifecycle({ load }: Deps) {
   const reactivate = useCallback((m: MemberRow) => once(`reactivate:${m.user_id}`, async () => {
     try {
       const r = await endpoints.adminReactivate(m.membership_id);
-      toast.push(r.member_notified
+      toast.push(r.member_email_queued
         ? { tone: "success", text: OUTCOMES.reactivated(m.full_name) }
         : { tone: "warning", text: OUTCOMES.reactivatedUnnotified(m.full_name) });
     } finally {
@@ -105,10 +105,10 @@ export function useMemberLifecycle({ load }: Deps) {
 
   const resetPassword = useCallback(async (m: MemberRow): Promise<ResetResult | undefined> => once(`reset:${m.user_id}`, async () => {
     const r = await endpoints.adminResetMemberPassword(m.membership_id);
-    toast.push(r.member_notified
+    toast.push(r.member_email_queued
       ? { tone: "success", text: OUTCOMES.reset(m.full_name) }
       : { tone: "warning", text: OUTCOMES.resetUnnotified(m.full_name) });
-    return { tempPassword: r.temp_password, emailSentTo: r.email_sent_to };
+    return { tempPassword: r.temp_password, emailQueuedTo: r.email_queued_to };
   }), [once, toast]);
 
   /**

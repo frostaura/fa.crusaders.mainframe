@@ -327,7 +327,7 @@ export function adminPackages(): Reply<typeof adminEndpoints.packages> {
 }
 
 export function memberCodeReset(): MemberCodeResetResult {
-  return { rotated: true, generation: 2, passkeys_revoked: true, passkeys_removed: 1, member_notified: true };
+  return { rotated: true, generation: 2, passkeys_revoked: true, passkeys_removed: 1, member_email_queued: true };
 }
 
 /* ─────────────────────────────── one member ─────────────────────────────── */
@@ -403,7 +403,7 @@ export function memberDeletePreview(overrides: Partial<MemberDeletePreview> = {}
 export function memberDeleteResult(overrides: Partial<MemberDeleteResult> = {}): MemberDeleteResult {
   return {
     deleted: true, user_id: ID, mode: "erase", already_deleted: false, bookings_cancelled: 1, seats_given_up: 0,
-    purchases_closed: 0, written_off_minutes: 75, member_notified: true, ...overrides,
+    purchases_closed: 0, written_off_minutes: 75, member_email_queued: true, ...overrides,
   };
 }
 
@@ -458,23 +458,23 @@ export function bulkBookPayer(): NonNullable<BulkBookResponse["payer"]> {
 /* ─────────────────────────────── members (lib/api.ts) ─────────────────────────────── */
 
 export function approveAnswer(): Reply<typeof endpoints.adminApprove> {
-  return { approved: true, member_notified: true };
+  return { approved: true, member_email_queued: true };
 }
 
 export function rejectAnswer(): Reply<typeof endpoints.adminReject> {
-  return { rejected: true, member_notified: true };
+  return { rejected: true, member_email_queued: true };
 }
 
 export function suspendAnswer(): Reply<typeof endpoints.adminSuspend> {
-  return { suspended: true, member_notified: true };
+  return { suspended: true, member_email_queued: true };
 }
 
 export function reactivateAnswer(): Reply<typeof endpoints.adminReactivate> {
-  return { reactivated: true, member_notified: true };
+  return { reactivated: true, member_email_queued: true };
 }
 
 export function resetPasswordAnswer(): Reply<typeof endpoints.adminResetMemberPassword> {
-  return { temp_password: "x", email_sent_to: null, member_notified: false, advice: "…" };
+  return { temp_password: "x", email_queued_to: null, member_email_queued: false, advice: "…" };
 }
 
 export function pinAnswer(): Reply<typeof endpoints.adminSetMemberPin> {

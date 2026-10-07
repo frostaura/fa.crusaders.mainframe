@@ -166,6 +166,7 @@ internal static class EmailCatalogue
             ("AdminTopUpFailedUnsigned", EmailTemplates.AdminTopUpFailed(club, to, new TopUpFailure("signature_invalid", null, null, null, symbol, ConsoleUrl))),
             ("AdminWebhookDisabled", EmailTemplates.AdminWebhookDisabled(club, to, new WebhookDisabled("https://hooks.riverside.review.test", "Results board", 6, false, ConsoleUrl))),
             ("AdminWebhookDisabledBlocked", EmailTemplates.AdminWebhookDisabled(club, to, new WebhookDisabled("http://10.0.0.4", null, 1, true, ConsoleUrl))),
+            ("AdminEmailUndeliverable", EmailTemplates.AdminEmailUndeliverable(club, to, new EmailUndeliverable("thandi@riverside.review.test", "Your court is booked", "SmtpException: Mailbox unavailable", ConsoleUrl))),
             ("AdminScheduleConflict", EmailTemplates.AdminScheduleConflict(club, to, new ScheduleConflictNotice("Tuesday league", "2026-10-06", 2, ["2026-10-06", "2026-10-13"], ConsoleUrl))),
             ("AdminOverdraftAuthorised", EmailTemplates.AdminOverdraftAuthorised(club, to, new OverdraftNotice("Jason Fourie", "Thandi Mokoena", false, "Court 3", "Tue 29 Sep, 18:00", 24, -16, ConsoleUrl))),
             ("AdminOverdraftAuthorisedSelf", EmailTemplates.AdminOverdraftAuthorised(club, to, new OverdraftNotice("Jason Fourie", "Jason Fourie", true, "Court 3", "Tue 29 Sep, 18:00", 24, -16, ConsoleUrl))),

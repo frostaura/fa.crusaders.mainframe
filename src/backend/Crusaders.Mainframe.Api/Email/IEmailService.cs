@@ -1,8 +1,28 @@
 namespace Crusaders.Mainframe.Api.Email;
 
+/// <summary>
+/// The door every product mail goes in by. In the running application this QUEUES the message in
+/// the email outbox and answers in milliseconds — it never talks to a mail server, so a slow or
+/// dead SMTP host cannot hold a request, an admin's button or a worker. Delivery, retries and the
+/// notice to the club when a mail never arrives belong to <see cref="Services.EmailOutboxDispatcher"/>.
+/// </summary>
+/// <remarks>
+/// A returned task therefore means "queued", never "delivered". It throws only when the message
+/// could not be queued, which is the one failure a caller can still do something about.
+/// </remarks>
 public interface IEmailService
 {
     Task SendAsync(EmailMessage message, CancellationToken ct = default);
+}
+
+/// <summary>
+/// The thing that actually reaches a mail server — SMTP in the application. Used by the outbox
+/// sender and by the admin notice dispatcher, which has its own outbox and retries and so talks
+/// to SMTP directly rather than queueing a second time. A <c>SendAsync</c> here means "the server
+/// accepted it" and may take as long as the transport's timeout.
+/// </summary>
+public interface IEmailTransport : IEmailService
+{
 }
 
 /// <summary>

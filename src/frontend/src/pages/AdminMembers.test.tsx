@@ -49,7 +49,7 @@ describe("AdminMembers — the temporary password an admin issues", () => {
       { path: "/api/v1/admin/biometric/enrollments", body: [] },
       {
         method: "POST", path: "/api/v1/admin/members/33333333-3333-3333-3333-333333333333/reset-password",
-        body: { temp_password: "Xk7-tempo-92", email_sent_to: "ada@example.com", member_notified: true },
+        body: { temp_password: "Xk7-tempo-92", email_queued_to: "ada@example.com", member_email_queued: true },
       },
     ]);
     renderPage(<AdminMembersPage />);
@@ -632,7 +632,7 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
 
   it("suspends with a reason, and says the member's money and bookings are untouched", async () => {
     const stub = stubFetch(routes({}, [
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true, member_notified: true } },
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true, member_email_queued: true } },
     ]));
     renderPage(<AdminMembersPage />);
 
@@ -686,7 +686,7 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
 
   it("offers reactivate — and only reactivate-shaped actions — on a suspended member", async () => {
     const stub = stubFetch(routes({ status: "Suspended" }, [
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true, member_notified: true } },
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true, member_email_queued: true } },
     ]));
     renderPage(<AdminMembersPage />);
 
@@ -751,7 +751,7 @@ describe("AdminMembers — one click, one request", () => {
 
   it("reactivates once on a double-click, so no 409 lands on top of the 200", async () => {
     const stub = stubFetch(routes({ status: "Suspended" }, [
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, status: [200, 409], body: { reactivated: true, member_notified: true } },
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, status: [200, 409], body: { reactivated: true, member_email_queued: true } },
     ]));
     renderPage(<AdminMembersPage />);
 
@@ -806,7 +806,7 @@ describe("AdminMembers — what the admin is told when the member could not be e
 
   async function suspendWith(notified: boolean) {
     stubFetch(routes({}, [
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true, member_notified: notified } },
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true, member_email_queued: notified } },
     ]));
     renderPage(<AdminMembersPage />);
     await fromMenu(ROW_ACTIONS.suspend);
@@ -818,7 +818,7 @@ describe("AdminMembers — what the admin is told when the member could not be e
   it("tells the admin a suspended member will find out at the door, when the email did not go", async () => {
     await suspendWith(false);
     expect(await screen.findByText(
-      "Ada Lovelace is suspended, but the email couldn't be sent. They'll find out at the door unless you tell them.",
+      "Ada Lovelace is suspended, but the email couldn't be queued. They'll find out at the door unless you tell them.",
     )).toBeInTheDocument();
   });
 
@@ -826,12 +826,12 @@ describe("AdminMembers — what the admin is told when the member could not be e
     await suspendWith(true);
     expect(await screen.findByText("Ada Lovelace suspended.")).toBeInTheDocument();
     expect(screen.queryByText(/find out at the door/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/couldn't be sent/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be queued/)).not.toBeInTheDocument();
   });
 
   async function reactivateWith(notified: boolean) {
     stubFetch(routes({ status: "Suspended" }, [
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true, member_notified: notified } },
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true, member_email_queued: notified } },
     ]));
     renderPage(<AdminMembersPage />);
     await fromMenu(ROW_ACTIONS.reactivate);
@@ -840,13 +840,13 @@ describe("AdminMembers — what the admin is told when the member could not be e
 
   it("tells the admin to say so themselves when a reactivation email did not go", async () => {
     await reactivateWith(false);
-    expect(await screen.findByText("Ada Lovelace is active again, but the email couldn't be sent. Tell them directly.")).toBeInTheDocument();
+    expect(await screen.findByText("Ada Lovelace is active again, but the email couldn't be queued. Tell them directly.")).toBeInTheDocument();
   });
 
   it("says none of that when the reactivation email did go", async () => {
     await reactivateWith(true);
     expect(await screen.findByText("Ada Lovelace is active again.")).toBeInTheDocument();
-    expect(screen.queryByText(/couldn't be sent/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be queued/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Tell them directly/)).not.toBeInTheDocument();
   });
 
@@ -854,7 +854,7 @@ describe("AdminMembers — what the admin is told when the member could not be e
     stubFetch(routes({}, [
       {
         method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reset-password`,
-        body: { temp_password: "Xk7-tempo-92", email_sent_to: notified ? "ada@example.com" : null, member_notified: notified },
+        body: { temp_password: "Xk7-tempo-92", email_queued_to: notified ? "ada@example.com" : null, member_email_queued: notified },
       },
     ]));
     renderPage(<AdminMembersPage />);
@@ -866,7 +866,7 @@ describe("AdminMembers — what the admin is told when the member could not be e
   it("sends the admin to the password on the screen when the reset email did not go", async () => {
     await resetWith(false);
     expect(await screen.findByText(
-      "Password reset for Ada Lovelace, but the email couldn't be sent. Read them the password below.",
+      "Password reset for Ada Lovelace, but the email couldn't be queued. Read them the password below.",
     )).toBeInTheDocument();
     // "below" has to be true: the password the toast points at is on the same screen.
     const dialog = await screen.findByRole("dialog", { name: PASSWORD_DIALOG.title });
@@ -882,17 +882,17 @@ describe("AdminMembers — what the admin is told when the member could not be e
   it("says the temporary password was not emailed, rather than naming an address it never reached", async () => {
     await resetWith(false);
     const dialog = await screen.findByRole("dialog", { name: PASSWORD_DIALOG.title });
-    expect(dialog).toHaveTextContent("Not emailed");
-    expect(dialog).toHaveTextContent("the send failed, so this password only reaches the member if you pass it on");
+    expect(dialog).toHaveTextContent("Email not queued");
+    expect(dialog).toHaveTextContent("the email couldn't be queued, so this password only reaches the member if you pass it on");
     // The bug this branch exists for: the dialog used to print "Emailed to null".
-    expect(dialog).not.toHaveTextContent(/Emailed to/);
+    expect(dialog).not.toHaveTextContent(/Email on its way to/);
     expect(dialog).not.toHaveTextContent(/null/);
   });
 
   it("names the address when the temporary password really was emailed", async () => {
     await resetWith(true);
     const dialog = await screen.findByRole("dialog", { name: PASSWORD_DIALOG.title });
-    expect(dialog).toHaveTextContent("Emailed to ada@example.com");
-    expect(dialog).not.toHaveTextContent(/Not emailed/);
+    expect(dialog).toHaveTextContent("Email on its way to ada@example.com");
+    expect(dialog).not.toHaveTextContent(/Email not queued/);
   });
 });

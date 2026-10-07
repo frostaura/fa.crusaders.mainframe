@@ -657,7 +657,7 @@ public sealed class BookingService
         }
 
         var user = await _db.Users.FirstAsync(u => u.Id == booking.UserId, ct);
-        SendEmailInBackground(
+        await QueueEmailAsync(
             EmailTemplates.WalkUpNotStarted(await _club.GetAsync(ct), user.Email, court.Name, booking.AmountChargedMinutes),
             $"walk-up void for {booking.Id}");
 
@@ -1570,7 +1570,7 @@ public sealed class BookingService
                 CheckedInByName = checker?.OtherName,
             },
             refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
-        SendEmailInBackground(cancellationMsg, $"cancellation for {booking.Id}");
+        await QueueEmailAsync(cancellationMsg, $"cancellation for {booking.Id}");
         if (startedNoRefund) await TellStartedCancelAsync(booking, cancelledBy, checker?.UserId, ct);
 
         await _bus.EmitAsync(new DomainEvent(
@@ -3156,18 +3156,10 @@ public sealed class BookingService
     private async Task<string> SlotLabelAsync(Booking booking, CancellationToken ct) =>
         SlotLabel(booking, await _settings.GetAsync(ct));
 
-    // Fire-and-forget email dispatch. IEmailService is registered as singleton so the captured
-    // reference outlives the request scope safely. Errors are swallowed and logged.
-    private void SendEmailInBackground(Email.EmailMessage message, string context)
-    {
-        var email = _email;
-        var logger = _logger;
-        _ = Task.Run(async () =>
-        {
-            try { await email.SendAsync(message, CancellationToken.None); }
-            catch (Exception ex) { logger.LogWarning(ex, "Background email send failed ({Context})", context); }
-        });
-    }
+    // IEmailService queues into the email outbox, so this costs one small insert, not an SMTP
+    // round trip. A mail that cannot even be queued is logged and never unwinds the booking.
+    private Task<bool> QueueEmailAsync(Email.EmailMessage message, string context) =>
+        Email.EmailDispatch.QueueAsync(_email, _logger, message, context);
 }
 
 /// <summary>
