@@ -45,7 +45,7 @@ public sealed class UserPreferencesHttpTests : IClassFixture<PostgresFixture>
         var body = await club.Client(factory, member, adminRole: false).GetFromJsonAsync<JsonElement>(Path);
 
         Assert.Equal("system", body.GetProperty("theme").GetString());
-        Assert.False(body.GetProperty("findable").GetBoolean());
+        Assert.True(body.GetProperty("findable").GetBoolean());
         Assert.False(body.GetProperty("show_in_leaderboards").GetBoolean());
         Assert.False(body.GetProperty("rating_opt_in").GetBoolean());
         Assert.False(body.GetProperty("weekly_recap").GetBoolean());

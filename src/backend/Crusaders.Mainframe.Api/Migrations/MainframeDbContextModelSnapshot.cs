@@ -2371,7 +2371,7 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<bool>("Findable")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
-                        .HasDefaultValue(false);
+                        .HasDefaultValue(true);
 
                     b.Property<DateTimeOffset?>("MemberOnboardingCompletedAt")
                         .HasColumnType("timestamp with time zone");

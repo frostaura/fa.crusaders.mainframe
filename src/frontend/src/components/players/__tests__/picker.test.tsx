@@ -177,7 +177,7 @@ describe("PlayerPicker — the club directory (D13)", () => {
     expect(new Set(directoryCalls(stub.calls).map((c) => c.path))).toEqual(new Set(["/api/v1/members/directory?q=jo%20v"]));
   });
 
-  it("explains an empty answer — only members who chose to be findable appear", async () => {
+  it("explains an empty answer — members who hid themselves do not appear", async () => {
     routes([{ path: "/api/v1/members/directory", body: { items: [] } }]);
     show();
     await openTab(PICKER.members);

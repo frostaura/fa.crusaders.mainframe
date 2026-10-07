@@ -13,6 +13,8 @@ import { useRead, type Read } from "@/lib/useRead";
  * survives until the switch returns (add it back here).
  */
 export type PrivacyKey = keyof SocialPrefs;
+/** What a switch reads as when the server has not said: findable is on by default, the rest are opt-in. */
+const UNSAID: Record<PrivacyKey, boolean> = { findable: true, show_in_leaderboards: false };
 export const PRIVACY_KEYS: readonly PrivacyKey[] = ["findable"];
 
 export const PRIVACY_LABEL: Record<PrivacyKey, { label: string; hint: string }> = {
@@ -23,7 +25,7 @@ export const PRIVACY_LABEL: Record<PrivacyKey, { label: string; hint: string }> 
 export type PrivacyPrefs = {
   read: Read<Partial<SocialPrefs>>;
   retry: () => void;
-  /** What the switch shows: the member's own flip first, then the server's, then OFF. */
+  /** What the switch shows: the member's own flip first, then the server's, then the default. */
   value: (key: PrivacyKey) => boolean;
   pending: (key: PrivacyKey) => boolean;
   /** The sentence for a flip that did not land, until the next flip. */
@@ -63,8 +65,8 @@ function flipFailure(error: unknown, label: string): string {
  * The member's own social switches (D13), read from and written to `/me/preferences`.
  *
  * <p>
- * <b>Off unless the server says on.</b> A missing field, an older API or a read still in
- * flight all read as OFF — an opt-in that defaults on because we could not ask is not an opt-in.
+ * <b>The default unless the server says otherwise.</b> A missing field or an older API reads as
+ * the flag's default (findable on, the opt-ins off); the switches only render once the read has answered.
  * </p>
  *
  * <p>
@@ -81,7 +83,7 @@ export function usePrivacyPrefs(): PrivacyPrefs {
   const [errors, setErrors] = useState<Partial<Record<PrivacyKey, string>>>({});
 
   const value = useCallback(
-    (key: PrivacyKey) => wanted[key] ?? read.data?.[key] === true,
+    (key: PrivacyKey) => wanted[key] ?? read.data?.[key] ?? UNSAID[key],
     [wanted, read.data],
   );
 

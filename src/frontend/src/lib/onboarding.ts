@@ -45,10 +45,10 @@ export type ProfileWithPreferences = MyProfile & { preferences?: Partial<Onboard
  * member's stored resume point names.
  *
  * <p>
- * <b>`privacy` is last (P11, D13).</b> Every social surface is opt-in and off by default —
- * findable in partner search, leaderboards — and the wizard is where a new member is first
- * asked. It comes after install because it is the one step that is a choice rather than a
- * setup task, and the last thing said before Finish is "these are off unless you say so".
+ * <b>`privacy` is last (P11, D13).</b> Findable in partner search is ON by default with an easy
+ * off; leaderboards and the rest stay opt-in — and the wizard is where a new member is first
+ * told. It comes after install because it is the one step that is a choice rather than a
+ * setup task, and the last thing said before Finish is "this is on unless you switch it off".
  * </p>
  */
 export const MEMBER_STEP_SLOTS = [

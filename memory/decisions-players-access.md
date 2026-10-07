@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions-players-access
-description: "Players access and consent: only a live seat shows a booking, link claims by link only, accept names the share seen, the invite loop is closed, balance_credits always raw, member mail rides R23."
+description: "Players access and consent: findable on by default; only a live seat shows a booking, link claims by link only, accept names the share seen, the invite loop is closed, balance_credits always raw, member mail rides R23."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-06
 ---
 
 # Live decisions — players: access, consent, invites and mail (D11–D13)
@@ -46,6 +46,12 @@ Spec: `docs/specs/players-and-splits.md` §4–§6; money rules: `decisions-play
   a token** — a token in an outbox payload would be a clear-text credential.
 - **Member mail rides the R23 outbox with `Audience`/`RecipientUserId`** rather than a second
   outbox; quiet hours re-checked at delivery (a deferral hands back the attempt). Admin feed filters Audience = Admins.
+- **Findable is ON by default, opt-out (Dean, 2026-10-06; supersedes D13's opt-in for this one flag).**
+  The directory hides only an explicit `findable = false`; no preferences row reads as on; the column
+  default is true and migration `FindableByDefault` set every stored false to true (the column never
+  recorded whether a member chose, so choices could not be told from the old default). Admins are members
+  and appear like anyone, with the same Profile switch; the onboarding step says "on, switch off here".
+  Leaderboards, rating, recap, share_results stay opt-in. *Why:* partner search is useless when nobody is in it.
 - **Preferences: `findable` / `show_in_leaderboards` (P2 names) stay canonical**; D13's
   `findable_in_directory` / `show_on_leaderboards` are accepted aliases; `share_results` stored only.
 - **Review round 1 (2026-09-30), pinned in `R1PlayersHttpTests` / `R1MailHttpTests`:** an ACCEPTED

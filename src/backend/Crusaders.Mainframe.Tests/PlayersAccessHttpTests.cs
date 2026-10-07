@@ -155,8 +155,9 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(HttpStatusCode.NotFound, invite.StatusCode);
         Assert.Equal(PlayerErrors.MemberNotFound, Error(await JsonAsync(invite)));
 
+        // Both clubs have a findable "Jo Partner" now that findable is the default: only the home one is listed.
         var directory = await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=Jo"));
-        Assert.Empty(directory.GetProperty("items").EnumerateArray());
+        Assert.Equal([home.Jo], directory.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("user_id").GetGuid()));
 
         var inbox = await JsonAsync(await me.GetAsync("/api/v1/me/notifications"));
         Assert.All(inbox.GetProperty("items").EnumerateArray(), n => Assert.NotEqual(awayBooking, n.GetProperty("booking_id").GetGuid()));
@@ -181,16 +182,16 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
     // ------------------------------------------------------------------ D13 — the directory
 
     [SkippableFact]
-    public async Task The_directory_finds_only_members_who_opted_in_and_says_only_their_name_and_photo()
+    public async Task The_directory_finds_every_active_member_who_has_not_opted_out_and_says_only_their_name_and_photo()
     {
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "pldir");
-        await FindableAsync(club, f, club.Sam);
-        await FindableAsync(club, f, club.Alex);
+        // Nobody touched a setting: findable is the default, with no preferences row at all.
+        // Sam saved an unrelated preference, so a row exists and still says "findable".
+        Assert.Equal(HttpStatusCode.OK, (await club.Client(f, club.Sam).PutAsJsonAsync("/api/v1/me/preferences", new { theme = "dark" })).StatusCode);
         await FindableAsync(club, f, club.Jo, findable: false);
         // Findable, but suspended: gone from the directory without anybody touching the flag.
-        await FindableAsync(club, f, club.Bystander);
         await club.WriteAsync(f, db => db.Memberships.IgnoreQueryFilters().First(m => m.UserId == club.Bystander).Status = MembershipStatus.Suspended);
 
         var me = club.Client(f, club.Organiser);
@@ -203,10 +204,33 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
             ["user_id", "name", "photo_url", "played_with_you", "last_played_with_you_at", "member_since", "member_ref"], i.EnumerateObject().Select(p => p.Name)));
 
         Assert.Empty((await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=Bea"))).GetProperty("items").EnumerateArray());
+        Assert.Empty((await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=Jo"))).GetProperty("items").EnumerateArray());
         Assert.Empty((await JsonAsync(await club.Client(f, club.Sam).GetAsync("/api/v1/members/directory?q=Sam"))).GetProperty("items").EnumerateArray());
         Assert.Equal("query_too_short", Error(await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=S"))));
         // A LIKE wildcard is a literal, not a way to list the club.
         Assert.Empty((await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=%25%25"))).GetProperty("items").EnumerateArray());
+    }
+
+    /// <summary>An admin is a member and a player too: findable by default, switchable off like anyone, and a valid invitee.</summary>
+    [SkippableFact]
+    public async Task An_admin_is_findable_by_default_can_switch_it_off_and_can_be_invited()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await PlayersClub.SeedAsync(f, "pldiradm");
+        var me = club.Client(f, club.Organiser);
+
+        var found = await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=Ada"));
+        Assert.Equal([club.Admin], found.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("user_id").GetGuid()));
+        var prefs = await JsonAsync(await club.Client(f, club.Admin, admin: true).GetAsync("/api/v1/me/preferences"));
+        Assert.True(prefs.GetProperty("findable").GetBoolean());
+
+        await club.CreditAsync(f, club.Organiser, 100);
+        var (bookingId, _) = await club.BookWithPlayersAsync(f, [new { userId = club.Admin }]);
+        Assert.Contains(await club.SeatsAsync(f, bookingId), s => s.UserId == club.Admin);
+
+        Assert.Equal(HttpStatusCode.OK, (await club.Client(f, club.Admin, admin: true).PutAsJsonAsync("/api/v1/me/preferences", new { findable = false })).StatusCode);
+        Assert.Empty((await JsonAsync(await me.GetAsync("/api/v1/members/directory?q=Ada"))).GetProperty("items").EnumerateArray());
     }
 
     [SkippableFact]
@@ -443,7 +467,7 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
     // ------------------------------------------------------------------ preferences and settings
 
     [SkippableFact]
-    public async Task Every_social_flag_is_off_until_the_member_turns_it_on()
+    public async Task Findable_is_on_and_every_other_social_flag_is_off_until_the_member_turns_it_on()
     {
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
@@ -451,7 +475,7 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         var me = club.Client(f, club.Sam);
 
         var defaults = await JsonAsync(await me.GetAsync("/api/v1/me/preferences"));
-        Assert.False(defaults.GetProperty("findable").GetBoolean());
+        Assert.True(defaults.GetProperty("findable").GetBoolean());
         Assert.False(defaults.GetProperty("show_in_leaderboards").GetBoolean());
         Assert.False(defaults.GetProperty("share_results").GetBoolean());
 

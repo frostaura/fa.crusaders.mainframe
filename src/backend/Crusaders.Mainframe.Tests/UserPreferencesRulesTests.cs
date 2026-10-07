@@ -79,12 +79,12 @@ public sealed class UserPreferencesRulesTests
         => Assert.Equal(count, UserPreferencesRules.ReadOptouts(json).Count);
 
     [Fact]
-    public void No_row_reads_as_every_privacy_flag_off_and_the_system_theme()
+    public void No_row_reads_as_findable_every_other_privacy_flag_off_and_the_system_theme()
     {
         var view = UserPreferencesView.From(null);
 
         Assert.Equal("system", view.Theme);
-        Assert.False(view.Findable);
+        Assert.True(view.Findable);
         Assert.False(view.ShowInLeaderboards);
         Assert.False(view.RatingOptIn);
         Assert.False(view.WeeklyRecap);

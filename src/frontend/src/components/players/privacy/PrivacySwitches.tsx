@@ -8,7 +8,7 @@ import { PRIVACY_COPY as COPY } from "@/lib/playersCopy";
 import { PRIVACY_KEYS, PRIVACY_LABEL, usePrivacyPrefs, type PrivacyKey, type PrivacyPrefs } from "./usePrivacyPrefs";
 
 /**
- * D13 — "Let other members find me", off by default. ("Show me on leaderboards" returns with
+ * D13 — "Let other members find me", on by default. ("Show me on leaderboards" returns with
  * leaderboards; `PRIVACY_KEYS` holds which switches show.)
  *
  * <p>
