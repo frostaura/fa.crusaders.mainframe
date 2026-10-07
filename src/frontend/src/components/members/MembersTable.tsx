@@ -422,6 +422,9 @@ function StatusCell({ row }: { row: MemberRow }) {
   );
 }
 
+/** A group's name can be longer than the cell: the pill stops at the cell's edge with an ellipsis (the full name is its title), never runs under the pinned balance. */
+const CHIP_FITS_CELL = "min-w-0 max-w-full [&>span]:min-w-0 [&>span]:truncate";
+
 function GroupChips({ groups }: { groups: GroupChip[] | undefined }) {
   if (groups === undefined) return <Skeleton className="h-5 w-24 rounded-full" />;
   // Two chips and "+N", never three lines. A built-in group (the league group, which carries the
@@ -430,7 +433,7 @@ function GroupChips({ groups }: { groups: GroupChip[] | undefined }) {
   const rest = groups.slice(2).map((g) => g.name);
   return (
     <div className="flex flex-wrap gap-1">
-      {groups.slice(0, 2).map((g) => <Badge key={g.id} tone={g.system_key ? "info" : "neutral"}>{g.name}</Badge>)}
+      {groups.slice(0, 2).map((g) => <Badge key={g.id} tone={g.system_key ? "info" : "neutral"} title={g.name} className={CHIP_FITS_CELL}>{g.name}</Badge>)}
       {rest.length > 0 ? (
         <Badge title={GROUPS_COPY.moreTitle(rest)}>
           {GROUPS_COPY.more(rest.length)}
