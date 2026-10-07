@@ -102,10 +102,13 @@ function OccurrenceRow({
                 </p>
               </div>
               {occurrence.status === "scheduled" && (
-                <div className="flex flex-wrap gap-2">
+                // Stacked and as wide as each other on a phone; side by side from `sm`, each at a
+                // floor that holds the longest date ("Wed 30 Sep"), so every row's pair lines up.
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                   <Button
                     variant="outline"
                     size="sm"
+                    className="sm:min-w-64"
                     aria-expanded={changing}
                     onClick={onToggleChange}
                     icon={<PencilSimple aria-hidden="true" />}
@@ -113,7 +116,7 @@ function OccurrenceRow({
                     {`Change the hours of ${clubDateShort(occurrence.date)}`}
                   </Button>
                   <ConfirmDialog
-                    trigger={<Button variant="danger-soft" size="sm" disabled={busy}>{`Skip ${clubDateShort(occurrence.date)}`}</Button>}
+                    trigger={<Button variant="danger-soft" size="sm" className="sm:min-w-40" disabled={busy}>{`Skip ${clubDateShort(occurrence.date)}`}</Button>}
                     title={`Skip ${clubDateShort(occurrence.date)}?`}
                     description={skipConsequence(courtsHeldBy(occurrence, courtCount), occurrence.date)}
                     confirmLabel={`Skip ${clubDateShort(occurrence.date)}`}

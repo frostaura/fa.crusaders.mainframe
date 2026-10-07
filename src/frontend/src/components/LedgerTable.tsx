@@ -223,7 +223,7 @@ export function LedgerTable(props: LedgerTableProps) {
       <ScrollArea label={label} onlyWhenWider={!fill} className={cn(fill && "min-h-0 flex-1")}>
         {/* Named as well as its scroller (A11Y F3.22): a table reached by a screen reader's table
             navigation announces its own name, not the region's. */}
-        <table data-slot="table" aria-label={label} className={cn("w-full border-collapse text-sm", TABLE_KEEP_WHOLE)}>
+        <table data-slot="table" aria-label={label} className={cn("w-full border-collapse text-sm [&_td]:align-middle", TABLE_KEEP_WHOLE)}>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               {columns.map((column) => <Fragment key={column}>{headerFor(column)}</Fragment>)}
@@ -279,7 +279,7 @@ function LedgerLine(props: {
     >
       {columns.map((column) => <Fragment key={column}>{narrowed(CELL[column](row), column, wideOnly.includes(column), fold)}</Fragment>)}
       {onOpen ? (
-        <TableCell className={cn(DETAILS_CELL, PIN_CELL, "align-top")}>
+        <TableCell className={cn(DETAILS_CELL, PIN_CELL)}>
           <Button
             variant="ghost"
             size="sm"

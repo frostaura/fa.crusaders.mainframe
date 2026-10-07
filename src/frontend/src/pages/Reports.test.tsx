@@ -143,7 +143,7 @@ describe("Reports — net daily buckets", () => {
 
     expect(stats.getByText("Adjustments")).toBeInTheDocument();
     // R6 L6-14: each bucket as the daily table shows it; the sentence under the card carries the signs.
-    expect(stats.getByText("Adjustments").parentElement).toHaveTextContent("Adjustments25 min");
+    expect(stats.getByText("Adjustments").closest("div")).toHaveTextContent("Adjustments25 min");
     expect(card.getByText(/what the desk added or took back by hand/)).toBeInTheDocument();
 
     // The desk's own wallet is gone from the club's report — and is not even asked for.
@@ -200,11 +200,11 @@ describe("Reports — net daily buckets", () => {
     renderAdmin();
     const region = await screen.findByRole("region", { name: CLUB_TOTALS });
     const stats = within(region.querySelector("dl")!);
-    expect(stats.getByText("Bookings").parentElement).toHaveTextContent("Bookings24 min");
-    expect(stats.getByText("Bookings").parentElement!.querySelector(".text-danger-strong")).toBeNull();
-    expect(stats.getByText("Penalties (net)").parentElement).toHaveTextContent("Penalties (net)0 min");
+    expect(stats.getByText("Bookings").closest("div")).toHaveTextContent("Bookings24 min");
+    expect(stats.getByText("Bookings").closest("div")!.querySelector(".text-danger-strong")).toBeNull();
+    expect(stats.getByText("Penalties (net)").closest("div")).toHaveTextContent("Penalties (net)0 min");
     const sales = await regionNamed(CLUB_REPORT_COPY.sales.title);
-    expect(sales.getByText(CLUB_REPORT_COPY.sales.perMinute).parentElement).toHaveTextContent(`${CLUB_REPORT_COPY.sales.perMinute}R1.86`);
+    expect(sales.getByText(CLUB_REPORT_COPY.sales.perMinute).closest("div")).toHaveTextContent(`${CLUB_REPORT_COPY.sales.perMinute}R1.86`);
     expect(sales.queryByText(/1\.8611/)).not.toBeInTheDocument();
   });
 
@@ -367,7 +367,7 @@ describe("Reports — the member's summary reconciles to their balance", () => {
     // R7 X7-6: each is the compact figure for the eye with its spoken twin beside it.
     expect(screen.getAllByText("3 h 45 min")).toHaveLength(2);
     expect(screen.getAllByText("3 hours 45 minutes")).toHaveLength(2);
-    expect(screen.getByText("Bookings played").nextElementSibling?.textContent?.replace(/\u00a0/g, " ")).toBe("14 · 3 h 45 min3 hours 45 minutes");
+    expect(screen.getByText("Bookings played").closest("dt")?.nextElementSibling?.textContent?.replace(/\u00a0/g, " ")).toBe("14 · 3 h 45 min3 hours 45 minutes");
   });
 
   it("fetches the wallet CSV with the session token rather than navigating to it", async () => {
@@ -507,7 +507,7 @@ describe("Reports — the totals card on a period with no movement", () => {
     // Every bucket on the card, all of them zero, all of them unsigned.
     for (const label of ["Spent", "Refunds (net)", "Penalties", "Adjustments"]) {
       const term = card.getByText(label);
-      expect(term.parentElement).toHaveTextContent(`${label}0 min`);
+      expect(term.closest("div")).toHaveTextContent(`${label}0 min`);
     }
   });
 
@@ -524,7 +524,7 @@ describe("Reports — the totals card on a period with no movement", () => {
 
     expect(card.getByText("+2 h 40 min")).toBeInTheDocument();
     // Spend leaves the wallet, so it is negated — not merely labelled with a minus.
-    expect(card.getByText("Spent").parentElement).toHaveTextContent("Spent−24 min");
+    expect(card.getByText("Spent").closest("div")).toHaveTextContent("Spent−24 min");
   });
 });
 

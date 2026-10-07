@@ -121,15 +121,16 @@ export function GroupCard(props: {
         {!builtIn && group.is_system_default ? <p className="text-text-muted">{GROUP_ACTIONS.standing(group.name)}</p> : null}
       </CardContent>
 
+      {/* On a phone the buttons grow to fill their row, so a wrapped last one is as wide as the card, not a stray half. */}
       <CardFooter className="flex-wrap">
-        <Button variant="secondary" onClick={props.onEdit} icon={<PencilSimple aria-hidden="true" />}>
+        <Button variant="secondary" className="grow sm:grow-0" onClick={props.onEdit} icon={<PencilSimple aria-hidden="true" />}>
           {GROUP_ACTIONS.edit}{" "}<span className="sr-only">{`${group.name}`}</span>
         </Button>
-        <Button variant="outline" onClick={props.onMembers} icon={<Users aria-hidden="true" />}>
+        <Button variant="outline" className="grow sm:grow-0" onClick={props.onMembers} icon={<Users aria-hidden="true" />}>
           {GROUP_ACTIONS.members}{" "}<span className="sr-only">{`of ${group.name}`}</span>
         </Button>
         {/* R8 L8-6: nowrap, the label pushed a 320 phone sideways at 200 % text. */}
-        <Button variant="outline" className="max-w-full whitespace-normal" onClick={props.onPreview} icon={<CalendarDots aria-hidden="true" />}>
+        <Button variant="outline" className="max-w-full grow whitespace-normal sm:grow-0" onClick={props.onPreview} icon={<CalendarDots aria-hidden="true" />}>
           {GROUP_ACTIONS.preview}{" "}<span className="sr-only">{`for ${group.name}`}</span>
         </Button>
       </CardFooter>

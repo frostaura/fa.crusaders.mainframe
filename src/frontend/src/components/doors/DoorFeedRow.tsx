@@ -3,7 +3,7 @@ import { chipTone } from "./chipTone";
 import { relative } from "../../lib/deviceLiveness";
 import { clubRowTime } from "../../lib/clubClock";
 import {
-  doorRowRender, doorScanTiming, doorScanTimingLong, doorTimeIsUncertain,
+  REMOVED_DOOR_NOTE, REMOVED_DOOR_UNNAMED, doorRowRender, doorScanTiming, doorScanTimingLong, doorTimeIsUncertain,
 } from "../../lib/doorsCopy";
 import { describeActivityWho } from "../../lib/deviceActivity";
 import { type DeviceActivityEntry } from "../../lib/api";
@@ -44,6 +44,20 @@ import { type DeviceActivityEntry } from "../../lib/api";
  */
 export const DOOR_NAME_ON_A_ROW = 28;
 
+/**
+ * The door's name cut to a row's width — and only the NAME. The removal note after it ("— a door
+ * that has since been removed") and an unnamed removed door's whole sentence are the clause itself,
+ * not somebody's naming scheme, so they are never cut ("A door that has since been…" on a 600px row).
+ */
+function shortDoorName(doorName: string): string {
+  if (doorName === REMOVED_DOOR_UNNAMED) return doorName;
+  const note = ` — ${REMOVED_DOOR_NOTE}`;
+  const named = doorName.endsWith(note) ? doorName.slice(0, -note.length) : doorName;
+  const tail = named === doorName ? "" : note;
+  if (named.length <= DOOR_NAME_ON_A_ROW) return doorName;
+  return `${named.slice(0, DOOR_NAME_ON_A_ROW - 1).trimEnd()}…${tail}`;
+}
+
 export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
   entry: DeviceActivityEntry;
   now: number;
@@ -75,9 +89,7 @@ export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
    * `title` and in the accessible name, so nothing is actually hidden: the row's whole detail
    * clause is what the screen reader gets.
    */
-  const shownDoorName = doorName && doorName.length > DOOR_NAME_ON_A_ROW
-    ? `${doorName.slice(0, DOOR_NAME_ON_A_ROW - 1).trimEnd()}…`
-    : doorName;
+  const shownDoorName = doorName ? shortDoorName(doorName) : doorName;
   const detail = [shownDoorName, render.detail].filter((part) => part).join(" · ");
   const detailFull = [doorName, render.detail].filter((part) => part).join(" · ");
   /**

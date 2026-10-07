@@ -523,7 +523,8 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
           // The whole 44px box is the target (A11Y F3-19: the box itself measured 20 × 20; its
           // `after:` extension is invisible to a pointer-size audit and to a reader of the page).
           // A <label> activates the checkbox it holds, so a press anywhere in it toggles.
-          <label className="inline-flex size-touch shrink-0 cursor-pointer items-center justify-center">
+          // `-mt-2.5` centres the 44px box on the title's 24px line, not on the top of the row.
+          <label className="inline-flex size-touch shrink-0 cursor-pointer items-center justify-center [@container(min-width:18rem)]:-mt-2.5">
             <Checkbox
               checked={selected}
               onCheckedChange={onToggle}

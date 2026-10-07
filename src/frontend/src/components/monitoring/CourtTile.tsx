@@ -181,7 +181,7 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
       {duplicate && <DuplicateBoxes parts={duplicate} />}
 
       {boxLine && (
-        <p className="border-t border-border pt-[calc(0.5rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] text-text-muted min-w-0 break-words">
+        <p className="mt-auto border-t border-border pt-[calc(0.5rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] text-text-muted min-w-0 break-words">
           {boxLine}
         </p>
       )}

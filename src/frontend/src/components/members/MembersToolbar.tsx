@@ -35,8 +35,10 @@ export function MembersToolbar(props: MembersToolbarProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { query, onQuery, status, onStatus, counts, stacked = false } = props;
   return (
-    <div className={cn("flex flex-col gap-3", !stacked && "lg:flex-row lg:items-center lg:justify-between")}>
-      <div className={cn("relative w-full", !stacked && "lg:max-w-sm")}>
+    <div className={cn("flex flex-col gap-3", !stacked && "lg:flex-row lg:flex-wrap lg:items-center lg:justify-between")}>
+      {/* The search gives way to the filter chips (down to 12rem), and when both cannot share a
+          line the chips take their own, whole, rather than one of six folding onto a second row. */}
+      <div className={cn("relative w-full", !stacked && "lg:w-auto lg:min-w-48 lg:max-w-sm lg:flex-1")}>
         <MagnifyingGlass size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
         <Input
           type="search"
@@ -53,7 +55,12 @@ export function MembersToolbar(props: MembersToolbarProps) {
         aria-label={COPY.filterLabel}
         value={status}
         onValueChange={(next) => { if (next) onStatus(next as StatusFilter); }}
-        className={cn("rounded-lg bg-bg-muted p-1", stacked && "flex-wrap justify-start")}
+        className={cn(
+          // Equal-width cells (three across on a phone) rather than a wrapping row whose second line
+          // has other widths than its first; one row of natural widths from `lg` when not stacked.
+          "grid w-full grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] rounded-lg bg-bg-muted p-1",
+          !stacked && "lg:flex lg:w-fit lg:max-w-full lg:shrink-0",
+        )}
       >
         {STATUS_FILTERS.map((f) => (
           <ToggleGroupItem key={f.value} value={f.value} className="data-[state=on]:bg-bg-surface data-[state=on]:shadow-xs">

@@ -51,7 +51,7 @@ describe("minutes on the report parts", () => {
     expect(dd).toHaveTextContent("1 h 30 min");
     expect(dd.querySelector(".sr-only")).toHaveTextContent("1 hour 30 minutes");
     render(<dl><Stat label="Sold" value={<Minutes value={-45} signed />} /></dl>);
-    expect(screen.getByText("Sold").nextElementSibling).toHaveTextContent("−45 min");
+    expect(screen.getByText("Sold").closest("dt")!.nextElementSibling).toHaveTextContent("−45 min");
   });
 
   it("marks a negative net day in the warning ink, not the danger ink, and keeps the sign", () => {

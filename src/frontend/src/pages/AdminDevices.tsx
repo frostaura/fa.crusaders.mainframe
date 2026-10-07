@@ -721,8 +721,10 @@ function DeviceRow({
 
       {!device.enabled && <OutOfServiceNotice device={device} coverage={coverage} />}
 
-      {/* The action strip: 44px targets, sm buttons with the extended hit area. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {/* The action strip: 44px targets, sm buttons with the extended hit area. The buttons share
+          equal columns (as many as the card holds, one at large text) instead of a ragged wrapping
+          row of four widths. */}
+      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,9.5rem),1fr))] gap-2">
         {editing === null && (
           <Button variant="outline" size="sm" className={WRAPS} data-opens-editor="details" onClick={() => setEditing("details")}>Edit name and courts</Button>
         )}
