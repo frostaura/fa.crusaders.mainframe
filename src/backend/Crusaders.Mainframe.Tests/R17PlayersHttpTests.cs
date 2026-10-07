@@ -245,9 +245,10 @@ public sealed class R17PickerPlayHttpTests(PostgresFixture pg) : IClassFixture<P
                 m.FullName = "Sam Partner";
                 m.CreatedAt = joined;
             }
-            foreach (var u in new[] { club.Alex, club.Jo })
+            // Everyone is findable by default, so the seeded third "Sam Partner" steps aside to leave the two namesakes.
+            foreach (var (u, findable) in new[] { (club.Alex, true), (club.Jo, true), (club.Sam, false) })
             {
-                db.UserPreferences.Add(new UserPreferences { TenantId = club.TenantId, UserId = u, Findable = true });
+                db.UserPreferences.Add(new UserPreferences { TenantId = club.TenantId, UserId = u, Findable = findable });
             }
         });
 
