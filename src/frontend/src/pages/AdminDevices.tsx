@@ -210,7 +210,7 @@ function CourtListEditor({
  * phone "Edit name and courts" is wider than the card, and the design-system Button is
  * `whitespace-nowrap` by default (e2e/admin-devices "refuses to hold its own content").
  */
-const WRAPS = "h-auto min-h-9 max-w-full whitespace-normal px-1.5 py-1.5 text-center";
+const WRAPS = "h-auto min-h-9 max-w-full grow whitespace-normal px-1.5 py-1.5 text-center";
 
 /** "No court on this relay" inside the Select — see CourtListEditor. */
 const NONE = "none";
@@ -721,10 +721,9 @@ function DeviceRow({
 
       {!device.enabled && <OutOfServiceNotice device={device} coverage={coverage} />}
 
-      {/* The action strip: 44px targets, sm buttons with the extended hit area. The buttons share
-          equal columns (as many as the card holds, one at large text) instead of a ragged wrapping
-          row of four widths. */}
-      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,9.5rem),1fr))] gap-2">
+      {/* The action strip: 44px targets, sm buttons with the extended hit area. Each button grows to
+          fill its row, so a row ends flush on the card's edge instead of ragged. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         {editing === null && (
           <Button variant="outline" size="sm" className={WRAPS} data-opens-editor="details" onClick={() => setEditing("details")}>Edit name and courts</Button>
         )}
