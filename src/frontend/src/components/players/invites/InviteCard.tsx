@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { DotSeparated } from "@/components/ui/dot-separated";
 import { Interactable } from "@/components/ui/interactable";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Invite } from "@/lib/playersApi";
@@ -105,9 +106,13 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
       <span className="flex min-w-0 flex-[1_1_12rem] flex-col gap-1">
         {note ? <span className="text-xs font-semibold uppercase tracking-overline text-text-muted">{note}</span> : null}
         <span className="break-words text-base font-semibold text-text-primary">{invitedLine(name, invite.open_link, invite.added_by_club === true)}</span>
-        <span className="break-words text-sm text-text-secondary">
-          {/* R19 L19-3 — "· 3 players" is one piece: the count never ends a line without its word. */}
-          {invite.court_name ?? INVITES_COPY.court}{" · "}<WhenWhole when={inviteWhen(invite)} />{` ·${NBSP}${keepFiguresWhole(playersCount(invite.players))}`}
+        <span className="block text-sm text-text-secondary">
+          {/* The dot never starts a line (it stood alone before "2 players" on a phone); R19 L19-3 still holds: the count never parts from its word. */}
+          <DotSeparated>
+            <span className="min-w-0 break-words">{invite.court_name ?? INVITES_COPY.court}</span>
+            <span className="min-w-0 break-words"><span className="sr-only">,</span>{" "}<WhenWhole when={inviteWhen(invite)} /></span>
+            <span className="whitespace-nowrap"><span className="sr-only">,</span>{" "}{keepFiguresWhole(playersCount(invite.players))}</span>
+          </DotSeparated>
         </span>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1">
           {/* R19 L19-3 — "Your share 10 min": the figure never parts from its unit (it was "10 / min"). */}
@@ -132,8 +137,6 @@ function WhenWhole({ when }: { when: string }) {
   if (cut < 0) return <>{keepFiguresWhole(when)}</>;
   return <>{keepFiguresWhole(when.slice(0, cut + 2))}<span className="whitespace-nowrap">{when.slice(cut + 2)}</span></>;
 }
-
-const NBSP = "\u00a0";
 
 /** The list while it is read — the card's own shape, three times. */
 export function InviteListSkeleton() {

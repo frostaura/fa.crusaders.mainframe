@@ -146,6 +146,13 @@ const RECEDED = "border-dashed border-border bg-transparent bg-none";
  * a reader and a keyboard still walk every row — but they draw nothing and let the pointer
  * through to the block.
  */
+/**
+ * Where a booked cell's content sits: at the top of a tall block (the label stays put as the block
+ * grows), but centred in a one-row block — a 15-minute booking printed 7px above the middle of its
+ * cell while the "Your limit" and free cells beside it were centred.
+ */
+const lead = (rows: number) => (rows > 1 ? "items-start py-2" : "items-center");
+
 function Block({ rows, children }: { rows: number; children: ReactNode }) {
   const height = `calc(${rows} * 3rem + ${rows - 1} * 0.25rem)`;
   return <div data-block-rows={rows} className="absolute inset-x-0 top-0" style={{ height }}>{children}</div>;
@@ -445,7 +452,7 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   return (
     <Cell label={holdCellLabel(where, slot.blockLabel)} selfFocus={!liftable} at={props.at} line={props.line} roving={props.roving} selecting={ctx.selection.active}>
       <Block rows={rows}>
-      <div className={cn(SURFACE, TONE.hold, "items-start py-1.5 pr-1", ctx.selection.active && RECEDED)}>
+      <div className={cn(SURFACE, TONE.hold, (rows > 1 ? "items-start py-1.5 pr-1" : "items-center pr-1"), ctx.selection.active && RECEDED)}>
         <span aria-hidden="true" className="flex min-w-0 flex-1 flex-col">
           <span className="truncate">{slot.blockLabel ?? CELL_TEXT.hold}</span>
           {slot.blockLabel ? <span className="truncate font-medium">{CELL_TEXT.hold}</span> : null}
@@ -495,7 +502,7 @@ function PendingCell(props: SlotCellProps & { slot: ScheduleSlot }) {
           aria-busy="true"
           aria-label={PENDING_CELL.label(where)}
           data-pending=""
-          className={cn(SURFACE, tone, "cursor-progress items-start py-2", ctx.selection.active && RECEDED)}
+          className={cn(SURFACE, tone, "cursor-progress", lead(rows), ctx.selection.active && RECEDED)}
         >
           <Spinner />
           <span className="min-w-0 truncate">{PENDING_CELL.word}</span>
@@ -528,7 +535,7 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
     return (
       <Cell label={minePastCellLabel(where, slot.checkedIn)} selfFocus {...cell}>
         <Block rows={rows}>
-          <div aria-hidden="true" className={cn(SURFACE, TONE.minePast, "items-start py-2")}>
+          <div aria-hidden="true" className={cn(SURFACE, TONE.minePast, lead(rows))}>
             {slot.checkedIn ? CELL_TEXT.played : CELL_TEXT.minePast}
           </div>
         </Block>
@@ -547,7 +554,7 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
           tabIndex={props.roving ? 0 : -1}
           aria-label={mineCellLabel(where, slot.checkedIn)}
           {...pick.button}
-          className={cn(SURFACE, PRESSABLE, TONE.mine, "group items-start py-2", pick.inset)}
+          className={cn(SURFACE, PRESSABLE, TONE.mine, "group", lead(rows), pick.inset)}
         >
           {pick.check}
           {onCourt ? (
@@ -578,7 +585,7 @@ function MinePastCell(props: SlotCellProps & { slot: ScheduleSlot }) {
           tabIndex={props.roving ? 0 : -1}
           aria-label={minePastOpenLabel(where, slot.checkedIn)}
           data-past-mine=""
-          className={cn(SURFACE, PRESSABLE, TONE.minePast, "items-start py-2 hover:border-control", ctx.selection.active && RECEDED)}
+          className={cn(SURFACE, PRESSABLE, TONE.minePast, lead(rows), "hover:border-control", ctx.selection.active && RECEDED)}
         >
           <span aria-hidden="true" className="min-w-0 truncate">{slot.checkedIn ? CELL_TEXT.played : CELL_TEXT.minePast}</span>
         </Link>
@@ -605,7 +612,7 @@ function PartnerCell(props: SlotCellProps & { slot: ScheduleSlot }) {
             tabIndex={props.roving ? 0 : -1}
             aria-label={partnerCellLabel(where)}
             data-partner-cell=""
-            className={cn(SURFACE, PRESSABLE, TONE.mine, "items-start py-2", ctx.selection.active && RECEDED)}
+            className={cn(SURFACE, PRESSABLE, TONE.mine, lead(rows), ctx.selection.active && RECEDED)}
           >
             <OwnerFace slot={slot} fallback={PARTNER_CELL_WORD} />
           </Link>
@@ -646,7 +653,7 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
               tabIndex={props.roving ? 0 : -1}
               aria-label={otherCellAdminLabel(slot.ownerFirstName, where)}
               {...pick.button}
-              className={cn(SURFACE, PRESSABLE, TONE.bookedAction, "group items-start py-2", pick.inset)}
+              className={cn(SURFACE, PRESSABLE, TONE.bookedAction, "group", lead(rows), pick.inset)}
             >
               {pick.check}
               <OwnerFace slot={slot} />
@@ -659,7 +666,7 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   return (
     <Cell label={bookedByLabel(where, slot.ownerFirstName)} selfFocus {...cell}>
       <Block rows={rows}>
-        <div className={cn(SURFACE, TONE.booked, "items-start py-2", ctx.selection.active && RECEDED)}>
+        <div className={cn(SURFACE, TONE.booked, lead(rows), ctx.selection.active && RECEDED)}>
           <OwnerFace slot={slot} />
         </div>
       </Block>

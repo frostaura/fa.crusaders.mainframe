@@ -64,6 +64,7 @@ function ShelfSectionBlock({ section, discount, baseline }: {
   section: ShelfSection; discount: MinutesShelf["discount"]; baseline: ShelfPackage | null;
 }) {
   const heading = section.group ? BUY_COPY.groupSection(section.group.name) : BUY_COPY.clubSection;
+  const reserveSaving = baseline !== null && section.packages.some((p) => p.saving_zar !== null && p.saving_zar > 0 && p.id !== baseline.id);
   const headingId = `shelf-${section.key.replace(/[^a-z0-9]/gi, "-")}`;
   return (
     <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-3">
@@ -81,7 +82,7 @@ function ShelfSectionBlock({ section, discount, baseline }: {
         ) : null}
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)] gap-3 @[40rem]/page:grid-cols-2 @[72rem]/page:grid-cols-3">
-        {section.packages.map((p) => <PackageCard key={p.id} pkg={p} baseline={baseline} />)}
+        {section.packages.map((p) => <PackageCard key={p.id} pkg={p} baseline={baseline} reserveSaving={reserveSaving} />)}
       </div>
     </section>
   );
@@ -92,7 +93,7 @@ function ShelfSectionBlock({ section, discount, baseline }: {
  * before the member's discount, the hourly figure that makes packages comparable, and the saving
  * against the smallest package as a badge plus the rand it amounts to.
  */
-function PackageCard({ pkg, baseline }: { pkg: ShelfPackage; baseline: ShelfPackage | null }) {
+function PackageCard({ pkg, baseline, reserveSaving }: { pkg: ShelfPackage; baseline: ShelfPackage | null; reserveSaving: boolean }) {
   const saving = pkg.saving_zar !== null && pkg.saving_zar > 0 && baseline && baseline.id !== pkg.id;
   const perHour = pricePerHour(pkg);
   return (
@@ -104,9 +105,13 @@ function PackageCard({ pkg, baseline }: { pkg: ShelfPackage; baseline: ShelfPack
       className="h-full min-w-0 p-3 @[18rem]/page:p-5"
     >
       <span aria-hidden="true" className="flex min-w-0 flex-col gap-3 break-words pt-1">
-        <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        {/* The saving always sits under the figure, never beside it: beside it, a long one ("Saves R200.00 (16%)") wrapped in the
+            narrowest card and pushed that card's price a row below its neighbours'. In a grid the cards without one keep the row empty. */}
+        <span className="flex min-w-0 flex-col items-start gap-1.5">
           <span className="text-2xl font-bold tracking-tight tabular-nums text-text-primary @[18rem]/page:text-3xl">{minutesCompact(pkg.minutes)}</span>
-          {pkg.saving_pct !== null && saving ? <Badge tone="success">{BUY_COPY.save(pkg.saving_zar!, pkg.saving_pct)}</Badge> : null}
+          {pkg.saving_pct !== null && saving
+            ? <Badge tone="success">{BUY_COPY.save(pkg.saving_zar!, pkg.saving_pct)}</Badge>
+            : reserveSaving ? <Badge aria-hidden="true" className="invisible hidden @[40rem]/page:inline-flex">{"\u00a0"}</Badge> : null}
         </span>
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-base font-semibold tabular-nums text-text-primary @[18rem]/page:text-xl">{formatMoney(pkg.price_zar)}</span>
