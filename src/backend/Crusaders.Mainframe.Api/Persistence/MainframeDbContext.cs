@@ -145,8 +145,8 @@ public partial class MainframeDbContext : DbContext
             e.ToTable("users");
             e.HasKey(u => u.Id);
             e.HasIndex(u => new { u.TenantId, u.Email }).IsUnique();
-            // One mirror per real admin per demo club.
-            e.HasIndex(u => new { u.TenantId, u.DemoSourceUserId }).IsUnique().HasFilter("\"DemoSourceUserId\" IS NOT NULL");
+            // One mirror admin and one member-view persona per real admin per demo club.
+            e.HasIndex(u => new { u.TenantId, u.DemoSourceUserId, u.DemoMemberView }).IsUnique().HasFilter("\"DemoSourceUserId\" IS NOT NULL");
             e.Property(u => u.Email).HasMaxLength(320).IsRequired();
             e.Property(u => u.Status).HasMaxLength(32).IsRequired();
             // Plain equality. See the remarks on OnModelCreating for why it must stay one.

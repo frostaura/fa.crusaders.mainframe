@@ -666,6 +666,8 @@ export type WhoAmI = {
    * instead of the one screen they need.
    */
   must_change_password?: boolean;
+  /** The demo club's member view: a plain-member session an admin flipped to, which still wears the demo stripe. */
+  demo_member_view?: boolean;
 };
 export type LoginResponse = { access_token: string; user_id: string; is_admin: boolean; must_change_password?: boolean };
 

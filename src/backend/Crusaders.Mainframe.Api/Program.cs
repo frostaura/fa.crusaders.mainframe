@@ -752,8 +752,10 @@ app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "crusader
 app.MapGet("/api/v1/whoami", async (HttpContext ctx, ITenantContext tenant, MainframeDbContext db) =>
 {
     var userId = ctx.User.Id();
-    var mustChangePassword = userId is { } id
-        && await db.Users.IgnoreQueryFilters().Where(u => u.Id == id).Select(u => u.MustChangePassword).FirstOrDefaultAsync(ctx.RequestAborted);
+    var account = userId is { } id
+        ? await db.Users.IgnoreQueryFilters().Where(u => u.Id == id)
+            .Select(u => new { u.MustChangePassword, u.DemoMemberView }).FirstOrDefaultAsync(ctx.RequestAborted)
+        : null;
     return Results.Ok(new
     {
         tenant_slug = tenant.TenantSlug,
@@ -761,7 +763,9 @@ app.MapGet("/api/v1/whoami", async (HttpContext ctx, ITenantContext tenant, Main
         user_id = userId,
         is_authenticated = ctx.User.Identity?.IsAuthenticated ?? false,
         is_admin = ctx.User.IsInRole("admin"),
-        must_change_password = mustChangePassword,
+        must_change_password = account?.MustChangePassword ?? false,
+        // The demo club's member view: the app draws the demo stripe for a session that is not an admin.
+        demo_member_view = account?.DemoMemberView ?? false,
     });
 }).AllowAnonymous();
 
@@ -770,6 +774,7 @@ app.MapAuthEndpoints();
 app.MapAdminMemberEndpoints();
 app.MapAdminRoleEndpoints();
 app.MapAdminModeEndpoints();
+app.MapDemoMemberViewEndpoints();
 app.MapWalletEndpoints();
 app.MapScheduleEndpoints();
 app.MapMemberGroupEndpoints();

@@ -27,7 +27,7 @@ namespace Crusaders.Mainframe.Api.Services.Demo;
 /// once, and a generation that fails leaves the previous data standing.
 /// </para>
 /// </summary>
-public sealed class DemoModeService
+public sealed partial class DemoModeService
 {
     /// <summary>How old the made-up data may get before the next entry draws it again.</summary>
     public static readonly TimeSpan StaleAfter = TimeSpan.FromHours(24);
@@ -81,6 +81,8 @@ public sealed class DemoModeService
         var (mirror, created) = await DemoMirrors.EnsureAsync(_db, club, user, ct);
         if (IsStale(club, _clock.GetUtcNow()))
         {
+            // The member-view persona exists before the draw, so the draw gives it its own story.
+            await DemoMirrors.EnsureAsync(_db, club, user, memberView: true, ct);
             await RegenerateAsync(club.Id, force: false, ct);
         }
         else if (created)
@@ -89,6 +91,27 @@ public sealed class DemoModeService
         }
         var fresh = await _db.Tenants.AsNoTracking().FirstAsync(t => t.Id == club.Id, ct);
         return new DemoEntry(fresh, mirror);
+    }
+
+    /// <summary>
+    /// The admin's member-view persona, for <paramref name="via"/> (an admin's demo session): a plain
+    /// member of the demo club with a wallet, games and open invites of its own. A persona made now,
+    /// in a demo that is already drawn, has no story yet, so the demo is drawn again once (the
+    /// made-up data only) — the same draw an entry makes when the demo is a day old.
+    /// </summary>
+    public async Task<DemoEntry> EnterMemberViewAsync(DemoReturn.To via, CancellationToken ct)
+    {
+        var club = await CurrentAsync(ct);
+        var (persona, created) = await DemoMirrors.EnsureAsync(_db, club, via.RealUser, memberView: true, ct);
+        if (created) await RegenerateAsync(club.Id, force: true, ct);
+        return new DemoEntry(await ClubAsync(club.Id, ct), persona);
+    }
+
+    /// <summary>The admin's mirror admin, restamped to the real admin's present session epoch, to hand a session to.</summary>
+    public async Task<User> BackToAdminAsync(DemoReturn.To via, CancellationToken ct)
+    {
+        var club = await CurrentAsync(ct);
+        return (await DemoMirrors.EnsureAsync(_db, club, via.RealUser, memberView: false, ct)).Mirror;
     }
 
     /// <summary>The real admin behind the caller's demo session, or why there is none.</summary>
@@ -105,7 +128,7 @@ public sealed class DemoModeService
         if (real is null) return new DemoReturn.NotADemoSession();
         if (mirror.DemoSourceEpoch != real.SessionEpoch) return new DemoReturn.SessionEnded();
         var realClub = await _db.Tenants.AsNoTracking().FirstAsync(t => t.Id == realClubId, ct);
-        return new DemoReturn.To(real, realClub);
+        return new DemoReturn.To(real, realClub, mirror);
     }
 
     /// <summary>
@@ -142,7 +165,7 @@ public sealed class DemoModeService
             if (!force && !IsStale(current, now)) return current.DemoGeneratedAt!.Value;
 
             await DemoWiper.WipeAsync(db, club.Id, ct);
-            var actor = await db.Users.AsNoTracking().Where(u => u.DemoSourceUserId != null).OrderBy(u => u.CreatedAt).Select(u => u.Id).FirstOrDefaultAsync(ct);
+            var actor = await db.Users.AsNoTracking().Where(u => u.DemoSourceUserId != null && !u.DemoMemberView).OrderBy(u => u.CreatedAt).Select(u => u.Id).FirstOrDefaultAsync(ct);
             await DemoConfigCopier.CopyAsync(db, club.DemoOfTenantId!.Value, club.Id, actor, ct);
             var generator = scope.ServiceProvider.GetRequiredService<DemoDataGenerator>();
             await generator.GenerateAsync(new DemoSeed(SeedFor(club.Id, now), now), ct);
@@ -158,53 +181,4 @@ public sealed class DemoModeService
         _logger.LogInformation("Demo club {Slug} regenerated in {Seconds:F1}s", club.Slug, _clock.GetElapsedTime(started).TotalSeconds);
         return now.Storable();
     }
-
-    /// <summary>The current club's demo club, created on first use.</summary>
-    private async Task<Tenant> EnsureClubAsync(Tenant real, CancellationToken ct)
-    {
-        var existing = await _db.Tenants.FirstOrDefaultAsync(t => t.DemoOfTenantId == real.Id, ct);
-        if (existing is not null)
-        {
-            DemoTenants.Register(existing.Id);
-            return existing;
-        }
-
-        var club = new Tenant
-        {
-            Slug = await FreeSlugAsync(real.Slug, ct),
-            DisplayName = Clip($"{real.DisplayName} (demo)", 255),
-            Status = "active",
-            DemoOfTenantId = real.Id,
-        };
-        // Registered before it can be written to: the very first row in it must already be silent.
-        DemoTenants.Register(club.Id);
-        _db.Tenants.Add(club);
-        try
-        {
-            await _db.SaveChangesAsync(ct);
-            return club;
-        }
-        catch (DbUpdateException)
-        {
-            // Another admin of the same club created it a moment ago (the unique index on DemoOfTenantId).
-            _db.ChangeTracker.Clear();
-            var winner = await _db.Tenants.FirstAsync(t => t.DemoOfTenantId == real.Id, ct);
-            DemoTenants.Register(winner.Id);
-            return winner;
-        }
-    }
-
-    private async Task<string> FreeSlugAsync(string realSlug, CancellationToken ct)
-    {
-        var slug = Clip(realSlug, 59) + "-demo";
-        if (!await _db.Tenants.AnyAsync(t => t.Slug == slug, ct)) return slug;
-        return Clip(realSlug, 50) + "-demo-" + Guid.NewGuid().ToString("N")[..8];
-    }
-
-    private static string Clip(string s, int max) => s.Length <= max ? s : s[..max];
-
-    private static long LockKey(Guid id) => BitConverter.ToInt64(id.ToByteArray(), 0);
-
-    /// <summary>A new draw each day, the same draw within one day.</summary>
-    private static int SeedFor(Guid demo, DateTimeOffset now) => (int)(LockKey(demo) ^ (now.UtcTicks / TimeSpan.TicksPerDay));
 }

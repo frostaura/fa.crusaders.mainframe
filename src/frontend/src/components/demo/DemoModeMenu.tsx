@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { ShieldCheck, Sparkle } from "@/components/ui/icons";
+import { ShieldCheck, Sparkle, UserCircle } from "@/components/ui/icons";
 import { Spinner } from "@/components/ui/spinner";
 import { DEMO_CODES, DEMO_COPY } from "@/lib/demoModeCopy";
 import { describeFailure } from "@/lib/errors";
@@ -11,15 +11,22 @@ import { switchClub } from "./switchClub";
 const CHOICES = [
   { value: "live", label: DEMO_COPY.live, icon: ShieldCheck },
   { value: "demo", label: DEMO_COPY.demo, icon: Sparkle },
+  { value: "demo_member", label: DEMO_COPY.demoMember, icon: UserCircle },
 ] as const;
 
 function isClubMode(value: string): value is ClubMode {
-  return value === "live" || value === "demo";
+  return value === "live" || value === "demo" || value === "demo_member";
+}
+
+/** The sentence a failed switch to `to` is named by. */
+function actionFor(to: ClubMode | null): string {
+  if (to === "demo") return DEMO_COPY.switchToDemoAction;
+  return to === "demo_member" ? DEMO_COPY.switchToMemberAction : DEMO_COPY.switchToLiveAction;
 }
 
 /**
- * The account menu's Live / Demo choice — admins only, shaped like the Appearance group beside it
- * (radio items: arrow keys rove, Space/Enter choose, the checked one is announced). Choosing keeps
+ * The account menu's Live / Demo choice (and, while in the demo, Demo as a member) — admins only,
+ * shaped like the Appearance group beside it (radio items: arrow keys rove, Space/Enter choose, the checked one is announced). Choosing keeps
  * the menu open with the choice busy, because the first visit of the day makes the whole demo club
  * and can take a minute or two on the club's Pi; the club's yes then loads the app afresh in the other club (`switchClub`). A
  * refusal is a toast and the menu stays in the club it was in.
@@ -34,7 +41,7 @@ export function DemoModeMenu({ userId }: { userId: string | null }) {
     failure: () => setTarget(null),
     toast: {
       failure: (error) => describeFailure(error, {
-        action: targetRef.current === "demo" ? DEMO_COPY.switchToDemoAction : DEMO_COPY.switchToLiveAction,
+        action: actionFor(targetRef.current),
         codes: DEMO_CODES,
       }),
     },
@@ -46,13 +53,14 @@ export function DemoModeMenu({ userId }: { userId: string | null }) {
     setTarget(value);
     void action.run(value);
   };
-  const working = busy && target ? (target === "demo" ? DEMO_COPY.opening : DEMO_COPY.closing) : null;
+  const opening = target === "demo_member" ? DEMO_COPY.openingMember : DEMO_COPY.opening;
+  const working = busy && target ? (target === "live" ? DEMO_COPY.closing : opening) : null;
   return (
     <>
       <DropdownMenuSeparator />
       <DropdownMenuLabel>{DEMO_COPY.menuLabel}</DropdownMenuLabel>
       <DropdownMenuRadioGroup value={(busy ? target : mode) ?? ""} onValueChange={choose}>
-        {CHOICES.map(({ value, label, icon: Glyph }) => (
+        {CHOICES.filter((c) => c.value !== "demo_member" || mode === "demo" || mode === "demo_member").map(({ value, label, icon: Glyph }) => (
           <DropdownMenuRadioItem
             key={value} value={value} disabled={mode === null} aria-busy={busy && target === value ? true : undefined}
             data-club-mode={value} onSelect={(event) => event.preventDefault()}

@@ -2,9 +2,11 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
 
 /**
- * Which club an admin is in — the live one or its demo (a second tenant full of made-up members,
- * bookings and money, made by the server on the first visit). Only admins can be in the demo, so
- * only the admin's lazy demo chunk (`src/demoMode.tsx`) carries this; `whoami` does not say it.
+ * Which club an admin is in — the live one, its demo (a second tenant full of made-up members,
+ * bookings and money, made by the server on the first visit), or the demo as a plain member (the
+ * admin's member-view persona, `demo_member`). Only admins can be in the demo, so only the admin's
+ * lazy demo chunk (`src/demoMode.tsx`) carries this; `whoami` says only the member view
+ * (`demo_member_view`), which is not an admin and never reads the mode (that route is the admin's).
  *
  * <p>
  * <b>Read once per page load, per admin.</b> A switch and a reset both load the app afresh, so the
@@ -13,11 +15,11 @@ import { api } from "@/lib/api";
  * from the live one, so a hint is never somebody else's, and the stripe is there from the first paint.
  * </p>
  */
-export type ClubMode = "live" | "demo";
+export type ClubMode = "live" | "demo" | "demo_member";
 
-/** `GET /api/v1/admin/mode`. `club_name` is the REAL club's in both modes. */
+/** `GET /api/v1/admin/mode`. `club_name` is the REAL club's in both modes; an admin reads `live` or `demo`. */
 export type ClubModeRead = {
-  mode: ClubMode;
+  mode: Exclude<ClubMode, "demo_member">;
   club_name: string;
   demo: { generated_at: string; stale_after_hours: number } | null;
 };
@@ -42,6 +44,9 @@ export const DEMO_DRAW_TIMEOUT_MS = 5 * 60_000;
 export const clubModeApi = {
   read: () => api.get<ClubModeRead>("/api/v1/admin/mode"),
   switchTo: (mode: ClubMode) => api.postSlow<ModeSwitchAnswer>("/api/v1/admin/mode", { mode }, DEMO_DRAW_TIMEOUT_MS),
+  /** The member view's way out — a non-admin route, because the persona is not an admin. */
+  leaveMemberView: (mode: "demo" | "live") =>
+    api.postSlow<ModeSwitchAnswer>("/api/v1/me/demo/mode", { mode }, DEMO_DRAW_TIMEOUT_MS),
   resetDemo: () => api.postSlow<{ generated_at: string }>("/api/v1/admin/demo/reset", undefined, DEMO_DRAW_TIMEOUT_MS),
 };
 
@@ -53,7 +58,7 @@ type Known = { userId: string; mode: ClubMode };
 function readHint(userId: string): ClubMode | null {
   try {
     const hint = JSON.parse(window.localStorage?.getItem(HINT_KEY) ?? "null") as Known | null;
-    return hint?.userId === userId && (hint.mode === "live" || hint.mode === "demo") ? hint.mode : null;
+    return hint?.userId === userId && (hint.mode === "live" || hint.mode === "demo" || hint.mode === "demo_member") ? hint.mode : null;
   } catch {
     return null;
   }

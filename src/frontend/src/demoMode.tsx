@@ -11,13 +11,19 @@ import { DemoStripe } from "./components/demo/DemoStripe";
  * default export, so the entry carries one loader for both parts (`components/shell/demoChrome`).
  *
  * <p>
+ * The member view (an admin's persona in the demo — not an admin, so `whoami` says it) draws the
+ * stripe only: no menu, and no mode read, because that route is the admin's.
+ * </p>
+ *
+ * <p>
  * Whose mode: the confirmed admin's, else (the stripe only, while the club cannot confirm the
  * session) the member this device last confirmed — the shell draws the admin's chrome for them too.
  * </p>
  */
-export default function DemoPart({ part }: { part: "stripe" | "menu" }) {
+export default function DemoPart({ part, memberView }: { part: "stripe" | "menu"; memberView?: boolean }) {
   const auth = useAuth();
   const owner = useDataOwner().who;
   const confirmed = auth.status === "authenticated" ? auth.userId : null;
-  return part === "menu" ? <DemoModeMenu userId={confirmed} /> : <DemoStripe userId={confirmed ?? owner} />;
+  if (part === "menu") return <DemoModeMenu userId={confirmed} />;
+  return <DemoStripe userId={confirmed ?? owner} memberView={memberView === true} />;
 }

@@ -1,3 +1,4 @@
+using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
@@ -17,11 +18,21 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// club's change record by the real admin (<see cref="AdminChangeActions.DemoEntered"/>,
 /// <see cref="AdminChangeActions.DemoLeft"/>, <see cref="AdminChangeActions.DemoReset"/>).
 /// </para>
+///
+/// <para>
+/// <b>Member view</b> (<see cref="MemberView"/>) is a third session in the same swap: the admin's
+/// persona in the demo club, a plain member. It is entered here (an admin, from the demo) and left
+/// through <see cref="DemoMemberViewEndpoints"/>, because the persona is not an admin and this group
+/// refuses it by role.
+/// </para>
 /// </summary>
 public static class AdminModeEndpoints
 {
     public const string Demo = "demo";
     public const string Live = "live";
+
+    /// <summary>The demo club as a plain member — the admin's member-view persona (<see cref="DemoMirrors"/>).</summary>
+    public const string MemberView = "demo_member";
 
     public static IEndpointRouteBuilder MapAdminModeEndpoints(this IEndpointRouteBuilder app)
     {
@@ -55,10 +66,11 @@ public static class AdminModeEndpoints
     private static async Task<IResult> SwitchAsync(ModeRequest req, HttpContext ctx, DemoModeService demo, CancellationToken ct)
     {
         var mode = req.Mode?.Trim().ToLowerInvariant();
-        if (mode is not (Demo or Live)) return Results.BadRequest(new { error = "mode_invalid" });
+        if (mode is not (Demo or Live or MemberView)) return Results.BadRequest(new { error = "mode_invalid" });
         if (ctx.User.Id() is not { } userId) return Results.Unauthorized();
 
         var current = await demo.CurrentAsync(ct);
+        if (mode == MemberView) return await EnterMemberViewAsync(ctx, demo, current, userId, ct);
         if (current.IsDemo == (mode == Demo)) return await SessionAsync(ctx, userId, mode, current.DemoGeneratedAt, ct);
         return mode == Demo ? await EnterAsync(ctx, demo, userId, ct) : await LeaveAsync(ctx, demo, userId, ct);
     }
@@ -70,6 +82,20 @@ public static class AdminModeEndpoints
             .RecordAsync(new AdminChange(AdminChangeActions.DemoEntered, userId), ct);
         ctx.RequestServices.GetRequiredService<ITenantContext>().Set(entry.Club.Id, entry.Club.Slug);
         return await SessionAsync(ctx, entry.Mirror.Id, Demo, entry.Club.DemoGeneratedAt, ct);
+    }
+
+    /// <summary>
+    /// <c>demo_member</c>: from the admin's demo session to their member-view persona. Only from
+    /// the demo — the live club has no such view, and nothing here reaches it.
+    /// </summary>
+    private static async Task<IResult> EnterMemberViewAsync(HttpContext ctx, DemoModeService demo, Tenant current, Guid userId, CancellationToken ct)
+    {
+        if (!current.IsDemo) return Results.Json(new { error = "member_view_needs_demo" }, statusCode: StatusCodes.Status409Conflict);
+        if (await demo.ReturnForAsync(userId, ct) is not DemoReturn.To to) return SessionEnded();
+
+        var entry = await demo.EnterMemberViewAsync(to, ct);
+        await RecordInRealClubAsync(ctx, to, AdminChangeActions.DemoMemberViewEntered, ct);
+        return await SessionAsync(ctx, entry.Mirror.Id, MemberView, entry.Club.DemoGeneratedAt, ct);
     }
 
     private static async Task<IResult> LeaveAsync(HttpContext ctx, DemoModeService demo, Guid mirrorId, CancellationToken ct)
@@ -98,7 +124,7 @@ public static class AdminModeEndpoints
     }
 
     /// <summary>The real admin's own act, on the real club's record, from a request that is in the demo.</summary>
-    private static async Task RecordInRealClubAsync(HttpContext ctx, DemoReturn.To to, string action, CancellationToken ct)
+    internal static async Task RecordInRealClubAsync(HttpContext ctx, DemoReturn.To to, string action, CancellationToken ct)
     {
         using var scope = ctx.RequestServices.GetRequiredService<IServiceScopeFactory>().CreateScope();
         scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(to.RealClub.Id, to.RealClub.Slug);
@@ -106,7 +132,7 @@ public static class AdminModeEndpoints
     }
 
     /// <summary>A sign-in's answer for <paramref name="userId"/> in the club the request is now in, plus the mode.</summary>
-    private static async Task<IResult> SessionAsync(HttpContext ctx, Guid userId, string mode, DateTimeOffset? generatedAt, CancellationToken ct)
+    internal static async Task<IResult> SessionAsync(HttpContext ctx, Guid userId, string mode, DateTimeOffset? generatedAt, CancellationToken ct)
     {
         var auth = ctx.RequestServices.GetRequiredService<AuthService>();
         var epoch = await ctx.RequestServices.GetRequiredService<DemoModeService>().EpochOfAsync(userId, ct);
@@ -124,7 +150,7 @@ public static class AdminModeEndpoints
         });
     }
 
-    private static IResult SessionEnded() =>
+    internal static IResult SessionEnded() =>
         Results.Json(new { error = "session_ended" }, statusCode: StatusCodes.Status401Unauthorized);
 }
 

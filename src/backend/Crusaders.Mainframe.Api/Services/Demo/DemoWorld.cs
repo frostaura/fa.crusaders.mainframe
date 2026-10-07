@@ -53,8 +53,11 @@ internal sealed class DemoWorld
     public required List<MemberGroup> Groups { get; init; }
     public required List<MinutePackage> Packages { get; init; }
 
-    /// <summary>The demo's own admins — the mirrors. The first is the actor of anything the club did.</summary>
+    /// <summary>The demo's own people for the real admins — the mirror admins and their member-view personas. All of them play.</summary>
     public required List<User> Mirrors { get; init; }
+
+    /// <summary>The mirror admins only. The first is the actor of anything the club did.</summary>
+    public IEnumerable<User> AdminMirrors => Mirrors.Where(m => !m.DemoMemberView);
 
     /// <summary>Everyone who plays: active members and the mirrors.</summary>
     public List<DemoPerson> Players { get; } = [];
@@ -64,7 +67,7 @@ internal sealed class DemoWorld
 
     public List<DemoMoney> Money { get; } = [];
 
-    public Guid AdminId => Mirrors.Count > 0 ? Mirrors[0].Id : Guid.Empty;
+    public Guid AdminId => AdminMirrors.FirstOrDefault()?.Id ?? Guid.Empty;
 
     private TimeZoneInfo? _zone;
 

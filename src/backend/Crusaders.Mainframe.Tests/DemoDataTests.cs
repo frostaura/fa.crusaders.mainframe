@@ -102,9 +102,15 @@ public sealed class DemoDataTests : IClassFixture<PostgresFixture>
         Assert.Contains(bookings, b => b.Status == BookingStatus.AdminBlock && b.StartsAt > now);
         Assert.Contains(bookings, b => b.Status == BookingStatus.AdminBlock && b.StartsAt < now);
 
-        var mirror = await db.Users.IgnoreQueryFilters().SingleAsync(u => u.TenantId == demo.Id && u.DemoSourceUserId != null);
+        var mirror = await db.Users.IgnoreQueryFilters().SingleAsync(u => u.TenantId == demo.Id && u.DemoSourceUserId != null && !u.DemoMemberView);
         Assert.True(await db.BookingParticipants.IgnoreQueryFilters().CountAsync(p => p.UserId == mirror.Id && p.Status == ParticipantStatus.Invited) >= 3);
         Assert.True(await db.MemberNotifications.IgnoreQueryFilters().AnyAsync(n => n.UserId == mirror.Id && n.Kind == MemberEventCatalogue.Invited));
+
+        // The member-view persona is drawn in the same pass, as a plain member with the same story.
+        var persona = await db.Users.IgnoreQueryFilters().SingleAsync(u => u.TenantId == demo.Id && u.DemoSourceUserId == mirror.DemoSourceUserId && u.DemoMemberView);
+        Assert.False(persona.IsAdmin);
+        Assert.True(await db.BookingParticipants.IgnoreQueryFilters().CountAsync(p => p.UserId == persona.Id && p.Status == ParticipantStatus.Invited) >= 3);
+        Assert.True(await db.LedgerEntries.IgnoreQueryFilters().Where(l => l.UserId == persona.Id).SumAsync(l => l.AmountMinutes) > 0);
         Assert.True(await db.MatchResults.IgnoreQueryFilters().CountAsync(r => r.TenantId == demo.Id && r.Status == MatchResultStatus.Confirmed) > 20);
         Assert.True(await db.MemberBadges.IgnoreQueryFilters().AnyAsync(b => b.TenantId == demo.Id));
         Assert.Equal(3, await db.Devices.IgnoreQueryFilters().CountAsync(d => d.TenantId == demo.Id));
