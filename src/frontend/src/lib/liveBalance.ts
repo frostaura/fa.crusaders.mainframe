@@ -52,6 +52,14 @@ export type LiveState = "loading" | "live" | "degraded" | "unavailable";
 /** Who caused the movement. Only `"club"` raises a toast — see the note on {@link BalanceDelta}. */
 export type BalanceDeltaSource = "self" | "club";
 
+let lastStamp = 0;
+/**
+ * A movement's time, strictly later than the one before it. Two frames in one millisecond shared a
+ * `Date.now()`, and the chip reads an unchanged `at` as "the same movement" — it dropped the second
+ * frame of a split cancel's burst (the share frame) and called the partners' minutes "freed".
+ */
+const stamp = (): number => (lastStamp = Math.max(Date.now(), lastStamp + 1));
+
 /**
  * The most recent movement.
  *
@@ -549,7 +557,7 @@ export function useLiveBalance({
       : expectSelf.current || open.length > 0;
     setDelta({
       amount,
-      at: Date.now(),
+      at: stamp(),
       source: own ? "self" : "club",
       reason: frame?.reason,
       parts: balanceParts(frame?.parts),
