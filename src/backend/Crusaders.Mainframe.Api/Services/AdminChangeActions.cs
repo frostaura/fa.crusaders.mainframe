@@ -190,6 +190,9 @@ public static class AdminChangeActions
     public const string DemoEntered = "demo.entered";
     public const string DemoLeft = "demo.left";
     public const string DemoReset = "demo.reset";
+    /// <summary>The admin flipped to, and back from, the demo club's member view (a plain member of the demo) — written like the others, into the real club's record.</summary>
+    public const string DemoMemberViewEntered = "demo.member_view_entered";
+    public const string DemoMemberViewLeft = "demo.member_view_left";
 
     // ---- device ----
     public const string DeviceUpdated = "device.updated";
@@ -223,7 +226,7 @@ public static class AdminChangeActions
         MemberApproved, MemberRejected, MemberSuspended, MemberReactivated, MemberDeleted,
         MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported, WebhookCreated, WebhookDeleted,
-        DemoEntered, DemoLeft, DemoReset,
+        DemoEntered, DemoLeft, DemoReset, DemoMemberViewEntered, DemoMemberViewLeft,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
         PlayResultVoided, PlayResultUpheld,
     ];
@@ -268,7 +271,7 @@ public static class AdminChangeActions
                 or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
                 or ChangesExported or WebhookCreated or WebhookDeleted
-                or DemoEntered or DemoLeft or DemoReset => AdminChangeAreas.Setting,
+                or DemoEntered or DemoLeft or DemoReset or DemoMemberViewEntered or DemoMemberViewLeft => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
                 or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
             PlayResultVoided or PlayResultUpheld => AdminChangeAreas.Play,
@@ -345,6 +348,8 @@ public static class AdminChangeActions
             DemoEntered => "Opened the demo club",
             DemoLeft => "Came back from the demo club",
             DemoReset => "Reset the demo club's made-up data",
+            DemoMemberViewEntered => "Opened the demo club as a member",
+            DemoMemberViewLeft => "Came back from the demo club's member view",
 
             DeviceUpdated => $"Changed a device{of}",
             DeviceDeleted => $"Removed a device{of}",

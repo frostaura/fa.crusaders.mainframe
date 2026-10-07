@@ -488,6 +488,14 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     writer: "AdminModeEndpoints.SwitchAsync", before: null, after: null,
   }),
   row({
+    action: "demo.member_view_entered", area: "setting", headline: "Opened the demo club as a member",
+    writer: "AdminModeEndpoints.EnterMemberViewAsync", before: null, after: null,
+  }),
+  row({
+    action: "demo.member_view_left", area: "setting", headline: "Came back from the demo club's member view",
+    writer: "DemoMemberViewEndpoints.ToAdminAsync", before: null, after: null,
+  }),
+  row({
     action: "demo.reset", area: "setting", headline: "Reset the demo club's made-up data",
     writer: "AdminModeEndpoints.ResetAsync", before: null, after: null,
   }),

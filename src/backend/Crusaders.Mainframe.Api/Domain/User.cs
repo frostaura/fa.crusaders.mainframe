@@ -66,5 +66,13 @@ public sealed class User : ITenantScoped
     /// </summary>
     public int? DemoSourceEpoch { get; set; }
 
+    /// <summary>
+    /// Set on a demo club's <b>member-view persona</b>: the second account each real admin has in
+    /// the demo, a plain member (never an admin) the admin can flip to so they test what a member
+    /// sees. It names the same real admin as the mirror admin does (<see cref="DemoSourceUserId"/>),
+    /// so the way back is the same and the one-of-each-per-admin index is on the pair.
+    /// </summary>
+    public bool DemoMemberView { get; set; }
+
     public Membership? Membership { get; set; }
 }

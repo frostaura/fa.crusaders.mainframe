@@ -40,6 +40,8 @@ export type AuthState =
        * 403 the member cannot act on.
        */
       mustChangePassword: boolean;
+      /** The session is an admin's demo-club member view (`whoami`): not an admin, and it draws the demo stripe. */
+      demoMemberView?: boolean;
     };
 
 /**
@@ -129,4 +131,14 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
+}
+
+/**
+ * Which demo-club stripe the app bar draws: an admin's (`admin` — the admin chrome the shell is
+ * drawing, remembered offline too) or the member view's (`member` — a non-admin session the club
+ * said is an admin's demo persona), or none.
+ */
+export function demoStripeFor(admin: boolean, auth: AuthState): "admin" | "member" | null {
+  if (auth.status === "authenticated" && auth.demoMemberView) return "member";
+  return admin ? "admin" : null;
 }

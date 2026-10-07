@@ -60,8 +60,9 @@ afterEach(() => {
   document.documentElement.removeAttribute("data-demo-mode");
 });
 
-function renderShell(mode: "live" | "demo", extra: Parameters<typeof stubFetch>[0] = []): { stub: FetchStub; userId: string } {
-  const whoami = signIn({ isAdmin: true });
+function renderShell(mode: "live" | "demo" | "demo_member", extra: Parameters<typeof stubFetch>[0] = []): { stub: FetchStub; userId: string } {
+  const memberView = mode === "demo_member";
+  const whoami = { ...signIn({ isAdmin: !memberView }), demo_member_view: memberView };
   const stub = stubFetch([
     { path: "/api/v1/whoami", body: whoami },
     { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
@@ -69,7 +70,7 @@ function renderShell(mode: "live" | "demo", extra: Parameters<typeof stubFetch>[
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
     { path: "/api/v1/admin/doors", body: { day_started_at: new Date().toISOString(), timezone: "Africa/Johannesburg", shut_all_active: false, doors: [] } },
-    { path: "/api/v1/admin/mode", body: { mode, club_name: "Crusaders Squash Club", demo: mode === "demo" ? { generated_at: DEMO_ANSWER.generated_at, stale_after_hours: 24 } : null } },
+    { path: "/api/v1/admin/mode", body: { mode: memberView ? "demo" : mode, club_name: "Crusaders Squash Club", demo: mode === "demo" ? { generated_at: DEMO_ANSWER.generated_at, stale_after_hours: 24 } : null } },
     ...extra,
   ]);
   renderPage(
@@ -180,5 +181,55 @@ describe("the demo stripe", () => {
     await waitFor(() => expect(leave).toHaveBeenCalledWith(window.location.pathname + window.location.search));
     expect(stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/demo/reset")).toHaveLength(1);
     expect(wipeMemberData).toHaveBeenCalled();
+  });
+});
+
+describe("the demo club as a member", () => {
+  const MEMBER_ANSWER = { ...DEMO_ANSWER, user_id: "dddddddd-0000-4000-8000-00000000d3e1", is_admin: false, mode: "demo_member" };
+
+  it("is offered only inside the demo", async () => {
+    renderShell("live");
+    await openMenu();
+    expect(screen.queryByRole("menuitemradio", { name: DEMO_COPY.demoMember })).toBeNull();
+  });
+
+  it("switches from the demo into the member view and loads the app afresh at My Code", async () => {
+    const { stub } = renderShell("demo", [{ method: "POST", path: "/api/v1/admin/mode", body: MEMBER_ANSWER }]);
+    const trigger = await screen.findByRole("button", { name: "Account menu" });
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    await screen.findByRole("menu");
+
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: DEMO_COPY.demoMember }));
+
+    await waitFor(() => expect(leave).toHaveBeenCalledWith("/my-code"));
+    expect(stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/mode").map((c) => c.body)).toEqual([{ mode: "demo_member" }]);
+    expect(tokenStore.get()).toBe("demo.token.value");
+    expect(readLastIdentity()).toBe(MEMBER_ANSWER.user_id);
+  });
+
+  it("wears the demo stripe as a member: no Reset, no admin menu, and a way back to the admin view", async () => {
+    const { stub } = renderShell("demo_member", [{ method: "POST", path: "/api/v1/me/demo/mode", body: DEMO_ANSWER }]);
+    const stripe = await screen.findByRole("region", { name: DEMO_COPY.stripeTitle });
+    expect(stripe).toHaveTextContent(`${DEMO_COPY.stripeTitle} · ${DEMO_COPY.stripeMemberDetail}`);
+    expect(within(stripe).queryByRole("button", { name: DEMO_COPY.reset })).toBeNull();
+    expect(document.documentElement.hasAttribute("data-demo-mode")).toBe(true);
+    // The persona is not an admin: the admin route that reads the mode is never asked.
+    expect(stub.calls.some((c) => c.path === "/api/v1/admin/mode")).toBe(false);
+
+    fireEvent.click(within(stripe).getByRole("button", { name: DEMO_COPY.backToAdmin }));
+
+    await waitFor(() => expect(leave).toHaveBeenCalledWith("/my-code"));
+    expect(stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/me/demo/mode").map((c) => c.body)).toEqual([{ mode: "demo" }]);
+    expect(stub.calls.some((c) => c.method === "POST" && c.path === "/api/v1/admin/mode")).toBe(false);
+  });
+
+  it("goes all the way back to the live club from the member view", async () => {
+    const { stub } = renderShell("demo_member", [{ method: "POST", path: "/api/v1/me/demo/mode", body: { ...DEMO_ANSWER, mode: "live" } }]);
+    const stripe = await screen.findByRole("region", { name: DEMO_COPY.stripeTitle });
+
+    fireEvent.click(within(stripe).getByRole("button", { name: DEMO_COPY.backToLive }));
+
+    await waitFor(() => expect(leave).toHaveBeenCalledWith("/my-code"));
+    expect(stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/me/demo/mode").map((c) => c.body)).toEqual([{ mode: "live" }]);
   });
 });

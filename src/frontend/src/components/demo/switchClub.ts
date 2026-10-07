@@ -88,9 +88,14 @@ async function untilAnswered<T>(ask: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Into the demo, or back to the live club. Rejects (and changes nothing here) when the club refuses. */
-export async function switchClub(to: ClubMode): Promise<void> {
-  const answer = await untilAnswered(() => clubModeApi.switchTo(to));
+/**
+ * Into the demo, into its member view, or back to the live club. Rejects (and changes nothing here)
+ * when the club refuses. `from` names the member view when that is where the session is: the
+ * persona is not an admin, so its way out is the member route, not the admin switch.
+ */
+export async function switchClub(to: ClubMode, from?: ClubMode): Promise<void> {
+  const leaving = from === "demo_member" && to !== "demo_member";
+  const answer = await untilAnswered(() => (leaving ? clubModeApi.leaveMemberView(to as "demo" | "live") : clubModeApi.switchTo(to)));
   await startAfresh(answer.access_token, answer.user_id, answer.mode, AFTER_SWITCH_PATH);
 }
 

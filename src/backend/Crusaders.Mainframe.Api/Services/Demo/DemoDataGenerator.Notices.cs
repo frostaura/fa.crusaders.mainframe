@@ -31,7 +31,7 @@ public sealed partial class DemoDataGenerator
         var row = AdminNotices.Stage(_db, w.TenantId, notice, at);
         row.State = AdminNotificationState.Sent;
         row.SentAt = at.AddMinutes(1).Storable();
-        row.RecipientCount = Math.Max(1, w.Mirrors.Count);
+        row.RecipientCount = Math.Max(1, w.AdminMirrors.Count());
     }
 
     /// <summary>

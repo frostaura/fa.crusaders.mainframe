@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ADMIN_RAIL_OFFSET_XL, ADMIN_RAIL_WIDTH_XL, CREST_BOX_OVER_RAIL } from "@/components/ui/layout";
 import { tokenStore } from "@/lib/api";
 import { useAdminAttention } from "@/lib/adminAttention";
-import { useAuth } from "@/lib/useAuth";
+import { demoStripeFor, useAuth } from "@/lib/useAuth";
 import { useDataOwner } from "@/lib/offline/useCachedRead";
 import { useNavigationPending } from "@/routeChunks";
 import { cn } from "@/lib/utils";
@@ -217,7 +217,7 @@ export default function AppShell() {
           paddingRight: "env(safe-area-inset-right)",
         }}
       >
-        <BarRow frame={frame} memberChrome={memberChrome} isAdmin={adminChrome} attention={attention} anonymous={auth.status === "anonymous"} />
+        <BarRow frame={frame} memberChrome={memberChrome} isAdmin={adminChrome} demoStripe={demoStripeFor(adminChrome, auth)} attention={attention} anonymous={auth.status === "anonymous"} />
         <RoutePendingBar />
       </header>
       {/*
@@ -293,15 +293,14 @@ function useRememberedAdmin(confirmed: { userId: string; isAdmin: boolean } | nu
   return owner !== null && readLastAdmin() === owner;
 }
 
-/** The bar's one row: crest, the tabs (inline where there is room), the bell and the actions; under it an admin's demo stripe. */
+/** The bar's one row: crest, the tabs (inline where there is room), the bell and the actions; under it the demo stripe (an admin's, or the member view's). */
 function BarRow(props: {
   frame: ReturnType<typeof chromeFrame>;
-  memberChrome: boolean;
-  isAdmin: boolean;
+  memberChrome: boolean; isAdmin: boolean; demoStripe: ReturnType<typeof demoStripeFor>;
   attention: ReturnType<typeof useAdminAttention>;
   anonymous: boolean;
 }) {
-  const { frame, memberChrome, isAdmin, attention, anonymous } = props;
+  const { frame, memberChrome, isAdmin, demoStripe, attention, anonymous } = props;
   return (
     <>
     {/*
@@ -331,7 +330,7 @@ function BarRow(props: {
         ) : null}
       </div>
     </div>
-    {isAdmin ? <DemoPart part="stripe" /> : null}</>
+    {demoStripe ? <DemoPart part="stripe" memberView={demoStripe === "member"} /> : null}</>
   );
 }
 

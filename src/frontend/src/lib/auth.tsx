@@ -351,7 +351,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // D3 — the only place a confirmed identity is written, because this is the only place
         // the club has said who the token belongs to.
         rememberIdentity(w.user_id);
-        setState({ status: "authenticated", userId: w.user_id, isAdmin: w.is_admin, mustChangePassword: w.must_change_password === true });
+        setState({ status: "authenticated", userId: w.user_id, isAdmin: w.is_admin, mustChangePassword: w.must_change_password === true, demoMemberView: w.demo_member_view === true });
       } else {
         // Token present but server doesn't recognise it — most likely expired or signed by an old key.
         // The member had a session and no longer does, which is a different thing from arriving

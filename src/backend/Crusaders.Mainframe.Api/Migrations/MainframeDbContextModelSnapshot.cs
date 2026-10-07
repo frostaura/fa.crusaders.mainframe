@@ -2298,6 +2298,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("DemoMemberView")
+                        .HasColumnType("boolean");
+
                     b.Property<int?>("DemoSourceEpoch")
                         .HasColumnType("integer");
 
@@ -2343,12 +2346,12 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "DemoSourceUserId")
-                        .IsUnique()
-                        .HasFilter("\"DemoSourceUserId\" IS NOT NULL");
-
                     b.HasIndex("TenantId", "Email")
                         .IsUnique();
+
+                    b.HasIndex("TenantId", "DemoSourceUserId", "DemoMemberView")
+                        .IsUnique()
+                        .HasFilter("\"DemoSourceUserId\" IS NOT NULL");
 
                     b.ToTable("users", (string)null);
                 });
