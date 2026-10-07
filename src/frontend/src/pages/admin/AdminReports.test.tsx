@@ -87,7 +87,7 @@ describe("Club reports — Sold is paid minutes only, Given apart (R14 J14-2)", 
 
   const totals = async () => within(await screen.findByRole("region", { name: CLUB_REPORT_COPY.totals.title }));
   /** The figure under a totals label, as its words. */
-  const figure = (card: ReturnType<typeof within>, label: string) => card.getByText(label, { selector: "dt span" }).closest("dt")!.nextElementSibling;
+  const figure = (card: ReturnType<typeof within>, label: string) => card.getByText(label, { selector: "dt" }).closest("dt")!.nextElementSibling;
 
   it("the totals card's Sold leaves out what the club gave, and Given says it", async () => {
     // 3 h of top-ups, 1 h 15 min of it given: 1 h 45 min sold.
@@ -111,7 +111,7 @@ describe("Club reports — Sold is paid minutes only, Given apart (R14 J14-2)", 
       const { unmount } = renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
       const card = await totals();
       expect(figure(card, CLUB_REPORT_COPY.totals.sold)).toHaveTextContent("3 hours");
-      expect(card.queryByText(CLUB_REPORT_COPY.totals.given, { selector: "dt span" })).toBeNull();
+      expect(card.queryByText(CLUB_REPORT_COPY.totals.given, { selector: "dt" })).toBeNull();
       expect(card.getByText(CLUB_REPORT_COPY.totals.netTail(false), { exact: false })).toBeInTheDocument();
       expect(screen.queryByRole("columnheader", { name: CLUB_REPORT_COPY.daily.given })).toBeNull();
       unmount(); vi.unstubAllGlobals();

@@ -351,14 +351,13 @@ function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) 
 }
 
 /**
- * The two everyday actions: on a phone they SHARE the row (each as wide as its words, the spare split
- * evenly, so "Book for member" is not folded into half a row) and their words wrap
- * in a box that grows (R4 V4-9: "Book for member" ran out of a fixed 44px box at 390 with 200%
+ * The two everyday actions: on a phone they SHARE the row (each starts at its longest word and the
+ * spare is split evenly, so the pair stays on one row) and their words wrap in a box that grows (R4 V4-9: "Book for member" ran out of a fixed 44px box at 390 with 200%
  * text; P13: stacked, "Sell package" pushed the section tabs under the bottom tab bar). Never
  * narrower than the longest word (`min-w-min`): at 320 with 200% text the pair wraps to two rows
  * instead of spilling.
  */
-const GROWS = "!h-auto min-h-touch min-w-min flex-[1_1_auto] whitespace-normal py-2 text-center sm:flex-[0_1_auto]";
+const GROWS = "!h-auto min-h-touch min-w-min flex-[1_1_min-content] whitespace-normal py-2 text-center sm:flex-[0_1_auto]";
 
 function BalancePanel({ detail, name, onSell }: { detail: MemberDetail; name: string; onSell: () => void }) {
   const overdrawn = detail.balance_minutes < 0;

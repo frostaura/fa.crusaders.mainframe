@@ -118,8 +118,8 @@ export function StatTiles({ tiles, label }: { tiles: Tile[]; label: string }) {
   return (
     <AutoGrid as="dl" min="stat" max={4} gap="md" aria-label={label} data-stat-tiles="">
       {tiles.map((tile) => (
-        <div key={tile.label} className={cn("row-span-2 grid min-w-0 grid-rows-subgrid gap-y-1 rounded-xl p-4", TILE_TONES[tile.tone])}>
-          <dt className="@container min-w-0"><span className={cn("block break-words text-xs font-semibold", LABEL_STEPS)}>{tile.label}</span></dt>
+        <div key={tile.label} className={cn("@container row-span-2 grid min-w-0 grid-rows-subgrid gap-y-1 rounded-xl p-4", TILE_TONES[tile.tone])}>
+          <dt className={cn("min-w-0 break-words text-xs font-semibold", LABEL_STEPS)}>{tile.label}</dt>
           <dd className="@container min-w-0"><span className={cn("block font-semibold tabular-nums tracking-tight", FIGURE_FITS.tile)}>{tile.value}</span></dd>
         </div>
       ))}
@@ -139,9 +139,9 @@ export function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     // px-2 under a 16rem list (R9 L9-6): at 320 / 200 % text the cell's 24px sides left "Adjustments"
     // no line of its own even in sentence case.
-    <div className="row-span-2 grid min-w-0 grid-rows-subgrid gap-y-0.5 rounded-lg bg-bg-muted px-2 py-2.5 @[16rem]:px-3">
+    <div className="@container row-span-2 grid min-w-0 grid-rows-subgrid gap-y-0.5 rounded-lg bg-bg-muted px-2 py-2.5 @[16rem]:px-3">
       {/* The overline's look, spelled out: its tracking class would outrank LABEL_STEPS' plain one. */}
-      <dt className="@container min-w-0"><span className={cn("block break-words text-xs font-semibold text-text-secondary", LABEL_STEPS)}>{label}</span></dt>
+      <dt className={cn("min-w-0 break-words text-xs font-semibold text-text-secondary", LABEL_STEPS)}>{label}</dt>
       <dd className="@container min-w-0"><span className={cn("block font-semibold tabular-nums text-text-primary", FIGURE_FITS.stat)}>{value}</span></dd>
     </div>
   );

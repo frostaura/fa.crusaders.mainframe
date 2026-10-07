@@ -210,7 +210,7 @@ function CourtListEditor({
  * phone "Edit name and courts" is wider than the card, and the design-system Button is
  * `whitespace-nowrap` by default (e2e/admin-devices "refuses to hold its own content").
  */
-const WRAPS = "h-auto min-h-9 max-w-full whitespace-normal py-1.5 text-center";
+const WRAPS = "h-auto min-h-9 max-w-full whitespace-normal px-1.5 py-1.5 text-center";
 
 /** "No court on this relay" inside the Select — see CourtListEditor. */
 const NONE = "none";
@@ -678,7 +678,7 @@ function DeviceRow({
     // R11 L11-3: the grid cell is the query container so the card's own inset can step down by its
     // box in rem (a phone at 200 % text) — a card cannot query itself.
     <div className="@container/boardslot min-w-0">
-    <div ref={card} data-board-card="" className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-2 shadow-xs @[16rem]/boardslot:p-4 sm:p-5">
+    <div ref={card} data-board-card="" className="flex flex-col gap-2 rounded-xl border border-border bg-bg-surface p-2 shadow-xs sm:gap-3 @[16rem]/boardslot:p-4 sm:p-5">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1"><DeviceRowHeader device={device} online={online} now={now} /></div>
         {/* Deleting is not a revocation and locks nothing out — the box still holds the
