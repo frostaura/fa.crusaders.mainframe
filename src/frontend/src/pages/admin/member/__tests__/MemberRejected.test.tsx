@@ -78,7 +78,7 @@ describe("member detail — approving a turned-down application (R3 A-2)", () =>
         sequence: [detailFixture({ status: "Rejected", rejection_reason: "Not a club member" }), detailFixture({ status: "Active" })],
         body: null,
       },
-      { method: "POST", path: approve, body: { approved: true, member_notified: true } },
+      { method: "POST", path: approve, body: { approved: true, member_email_queued: true } },
     ]);
     renderMember();
     await screen.findByText(OVERVIEW_COPY.turnedDownBecause("Not a club member"));

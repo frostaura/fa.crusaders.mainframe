@@ -1,30 +1,32 @@
 namespace Crusaders.Mainframe.Api.Email;
 
 /// <summary>
-/// Sends an email without making the caller wait for SMTP.
+/// Queues an email on a path where a failed mail must not unwind the caller.
 ///
 /// <para>
-/// Two of these mails are raised on paths that must answer fast for reasons that have
-/// nothing to do with mail: the PayFast ITN, which the gateway <b>retries</b> until it is
-/// acknowledged — so a slow EHLO turns into a duplicate notification — and the desk's
-/// minutes adjustment or package sale, where an admin is waiting on a form. Neither can fail because the
-/// mail server is down: the money has already moved and the ledger is the record.
-/// </para>
-///
-/// <para>
-/// <see cref="Services.BookingService"/> carries its own private copy of this shape;
-/// consolidating the two is a tidy-up for whoever next touches that file, not a change to
-/// make from here while another fixer is inside it.
+/// Some of these mails are raised on paths that must answer fast and cannot fail because of mail:
+/// the PayFast ITN, which the gateway <b>retries</b> until it is acknowledged, and the desk's
+/// minutes adjustment or package sale, where an admin is waiting on a form. The money has already
+/// moved and the ledger is the record. <see cref="IEmailService.SendAsync"/> now only queues into
+/// the email outbox, so awaiting it costs one small insert rather than an SMTP round trip; what is
+/// left to guard is the insert itself failing, which is logged and never thrown.
 /// </para>
 /// </summary>
 public static class EmailDispatch
 {
-    public static void InBackground(IEmailService email, ILogger logger, EmailMessage message, string context)
+    /// <summary>Queues <paramref name="message"/>. Answers whether it was queued; never throws.</summary>
+    public static async Task<bool> QueueAsync(IEmailService email, ILogger logger, EmailMessage message, string context)
     {
-        _ = Task.Run(async () =>
+        try
         {
-            try { await email.SendAsync(message, CancellationToken.None); }
-            catch (Exception ex) { logger.LogWarning(ex, "Background email send failed ({Context})", context); }
-        });
+            // Not the request's token: a request that is over must not cancel a mail it already promised.
+            await email.SendAsync(message, CancellationToken.None);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Email could not be queued ({Context})", context);
+            return false;
+        }
     }
 }

@@ -209,6 +209,14 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
             // makes real failures harder to read.
             services.RemoveAll<IHostedService>();
 
+            // The production IEmailService QUEUES; the admin notice dispatcher talks to the
+            // transport. A test that swaps IEmailService for a capturing stub means "the mail
+            // that leaves", so the transport follows whatever IEmailService is registered when it
+            // is first used — which is after every per-test override.
+            services.RemoveAll<Crusaders.Mainframe.Api.Email.IEmailTransport>();
+            services.AddSingleton<Crusaders.Mainframe.Api.Email.IEmailTransport>(
+                sp => new ForwardingEmailTransport(sp.GetRequiredService<Crusaders.Mainframe.Api.Email.IEmailService>()));
+
             // A startup filter runs ahead of everything Program.cs adds, so the remote
             // address is in place before UseForwardedHeaders looks at it.
             if (RemoteIpAddress is { } remote)
@@ -216,6 +224,12 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
                 services.AddTransient<IStartupFilter>(_ => new RemoteAddressFilter(remote));
             }
         });
+    }
+
+    /// <summary>Stands in for the SMTP transport by handing every message to the test's own <see cref="Crusaders.Mainframe.Api.Email.IEmailService"/>.</summary>
+    private sealed class ForwardingEmailTransport(Crusaders.Mainframe.Api.Email.IEmailService inner) : Crusaders.Mainframe.Api.Email.IEmailTransport
+    {
+        public Task SendAsync(Crusaders.Mainframe.Api.Email.EmailMessage message, CancellationToken ct = default) => inner.SendAsync(message, ct);
     }
 
     private sealed class RemoteAddressFilter(System.Net.IPAddress remote) : IStartupFilter

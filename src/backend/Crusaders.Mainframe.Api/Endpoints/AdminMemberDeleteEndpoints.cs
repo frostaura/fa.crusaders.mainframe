@@ -138,7 +138,7 @@ public static class AdminMemberDeleteEndpoints
             seats_given_up = did.SeatsGivenUp,
             purchases_closed = did.PurchasesClosed,
             written_off_minutes = did.WrittenOffMinutes,
-            member_notified = memberNotified,
+            member_email_queued = memberNotified,
         });
     }
 
@@ -199,8 +199,8 @@ public static class AdminMemberDeleteEndpoints
     }
 
     /// <summary>
-    /// The member's own mail, to the address they had — read before it was wiped. A failed send is
-    /// reported, never thrown: the deletion has committed.
+    /// The member's own mail, to the address they had — read before it was wiped. A mail that cannot be
+    /// queued is reported, never thrown: the deletion has committed. Queued, not sent: delivery is the email outbox's.
     /// </summary>
     private static async Task<bool> TellMemberAsync(
         HttpContext ctx, MemberDeletionPlan plan, string reason, MemberDeletionOutcome did, CancellationToken ct)

@@ -358,7 +358,7 @@ public class MemberLifecycleTests
         Assert.Equal(MembershipTransition.Ok, report.Result);
         // The second half: the caller is told the member was NOT told, rather than being
         // handed a success the club will act on as though a welcome email had gone out.
-        Assert.False(report.MemberNotified);
+        Assert.False(report.EmailQueued);
         Assert.Equal(1, mail.Attempts);
 
         // And the transition really happened — status, audit row and webhook all stand.
@@ -387,7 +387,7 @@ public class MemberLifecycleTests
         var report = await svc.RejectAsync(applicant.Id, host.AdminUser.Id, "Membership number not on file.", default);
 
         Assert.Equal(MembershipTransition.Ok, report.Result);
-        Assert.False(report.MemberNotified);
+        Assert.False(report.EmailQueued);
         var reread = await db.Memberships.AsNoTracking().FirstAsync(m => m.Id == applicant.Id);
         Assert.Equal(MembershipStatus.Rejected, reread.Status);
         Assert.Equal("Membership number not on file.", reread.RejectionReason);
@@ -410,15 +410,15 @@ public class MemberLifecycleTests
 
         var suspended = await svc.SuspendAsync(membership.Id, host.AdminUser.Id, "Dues unpaid.", default);
         Assert.Equal(MembershipTransition.Ok, suspended.Result);
-        Assert.False(suspended.MemberNotified);
+        Assert.False(suspended.EmailQueued);
 
         var reactivated = await svc.ReactivateAsync(membership.Id, host.AdminUser.Id, default);
         Assert.Equal(MembershipTransition.Ok, reactivated.Result);
-        Assert.False(reactivated.MemberNotified);
+        Assert.False(reactivated.EmailQueued);
     }
 
     /// <summary>
-    /// The other direction, so <c>MemberNotified</c> is discriminating rather than a field
+    /// The other direction, so <c>EmailQueued</c> is discriminating rather than a field
     /// that is always false. A refusal reports it false because there was nothing to send,
     /// which is a third state the console must not read as "the email failed".
     /// </summary>
@@ -433,12 +433,12 @@ public class MemberLifecycleTests
         var applicant = await PendingApplicantAsync(host, db);
         var approved = await svc.ApproveAsync(applicant.Id, host.AdminUser.Id, default);
         Assert.True(approved.Ok);
-        Assert.True(approved.MemberNotified);
+        Assert.True(approved.EmailQueued);
 
         // Approving an already-approved member is not a transition, so nobody was notified
         // and nothing was attempted.
         var again = await svc.ApproveAsync(applicant.Id, host.AdminUser.Id, default);
         Assert.Equal(MembershipTransition.NotFound, again.Result);
-        Assert.False(again.MemberNotified);
+        Assert.False(again.EmailQueued);
     }
 }

@@ -3,7 +3,7 @@ using System.Net.Mail;
 
 namespace Crusaders.Mainframe.Api.Email;
 
-public sealed class SmtpEmailService : IEmailService
+public sealed class SmtpEmailService : IEmailTransport
 {
     private readonly IConfiguration _config;
     private readonly ILogger<SmtpEmailService> _logger;

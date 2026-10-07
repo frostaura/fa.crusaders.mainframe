@@ -65,6 +65,9 @@ public sealed record AdminRolePayload(string SubjectName, string ActorName, bool
 public sealed record MemberDeletedPayload(
     string SubjectName, string ActorName, string Reason, bool KeptHistory, int BookingsCancelled, int WrittenOffMinutes);
 
+/// <summary>A mail the outbox gave up on: who it was for, what it was, and why the server kept refusing it.</summary>
+public sealed record EmailUndeliverablePayload(string To, string Subject, string Reason);
+
 public sealed record ForgeryPayload(string DeviceCode, string? MemberName, string Detail);
 
 public sealed record CodesCapabilityLostPayload(Guid DeviceId, string DeviceName, string DeviceCode, string? FirmwareVersion, string Phase);
@@ -118,6 +121,7 @@ public static class AdminEventCatalogue
     public const string CodeForgerySuspected = "code.forgery_suspected";
     public const string CodesCapabilityLost = "device.codes_capability_lost";
     public const string MemberDeleted = "member.deleted";
+    public const string EmailUndeliverable = "email.undeliverable";
 
     /// <summary>How the payloads are written and read. Snake_case, invariant, no indentation.</summary>
     public static readonly JsonSerializerOptions Json = new()
@@ -159,6 +163,8 @@ public static class AdminEventCatalogue
             "After the club switched to member codes, a board reported firmware that does not check them offline."),
         new(MemberDeleted, "Deleted members",
             "Another administrator deleted a member's account."),
+        new(EmailUndeliverable, "An email could not be delivered",
+            "The mail server kept refusing a message and the club's system has stopped trying."),
     ];
 
     private static readonly Dictionary<string, AdminEventKind> ByKind =
@@ -204,6 +210,7 @@ public static class AdminEventCatalogue
         [CodeForgerySuspected] = ComposeForgery,
         [CodesCapabilityLost] = ComposeCodesCapabilityLost,
         [MemberDeleted] = ComposeMemberDeleted,
+        [EmailUndeliverable] = ComposeEmailUndeliverable,
     };
 
     /// <summary>The baseline wording, unchanged: this is the registration notice that used to be sent directly.</summary>
@@ -318,6 +325,12 @@ public static class AdminEventCatalogue
             WrittenOffMinutes = p.WrittenOffMinutes,
             ConsoleUrl = c.ConsoleUrl,
         });
+    }
+
+    private static EmailMessage ComposeEmailUndeliverable(AdminMailContext c)
+    {
+        var p = c.Payload<EmailUndeliverablePayload>();
+        return EmailTemplates.AdminEmailUndeliverable(c.Club, c.To, new EmailUndeliverable(p.To, p.Subject, p.Reason, c.ConsoleUrl));
     }
 
     private static EmailMessage ComposeForgery(AdminMailContext c)

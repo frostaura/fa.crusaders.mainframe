@@ -90,7 +90,7 @@ public sealed class R1ChangeRecordHttpTests(PostgresFixture pg) : IClassFixture<
 
         var reset = await admin.PostAsJsonAsync(path, new { reason = "Lost her phone at the club" });
         Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
-        Assert.True((await MemberCodeClub.JsonAsync(reset)).GetProperty("member_notified").GetBoolean());
+        Assert.True((await MemberCodeClub.JsonAsync(reset)).GetProperty("member_email_queued").GetBoolean());
 
         var row = Assert.Single(await ChangesAsync(club, app));
         Assert.Equal(AdminChangeActions.MemberCodeReset, row.Action);

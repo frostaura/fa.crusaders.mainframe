@@ -98,7 +98,7 @@ describe("the row is the way into a member", () => {
     stubFetch([
       { path: "/api/v1/admin/members/", body: null, sequence: [[GRACE, HEDY], [HEDY], [HEDY]] },
       { path: "/api/v1/admin/biometric/enrollments", body: [] },
-      { method: "POST", path: `/api/v1/admin/members/${GRACE.membership_id}/approve`, body: { approved: true, member_notified: true } },
+      { method: "POST", path: `/api/v1/admin/members/${GRACE.membership_id}/approve`, body: { approved: true, member_email_queued: true } },
     ]);
     renderPage(<AdminMembersPage />, { initialEntries: ["/admin/members?status=PendingApproval"] });
     const first = (await screen.findAllByRole("button", { name: ROW_ACTIONS.approve }))
@@ -231,7 +231,7 @@ describe("what a row says about the member", () => {
 describe("the application queue", () => {
   it("approves once on a double-click, and re-reads the club afterwards", async () => {
     const stub = render({
-      extra: [{ method: "POST", path: `/api/v1/admin/members/${GRACE.membership_id}/approve`, body: { approved: true, member_notified: true } }],
+      extra: [{ method: "POST", path: `/api/v1/admin/members/${GRACE.membership_id}/approve`, body: { approved: true, member_email_queued: true } }],
     });
     const approve = await screen.findByRole("button", { name: ROW_ACTIONS.approve });
     fireEvent.click(approve);

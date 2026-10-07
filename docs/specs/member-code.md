@@ -796,7 +796,7 @@ Each is a server behaviour; none changes a byte the corpus holds.
   `200 {"signed_out":true,"passkeys_revoked":…,"passkeys_removed":N}`. `POST
   /admin/members/{id}/code/reset` takes `{"reason": string, "revoke_passkeys": bool}` — `reason`
   **required** since review round 1 (B6; `400 reason_required`), passkeys defaulting to **true** — and
-  adds `passkeys_revoked`, `passkeys_removed`, `member_notified` to `{"rotated":true,"generation":N}`.
+  adds `passkeys_revoked`, `passkeys_removed`, `member_email_queued` to `{"rotated":true,"generation":N}`.
   The reset is written to the change record (`member.code_reset`, with the reason) in its own save
   and the member is emailed that the club reset their code, why, and what to do next. Revoking deletes
   the member's WebAuthn credentials, audited `member.passkeys_revoked`. *Why true at the desk:* the

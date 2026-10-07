@@ -374,7 +374,7 @@ public static partial class WalletEndpoints
         // "Every player-affecting event sends an email" — and an admin moving a member's balance
         // by hand is about as player-affecting as it gets. Background dispatch: an admin is
         // waiting on this form and SMTP is not what decides whether the movement stands.
-        Crusaders.Mainframe.Api.Email.EmailDispatch.InBackground(
+        await Crusaders.Mainframe.Api.Email.EmailDispatch.QueueAsync(
             services.Email, services.LoggerFactory.CreateLogger("MinutesAdjustment"),
             await DeskMailAsync(movement, user.Email, posted, services, ct),
             $"desk minutes movement {posted.Entry.Id}");

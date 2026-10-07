@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
  * <p>
  * The failure copy on <code>TopUpStatus.tsx</code> told a member whose R500 status could not
  * be read that "we'll email you either way". Nothing emails on a failed, cancelled or
- * amount-mismatched top-up: <code>EmailDispatch.InBackground</code> occurs exactly once in
+ * amount-mismatched top-up: <code>EmailDispatch.QueueAsync</code> occurs exactly once in
  * <code>TopUpEndpoints.cs</code>, inside <code>CompleteAsync</code>; the amount_mismatch,
  * Failed/Cancelled and provider_register_failed branches send nothing; <code>EmailTemplates</code>
  * carries a <code>TopUpConfirmation</code> and no failure template; and
@@ -105,7 +105,7 @@ describe("the top-up status screen's email promises", () => {
     // Dispatched from the completion path, not from a branch that might not run.
     const complete = topUpEndpoints.slice(topUpEndpoints.indexOf("CompleteAsync"));
     expect(complete).toMatch(/EmailTemplates\.(TopUp|Purchase)Confirmation\(/);
-    expect(complete).toContain("EmailDispatch.InBackground(");
+    expect(complete).toContain("EmailDispatch.QueueAsync(");
   });
 });
 
@@ -142,7 +142,7 @@ describe("the rule itself", () => {
 
   it("counts a failure template that is dispatched", () => {
     expect(
-      sendsATopUpFailureEmail(WITH_FAILURE, "EmailDispatch.InBackground(EmailTemplates.TopUpFailed(to, why));"),
+      sendsATopUpFailureEmail(WITH_FAILURE, "EmailDispatch.QueueAsync(EmailTemplates.TopUpFailed(to, why));"),
     ).toBe(true);
   });
 

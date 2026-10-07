@@ -9,7 +9,7 @@ import { clubShortDate } from "./clubClock";
  * <p>
  * <b>The lifecycle sentences are pinned for a reason.</b> Each transition (approve, reject,
  * suspend, reactivate, reset password) commits before its email is attempted, and the API says
- * whether the member was told (`member_notified`). An admin who reads "approved" about a member
+ * whether the member was told (`member_email_queued`). An admin who reads "approved" about a member
  * nobody emailed leaves them waiting for a link that never comes, so each one has two arms and
  * both are asserted in `AdminMembers.test.tsx`.
  * </p>
@@ -239,7 +239,7 @@ export const nightHref = (userId: string) => `/admin/members/${userId}/night`;
 export const OUTCOMES = {
   approved: (name: string) => `${name} approved.`,
   approvedUnnotified: (name: string) =>
-    `${name} is approved, but the welcome email couldn't be sent. Their membership is active — tell them directly.`,
+    `${name} is approved, but the welcome email couldn't be queued. Their membership is active — tell them directly.`,
   approveFailed: "Approval failed.",
   /** F3-3: the reply was lost, the member was read again, and they are Active. */
   approvedAfterLostReply: (name: string) =>
@@ -248,16 +248,16 @@ export const OUTCOMES = {
     `It isn't known yet whether ${name} was approved: the reply got lost and the club couldn't be asked. Look at their status in the list before pressing Approve again.`,
   rejected: "Application rejected.",
   rejectedUnnotified: (name: string) =>
-    `${name}'s application is rejected, but the email couldn't be sent. Tell them directly — they'll be refused at sign-in until someone does.`,
+    `${name}'s application is rejected, but the email couldn't be queued. Tell them directly — they'll be refused at sign-in until someone does.`,
   suspended: (name: string) => `${name} suspended.`,
   suspendedUnnotified: (name: string) =>
-    `${name} is suspended, but the email couldn't be sent. They'll find out at the door unless you tell them.`,
+    `${name} is suspended, but the email couldn't be queued. They'll find out at the door unless you tell them.`,
   reactivated: (name: string) => `${name} is active again.`,
   reactivatedUnnotified: (name: string) =>
-    `${name} is active again, but the email couldn't be sent. Tell them directly.`,
+    `${name} is active again, but the email couldn't be queued. Tell them directly.`,
   reset: (name: string) => `Password reset for ${name}.`,
   resetUnnotified: (name: string) =>
-    `Password reset for ${name}, but the email couldn't be sent. Read them the password below.`,
+    `Password reset for ${name}, but the email couldn't be queued. Read them the password below.`,
   resendSent: (email: string) => `Verification email sent to ${email}.`,
   resendFailed: "Couldn't send the verification email. Check the mail settings and try again.",
   copied: "Copied to clipboard.",
@@ -303,9 +303,9 @@ export const RESET_DIALOG = {
 
 export const PASSWORD_DIALOG = {
   title: "Temporary password generated",
-  emailedTo: "Emailed to",
-  notEmailed: "Not emailed",
-  notEmailedRest: " — the send failed, so this password only reaches the member if you pass it on. ",
+  emailedTo: "Email on its way to",
+  notEmailed: "Email not queued",
+  notEmailedRest: " — the email couldn't be queued, so this password only reaches the member if you pass it on. ",
   /**
    * What the password actually does. It used to read "The member should change it after signing
    * in" — the advisory wording from before the forced-change gate existed. It now unlocks one

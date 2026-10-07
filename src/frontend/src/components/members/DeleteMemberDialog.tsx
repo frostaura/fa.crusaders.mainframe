@@ -91,14 +91,14 @@ function missingStep(s: Step): string | null {
 function landedResult(userId: string, preview: MemberDeletePreview | null): MemberDeleteResult {
   return {
     deleted: true, user_id: userId, mode: preview?.mode ?? "erase", already_deleted: true,
-    bookings_cancelled: 0, seats_given_up: 0, purchases_closed: 0, written_off_minutes: 0, member_notified: false,
+    bookings_cancelled: 0, seats_given_up: 0, purchases_closed: 0, written_off_minutes: 0, member_email_queued: false,
   };
 }
 
 /** Deleted — and, when they were to be emailed and the mail failed, said as a warning. */
 function deletedToast(result: MemberDeleteResult, preview: MemberDeletePreview | null, name: string) {
   if (result.already_deleted) return { tone: "success" as const, text: COPY.alreadyDeleted(name) };
-  if (preview?.member_told && !result.member_notified) return { tone: "warning" as const, text: COPY.deletedUnnotified(name), durationMs: 8000 };
+  if (preview?.member_told && !result.member_email_queued) return { tone: "warning" as const, text: COPY.deletedUnnotified(name), durationMs: 8000 };
   return { tone: "success" as const, text: COPY.deleted(name) };
 }
 

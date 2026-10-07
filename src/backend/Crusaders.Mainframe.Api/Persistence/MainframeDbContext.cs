@@ -80,6 +80,9 @@ public partial class MainframeDbContext : DbContext
     /// <summary>The admin notice outbox (R23). See <see cref="AdminNotification"/>.</summary>
     public DbSet<AdminNotification> AdminNotifications => Set<AdminNotification>();
 
+    /// <summary>Mail waiting to leave. System-wide, not tenant-filtered. See <see cref="EmailOutboxMessage"/>.</summary>
+    public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
+
     /// <summary>Each member's REF and code generation (D1). See <see cref="MemberCode"/>.</summary>
     public DbSet<MemberCode> MemberCodes => Set<MemberCode>();
 
@@ -186,6 +189,7 @@ public partial class MainframeDbContext : DbContext
         ConfigureDeviceErrors(modelBuilder);
         ConfigureUserPreferences(modelBuilder);
         ConfigureAdminNotifications(modelBuilder);
+        ConfigureEmailOutbox(modelBuilder);
         ConfigureMemberCodes(modelBuilder);
         ConfigurePlayers(modelBuilder);
         ConfigurePlay(modelBuilder);
@@ -402,6 +406,29 @@ public partial class MainframeDbContext : DbContext
             e.ToTable(t => t.HasCheckConstraint(
                 "ck_user_preferences_theme", "\"Theme\" IN ('system', 'light', 'dark')"));
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>The email outbox: one row per mail waiting to leave. See <see cref="EmailOutboxMessage"/>.</summary>
+    private static void ConfigureEmailOutbox(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<EmailOutboxMessage>(e =>
+        {
+            e.ToTable("email_outbox", t =>
+            {
+                t.HasCheckConstraint("ck_email_outbox_state", "\"State\" BETWEEN 0 AND 2");
+                t.HasCheckConstraint("ck_email_outbox_attempts", "\"Attempts\" >= 0");
+            });
+            e.HasKey(m => m.Id);
+            e.Property(m => m.ToAddress).HasMaxLength(EmailOutboxMessage.AddressMaxLength).IsRequired();
+            e.Property(m => m.Subject).HasMaxLength(EmailOutboxMessage.SubjectMaxLength).IsRequired();
+            e.Property(m => m.PayloadJson).HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'{}'::jsonb");
+            e.Property(m => m.LastError).HasMaxLength(EmailOutboxMessage.LastErrorMaxLength);
+            e.Property(m => m.State).HasConversion<int>();
+            // The sender's claim reads only what is due, so the index holds only what is pending.
+            e.HasIndex(m => m.DueAt).HasFilter("\"State\" = 0");
+            // Retention's purge reads finished rows by age.
+            e.HasIndex(m => new { m.State, m.FinishedAt });
         });
     }
 

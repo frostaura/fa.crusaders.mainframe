@@ -189,7 +189,7 @@ export type MemberDeleteResult = {
   seats_given_up: number;
   purchases_closed: number;
   written_off_minutes: number;
-  member_notified: boolean;
+  member_email_queued: boolean;
 };
 
 /* ─────────────────────────────── files ─────────────────────────────── */

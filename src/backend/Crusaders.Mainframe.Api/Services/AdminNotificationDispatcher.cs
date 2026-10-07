@@ -21,6 +21,13 @@ namespace Crusaders.Mainframe.Api.Services;
 /// </para>
 ///
 /// <para>
+/// <b>It talks to SMTP directly</b> (<see cref="IEmailTransport"/>), never through the email outbox:
+/// this table already is an outbox with its own leases, per-admin delivery record and backoff, and
+/// queueing each mail a second time would make a failure invisible to the one retry loop that owns
+/// it. The email outbox's own terminal-failure notice is raised through this path for that reason.
+/// </para>
+///
+/// <para>
 /// <b>At least once per admin, and never twice to the same admin for one row.</b> A claim is a
 /// lease, not a lock held across SMTP: the claim statement stamps <see cref="AdminNotification.LockedUntil"/>
 /// and commits at once, so a worker that dies mid-send leaves a row that becomes claimable again
@@ -173,7 +180,7 @@ public sealed class AdminNotificationDispatcher
     private sealed record Delivery(
         MainframeDbContext Db, AdminNotification Row, AdminEventKind Kind, TenantSettingsView Settings, ClubIdentity Club)
     {
-        public required IEmailService Email { get; init; }
+        public required IEmailTransport Email { get; init; }
         public required string BaseUrl { get; init; }
     }
 
@@ -227,7 +234,7 @@ public sealed class AdminNotificationDispatcher
 
         var delivery = new Delivery(db, row, kind, settings, ClubIdentityResolver.For(tenant, settings))
         {
-            Email = scope.ServiceProvider.GetRequiredService<IEmailService>(),
+            Email = scope.ServiceProvider.GetRequiredService<IEmailTransport>(),
             BaseUrl = scope.ServiceProvider.GetRequiredService<IConfiguration>()["App:PublicBaseUrl"] ?? "http://localhost:8088",
         };
         var error = await SendAllAsync(delivery, ct);
@@ -285,7 +292,7 @@ public sealed class AdminNotificationDispatcher
             var baseUrl = d.Services.GetRequiredService<IConfiguration>()["App:PublicBaseUrl"] ?? "http://localhost:8088";
             var message = MemberEventCatalogue.Compose(
                 new MemberMailContext(ClubIdentityResolver.For(d.Tenant, d.Settings), to, row, baseUrl, d.Settings));
-            await d.Services.GetRequiredService<IEmailService>().SendAsync(message, ct);
+            await d.Services.GetRequiredService<IEmailTransport>().SendAsync(message, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -387,6 +394,7 @@ public sealed class AdminNotificationDispatcher
         {
             case AdminEventCatalogue.FaultSpike:
             case AdminEventCatalogue.RefusalSpike:
+            case AdminEventCatalogue.EmailUndeliverable:
                 return AdminNotificationSettings.SpikeCooldown(settings);
             case AdminEventCatalogue.TopUpFailed:
                 return AdminNotificationSettings.TopUpFailureCooldown(settings);

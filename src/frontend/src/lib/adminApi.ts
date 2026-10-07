@@ -839,7 +839,7 @@ export type MemberCodeResetResult = {
   passkeys_revoked: boolean;
   passkeys_removed: number;
   /** Whether the member's email went; the reset stands either way. */
-  member_notified: boolean;
+  member_email_queued: boolean;
 };
 
 export type AdminAdjustResult = {

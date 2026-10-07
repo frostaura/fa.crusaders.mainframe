@@ -86,7 +86,7 @@ function stubClub(members: MemberRow[], commitButFail = false) {
           json: () => Promise.resolve({ error: "smtp" }),
         } as unknown as Response);
       }
-      return ok({ approved: true, member_notified: true });
+      return ok({ approved: true, member_email_queued: true });
     }
     if (path.startsWith("/api/v1/whoami")) return ok({ ...signIn({ isAdmin: true }), user_id: "u1" });
     if (path.startsWith("/api/v1/me/profile")) return ok(PROFILE);

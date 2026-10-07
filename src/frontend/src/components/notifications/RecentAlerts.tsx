@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DotSeparated } from "@/components/ui/dot-separated";
 import {
-  Bell, CaretRight, Clock, Coins, Door, Receipt, Repeat, ShieldCheck, ShieldWarning, UserMinus, UserPlus, Warning,
+  Bell, CaretRight, Clock, Coins, Door, Envelope, Receipt, Repeat, ShieldCheck, ShieldWarning, UserMinus, UserPlus, Warning,
   WebhooksLogo, WifiHigh, WifiSlash, type Icon,
 } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -49,6 +49,8 @@ const KIND_ICON: Record<string, Icon> = {
   "admin.role_changed": ShieldCheck,
   "code.forgery_suspected": ShieldWarning,
   "member.deleted": UserMinus,
+  // A mail the outbox gave up on after every retry.
+  "email.undeliverable": Envelope,
 };
 
 export function RecentAlerts({ feed, shown }: {

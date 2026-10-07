@@ -15,7 +15,7 @@ namespace Crusaders.Mainframe.Api.Email;
 /// subject, never its body.
 /// </para>
 /// </summary>
-public sealed class DemoAwareEmailService : IEmailService
+public sealed class DemoAwareEmailService : IEmailTransport
 {
     private readonly IEmailService _inner;
     private readonly ILogger<DemoAwareEmailService> _logger;

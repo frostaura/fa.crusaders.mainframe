@@ -133,7 +133,7 @@ public sealed class MemberDeleteHttpTests(PostgresFixture pg) : IClassFixture<Po
         Assert.Equal("erase", body.GetProperty("mode").GetString());
         Assert.Equal(1, body.GetProperty("bookings_cancelled").GetInt32());
         Assert.Equal(68, body.GetProperty("written_off_minutes").GetInt32());
-        Assert.True(body.GetProperty("member_notified").GetBoolean());
+        Assert.True(body.GetProperty("member_email_queued").GetBoolean());
 
         // The books: the future booking refunded through the cancellation, the rest written off, sum zero.
         Assert.Equal(BookingStatus.Cancelled, await PlayersClub.ReadAsync(f, db => db.Bookings.IgnoreQueryFilters().Where(b => b.Id == future).Select(b => b.Status).FirstAsync()));

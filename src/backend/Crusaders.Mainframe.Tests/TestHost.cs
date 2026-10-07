@@ -93,6 +93,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<IJwtIssuer, JwtIssuer>();
         var emailStub = new StubEmailService();
         services.AddSingleton<IEmailService>(emailStub);
+        services.AddSingleton<IEmailTransport>(emailStub);
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
         // IRelayClient is not registered here either, for the reason Program.cs gives: the
@@ -171,6 +172,10 @@ public sealed class TestHost : IAsyncDisposable
         // runs the real dispatcher against this host's store.
         services.AddSingleton<AdminNotificationDispatcher>();
         services.AddSingleton<AdminNotificationSweep>();
+        // Mirrors Program.cs: the email outbox. IEmailService stays the capturing stub in this
+        // host; the outbox's own tests build an EmailOutboxService over this container's scopes.
+        services.AddSingleton<Crusaders.Mainframe.Api.Email.EmailOutboxSignal>();
+        services.AddSingleton<EmailOutboxDispatcher>();
 
         var sp = services.BuildServiceProvider();
 
@@ -520,6 +525,10 @@ public sealed class TestHost : IAsyncDisposable
     public Task<int> DeliverAdminNoticesAsync(DateTimeOffset? now = null) =>
         Services.GetRequiredService<AdminNotificationDispatcher>().DeliverDueAsync(now ?? DateTimeOffset.UtcNow, default);
 
+    /// <summary>Runs the email outbox sender once at <paramref name="now"/> (default: the wall clock).</summary>
+    public Task<int> DeliverEmailOutboxAsync(DateTimeOffset? now = null) =>
+        Services.GetRequiredService<EmailOutboxDispatcher>().DeliverDueAsync(now ?? DateTimeOffset.UtcNow, default);
+
     public async ValueTask DisposeAsync()
     {
         try { if (Directory.Exists(MediaRoot)) Directory.Delete(MediaRoot, recursive: true); }
@@ -543,7 +552,7 @@ public sealed class TestHost : IAsyncDisposable
 /// once a fortnight for no reason is worse than no test.
 /// </para>
 /// </summary>
-public sealed class StubEmailService : IEmailService
+public sealed class StubEmailService : IEmailTransport
 {
     private readonly List<EmailMessage> _sent = new();
     private readonly object _gate = new();
