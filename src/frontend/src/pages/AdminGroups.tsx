@@ -352,7 +352,8 @@ export function AdminGroupsPage() {
         freshness={<Freshness at={reads.readAt} />}
       />
 
-      <div className="flex flex-wrap gap-2">
+      {/* One column of equal-width buttons on a phone; side by side, each its own width, from `sm`. */}
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
         <Button onClick={() => openSheet("", "settings")} icon={<Plus aria-hidden="true" />}>Create a group</Button>
         {/* Wraps rather than widening the page at 200% text (R3 X-4). */}
         <Button variant="outline" className="!h-auto min-h-touch whitespace-normal py-2" onClick={() => { setMemberPreview(true); setPreviewBasis(clubKey); }}>
