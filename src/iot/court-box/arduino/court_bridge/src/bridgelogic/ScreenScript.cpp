@@ -36,6 +36,14 @@ enum class RowArg : uint8_t {
   DurationCells,
   /// `amount_label`, as the server rendered it.
   Amount,
+  /// `<letter> <minutes>` — the court and its minutes on one row (2.3.0).
+  CourtAndMinutes,
+  /// `<letter> +<minutes>` — the court and the minutes just added.
+  CourtPlusMinutes,
+  /// The member's balance in minutes.
+  Balance,
+  /// The greeting name, or NOTHING (`HI` alone) when the API sent none.
+  GreetName,
 };
 
 struct RowSpec {
@@ -402,6 +410,61 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
       {"SCAN WHEN READY", RowArg::None, ""}},
      kRevertSeconds,
      kShowFlagCountdown},
+
+    // --- bridge 2.3.0 -----------------------------------------------------
+    // The greeting is an acknowledgement (card hold); whatever the scan
+    // decided follows it on its own. No countdown: it is gone in seconds.
+    {ScreenId::Greeting,
+     {{"HI ", RowArg::GreetName, ""},
+      {"BALANCE ", RowArg::Balance, " MIN"},
+      kBlank,
+      kBlank},
+     kCardSeconds,
+     0U},
+    {ScreenId::GreetingNoBalance,
+     {{"HI ", RowArg::GreetName, ""},
+      {"WELCOME", RowArg::None, ""},
+      kBlank,
+      kBlank},
+     kCardSeconds,
+     0U},
+    // Court cells on row 3, so the scan-left clamp applies (invitesCourtPress).
+    {ScreenId::PickCourt,
+     {{"PICK A COURT", RowArg::None, ""},
+      {"THEN A TIME", RowArg::None, ""},
+      {"Green, then black", RowArg::None, ""},
+      {"", RowArg::CourtCells, ""}},
+     kChoiceSeconds,
+     kShowFlagCountdown},
+    {ScreenId::MinutesLeft,
+     {{"COURT ", RowArg::CourtAndMinutes, " MIN"},
+      {"SCAN TO EXTEND", RowArg::None, ""},
+      {"Then press the court", RowArg::None, ""},
+      {"SCAN WHEN READY", RowArg::None, ""}},
+     kRevertSeconds,
+     kShowFlagCountdown},
+    // `EXTEND? PICK TIME` is seventeen columns; this is sixteen.
+    {ScreenId::ExtendPrompt,
+     {{"COURT ", RowArg::CourtAndMinutes, " MIN"},
+      {"EXTEND:PICK TIME", RowArg::None, ""},
+      {"Black button adds", RowArg::None, ""},
+      {"", RowArg::DurationCells, ""}},
+     kChoiceSeconds,
+     kShowFlagCountdown},
+    {ScreenId::Extended,
+     {{"COURT ", RowArg::CourtPlusMinutes, " MIN"},
+      {"BALANCE ", RowArg::Balance, " MIN"},
+      kBlank,
+      {"ENJOY YOUR GAME", RowArg::None, ""}},
+     kRevertSeconds,
+     kShowFlagCountdown},
+    {ScreenId::ExtendedNoBalance,
+     {{"COURT ", RowArg::CourtPlusMinutes, " MIN"},
+      {"ENJOY YOUR GAME", RowArg::None, ""},
+      kBlank,
+      kBlank},
+     kRevertSeconds,
+     kShowFlagCountdown},
 };
 
 /// kScreenSpecs is indexed by the ScreenId value, so a row in the wrong place
@@ -497,6 +560,22 @@ void appendArg(RowArg arg, const ScreenFacts& facts, char* out, size_t cap) {
     return;
   case RowArg::Amount:
     append(out, cap, facts.amount);
+    return;
+  case RowArg::CourtAndMinutes:
+    appendChar(out, cap, courtLetter(facts.court));
+    append(out, cap, " ");
+    appendU32(out, cap, facts.minutes);
+    return;
+  case RowArg::CourtPlusMinutes:
+    appendChar(out, cap, courtLetter(facts.court));
+    append(out, cap, " +");
+    appendU32(out, cap, facts.minutes);
+    return;
+  case RowArg::Balance:
+    appendU32(out, cap, facts.balance);
+    return;
+  case RowArg::GreetName:
+    append(out, cap, facts.name);
     return;
   case RowArg::CourtCells:
   case RowArg::DurationCells:

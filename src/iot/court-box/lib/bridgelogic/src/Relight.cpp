@@ -38,6 +38,10 @@ bool Relight::tracking(uint8_t court) const {
   return court < kStateCourts && courts_[court].bookingEnd.isArmed();
 }
 
+uint32_t Relight::bookingRemainingMs(uint8_t court, uint32_t nowMs) const {
+  return tracking(court) ? courts_[court].bookingEnd.remaining(nowMs) : 0U;
+}
+
 Extension Relight::check(uint8_t court, uint32_t nowMs) const {
   Extension ext;
   if (!tracking(court)) {

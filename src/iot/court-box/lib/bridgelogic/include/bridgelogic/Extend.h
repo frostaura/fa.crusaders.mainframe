@@ -1,0 +1,113 @@
+// Crusaders Mainframe — extending a lit court at the box, and greeting the
+// member who scanned (bridge 2.3.0).
+//
+// WHAT AN EXTENSION IS
+// --------------------
+// A member scans, presses a court that is ALREADY LIT — their own or anybody
+// else's — and then a black duration button. The bridge asks
+// `POST /api/v1/device/extend` to add that many minutes to the session on that
+// court, charged to the scanning member. The server decides how much can be
+// added (it truncates before the next booking) and answers with
+// `extended_minutes`, which is what the relay is given — never what was asked.
+//
+// Extending moves money, so it is NEVER done offline: with no link the box says
+// NO CONNECTION / EXTEND NEEDS NET and changes nothing.
+//
+// The request carries a per-purchase nonce exactly like a walk-up's, reused on
+// a retry of the SAME extension after an undecided answer, so a lost response
+// cannot charge the member twice.
+//
+// No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
+
+#ifndef CRUSADERS_BRIDGELOGIC_EXTEND_H
+#define CRUSADERS_BRIDGELOGIC_EXTEND_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "bridgelogic/ScreenScript.h"
+#include "court/Session.h"
+
+namespace bridgelogic {
+
+/// The extend endpoint.
+inline constexpr char kPathExtend[] = "/api/v1/device/extend";
+
+/// What the greeting card says, read from an activate or extend response.
+struct Greeting {
+  /// `greeting_name`, upper-cased printable ASCII, cut to kGreetingNameCols.
+  /// Empty when absent — the card then reads `HI` alone.
+  char name[kGreetingNameCols + 1U] = {};
+  /// Whether `balance_minutes` was present (an older backend sends neither).
+  bool hasBalance = false;
+  uint32_t balanceMinutes = 0U;
+};
+
+/// Reads `greeting_name` and `balance_minutes` TOLERANTLY: either may be
+/// absent, and a name that cannot be read is an empty name, not a refusal.
+void readGreeting(const char* body, size_t len, Greeting& out);
+
+/// The facts for ScreenId::Greeting / GreetingNoBalance.
+ScreenId greetingScreen(const Greeting& greeting, ScreenFacts& facts);
+
+/// Everything one extend request names. Same shape and rules as WalkUpRequest.
+struct ExtendRequest {
+  const char* mac = nullptr;
+  /// The CLUB court number of the pressed relay.
+  int16_t courtNumber = 0;
+  uint16_t minutes = 0U;
+  const char* token = nullptr;
+  const char* nonce = nullptr;
+  /// Rendered only for a v1 member code, as the walk-up does.
+  uint32_t scanAgeMs = 0U;
+};
+
+/// `{"mac","method":"qr","token","court","minutes","nonce"[,"scan_age_ms"]}`.
+/// Returns the length, or 0 when it would not fit — never a truncated body.
+size_t renderExtendBody(char* out, size_t cap, const ExtendRequest& request);
+
+inline constexpr size_t kExtendBodyCap = 320U;
+
+/// What the API's answer means for the box.
+struct ExtendResult {
+  /// Granted or refused, as opposed to not answered. Spends the nonce.
+  bool decided = false;
+  /// 200 with a positive `extended_minutes`.
+  bool extended = false;
+  uint32_t extendedMinutes = 0U;
+  bool hasBalance = false;
+  uint32_t balanceAfterMinutes = 0U;
+  /// The two lines to paint for anything that is not a success.
+  court::Outcome refusal;
+  /// `code_used` / `not_recognised`: forget the scan (D8-1).
+  bool forgetsScan = false;
+  /// BUSY / PRESS AGAIN or TOO LONG: the caller holds the scan for a re-press.
+  bool invitesPress = false;
+};
+
+///   200        → extended for `extended_minutes` (0 reads NO TIME BEFORE /
+///                NEXT BOOKING)
+///   0          → NO CONNECTION / EXTEND NEEDS NET (undecided)
+///   court_not_lit (409)       → COURT NOT ON / PICK ANOTHER
+///   no_time_available (409)   → NO TIME BEFORE / NEXT BOOKING
+///   insufficient_balance (402)→ TOO FEW MINUTES / BUY & RETRY
+///   anything else             → the walk-up's mapping (onWalkUpResponse)
+ExtendResult onExtendResponse(uint16_t status, const char* body, size_t len);
+
+/// The two numbers an extension turns into at the relay.
+struct ExtendPlan {
+  /// The `!EXT` argument: the new relay deadline from now, capped at the
+  /// relay's ninety-minute hard cap.
+  uint32_t relaySeconds = 0U;
+  /// The whole session left after the extension, uncapped — what
+  /// bridgelogic::Relight holds the court to past the cap.
+  uint32_t sessionSeconds = 0U;
+};
+
+/// `sessionLeftSeconds` is what the court had left before (the larger of the
+/// relay's own remaining time and any longer booking Relight is tracking).
+ExtendPlan planExtension(uint32_t sessionLeftSeconds, uint32_t extendedMinutes);
+
+} // namespace bridgelogic
+
+#endif // CRUSADERS_BRIDGELOGIC_EXTEND_H

@@ -237,9 +237,38 @@ enum class ScreenId : uint8_t {
   /// the scan is forgotten and the glass asks for the one thing that works: a
   /// fresh scan. No court cells — no court press is honoured until then.
   ScanAgain,
+
+  // --- bridge 2.3.0: greeting, minutes left, extend. APPENDED. -------------
+
+  /// A recognised online scan, before its outcome: `HI <NAME>` / `BALANCE
+  /// <n> MIN`, from the activate response's `greeting_name` and
+  /// `balance_minutes`. The card hold; the outcome follows it.
+  Greeting,
+  /// The same greeting with no balance to state — an older backend, or an
+  /// offline roster scan: `HI <NAME>` / `WELCOME`.
+  GreetingNoBalance,
+  /// A recognised member with nothing to light: pick a court, then a time.
+  PickCourt,
+  /// A court press with NO scan behind it, on a lit court: how long it has
+  /// left and how to add to it. `COURT A 45 MIN` / `SCAN TO EXTEND`.
+  MinutesLeft,
+  /// A court press AFTER a scan, on a lit court (anybody's): `COURT A 45 MIN`
+  /// / `EXTEND:PICK TIME`, durations on row 3, the choice window counting.
+  ExtendPrompt,
+  /// The extension was bought and the `!EXT` sent: `COURT A +30 MIN` /
+  /// `BALANCE <n> MIN`.
+  Extended,
+  /// Like Extended with no balance in the answer: `COURT A +30 MIN` /
+  /// `ENJOY YOUR GAME`.
+  ExtendedNoBalance,
 };
 
-inline constexpr uint8_t kScreenCount = 34U;
+inline constexpr uint8_t kScreenCount = 41U;
+
+/// Longest greeting name the glass shows: `HI ` plus thirteen is sixteen, the
+/// safe subset. Longer names are CUT here (the greeting carve-out above: a
+/// shortened name is still a complete greeting).
+inline constexpr size_t kGreetingNameCols = 13U;
 
 /// What the glass shows while `/activate` is asked about a scan.
 inline constexpr ScreenId kActivateWaitScreen = ScreenId::CheckingCode;
@@ -280,6 +309,8 @@ struct ScreenFacts {
   /// the box does no arithmetic on it and shows it verbatim. See
   /// kMaxAmountLabelDigits.
   char amount[kMaxAmountLabelLen + 1U] = {};
+  /// The member's balance in whole minutes (Greeting, Extended).
+  uint32_t balance = 0U;
   /// The LIVE panel. Null falls back to the compiled-in default map, which is
   /// the original wiring — the same rule court::ButtonMap follows.
   const court::ButtonMap* buttons = nullptr;

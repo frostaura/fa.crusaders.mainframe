@@ -90,6 +90,7 @@
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/BootId.h"
 #include "bridgelogic/EventDrain.h"
+#include "bridgelogic/Extend.h"
 #include "bridgelogic/FaultLog.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/MemberScan.h"
@@ -487,6 +488,32 @@ bridgelogic::ScanMemory gScan(kScanMemoryMs, devlink::kLcdChoiceDefaultMs);
 /// what price label, under which nonce.
 bridgelogic::PayForFlow gPayFor;
 
+/// The Mega's last `!STATE`, per court: the mask bit, the seconds it reported
+/// and when. What an unscanned court press (MinutesLeft) and an extension read
+/// a court's time left from (bridge 2.3.0). The Mega is the authority; this is
+/// its last word, aged on millis() since.
+uint8_t gStateMask = 0U;
+uint16_t gStateSecs[bridgelogic::kStateCourts] = {};
+uint32_t gStateAt[bridgelogic::kStateCourts] = {};
+
+/// The court an EXTEND prompt is on the glass for, or kNoExtend. Set when a
+/// scanned member presses a lit court; the duration press that follows buys an
+/// extension on it instead of a walk-up.
+constexpr uint8_t kNoExtend = 0xFFU;
+uint8_t gExtendCourt = kNoExtend;
+
+/// The extension's idempotency key — the walk-up's rule, its own instance so
+/// the two purchases never share a nonce.
+bridgelogic::WalkUpNonce gExtendNonce;
+
+/// THE GREETING (bridge 2.3.0). A recognised scan is greeted first, and the
+/// outcome's screen is held back until the greeting's card hold ends — the
+/// relay itself is never held back. Any screen a member's own press produces
+/// replaces both at once.
+tb::Deadline gGreetUntil;
+bool gFollowUpPending = false;
+bridgelogic::Screen gFollowUp = {};
+
 /// Milliseconds since the remembered scan was read.
 uint32_t scanAgeMs() {
   return gScan.ageMs(gClock.nowMs());
@@ -551,6 +578,9 @@ bool sendToMega(const proto::Frame& frame) {
 /// A row that is empty is not sent: the Mega clears the staging area on
 /// `!SHOW`, so an omitted row is a blank row and a frame saved on a 9600 link.
 void sendScreen(const bridgelogic::Screen& screen) {
+  // Whatever was waiting behind a greeting is superseded by this screen.
+  gFollowUpPending = false;
+  gGreetUntil.disarm();
   // EVERY row, empty ones included: the Mega commits every staged row, and a
   // skipped one showed the previous screen's words (R19).
   for (size_t i = 0U; i < bridgelogic::kScreenFrameCount; ++i) {
@@ -577,6 +607,90 @@ bridgelogic::ScreenFacts screenFacts(uint32_t nowMs) {
 
 void showScreen(bridgelogic::ScreenId id, uint32_t nowMs) {
   sendScreen(screenNow(id, screenFacts(nowMs)));
+}
+
+/// Two lines as a whole screen with the tenant's revert hold — the `!LCD`
+/// overlay's shape, as a value that can wait behind a greeting.
+bridgelogic::Screen linesScreen(const char* line1, const char* line2) {
+  bridgelogic::Screen screen = {};
+  snprintf(screen.rows[0], sizeof(screen.rows[0]), "%s", line1 != nullptr ? line1 : "");
+  snprintf(screen.rows[1], sizeof(screen.rows[1]), "%s", line2 != nullptr ? line2 : "");
+  uint32_t seconds = gLcdSettings.revertMs / 1000UL;
+  if (seconds < proto::kShowHoldMinSeconds) {
+    seconds = proto::kShowHoldMinSeconds;
+  }
+  if (seconds > proto::kShowHoldMaxSeconds) {
+    seconds = proto::kShowHoldMaxSeconds;
+  }
+  screen.holdSeconds = static_cast<uint16_t>(seconds);
+  screen.flags = 0U;
+  return screen;
+}
+
+bool greetingActive(uint32_t nowMs) {
+  return gGreetUntil.isArmed() && !gGreetUntil.expired(nowMs);
+}
+
+/// Paints `screen` now, or right after the greeting if one is on the glass.
+void sendAfterGreeting(const bridgelogic::Screen& screen) {
+  if (greetingActive(gClock.nowMs())) {
+    gFollowUp = screen;
+    gFollowUpPending = true;
+    return;
+  }
+  sendScreen(screen);
+}
+
+/// An outcome's two lines, after the greeting if one is showing.
+void paintLines(const char* line1, const char* line2) {
+  sendAfterGreeting(linesScreen(line1, line2));
+}
+
+/// Two lines NOW, whatever was waiting: a failure the member must see.
+void sendLinesNow(const char* line1, const char* line2) {
+  sendScreen(linesScreen(line1, line2));
+}
+
+/// `HI <NAME>` / `BALANCE <n> MIN` (or `WELCOME`), for the card hold. What
+/// the scan decided is painted when it ends (sendAfterGreeting).
+void greet(const bridgelogic::Greeting& greeting, uint32_t nowMs) {
+  bridgelogic::ScreenFacts facts = screenFacts(nowMs);
+  const bridgelogic::ScreenId id = bridgelogic::greetingScreen(greeting, facts);
+  const bridgelogic::Screen screen = screenNow(id, facts);
+  sendScreen(screen);
+  gGreetUntil.arm(nowMs, static_cast<uint32_t>(screen.holdSeconds) * 1000UL);
+}
+
+/// The follow-up screen, once the greeting's hold is over.
+void pumpFollowUp(uint32_t nowMs) {
+  if (!gFollowUpPending || greetingActive(nowMs)) {
+    return;
+  }
+  const bridgelogic::Screen screen = gFollowUp;
+  sendScreen(screen);
+}
+
+/// Seconds the RELAY on `court` has left, from the Mega's last `!STATE`.
+uint32_t relaySecondsLeft(uint8_t court, uint32_t nowMs) {
+  if (court >= bridgelogic::kStateCourts || (gStateMask & static_cast<uint8_t>(1U << court)) == 0U) {
+    return 0U;
+  }
+  const uint32_t elapsed = tb::since(nowMs, gStateAt[court]) / 1000UL;
+  return gStateSecs[court] > elapsed ? gStateSecs[court] - elapsed : 0U;
+}
+
+/// Seconds the SESSION on `court` has left: the relay's, or a longer booking
+/// Relight is holding the court to past the ninety-minute cap.
+uint32_t courtSecondsLeft(uint8_t court, uint32_t nowMs) {
+  const uint32_t relay = relaySecondsLeft(court, nowMs);
+  const uint32_t booking = court < bridgelogic::kStateCourts ? gRelight.bookingRemainingMs(court, nowMs) / 1000UL : 0U;
+  return booking > relay ? booking : relay;
+}
+
+/// Whether `court` is lit, as far as this half knows.
+bool courtLit(uint8_t court, uint32_t nowMs) {
+  return court < gCourtCount && court < bridgelogic::kStateCourts &&
+         (gHeld[court].held || relaySecondsLeft(court, nowMs) > 0U);
 }
 
 /// `!IDLE` — what the Mega's own landing screen's status row says.
@@ -803,7 +917,9 @@ void noteMegaPong(const proto::Frame& frame, uint32_t nowMs) {
 /// whose game the court is must ask, never the held state, which a previous
 /// game can leave true (D8-3).
 bool applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
-  static_cast<void>(sendToMega(proto::Frame::lcd(outcome.line1, outcome.line2)));
+  // After the greeting, when one is on the glass (bridge 2.3.0); the relay
+  // below is never held back for it.
+  paintLines(outcome.line1, outcome.line2);
   if (outcome.action != court::Action::TurnOn || outcome.court >= bridgelogic::kStateCourts) {
     return false;
   }
@@ -816,8 +932,7 @@ bool applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
     // hears about it too — a court that repeatedly cannot be commanded is a
     // cable, and the member at the panel cannot diagnose one.
     gFaults.note(bridgelogic::Fault::RelayCmdDropped, outcome.court, nowMs);
-    static_cast<void>(
-        sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
+    sendLinesNow(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2);
   }
   // The `!ON` left the bridge, which is not the same as reached the Mega: a
   // checksum that dies on the wire comes back as `!ERR,BADCRC`, and it is then
@@ -862,7 +977,7 @@ bool settleScan(const court::Outcome& outcome, uint32_t nowMs) {
 /// away from the code they belong with.
 bool activateOnline(const char* token);
 void requestWalkUp(const court::WalkUpIntent& intent);
-bool offerPayFor(uint8_t relay, uint32_t nowMs);
+void requestExtend(const court::WalkUpIntent& intent);
 
 void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // Remembered so a following walk-up knows WHO is buying. The scanned bytes, not the
@@ -874,6 +989,8 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // A new identity at the panel: any pay-for quote on the glass was somebody
   // else's question.
   gPayFor.clear();
+  // And any EXTEND prompt was somebody else's court press.
+  gExtendCourt = kNoExtend;
 
   // No `!AUTH` yet. The window used to be armed HERE, before anything had
   // decided what the scan was — so any barcode bought thirty seconds of
@@ -930,6 +1047,10 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
       applyAuth(gAuth.afterHeldCourtRescan(member.outcome.court, now));
       return;
     }
+    if (member.outcome.recognised) {
+      // Offline: no name and no balance to state (bridge 2.3.0).
+      greet(bridgelogic::Greeting(), now);
+    }
     settleScan(member.outcome, now);
     if (member.outcome.action == court::Action::TurnOn && member.outcome.court < bridgelogic::kStateCourts &&
         gHeld[member.outcome.court].held) {
@@ -961,13 +1082,21 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
 
-  settleScan(gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, now), now);
+  const court::Outcome rostered =
+      gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, now);
+  if (rostered.recognised) {
+    greet(bridgelogic::Greeting(), now);
+  }
+  settleScan(rostered, now);
 }
 
 /// Queues the Release for a court and forgets it. The one place a held court
 /// becomes a released one, whichever messenger — `!EVT` or `!STATE` — said so.
 void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
-  static_cast<void>(applyOutcome(gSession.onRelease(court, heldMs, nowMs), nowMs));
+  // The Release event only. Its `CRUSADERS COURTS / SCAN TO START` overlay is
+  // no longer painted (bridge 2.3.0): the Mega's own landing screen — SCAN
+  // YOUR CODE over the lit courts' minutes — is what a released court leaves.
+  static_cast<void>(gSession.onRelease(court, heldMs, nowMs));
   gHeld[court] = bridgelogic::HeldState{nowMs, false};
   gRelight.onRelease(court);
   gOnlineGrants.released(court);
@@ -1049,8 +1178,7 @@ void handleReceiveError(const proto::Frame& frame, uint32_t nowMs) {
   // And nobody's game is on it: the online grant goes with it, as it does on
   // every other path a court goes dark by (D8-3).
   bridgelogic::courtStaysDark(court, gHeld, gOnlineGrants, nowMs);
-  static_cast<void>(
-      sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
+  sendLinesNow(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2);
 }
 
 void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
@@ -1117,11 +1245,15 @@ void handleState(const proto::Frame& frame, uint32_t nowMs) {
   // had. The heartbeat carries it on, so the control board can say "lights on,
   // confirmed by the box" instead of only what the server believes.
   gRelayStateCount = 0U;
+  gStateMask = mask;
   for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
     uint16_t seconds = 0U;
     if (bridgelogic::parseStateSeconds(frame.arg(static_cast<uint8_t>(i + 1U)), seconds)) {
       gRelight.observeRelayRemaining(i, seconds, nowMs);
     }
+    // What MinutesLeft and an extension read (bridge 2.3.0).
+    gStateSecs[i] = (mask & static_cast<uint8_t>(1U << i)) != 0U ? seconds : 0U;
+    gStateAt[i] = nowMs;
     if ((mask & static_cast<uint8_t>(1U << i)) == 0U) {
       continue;
     }
@@ -1163,24 +1295,49 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
 
   switch (gPad.press(gButtons, index, nowMs)) {
   case court::PadResult::CourtSelected: {
-    // D10 FIRST: a court somebody else holds right now is a court this member
-    // may pay for, and the glass asks before it offers to sell time on it. Any
-    // answer that is not a pay-for decision falls through to the walk-up
-    // choice below, exactly as a box before D10 did.
-    if (offerPayFor(gPad.selectedCourt(), nowMs)) {
+    // Bridge 2.3.0. The Mega now forwards COURT keys with its window shut, so
+    // this is where an unscanned court press is answered, and a lit court is
+    // an EXTEND rather than a pay-for or the first half of switching off.
+    const uint8_t relay = gPad.selectedCourt();
+    gPayFor.clear();
+    const bool lit = courtLit(relay, nowMs);
+    bridgelogic::ScreenFacts facts = screenFacts(nowMs);
+    facts.court = relay;
+    facts.minutes = (courtSecondsLeft(relay, nowMs) + 59U) / 60U;
+    if (gLastScan[0] == '\0') {
+      // Nobody has scanned: a lit court says how long it has left and how to
+      // add to it; a dark one asks for the scan. Nothing stays selected — no
+      // duration press may follow an unscanned court press.
+      gPad.clear();
+      gExtendCourt = kNoExtend;
+      sendScreen(screenNow(lit ? bridgelogic::ScreenId::MinutesLeft : bridgelogic::ScreenId::ScanFirst, facts));
+      return;
+    }
+    if (lit) {
+      // Anybody's lit court, the scanner's own included: the next black
+      // button extends it on the scanner's minutes.
+      gExtendCourt = relay;
+      sendScreen(screenNow(bridgelogic::ScreenId::ExtendPrompt, facts));
       return;
     }
     // The one screen whose hold is the CHOICE window and whose countdown is the
     // point: a half-made purchase is the one thing on this box a timeout can
     // lose, so the member watches it go rather than finding out afterwards.
-    bridgelogic::ScreenFacts facts = screenFacts(nowMs);
-    facts.court = gPad.selectedCourt();
+    gExtendCourt = kNoExtend;
     sendScreen(screenNow(bridgelogic::ScreenId::ChooseTime, facts));
     return;
   }
-  case court::PadResult::Requested:
-    requestWalkUp(gPad.intent());
+  case court::PadResult::Requested: {
+    const court::WalkUpIntent intent = gPad.intent();
+    const bool extend = gExtendCourt == intent.court;
+    gExtendCourt = kNoExtend;
+    if (extend) {
+      requestExtend(intent);
+    } else {
+      requestWalkUp(intent);
+    }
     return;
+  }
   case court::PadResult::ReleaseRequested: {
     // Only the court the current window is bound to — the one this member's
     // scan or purchase lit. Anything else is somebody else's game, and the
@@ -1387,8 +1544,21 @@ bool activateOnline(const char* token) {
   if (decision.outcome.action == court::Action::TurnOn) {
     noteOnlineUse(token);
   }
+  if (decision.outcome.recognised) {
+    // HI <NAME> / BALANCE <n> MIN first; the outcome follows the card hold
+    // (bridge 2.3.0). Both fields are optional — an older backend greets
+    // with HI / WELCOME.
+    bridgelogic::Greeting greeting;
+    bridgelogic::readGreeting(response, strlen(response), greeting);
+    greet(greeting, gClock.nowMs());
+  }
   const bool lit = settleScan(decision.outcome, gClock.nowMs());
   noteOnlineLit(decision.outcome, lit, token);
+  if (decision.invitesWalkUp && gLastScan[0] != '\0') {
+    // A known member with nothing to light: invite the walk-up instead of
+    // NO BOOKING / SEE THE DESK.
+    sendAfterGreeting(screenNow(bridgelogic::ScreenId::PickCourt, screenFacts(gClock.nowMs())));
+  }
   return true;
 }
 
@@ -1486,225 +1656,101 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   applyAuth(gAuth.afterWalkUp(answer.outcome, nowMs));
 }
 
-/// The facts a pay-for screen names: the club's court number and the server's
-/// own label for the price.
-bridgelogic::ScreenFacts payForFacts(uint8_t relay, const char* amountLabel, uint32_t nowMs) {
-  bridgelogic::ScreenFacts facts = screenFacts(nowMs);
-  facts.court = relay;
-  facts.courtNumber = relay < gCourtCount ? gCourtNumbers[relay] : static_cast<int16_t>(0);
-  snprintf(facts.amount, sizeof(facts.amount), "%s", amountLabel != nullptr ? amountLabel : "");
-  return facts;
-}
+/// Extends a lit court on the scanning member's minutes (bridge 2.3.0).
+///
+/// Needs the network — extending moves money — and is never decided here:
+/// the server truncates before the next booking and answers with what it
+/// actually added, which is what the relay is given. The `!EXT` sets the new
+/// relay deadline from now, capped at ninety minutes; a longer session is
+/// held past the cap by Relight exactly as a long booking is.
+///
+/// (The D10 pay-for flow is no longer reachable from the panel: a lit court
+/// press is an extension now. bridgelogic::PayFor stays compiled.)
+void requestExtend(const court::WalkUpIntent& intent) {
+  uint32_t nowMs = gClock.nowMs();
+  if (gLastScan[0] == '\0') {
+    showScreen(bridgelogic::ScreenId::ScanFirst, nowMs);
+    return;
+  }
+  if (intent.court >= gCourtCount || intent.court >= bridgelogic::kStateCourts) {
+    showScreen(bridgelogic::ScreenId::SeeTheDesk, nowMs);
+    return;
+  }
+  if (!gWifiUp || gBreaker.open(nowMs)) {
+    sendLinesNow("NO CONNECTION", "EXTEND NEEDS NET");
+    return;
+  }
 
-/// The second press: pay what the glass asked about. The nonce is the quote's,
-/// so a press after an undecided answer retries the SAME payment.
-void confirmPayFor() {
-  const uint8_t relay = gPayFor.relay();
-  sendScreen(screenNow(bridgelogic::ScreenId::PayForWorking, screenFacts(gClock.nowMs())));
+  showScreen(bridgelogic::ScreenId::OneMoment, nowMs);
 
-  bridgelogic::PayForRequest request;
+  bridgelogic::ExtendRequest request;
   request.mac = gMacHex;
+  request.courtNumber = gCourtNumbers[intent.court];
+  request.minutes = intent.minutes;
   request.token = gLastScan;
-  request.courtNumber = gPayFor.courtNumber();
-  request.nonce = gPayFor.nonce();
-  request.confirm = true;
-  request.amountLabel = gPayFor.amountLabel();
+  request.nonce = gExtendNonce.forPurchase(intent, gLastScan, gRequestEntropy);
   request.scanAgeMs = scanAgeMs();
-  char body[bridgelogic::kPayForBodyCap];
-  if (bridgelogic::renderPayForBody(body, sizeof(body), request) == 0U) {
-    gPayFor.clear();
-    gPad.clear();
+  char body[bridgelogic::kExtendBodyCap];
+  if (bridgelogic::renderExtendBody(body, sizeof(body), request) == 0U) {
     showScreen(bridgelogic::ScreenId::SeeTheDesk, gClock.nowMs());
     return;
   }
 
   static char response[384];
   response[0] = '\0';
-  const uint16_t status = callApi(bridgelogic::kPathPayFor, body, response, sizeof(response));
-  const bridgelogic::PayForAnswer answer =
-      bridgelogic::onPayForConfirm(status, response, strlen(response), gPayFor.amountLabel());
-  const uint32_t nowMs = gClock.nowMs();
-  const bridgelogic::ScreenFacts facts = payForFacts(relay, answer.amountLabel, nowMs);
+  const uint16_t status = callApi(bridgelogic::kPathExtend, body, response, sizeof(response));
+  const bridgelogic::ExtendResult answer = bridgelogic::onExtendResponse(status, response, strlen(response));
+  if (answer.decided) {
+    gExtendNonce.decided();
+  }
+  nowMs = gClock.nowMs();
 
-  if (answer.kind == bridgelogic::PayForKind::Undecided) {
-    // The scan and the Mega's window are held for the whole choice window
-    // FIRST (D18-4): a re-armed quote nobody can press for is no retry at all.
-    // When that window no longer fits inside the server's bound on the scan's
-    // age, the quote goes with the scan and the glass says SCAN AGAIN (D19-2).
-    if (!holdForPressAgain(nowMs)) {
+  if (!answer.extended) {
+    if ((!answer.decided || answer.invitesPress) && !holdForPressAgain(nowMs)) {
+      // SCAN AGAIN is already on the glass (R19).
       return;
     }
-    // The quote and its nonce stay armed — re-armed from now, so the retry has
-    // the whole choice window — and pressing the court again asks the server
-    // whether THIS payment happened, never for a second one. The selection
-    // goes: a duration press must not turn a pending payment into a walk-up on
-    // a court somebody is playing on.
-    gPayFor.arm(relay, gPayFor.courtNumber(), gPayFor.amountLabel(), gLcdSettings.choiceMs, nowMs);
-    gPad.clear();
-    sendScreen(screenNow(answer.screen, facts));
-    return;
-  }
-  gPayFor.clear();
-  gPad.clear();
-  if (answer.kind == bridgelogic::PayForKind::Paid) {
-    noteOnlineUse(gLastScan);
-  }
-  if (answer.kind != bridgelogic::PayForKind::Paid) {
-    if (answer.invitesPress && !holdForPressAgain(nowMs)) {
-      // PRICE CHANGED / Press court again asks for a re-quote on this scan;
-      // when the choice window no longer fits inside the server's bound on the
-      // scan's age, SCAN AGAIN is on the glass instead (R19).
-      return;
-    }
-    sendScreen(screenNow(answer.screen, facts));
-    if (answer.spendsScan) {
-      // `code_used` / `not_recognised`: the code buys nothing more here (D8-1).
+    sendLinesNow(answer.refusal.line1, answer.refusal.line2);
+    if (answer.forgetsScan) {
       forgetScan();
     }
     return;
   }
 
-  const bridgelogic::Screen paid = screenNow(bridgelogic::ScreenId::PayForPaid, facts);
-  if (answer.grantedSeconds > 0U && relay < gCourtCount && relay < bridgelogic::kStateCourts &&
-      !gHeld[relay].held) {
-    // Paid for a booking nobody had started: the server granted what is left
-    // of it and the court lights exactly as an activation's would — capped at
-    // what one `!ON` can hold, with the remainder kept for `!EXT`.
-    court::Outcome grant;
-    grant.action = court::Action::TurnOn;
-    grant.court = relay;
-    grant.recognised = true;
-    const uint32_t capped = answer.grantedSeconds > proto::kRelayHardCapSeconds
-                                ? static_cast<uint32_t>(proto::kRelayHardCapSeconds)
-                                : answer.grantedSeconds;
-    grant.durationMs = capped * 1000U;
-    grant.bookingRemainingMs =
-        answer.grantedSeconds > UINT32_MAX / 1000U ? UINT32_MAX : answer.grantedSeconds * 1000U;
-    court::detail::setLine(grant.line1, paid.rows[0]);
-    court::detail::setLine(grant.line2, paid.rows[1]);
-    const bool lit = applyOutcome(grant, nowMs);
-    noteOnlineLit(grant, lit, gLastScan);
-    spendScan();
-    gRelight.onGrant(grant, nowMs);
-    applyAuth(gAuth.afterWalkUp(grant, nowMs));
-    return;
-  }
-  sendScreen(paid);
-  // The identity is spent on the payment: the next member's presses must not
-  // pay, or buy, on this one's code.
-  forgetScan();
-}
+  noteOnlineUse(gLastScan);
+  const uint8_t court = intent.court;
+  const uint32_t relayLeft = relaySecondsLeft(court, nowMs);
+  const bridgelogic::ExtendPlan plan =
+      bridgelogic::planExtension(courtSecondsLeft(court, nowMs), answer.extendedMinutes);
 
-/// Whether a press on `relay` is one a pay-for could be about: a scan behind
-/// it, a court this box drives, a link, and somebody holding the court now.
-bool payForCandidate(uint8_t relay, uint32_t nowMs) {
-  if (gLastScan[0] == '\0' || relay >= gCourtCount || relay >= bridgelogic::kStateCourts || !gWifiUp ||
-      gBreaker.open(nowMs)) {
-    return false;
-  }
-  // Nobody holds it now, as far as this box knows: a walk-up court.
-  return gRoster.occupied(relay, nowMs) || gHeld[relay].held;
-}
-
-/// The quote came back: arm it and ask. See offerPayFor.
-void armPayForQuote(uint8_t relay, const bridgelogic::PayForAnswer& answer, uint32_t now) {
-  gPayFor.arm(relay, gCourtNumbers[relay], answer.amountLabel, gLcdSettings.choiceMs, now);
-  // The selection goes: the only answer to this question is the SAME court
-  // again, which re-selects it, and a duration press must not buy walk-up
-  // time on a court somebody is playing on.
-  gPad.clear();
-  // The member is being asked to press again, so the scan they are paying
-  // with stays remembered for the WHOLE question and is never shortened
-  // (R19 D19-1: after a PRESS AGAIN hold the old "scan memory plus one choice
-  // window from the scan" cut it below the countdown and the confirm went
-  // nowhere). Never past the server's bound on the scan's age, either: a
-  // question that cannot be held whole is not asked (D19-2) — which is also
-  // what stops a member who scans, is quoted and walks away from leaving an
-  // identity that re-quotes on every press.
-  if (!gScan.holdForQuote(now)) {
-    scanAgain(now);
-    return;
-  }
-  applyAuth(gAuth.afterPayForQuote(now));
-  sendScreen(screenNow(bridgelogic::ScreenId::PayForQuote, payForFacts(relay, answer.amountLabel, now)));
-}
-
-/// Asks the server what paying for `relay` would cost. True when the press was
-/// answered as a pay-for — quoted or refused — and false when it is the walk-up
-/// court choice after all.
-bool quotePayFor(uint8_t relay, uint32_t nowMs) {
-  sendScreen(screenNow(bridgelogic::ScreenId::PayForWorking, screenFacts(nowMs)));
-  bridgelogic::PayForRequest request;
-  request.mac = gMacHex;
-  request.token = gLastScan;
-  request.courtNumber = gCourtNumbers[relay];
-  request.nonce = gPayFor.quoteNonce(gRequestEntropy);
-  request.confirm = false;
-  request.scanAgeMs = scanAgeMs();
-  char body[bridgelogic::kPayForBodyCap];
-  if (bridgelogic::renderPayForBody(body, sizeof(body), request) == 0U) {
-    return false;
+  // Relight first, from the relay's CURRENT deadline: if the `!EXT` below
+  // does not leave, pumpRelight sends it before the relay runs out.
+  court::Outcome session;
+  session.action = court::Action::TurnOn;
+  session.court = court;
+  session.recognised = true;
+  session.durationMs = relayLeft * 1000UL;
+  session.bookingRemainingMs =
+      plan.sessionSeconds > UINT32_MAX / 1000U ? UINT32_MAX : plan.sessionSeconds * 1000UL;
+  gRelight.onGrant(session, nowMs);
+  if (sendToMega(proto::Frame::ext(static_cast<proto::Court>(court), plan.relaySeconds))) {
+    gRelight.extended(court, plan.relaySeconds, nowMs);
+    gStateMask = static_cast<uint8_t>(gStateMask | (1U << court));
+    gStateSecs[court] = static_cast<uint16_t>(plan.relaySeconds);
+    gStateAt[court] = nowMs;
+  } else {
+    gFaults.note(bridgelogic::Fault::RelayCmdDropped, court, nowMs);
   }
 
-  static char response[384];
-  response[0] = '\0';
-  const uint16_t status = callApi(bridgelogic::kPathPayFor, body, response, sizeof(response));
-  const bridgelogic::PayForAnswer answer =
-      bridgelogic::onPayForQuote(status, response, strlen(response), gCourtNumbers[relay]);
-  const uint32_t now = gClock.nowMs();
-
-  switch (answer.kind) {
-  case bridgelogic::PayForKind::Quote:
-    armPayForQuote(relay, answer, now);
-    return true;
-  case bridgelogic::PayForKind::Refused:
-  case bridgelogic::PayForKind::Paid:
-  case bridgelogic::PayForKind::Undecided:
-    // A decided refusal of the quote, or no decision at all (D18-3: a dead
-    // link, a 429, a 5xx — NO CONNECTION or BUSY, never CHOOSE TIME on a court
-    // somebody holds). The selection goes with it, so a duration press cannot
-    // turn either into a walk-up on a court somebody is playing on.
-    gPad.clear();
-    if ((answer.kind == bridgelogic::PayForKind::Undecided || answer.invitesPress) &&
-        !holdForPressAgain(now)) {
-      // PRESS AGAIN: the same court press asks again, so the scan and the
-      // Mega's window are held for the whole choice window (D18-4) — unless
-      // that window no longer fits inside the server's bound on the scan's
-      // age, and then SCAN AGAIN is already on the glass (D19-2).
-      return true;
-    }
-    sendScreen(screenNow(answer.screen, payForFacts(relay, answer.amountLabel, now)));
-    if (answer.spendsScan) {
-      // `code_used` / `not_recognised`: the code buys nothing more here — not
-      // this court, and not a walk-up on the next press (D8-1).
-      forgetScan();
-    }
-    return true;
-  case bridgelogic::PayForKind::WalkUp:
-    break;
-  }
-  return false;
-}
-
-/// A court button was pressed with a scan behind it. True when the press was a
-/// pay-for — asked, answered or confirmed — and the walk-up choice must NOT be
-/// shown; false when it is an ordinary walk-up court choice after all.
-bool offerPayFor(uint8_t relay, uint32_t nowMs) {
-  if (gPayFor.quoted(relay, nowMs)) {
-    confirmPayFor();
-    return true;
-  }
-  if (gAuth.allowsRelease(relay, nowMs)) {
-    // THE WINDOW IS BOUND TO THIS COURT: it is the member's own game — they lit
-    // it, bought it, or rescanned on it — and a court press here is the first
-    // half of switching it OFF, exactly as before D10. Asking the server would
-    // answer `own_booking`, clear the selection, and leave the OFF press with
-    // nothing to act on.
-    return false;
-  }
-  // A different court, or a quote that lapsed: whatever was asked is gone.
-  gPayFor.clear();
-  return payForCandidate(relay, nowMs) && quotePayFor(relay, nowMs);
+  bridgelogic::ScreenFacts facts = screenFacts(nowMs);
+  facts.court = court;
+  facts.minutes = answer.extendedMinutes;
+  facts.balance = answer.balanceAfterMinutes;
+  sendScreen(screenNow(answer.hasBalance ? bridgelogic::ScreenId::Extended
+                                         : bridgelogic::ScreenId::ExtendedNoBalance,
+                       facts));
+  // The identity is spent on the purchase, as a walk-up's is.
+  spendScan();
 }
 
 /// Moves at most ONE due fault into the event queue per pass.
@@ -2104,8 +2150,12 @@ void loop() {
   // walked away left a box that is on the WiFi telling the next member it is
   // not — until a WiFi edge, a Mega reset or a scan repainted it (D1-7).
   if (gPad.tick(now)) {
-    showIdentityScreen();
+    // No repaint (bridge 2.3.0): the choice screen's own hold returns the
+    // glass to the Mega's landing screen, and an identity overlay here hid it.
+    gExtendCourt = kNoExtend;
   }
+  // The outcome a greeting was holding back, once its card hold is over.
+  pumpFollowUp(now);
   // A pay-for question nobody answered lapses on its own, for the same reason.
   static_cast<void>(gPayFor.tick(now));
   if (gLastScan[0] != '\0' && gScan.expired(now)) {

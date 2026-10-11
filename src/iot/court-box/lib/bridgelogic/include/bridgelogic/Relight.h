@@ -90,6 +90,11 @@ public:
   /// True while `court` has a booking longer than its current relay deadline.
   bool tracking(uint8_t court) const;
 
+  /// What is left of the booking `court` is held to past the relay cap, or 0
+  /// when it is not tracked. The minutes-left and extend screens read the
+  /// larger of this and the relay's own remaining time (bridge 2.3.0).
+  uint32_t bookingRemainingMs(uint8_t court, uint32_t nowMs) const;
+
 private:
   struct Court {
     /// When the booking ends.

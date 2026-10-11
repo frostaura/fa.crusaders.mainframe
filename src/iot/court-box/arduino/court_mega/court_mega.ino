@@ -96,9 +96,11 @@ void setup() {
   arduino_hal::watchdogBeginBoot();
 
   // Relays next, before anything else can take time. begin() drives every pin
-  // to the released level BEFORE configuring it as an output, because an AVR
-  // output latches its power-on LOW — which on an active-LOW board is four
-  // courts' lights coming on at every reset.
+  // to the released level BEFORE configuring it as an output, so the pin
+  // becomes an output already at "off" whichever polarity RELAY_ACTIVE_LOW
+  // names. The club's solid-state relays are active HIGH (released = LOW);
+  // on an active-LOW board the other order is four courts' lights coming on
+  // at every reset.
   gRelay.begin();
 
   gButtons.begin();

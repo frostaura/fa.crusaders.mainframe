@@ -246,6 +246,10 @@ ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body,
   if (!activated) {
     ActivationResult result;
     result.outcome = refusedFor(body, len);
+    char reason[24] = {};
+    if (devapi::json::topLevelStringField(body, len, "reason", reason, sizeof(reason))) {
+      result.invitesWalkUp = strcmp(reason, "no_booking") == 0 || strcmp(reason, "ended") == 0;
+    }
     return result;
   }
 

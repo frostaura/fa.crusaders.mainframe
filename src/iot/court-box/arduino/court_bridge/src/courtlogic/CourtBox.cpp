@@ -204,16 +204,46 @@ void CourtBox::pollButtons(uint32_t nowMs) {
   // costs nothing: the Mega sees the press either way.
   screens_.noteActivity(nowMs);
   if (!auth_.allows(nowMs)) {
-    // Dropped, not queued. A press held until the next authorisation window
-    // opens would fire a relay on the NEXT member's scan, which is precisely
-    // the unexpiring-flag defect this window exists to close.
+    // COURT keys are forwarded even with the window shut (Mega 2.1.0). An
+    // unscanned court press asks a QUESTION — "how long is left on court B?" —
+    // and only the bridge can answer it: it knows whether a scan is remembered
+    // and what each lit court has left, and paints either the minutes left
+    // (SCAN TO EXTEND) or SCAN YOUR CODE FIRST. A court key on its own buys
+    // nothing and lights nothing — every purchase needs a DURATION key, which
+    // is still dropped here — so forwarding it cannot fire a relay on the next
+    // member's scan.
     //
-    // The drop was always right; the SILENCE was the bug. Six presses across
-    // all eight channels produced no frame, no pixel and no sound.
-    if (unauthorised_ < UINT16_MAX) {
-      ++unauthorised_;
+    // Duration keys stay dropped, not queued: a duration held until the next
+    // window opens would buy time on the NEXT member's scan, which is the
+    // unexpiring-flag defect this window exists to close. Only those drops are
+    // counted as unauthorised, so the `!PONG` counter still means "a press
+    // thrown away", i.e. a stuck contact or a bridge that stopped sending
+    // `!AUTH`.
+    bool forwarded = false;
+    bool dropped = false;
+    for (uint8_t i = 0U; i < hal::kButtonCount; ++i) {
+      if ((pressed & buttonBit(i)) == 0U) {
+        continue;
+      }
+      if (i < hal::kDurationButtonBase && sendFrame(proto::Frame::btn(static_cast<proto::Key>(i)))) {
+        forwarded = true;
+        continue;
+      }
+      dropped = true;
     }
-    screens_.hint(nowMs);
+    if (dropped) {
+      if (unauthorised_ < UINT16_MAX) {
+        ++unauthorised_;
+      }
+      // The drop was always right; the SILENCE was the bug. Six presses across
+      // all eight channels used to produce no frame, no pixel and no sound.
+      screens_.hint(nowMs);
+    } else if (forwarded) {
+      // The bridge answers within a pass or two. If it does not — it is dead,
+      // rebooting or mid-flash — the Mega paints its own hint once the grace
+      // runs out, so the press is never met with silence.
+      screens_.armHintFallback(nowMs);
+    }
     return;
   }
   for (uint8_t i = 0U; i < hal::kButtonCount; ++i) {
@@ -423,7 +453,14 @@ void CourtBox::applyExt(const proto::Frame& frame, uint32_t nowMs) {
     // The relay is open. Refusing is the spec's rule; saying so is what stops
     // the bridge believing it extended a session that had already ended.
     static_cast<void>(sendFrame(proto::Frame::err(proto::DecodeError::BadArg)));
+    return;
   }
+  // The new deadline, at once (Mega 2.1.0). A member who just paid to extend
+  // a court reads its minutes left from the bridge, which reads them from
+  // `!STATE`; waiting up to ten seconds for the periodic frame would show the
+  // old number. The mask has not changed, so the due-time is what is forced.
+  stateDue_.arm(nowMs, 0U);
+  publishState(nowMs);
 }
 
 // --- outbound --------------------------------------------------------------

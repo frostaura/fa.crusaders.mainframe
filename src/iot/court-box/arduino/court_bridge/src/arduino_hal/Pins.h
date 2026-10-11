@@ -28,7 +28,8 @@
 
 namespace arduino_hal {
 
-/// Courts A-D. Active LOW; the inversion itself lives in hal::relayLevelFor().
+/// Courts A-D. Polarity is the RELAY_ACTIVE_LOW build flag — see
+/// courtRelayLevelFor() in ArduinoRelay.cpp.
 inline constexpr uint8_t kRelayPins[hal::kRelayChannelCount] = {2U, 3U, 4U, 5U};
 
 /// Courts A-D (green) then durations 1-4 (black), all INPUT_PULLUP.

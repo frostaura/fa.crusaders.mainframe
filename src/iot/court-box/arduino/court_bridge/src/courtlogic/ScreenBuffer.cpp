@@ -91,7 +91,7 @@ void readyIn(char* out, uint8_t cols, uint16_t seconds) {
 } // namespace
 
 ScreenBuffer::ScreenBuffer(hal::IDisplayPort& display)
-    : display_(display), staged_(), live_(), hold_(), hintUntil_(), hintAllowedAt_(), refresh_(),
+    : display_(display), staged_(), live_(), hold_(), hintUntil_(), hintAllowedAt_(), hintFallback_(), refresh_(),
       holdMs_(kDefaultHoldMs), clockMinute_(kNoClockMinute), clockStampMs_(0U), courtNumbers_(),
       // "No complaint" until the bridge says otherwise. The Mega cannot know
       // what the link is doing and must not guess in either direction: the
@@ -119,6 +119,7 @@ void ScreenBuffer::begin(uint32_t nowMs) {
   hold_.disarm();
   hintUntil_.disarm();
   hintAllowedAt_.disarm();
+  hintFallback_.disarm();
   holdMs_ = kDefaultHoldMs;
   showFlags_ = 0U;
   clockMinute_ = kNoClockMinute;
@@ -148,6 +149,9 @@ void ScreenBuffer::stageRow(uint8_t row, const char* text) {
 }
 
 void ScreenBuffer::show(uint32_t seconds, uint8_t flags, uint32_t nowMs) {
+  // The bridge answered, so the Mega's own fallback for a forwarded court
+  // press is not needed. `!LCD` comes through here too (overlay()).
+  hintFallback_.disarm();
   if ((flags & kShowActionRowOnly) != 0U) {
     static_cast<void>(showActionRowOnly(seconds, nowMs));
     return;
@@ -262,6 +266,15 @@ void ScreenBuffer::hint(uint32_t nowMs) {
   char row[hal::kDisplayCols + 1U];
   padInto(row, "SCAN YOUR CODE FIRST", hal::kDisplayCols);
   paintRow(3U, row);
+  // AND row 1, because the club's panel is a 16x2 and row 3 is off-glass
+  // there (Mega 2.1.0). Under the landing screen's SCAN YOUR CODE it reads
+  // SCAN CODE FIRST; poll() puts the live row back when the hint expires.
+  padInto(row, kHintLine, hal::kDisplayCols);
+  paintRow(1U, row);
+}
+
+void ScreenBuffer::armHintFallback(uint32_t nowMs) {
+  hintFallback_.arm(nowMs, kHintFallbackMs);
 }
 
 void ScreenBuffer::noteActivity(uint32_t nowMs) {
@@ -273,8 +286,14 @@ void ScreenBuffer::noteActivity(uint32_t nowMs) {
 // --- one pass ---------------------------------------------------------------
 
 void ScreenBuffer::poll(const RelayGuard& relays, uint32_t nowMs) {
+  if (hintFallback_.isArmed() && hintFallback_.expired(nowMs)) {
+    // The bridge never answered a forwarded court press.
+    hintFallback_.disarm();
+    hint(nowMs);
+  }
   if (hintUntil_.isArmed() && hintUntil_.expired(nowMs)) {
     hintUntil_.disarm();
+    paintRow(1U, live_[1]);
     paintRow(3U, live_[3]);
   }
   if (hold_.isArmed() && hold_.expired(nowMs)) {
@@ -310,10 +329,12 @@ void ScreenBuffer::refreshLive(const RelayGuard& relays, uint32_t nowMs) {
     return;
   }
 
+  renderSummaryRow(relays, nowMs, live_[1]);
   renderCourtRow(relays, nowMs, live_[2]);
   renderActionRow(nowMs, live_[3]);
   paintRow(2U, live_[2]);
   if (!hintUntil_.isArmed()) {
+    paintRow(1U, live_[1]);
     paintRow(3U, live_[3]);
   }
 }
@@ -331,7 +352,7 @@ void ScreenBuffer::commit() {
 
 void ScreenBuffer::renderLanding(const RelayGuard& relays, uint32_t nowMs) {
   padInto(live_[0], kIdleLine1, hal::kDisplayCols);
-  padInto(live_[1], kIdleLine2, hal::kDisplayCols);
+  renderSummaryRow(relays, nowMs, live_[1]);
   renderCourtRow(relays, nowMs, live_[2]);
   renderActionRow(nowMs, live_[3]);
   for (uint8_t r = 0U; r < proto::kMaxRows; ++r) {
@@ -361,6 +382,58 @@ void ScreenBuffer::renderCourtRow(const RelayGuard& relays, uint32_t nowMs, char
       continue;
     }
     rightAlign(&out[at + 2U], 2U, minutesCeilCapped(left));
+  }
+}
+
+/// Row 1 of the landing screen: the lit courts' minutes left inside the
+/// sixteen columns a 1602 shows (Mega 2.1.0), or kIdleLine2 when all are dark.
+///
+/// ONE lit court reads as a sentence — `COURT B 45 MIN` — because that is the
+/// common case and the clearest. Two or more read as four-column cells,
+/// `A45 C 5`, letter then minutes left, which fit all four courts in sixteen
+/// columns. Minutes round UP, as on the full court row: a court with thirty
+/// seconds left reads 1, never 0.
+void ScreenBuffer::renderSummaryRow(const RelayGuard& relays, uint32_t nowMs, char* out) const {
+  padInto(out, "", hal::kDisplayCols);
+  uint8_t lit = 0U;
+  uint8_t only = 0U;
+  for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
+    if (relays.remainingSeconds(i, nowMs) > 0U) {
+      ++lit;
+      only = i;
+    }
+  }
+  if (lit == 0U) {
+    padInto(out, kIdleLine2, hal::kDisplayCols);
+    return;
+  }
+  if (lit == 1U) {
+    char text[16] = "COURT ? ";
+    text[6] = static_cast<char>('A' + static_cast<int>(only));
+    rightAlign(&text[8], 2U, minutesCeilCapped(relays.remainingSeconds(only, nowMs)));
+    text[10] = ' ';
+    text[11] = 'M';
+    text[12] = 'I';
+    text[13] = 'N';
+    text[14] = '\0';
+    // "COURT B  5 MIN" reads oddly with the pad space; close it up.
+    if (text[8] == ' ') {
+      for (uint8_t c = 8U; c < 14U; ++c) {
+        text[c] = text[c + 1U];
+      }
+    }
+    padInto(out, text, hal::kDisplayCols);
+    return;
+  }
+  uint8_t at = 0U;
+  for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
+    const uint16_t left = relays.remainingSeconds(i, nowMs);
+    if (left == 0U || static_cast<uint8_t>(at + 3U) > hal::kDisplayCols) {
+      continue;
+    }
+    out[at] = static_cast<char>('A' + static_cast<int>(i));
+    rightAlign(&out[at + 1U], 2U, minutesCeilCapped(left));
+    at = static_cast<uint8_t>(at + 4U);
   }
 }
 

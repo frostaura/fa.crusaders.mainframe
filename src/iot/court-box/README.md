@@ -142,7 +142,13 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.9 and Mega 2.0.0**: 2.2.9
+`platformio.ini`. The current images are **bridge 2.3.0 and Mega 2.1.0**, and
+both chips are reflashed for them: the Mega drives the relays ACTIVE HIGH
+(solid-state relays), leads its landing screen with SCAN YOUR CODE over the lit
+courts' minutes, and forwards court keys with the window shut; the bridge greets
+a recognised scan (`HI <NAME>` / `BALANCE <n> MIN`), answers an unscanned
+court press with the minutes left, and extends a lit court at the panel via
+`/api/v1/device/extend` in place of the pay-for offer. Before them, 2.2.9
 remembers a scan for the club's own scan memory, holds it for the whole
 countdown of every pay-for quote and PRESS AGAIN without ever shortening it,
 and never past the server's bound on its age — when a whole countdown no
@@ -257,7 +263,7 @@ Two things stand behind that timer on the Mega itself:
 
 | Function | Connection |
 |---|---|
-| Court relays A–D | Mega pins **2, 3, 4, 5** — **active LOW** |
+| Court relays A–D | Mega pins **2, 3, 4, 5** — **ACTIVE HIGH** (normally-open solid-state relays, `RELAY_ACTIVE_LOW=0`, Mega 2.1.0); fit a pull-down on each SSR input so the bootloader's high-Z second is a guaranteed off |
 | Court buttons A–D (green) | Mega pins **22, 24, 26, 28**, `INPUT_PULLUP` |
 | Duration buttons 15/30/45/60m (black) | Mega pins **30, 32, 34, 36**, `INPUT_PULLUP` |
 | Status LED | Mega pin **13** |

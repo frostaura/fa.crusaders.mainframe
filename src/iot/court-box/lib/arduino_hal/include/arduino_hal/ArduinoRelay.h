@@ -2,12 +2,22 @@
 //
 // WHY begin() DRIVES THE PIN BEFORE IT CONFIGURES IT
 // --------------------------------------------------
-// An AVR pin powers up as an input reading LOW, and pinMode(pin, OUTPUT) latches
-// that LOW onto the pin. On an ACTIVE LOW relay board that closes the contact:
-// calling pinMode() first turns all four courts' lights ON at every reset, for
-// as long as it takes the sketch to write HIGH. Writing HIGH while the pin is
-// still an input enables the pullup instead, so the level is already high when
-// the pin becomes an output and no court ever flickers on.
+// pinMode(pin, OUTPUT) latches whatever the PORT bit holds onto the pin. Writing
+// the RELEASED level while the pin is still an input sets that bit first, so
+// the pin becomes an output already at "off" and no court ever flickers on.
+//
+// The club now runs NORMALLY-OPEN SOLID-STATE relays, ACTIVE HIGH (Mega 2.1.0,
+// RELAY_ACTIVE_LOW=0): released is LOW. An AVR resets with PORT=0 and DDR=0,
+// so the bit is already LOW; writing LOW first keeps the pullup OFF (a pullup
+// on an SSR input could half-drive it) and pinMode() then latches LOW = off.
+// The order still matters for the other polarity: on an active-LOW board,
+// pinMode() first would latch the power-on LOW and close all four contacts for
+// as long as it took to write HIGH. Level first, direction second, either way.
+//
+// Between reset and begin() — the bootloader's ~1 s — the pins are high-Z
+// inputs. An SSR input left floating is OFF in practice, but a pull-down
+// resistor on each input is what makes that a guarantee rather than a hope;
+// see the README's wiring table.
 //
 // This is not theoretical tidiness. A brownout that resets the Mega repeatedly
 // would otherwise strobe four lighting circuits.

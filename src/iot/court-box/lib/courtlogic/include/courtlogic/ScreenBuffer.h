@@ -74,11 +74,23 @@ namespace courtlogic {
 
 /// The two lines shown when nothing else is.
 ///
-/// A VERBAL CALL TO ACTION, not branding. An idle kiosk that shows only a name
-/// is one people walk past; the second line is the instruction, and it is the
-/// line a member who has never used the box reads first.
-inline constexpr char kIdleLine1[] = "CRUSADERS COURTS";
-inline constexpr char kIdleLine2[] = "SCAN YOUR CODE";
+/// A VERBAL CALL TO ACTION, not branding, and it LEADS (Mega 2.1.0). The club's
+/// panel is a 16x2: rows 2-3 of the 20x4 layout are off-glass there, so the
+/// scan prompt is row 0 and whatever row 1 says is all the member sees beside
+/// it. Row 1 is kIdleLine2 while every court is dark and the lit courts' minutes
+/// left (renderSummaryRow) while any is lit — the one live fact a 1602 can show.
+inline constexpr char kIdleLine1[] = "SCAN YOUR CODE";
+inline constexpr char kIdleLine2[] = "TO PLAY";
+
+/// The Mega's own answer to a press it could not act on, painted on row 1 —
+/// the only row besides the scan prompt that a 16x2 shows. Fifteen columns.
+inline constexpr char kHintLine[] = "SCAN CODE FIRST";
+
+/// How long a COURT press forwarded with the window shut waits for the bridge
+/// to paint its answer before the Mega paints kHintLine itself. The bridge
+/// answers within a pass; a bridge that has not answered in this long is dead,
+/// rebooting or mid-flash, and the press must not be met with silence.
+inline constexpr uint32_t kHintFallbackMs = 1500UL;
 
 /// Painted the instant a scan completes, before any answer exists.
 ///
@@ -88,9 +100,11 @@ inline constexpr char kIdleLine2[] = "SCAN YOUR CODE";
 /// until they reported the scanner as broken. This is local feedback only — no
 /// decision moves onto the Mega — and the bridge's own answer replaces it
 /// within a second when the bridge is alive.
-inline constexpr char kScanFeedbackLine1[] = "CHECKING YOUR CODE";
-inline constexpr char kScanFeedbackLine2[] = "";
-inline constexpr char kScanFeedbackLine3[] = "Please wait";
+// Rows 0-1 within sixteen columns: the club's panel is a 16x2, and the old
+// "CHECKING YOUR CODE" clipped to "CHECKING YOUR CO" there.
+inline constexpr char kScanFeedbackLine1[] = "CHECKING CODE";
+inline constexpr char kScanFeedbackLine2[] = "PLEASE WAIT";
+inline constexpr char kScanFeedbackLine3[] = "";
 
 /// How long an overlay stands when nobody said. Ten seconds is GOAL item 1's
 /// number and the old scan-feedback timeout, kept, made the DEFAULT rather than
@@ -237,6 +251,11 @@ public:
   /// arrive as an action-row-only `!SHOW`; see kShowActionRowOnly.
   void hint(uint32_t nowMs);
 
+  /// A COURT press was forwarded to the bridge with the window shut. Paints
+  /// nothing now: if no `!SHOW` or `!LCD` arrives within kHintFallbackMs the
+  /// bridge is not answering and hint() runs instead.
+  void armHintFallback(uint32_t nowMs);
+
   /// Any debounced press, whether or not it was forwarded.
   ///
   /// Re-arms the current hold. That is the "simple action" a timed response is
@@ -260,6 +279,7 @@ private:
   void commit();
   void renderLanding(const RelayGuard& relays, uint32_t nowMs);
   void renderCourtRow(const RelayGuard& relays, uint32_t nowMs, char* out) const;
+  void renderSummaryRow(const RelayGuard& relays, uint32_t nowMs, char* out) const;
   void renderActionRow(uint32_t nowMs, char* out) const;
   void refreshLive(const RelayGuard& relays, uint32_t nowMs);
   void writeTail(char* row, const char* tail, uint8_t width) const;
@@ -282,6 +302,7 @@ private:
   tb::Deadline hold_;
   tb::Deadline hintUntil_;
   tb::Deadline hintAllowedAt_;
+  tb::Deadline hintFallback_;
   tb::Deadline refresh_;
 
   /// What the current hold was armed FOR, so any press can re-arm it to the

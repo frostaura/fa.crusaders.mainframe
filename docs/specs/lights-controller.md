@@ -21,6 +21,39 @@
 > `Authorization: Bearer` header, on requests the box makes *outbound*; nothing
 > calls the box. Kept for the design rationale and the fail-safe discussion.
 
+## The installed court box at the panel (bridge 2.3.0 / Mega 2.1.0)
+
+What a member sees and does at the Crusaders box today. Everything essential
+is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
+
+- **Relays are ACTIVE HIGH.** The club fitted normally-open solid-state relays;
+  `court_mega` is built with `RELAY_ACTIVE_LOW=0`. The pin is still driven to
+  its released level (LOW) before it becomes an output, so a reset never
+  flashes a court on. Fit a pull-down on each SSR input so the bootloader's
+  high-Z second is a guaranteed off.
+- **Landing screen (Mega-owned):** `SCAN YOUR CODE`, then `TO PLAY` while every
+  court is dark, or the lit courts' minutes left — `COURT B 45 MIN` for one,
+  `A45 C 5` for several.
+- **Scan → greeting → outcome.** A recognised online scan reads
+  `HI <NAME>` / `BALANCE <n> MIN` (from `/activate`'s `greeting_name` and
+  `balance_minutes`; `HI` / `WELCOME` when absent, and for offline roster
+  scans) for the card hold, then the outcome: the lit court and its minutes,
+  or `PICK A COURT` / `THEN A TIME` for a member with nothing booked.
+- **Court press with no scan:** a lit court reads `COURT A 45 MIN` /
+  `SCAN TO EXTEND`; a dark one `SCAN YOUR CODE` / `Then a court`.
+- **Court press after a scan:** a dark court is a walk-up (`COURT A` /
+  `HOW LONG?`, then a black button). A **lit** court — anybody's, the scanner's
+  own included — reads `COURT A 45 MIN` / `EXTEND:PICK TIME`; a black button
+  POSTs `/api/v1/device/extend` and, on success, sends `!EXT` for
+  `min(90 min, remaining + extended_minutes)` (longer sessions are held past the
+  cap by `Relight`) and reads `COURT A +30 MIN` / `BALANCE <n> MIN`. Refusals:
+  `COURT NOT ON` / `PICK ANOTHER`, `NO TIME BEFORE` / `NEXT BOOKING`,
+  `TOO FEW MINUTES` / `BUY & RETRY`, otherwise the walk-up's words. **Never
+  offline:** `NO CONNECTION` / `EXTEND NEEDS NET`. The D10 pay-for offer and
+  pressing your own lit court to switch it off are gone from the panel.
+- Every screen reverts to the landing screen on its own (revert or choice hold,
+  and the Mega's 120 s clamp behind both).
+
 [Superseded design] The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
 
 ## Why this shape

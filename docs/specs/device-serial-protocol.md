@@ -51,7 +51,7 @@ guessed at: a half-understood relay command is worse than a missing one.
 |---|---|
 | `!ON,<court>,<seconds>` | Close the relay for **at most** `seconds`. Duration is **mandatory**. |
 | `!OFF,<court>` | Open the relay now. |
-| `!EXT,<court>,<seconds>` | Extend the deadline to now + `seconds`. Refused with `!ERR,BADARG` if the relay is open — which the bridge reads as "that court is already dark", forgetting the extension rather than re-sending it. The bridge emits `!EXT` itself: for a lit court whose booking outlasts the relay deadline, `bridgelogic::Relight` sends one **60 s before each cap expiry** (`kExtLeadMs`), so a two-hour booking stays lit while the ESP lives and still fails open at the next cap when it dies. A lost `!EXT` is re-sent once by `bridgelogic::OnRetry`, on the same rule as a lost `!ON`. |
+| `!EXT,<court>,<seconds>` | Extend the deadline to now + `seconds`. Refused with `!ERR,BADARG` if the relay is open — which the bridge reads as "that court is already dark", forgetting the extension rather than re-sending it. The bridge emits `!EXT` itself: for a lit court whose booking outlasts the relay deadline, `bridgelogic::Relight` sends one **60 s before each cap expiry** (`kExtLeadMs`), so a two-hour booking stays lit while the ESP lives and still fails open at the next cap when it dies. A lost `!EXT` is re-sent once by `bridgelogic::OnRetry`, on the same rule as a lost `!ON`. Since bridge 2.3.0 it is also how a paid **extension at the panel** reaches the relay (`min(5400, remaining + extended_minutes × 60)`), and since Mega 2.1.0 an accepted `!EXT` is followed at once by a `!STATE` carrying the new deadline. |
 | `!LCD,<line1>,<line2>` | The two-row form, kept. Stages rows 0 and 1 and commits them with the default hold, so it is an overlay with a deadline like every other screen. Text is truncated at `court::kLineLen` — **20** columns, not 16; see *Screens, and who owns the glass*. |
 | `!ROW,<row>,<text>` | Stage one row of the pending overlay. **Paints nothing**; `!SHOW` commits. `<row>` is `0`–`3`, and a row index the protocol does not have is **`!ERR,BADARG`** — never folded onto the last row. |
 | `!SHOW,<seconds>,<flags>` | Commit the staged rows **atomically** and arm their revert deadline. `<seconds>` is clamped into **[1, 120]**. `<flags>` bit0 = countdown in the action row's right-hand cells; bit1 = replace the action row only, leaving rows 0–2 untouched. |
@@ -71,7 +71,7 @@ see *Safety rule 3*, which is what makes the two ranges separate fields in
 
 | Frame | Meaning |
 |---|---|
-| `!BTN,<key>` | A debounced press. `key` ∈ `A`–`D`, `1`–`4`. |
+| `!BTN,<key>` | A debounced press. `key` ∈ `A`–`D`, `1`–`4`. **Court keys `A`–`D` are sent whether or not the window is armed** (Mega 2.1.0) — the bridge answers an unscanned court press with the court's minutes left (`SCAN TO EXTEND`) or `SCAN YOUR CODE`. **Duration keys `1`–`4` are sent only while armed**; outside the window they are dropped, counted (`unauthorised`) and answered on the Mega's own glass. |
 | `!SCAN,<code>` | A complete line from the QR scanner on Serial2. |
 | `!STATE,<mask>,<remA>,<remB>,<remC>,<remD>` | Relay bitmask and per-relay seconds remaining. Sent on change and every 10s. **The Mega is the authority on the relay deadline and the bridge consumes both fields:** the mask reconciles held state (`bridgelogic::reconcile`), and the per-court seconds correct the deadline `bridgelogic::Relight` only *believes* it moved when it sent an `!EXT` — so an extension lost on the wire is detected within one `!STATE` and re-sent, instead of the court going dark half an hour later. |
 | `!PONG,<version>,<uptime_s>` · `!PONG,<version>,<uptime_s>,<tx_dropped>,<rx_errors>,<unauthorised>` | Answer to `!PING`. **Two arguments or five**, and the three counters are additive: a bridge flashed ahead of the Mega it is wired to must still read the answer, and the Mega is the half that cannot be reflashed over the air, so the two-argument form still decodes. The counters are the Mega's own since-boot totals (`courtlogic::CourtBox`), which existed already and which nothing off the board could read — so a climbing "presses thrown away because the window was shut", from a stuck button or a bridge that stopped sending `!AUTH`, was invisible from the office. The contract on the bridge side is a **per-heartbeat diff reported as a fault**, which is what `bridgelogic::FaultLog::noteMany` is for: a diff of zero notes nothing at all, so a quiet link never opens a window. |
@@ -87,10 +87,23 @@ network or the backend believe.
    indefinite-on in v2. `RELAY_HARD_CAP_MS` (90 minutes) caps it even if a frame
    asks for more. A Mega whose bridge has been unplugged still opens its relays.
 
-2. **Authorisation expires.** `!AUTH` arms buttons for a bounded window;
-   `AUTH_TTL_MS` (30s) is the default and a lapse emits `!EVT,AUTHEXPIRED`.
-   Carl's `authenticated` flag has no expiry at all, so a button pressed hours
-   after someone else's scan still fires a relay on their credit.
+2. **Authorisation expires.** `!AUTH` arms the DURATION keys for a bounded
+   window; `AUTH_TTL_MS` (30s) is the default and a lapse emits
+   `!EVT,AUTHEXPIRED`. Carl's `authenticated` flag has no expiry at all, so a
+   button pressed hours after someone else's scan still fires a relay on their
+   credit.
+
+   Since Mega 2.1.0 the window gates **duration keys only**. Court keys are
+   forwarded with the window shut, because a court key on its own buys nothing
+   and lights nothing — every purchase and every extension needs a duration
+   press, and that is still dropped outside the window, so no press can be
+   held over to the next member's scan. The bridge decides what an unscanned
+   court press means: a lit court reads `COURT A 45 MIN / SCAN TO EXTEND`, a
+   dark one `SCAN YOUR CODE`. If the bridge paints nothing within 1.5 s (dead,
+   rebooting, mid-flash) the Mega paints `SCAN CODE FIRST` on row 1 itself.
+   The `!PONG` `unauthorised` counter counts **dropped duration presses only**,
+   so it still means "a press thrown away" — a stuck contact, or a bridge that
+   stopped sending `!AUTH`.
 
    *Who the window is for* is the bridge's rule (`bridgelogic::AuthPolicy`), and
    it matters as much as the expiry: the window is armed **only for a recognised

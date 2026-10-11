@@ -95,6 +95,10 @@ struct ActivationResult {
   /// itself is bridgelogic::AuthPolicy's, which keeps it armed for the member
   /// who just lit the court so their OFF button works.)
   bool disarmAuth = false;
+  /// A recognised member with nothing to light — `no_booking` or `ended`.
+  /// The glass invites a walk-up (PICK A COURT / THEN A TIME) after the
+  /// greeting rather than sending them to the desk (bridge 2.3.0).
+  bool invitesWalkUp = false;
   /// What to paint and, on a grant, which relay to drive for how long.
   court::Outcome outcome;
 };
