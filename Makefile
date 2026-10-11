@@ -364,6 +364,10 @@ corpus-check:
 # reaches the network.
 arduino-export: build-iot
 	$(PY) $(IOT_SHARED_TOOLS)/arduino_export.py
+	# Swept AGAIN after writing: iCloud copies files it sees rewritten, so a sweep
+	# before the export cannot catch the `Extend 2.cpp` the export itself provoked —
+	# and the Arduino IDE compiles every file in the sketch folder, twice-defined.
+	@$(PY) $(IOT_SHARED_TOOLS)/sweep_icloud_duplicates.py
 
 # Regenerate and fail if the committed sketches are stale — same shape as
 # corpus-check, for the same reason: nothing else runs the generator, so an
@@ -403,7 +407,7 @@ arduino-check: arduino-export
 # a switch change first. The positions below are the project wiring sheet's and
 # the hardware is fixed: nothing here is negotiable, and getting DIP 1/2 wrong
 # means avrdude talks to the ESP8266 and times out looking like a dead board.
-flash-mega:
+flash-mega: sweep-icloud
 	@echo "DIP switches for a MEGA upload:  1 OFF  2 OFF  3 ON  4 ON  5-8 OFF"
 	@echo "Set them now, then leave the box powered."
 	@$(WAIT_FOR_PORT); \
@@ -417,7 +421,7 @@ flash-mega:
 # court_bridge/main.cpp #errors on a missing value and static_asserts on an
 # empty one; this is the friendlier half of the same rule, before twenty seconds
 # of compiler output.
-flash-bridge:
+flash-bridge: sweep-icloud
 	@test -f $(IOT_DIR)/court-box/src/common/secrets.h || ( \
 	  echo "$(IOT_DIR)/court-box/src/common/secrets.h is missing."; \
 	  echo "  cp $(IOT_DIR)/court-box/src/common/secrets.h.example $(IOT_DIR)/court-box/src/common/secrets.h"; \
