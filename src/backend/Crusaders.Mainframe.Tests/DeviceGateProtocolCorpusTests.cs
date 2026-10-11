@@ -467,9 +467,11 @@ public class DeviceGateProtocolCorpusTests
         // response vectors (five for the power-dip relay restore, two for the nine `config`
         // settings, three for `member_display`). Four more requests in R15 D15-1: the activate,
         // walk-up and pay-for bodies and the event body carrying a scan with a quote, a backslash
-        // and two bytes above 0x7F, escaped.
-        Assert.Equal(11, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
-        Assert.Equal(19, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
+        // and two bytes above 0x7F, escaped. 12 and 25 since scan-to-extend: the extend body, five
+        // extend answers (ok, truncated, court_not_lit, no_time_available, insufficient_balance)
+        // and the activate answer carrying greeting_name and balance_minutes.
+        Assert.Equal(12, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
+        Assert.Equal(25, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
     }
 
     private static string Body(string section, string id) =>

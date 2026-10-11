@@ -88,4 +88,59 @@ public class MemberDisplayTests
     {
         Assert.Null(MemberDisplay.Shorten(full));
     }
+
+    // ---- the court box's greeting_name: the first name only ------------------------------------
+
+    [Theory]
+    [InlineData("Olga Organiser", "OLGA")]
+    [InlineData("  Zoë   Nel ", "ZOE")]
+    [InlineData("Søren Æbelø", "SOREN")]
+    [InlineData("Straße Łukasz", "STRASSE")]
+    [InlineData("Mary-Jane Watson", "MARY-JANE")]
+    [InlineData("O’Brien Kelly", "O'BRIEN")]
+    [InlineData("🎾 Ava Smith", "AVA")]                 // a glyph the panel cannot print is not the first word
+    [InlineData("Kim\\Lee Park", "KIM")]                // a backslash separates words, as in Shorten
+    [InlineData("Ana~Maria Vos", "ANA")]
+    [InlineData("Cher", "CHER")]
+    public void The_greeting_is_the_first_word_folded_to_upper_case_ascii(string full, string expected)
+    {
+        Assert.Equal(expected, MemberDisplay.FirstName(full));
+    }
+
+    [Fact]
+    public void A_first_name_longer_than_the_line_is_cut_to_the_cap()
+    {
+        var shown = MemberDisplay.FirstName("Wolfeschlegelsteinhausen Bergerdorff");
+
+        Assert.Equal(MemberDisplay.MaxLength, shown.Length);
+        Assert.Equal("WOLFESCHLEGELSTE", shown);
+        Assert.Equal("ABCDEFGHIJKLMNOP", MemberDisplay.FirstName("abcdefghijklmnop Q"));   // exactly the cap is kept whole
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("🎾🎾🎾")]
+    [InlineData("李小龍")]
+    public void No_printable_first_name_is_an_empty_greeting_never_null(string? full)
+    {
+        Assert.Equal("", MemberDisplay.FirstName(full));
+    }
+
+    [Theory]
+    [InlineData("Zoë Nel")]
+    [InlineData("Ñandúvillaseñorinhoço Peña")]
+    [InlineData("Thabo “TJ” Mokoena")]
+    [InlineData("\"Quoted\" Name")]
+    public void Every_greeting_character_is_printable_ascii_and_fits(string full)
+    {
+        var shown = MemberDisplay.FirstName(full);
+
+        Assert.All(shown, c => Assert.InRange(c, ' ', '}'));
+        Assert.DoesNotContain(' ', shown);
+        Assert.DoesNotContain('"', shown);
+        Assert.InRange(shown.Length, 1, MemberDisplay.MaxLength);
+        Assert.Equal(shown.ToUpperInvariant(), shown);
+    }
 }

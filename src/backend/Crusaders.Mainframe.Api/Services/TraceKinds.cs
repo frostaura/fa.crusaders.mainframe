@@ -633,6 +633,11 @@ public static class TraceKinds
         MemberCodeRollout.PhaseChangedAction,
         // The retention sweep's own record — its actor is the anonymised sentinel, never a person.
         "retention.anonymised",
+        // An extension bought at the box: the extension IS a walk-up-shaped booking, whose own
+        // `booking.walk_up_created` row (written by CommitAsync, same actor and subject) already puts
+        // the purchase on the scanner's Night and its LightsPurchase row on the wallet strand. This
+        // twin only names which session was extended; worded too, one purchase would read twice.
+        Endpoints.DeviceExtendEndpoint.ExtendedAction,
     ];
 
     // ------------------------------------------------------------------ mapping

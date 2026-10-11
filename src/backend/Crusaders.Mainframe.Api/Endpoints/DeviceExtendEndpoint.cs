@@ -34,6 +34,13 @@ public static class DeviceExtendEndpoint
     public const string InsufficientBalance = "insufficient_balance";
     public const string CourtNotOnDevice = "court_not_on_device";
 
+    /// <summary>
+    /// The audit row naming which session an extension extended. Declared in
+    /// <see cref="TraceKinds.NotAPersonsNight"/>: the extension's own <c>booking.walk_up_created</c>
+    /// row already tells the scanner's Night.
+    /// </summary>
+    public const string ExtendedAction = "court.extended";
+
     /// <summary>Longest extension accepted — the relay bank's hard cap.</summary>
     public const int MaxMinutes = 90;
 
@@ -153,7 +160,7 @@ public static class DeviceExtendEndpoint
             TenantId = ok.Booking.TenantId,
             ActorUserId = x.UserId,
             SubjectUserId = x.UserId,
-            Action = "court.extended",
+            Action = ExtendedAction,
             DetailsJson = JsonSerializer.Serialize(new
             {
                 booking_id = ok.Booking.Id,

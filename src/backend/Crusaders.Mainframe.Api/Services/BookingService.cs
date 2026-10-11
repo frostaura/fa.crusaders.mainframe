@@ -485,28 +485,9 @@ public sealed class BookingService
 
         var now = _clock.GetUtcNow();
 
-        // Closing time bounds the extension exactly as it bounds a walk-up; an extension starting
-        // at or after closing has nothing to sell, which is no time rather than a closed club.
-        var window = OpenWindowUtc(startsAt, settings);
-        if (startsAt < window.OpensAtUtc || startsAt >= window.ClosesAtUtc)
-        {
-            return new BookingResult.NoTimeAvailable(requestedMinutes, 0);
-        }
-
-        var requestedEnd = startsAt.AddMinutes(requestedMinutes);
-        var nextStart = await _db.Bookings
-            .Where(b => b.CourtId == courtId
-                && b.Status != BookingStatus.Cancelled
-                && b.StartsAt < requestedEnd && b.EndsAt > startsAt)
-            .OrderBy(b => b.StartsAt)
-            .Select(b => (DateTimeOffset?)b.StartsAt)
-            .FirstOrDefaultAsync(ct);
-        var endsAt = nextStart is { } next && next < requestedEnd ? next : requestedEnd;
-        if (endsAt > window.ClosesAtUtc) endsAt = window.ClosesAtUtc;
-
-        var grantedMinutes = (int)Math.Floor((endsAt - startsAt).TotalMinutes);
+        var grantedMinutes = await ExtensionMinutesAsync(courtId, startsAt, requestedMinutes, settings, ct);
         if (grantedMinutes <= 0) return new BookingResult.NoTimeAvailable(requestedMinutes, 0);
-        endsAt = startsAt.AddMinutes(grantedMinutes);
+        var endsAt = startsAt.AddMinutes(grantedMinutes);
 
         var subject = await SubjectAsync(new BookingPayer(userId, userId), startsAt, settings, ct);
         var slot = new RuleSlot(courtId, startsAt, endsAt, 1, IsWalkUp: true);
@@ -548,6 +529,32 @@ public sealed class BookingService
             ExternalReference: externalReference,
             DeferConfirmation: false,
             Rules: (subject, slot)), ct);
+    }
+
+    /// <summary>
+    /// The whole minutes an extension starting at <paramref name="startsAt"/> can have: the
+    /// request, cut at the next booking on the court and at closing time. Zero means no time.
+    /// Closing time bounds the extension exactly as it bounds a walk-up; an extension starting
+    /// at or after closing has nothing to sell, which is no time rather than a closed club.
+    /// </summary>
+    private async Task<int> ExtensionMinutesAsync(
+        Guid courtId, DateTimeOffset startsAt, int requestedMinutes, TenantSettingsView settings, CancellationToken ct)
+    {
+        var window = OpenWindowUtc(startsAt, settings);
+        if (startsAt < window.OpensAtUtc || startsAt >= window.ClosesAtUtc) return 0;
+
+        var requestedEnd = startsAt.AddMinutes(requestedMinutes);
+        var nextStart = await _db.Bookings
+            .Where(b => b.CourtId == courtId
+                && b.Status != BookingStatus.Cancelled
+                && b.StartsAt < requestedEnd && b.EndsAt > startsAt)
+            .OrderBy(b => b.StartsAt)
+            .Select(b => (DateTimeOffset?)b.StartsAt)
+            .FirstOrDefaultAsync(ct);
+        var endsAt = nextStart is { } next && next < requestedEnd ? next : requestedEnd;
+        if (endsAt > window.ClosesAtUtc) endsAt = window.ClosesAtUtc;
+
+        return Math.Max(0, (int)Math.Floor((endsAt - startsAt).TotalMinutes));
     }
 
     /// <summary>
