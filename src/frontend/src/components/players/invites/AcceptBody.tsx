@@ -14,6 +14,7 @@ import { heldPartsLine } from "@/lib/walletCopy";
 import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { Minutes } from "@/components/Minutes";
 import { inviteCapSentence, inviteRefusal, inviteWhen, organiserName } from "./inviteFacts";
+import { WhenWhole } from "./WhenWhole";
 import type { AcceptAnswer } from "@/lib/playersApi";
 import type { AcceptFlow } from "./useAcceptFlow";
 import { useDailyCap } from "./useDailyCap";
@@ -103,7 +104,7 @@ function GameFacts({ flow }: { flow: AcceptFlow }) {
     <dl className="grid grid-cols-1 gap-x-4 gap-y-3 rounded-xl border-border bg-bg-surface @[13rem]:border @[13rem]:p-3 @[16rem]:grid-cols-2 sm:p-4" data-game-facts="">
       <Fact label={INVITES_COPY.court}>{invite.court_name ?? INVITES_COPY.court}</Fact>
       <Fact label={INVITES_COPY.players}>{playersCount(invite.players)}</Fact>
-      <Fact label={INVITES_COPY.when} className="@[16rem]:col-span-2">{inviteWhen(invite)}</Fact>
+      <Fact label={INVITES_COPY.when} className="@[16rem]:col-span-2"><WhenWhole when={inviteWhen(invite)} /></Fact>
       <Fact label={INVITES_COPY.organiser} className="@[16rem]:col-span-2">
         {/* R12 — the name drops under the avatar rather than break mid-word ("No / msa" at 320 / 200 %). */}
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">

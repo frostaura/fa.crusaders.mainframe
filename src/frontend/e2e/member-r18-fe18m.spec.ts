@@ -100,11 +100,27 @@ for (const [width, root] of [[320, 32], [320, 24], [390, 32], [320, 16]] as cons
 
 const BARTHOLOMEW = { user_id: "55555555-5555-5555-5555-555555555559", name: "Bartholomew Mkhize", photo_url: null };
 
+/**
+ * The game's day pinned to the WIDE case, whatever day the suite runs: the first day from tomorrow
+ * whose date has two digits ("Mon 12 Oct", not "Thu 8 Oct"). With `tomorrowAt` this test passed or
+ * failed by the calendar — the one extra glyph is what pushed "18:00–18:45" over a line at 320 / 150 %.
+ * The club is UTC+2 (as `tomorrowAt`), so 18:00 there is 16:00 UTC on the same date.
+ */
+function wideDayAt(hour: number, minutes = 0): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 1);
+  while (d.getUTCDate() < 10) d.setUTCDate(d.getUTCDate() + 1);
+  d.setUTCHours(hour - 2, minutes, 0, 0);
+  return d.toISOString();
+}
+
 for (const [width, root] of [[320, 32], [320, 24], [390, 16]] as const) {
   test(`L18-1 / L18-4 — the invites card and the invite page break no word, and keep each figure whole, at ${width} / ${root * 100 / 16} %`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await signIn(page);
-    const invite = inviteFixture({ organiser: BARTHOLOMEW, share_minutes: 10, to_pay_minutes: 10, balance_minutes: 600, spendable_minutes: 600, held_minutes: 0, balance_after_minutes: 590 });
+    const invite = inviteFixture({
+      starts_at: wideDayAt(18), ends_at: wideDayAt(18, 45), share_deadline: wideDayAt(20, 45),
+      organiser: BARTHOLOMEW, share_minutes: 10, to_pay_minutes: 10, balance_minutes: 600, spendable_minutes: 600, held_minutes: 0, balance_after_minutes: 590 });
     await serveApi(page, [
       ...memberShellRoutes({ invites: [invite, { ...invite, participant_id: "p-second" }], wallet: { balance_minutes: 600, held_minutes: 0, spendable_minutes: 600 } }),
     ]);

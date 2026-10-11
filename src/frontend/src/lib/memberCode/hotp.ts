@@ -39,9 +39,14 @@ export type SoftHmacKey = { readonly kind: "soft-hmac-sha256"; readonly bytes: U
 /** An HMAC-SHA-256 signing key: a non-extractable WebCrypto key, or the no-WebCrypto fallback. */
 export type HmacKey = CryptoKey | SoftHmacKey;
 
+/**
+ * Realm-blind: a record read back from IndexedDB is a structured clone, and a clone made in another
+ * realm (jsdom's under vitest, a worker's) holds a `Uint8Array` that fails `instanceof` here.
+ */
 export function isSoftHmacKey(key: unknown): key is SoftHmacKey {
   const k = key as Partial<SoftHmacKey> | null;
-  return !!k && typeof k === "object" && k.kind === "soft-hmac-sha256" && k.bytes instanceof Uint8Array;
+  return !!k && typeof k === "object" && k.kind === "soft-hmac-sha256"
+    && ArrayBuffer.isView(k.bytes) && Object.prototype.toString.call(k.bytes) === "[object Uint8Array]";
 }
 
 /** Is `value` a key `hmac` can sign with — what a stored record must hold to be used. */

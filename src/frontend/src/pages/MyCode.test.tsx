@@ -19,7 +19,7 @@ import {
   unreachable,
 } from "../test/harness";
 import { forgetLastKnown, rememberDoor } from "../lib/lastKnown";
-import { fromHex, importHmacKey } from "../lib/memberCode/hotp";
+import { fromHex, importHmacKey, isSoftHmacKey } from "../lib/memberCode/hotp";
 import { loadMemberCode, saveMemberCode } from "../lib/memberCode/keyStore";
 import { GATE_ROSTER_MAX_ENTRIES } from "../lib/gateCopy";
 import { MY_CODE } from "../lib/myCodeCopy";
@@ -102,6 +102,21 @@ describe("MyCode — the one rotating code", () => {
     expect(screen.getByRole("article", { name: "Your member pass" })).toBeInTheDocument();
     expect(enrols(stub)).toBe(1);
     expect(statusReads(stub)).toBe(0);
+  });
+
+  /**
+   * Plain `http://` to the club's LAN server is not a secure context, so the browser gives the page
+   * `crypto` with no `subtle`. The pass still shows the corpus token — made with the soft key — and
+   * the key it enrolled is the fallback, kept on this phone like any other.
+   */
+  it("enrols and shows the corpus token on a page with no WebCrypto (crypto.subtle absent)", async () => {
+    atAnchor();
+    vi.stubGlobal("crypto", { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) });
+    expect(globalThis.crypto.subtle).toBeUndefined();
+    const stub = renderWith();
+    expect(await screen.findByLabelText("Your code")).toHaveTextContent(MEMBER_CODE_FIXTURE.anchorToken);
+    expect(enrols(stub)).toBe(1);
+    expect(isSoftHmacKey((await loadMemberCode())?.key)).toBe(true);
   });
 
   /** The QR carries the bare 19-character token — nothing around it, or the box poisons the scan. */
