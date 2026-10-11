@@ -347,7 +347,23 @@ bool Esp32Watchdog::begin(uint8_t seconds) {
     if (attempt != 0U) {
       delay(10);
     }
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    // Arduino-ESP32 3.x (IDF 5): the (seconds, panic) overload is gone, and
+    // `esp_task_wdt_init` on an already-initialised TWDT is ESP_ERR_INVALID_STATE
+    // rather than the 4.4 "update it". `reconfigure` is the update; `init` is the
+    // fallback for a core built without CONFIG_ESP_TASK_WDT_INIT. The idle-task
+    // mask keeps both cores' idle tasks watched, as the 2.x default did.
+    esp_task_wdt_config_t wdtConfig = {};
+    wdtConfig.timeout_ms = static_cast<uint32_t>(seconds) * 1000U;
+    wdtConfig.idle_core_mask = (1U << portNUM_PROCESSORS) - 1U;
+    wdtConfig.trigger_panic = true;
+    esp_err_t configured = esp_task_wdt_reconfigure(&wdtConfig);
+    if (configured == ESP_ERR_INVALID_STATE) {
+      configured = esp_task_wdt_init(&wdtConfig);
+    }
+#else
     const esp_err_t configured = esp_task_wdt_init(static_cast<uint32_t>(seconds), true);
+#endif
     const esp_err_t subscribed = esp_task_wdt_add(nullptr);
     if (configured == ESP_OK && subscribed == ESP_OK) {
       return true;
