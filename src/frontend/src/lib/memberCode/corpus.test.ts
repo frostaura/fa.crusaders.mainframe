@@ -120,7 +120,7 @@ describe("membercode corpus — derivation.json (from S onwards)", () => {
     // above it (master key → S) is server-only and is not the phone's to check — `hkdf.json` is
     // not read by vitest, per the manifest.
     const secret = await key(c.member_secret_hex);
-    expect(secret.extractable).toBe(false);
+    expect((secret as CryptoKey).extractable).toBe(false);
     expect(encodeRef(c.ref_value)).toBe(c.ref);
     for (const s of c.steps) {
       expect(stepAt(s.unix * 1000), s.label).toBe(s.step);
@@ -131,7 +131,7 @@ describe("membercode corpus — derivation.json (from S onwards)", () => {
       expect(toHex(tag.slice(0, 12)), s.label).toBe(s.kday_hex);
       expect(btoa(String.fromCharCode(...tag.slice(0, 12))).replace(/\+/g, "-").replace(/\//g, "_"), s.label).toBe(s.kday_b64url);
       const dayKey = await deriveDayKey(secret, s.club_day);
-      expect(dayKey.extractable, s.label).toBe(false);
+      expect((dayKey as CryptoKey).extractable, s.label).toBe(false);
       expect(await hotp(dayKey, s.step, 6), s.label).toBe(s.off);
       const code = await memberCodeAt(secret, c.ref, c.tz, s.step);
       expect({ on: code.on, off: code.off, token: code.token, clubDay: code.clubDay }, s.label)

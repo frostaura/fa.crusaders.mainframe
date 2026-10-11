@@ -17,11 +17,19 @@
  * in memory for the life of the page: the code still works while the page is open, and the
  * next cold start simply enrols again — which needs signal, and the page says so.
  * </p>
+ *
+ * <p>
+ * On a page with no WebCrypto (plain `http://` to the club's LAN server — see `hotp.ts`) the
+ * record holds a {@link SoftHmacKey} instead, which IS the bytes. That is the price of the code
+ * working there at all; on https the record holds the non-extractable handle as before.
+ * </p>
  */
 
+import { isHmacKey, type HmacKey } from "./hotp";
+
 export type MemberCodeRecord = {
-  /** The member secret S, imported non-extractable with usage `sign` only. */
-  key: CryptoKey;
+  /** The member secret S: imported non-extractable with usage `sign` only, or the no-WebCrypto fallback. */
+  key: HmacKey;
   ref: string;
   generation: number;
   tz: string;
@@ -86,7 +94,7 @@ function isRecord(value: unknown): value is MemberCodeRecord {
   return !!r && typeof r === "object"
     && typeof r.ref === "string" && typeof r.generation === "number" && typeof r.tz === "string"
     && typeof r.offsetMs === "number" && typeof r.userId === "string"
-    && typeof CryptoKey !== "undefined" && r.key instanceof CryptoKey;
+    && isHmacKey(r.key);
 }
 
 /** The stored record, or null. Never throws. */

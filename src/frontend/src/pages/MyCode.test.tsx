@@ -150,8 +150,8 @@ describe("MyCode — the one rotating code", () => {
     renderWith();
     await screen.findByLabelText("Your code");
     const record = await loadMemberCode();
-    expect(record!.key.extractable).toBe(false);
-    expect(record!.key.usages).toEqual(["sign"]);
+    expect((record!.key as CryptoKey).extractable).toBe(false);
+    expect((record!.key as CryptoKey).usages).toEqual(["sign"]);
     const everything = Object.keys(window.localStorage).map((k) => window.localStorage.getItem(k)).join("|");
     expect(everything).not.toContain(MEMBER_CODE_FIXTURE.secretHex);
     expect(everything).not.toMatch(/rOXp1nGO4hw0Pe6QnpA3_5jUfb8FPf-le5sk2cmbU4c/);

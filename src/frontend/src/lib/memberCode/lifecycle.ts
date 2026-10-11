@@ -1,6 +1,6 @@
 import { ApiError, endpoints, NetworkError, OfflineError, type MemberCodeEnrolment, type MemberCodeStatus } from "../api";
 import { assertKnownZone, STEP_MS } from "./clubDay";
-import { fromBase64Url, importHmacKey } from "./hotp";
+import { fromBase64Url, importHmacKey, type HmacKey } from "./hotp";
 import { loadMemberCode, saveMemberCode, wipeMemberCode, type MemberCodeRecord } from "./keyStore";
 import { isCanonicalRef } from "./token";
 import { noteCodeAsked } from "../../routeChunks";
@@ -74,7 +74,7 @@ function checkEnrolment(e: MemberCodeEnrolment): void {
 }
 
 /** Imports S from the wire. The decoded bytes are zeroed whatever happens. */
-async function importSecret(secret: string): Promise<CryptoKey> {
+async function importSecret(secret: string): Promise<HmacKey> {
   let raw: Uint8Array;
   try { raw = fromBase64Url(secret); } catch { throw new InvalidEnrolment("secret"); }
   try {

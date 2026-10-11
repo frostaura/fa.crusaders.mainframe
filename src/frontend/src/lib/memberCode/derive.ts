@@ -1,5 +1,5 @@
 import { clubDayOf, STEP_MS } from "./clubDay";
-import { hmac, hotp, importHmacKey } from "./hotp";
+import { hmac, hotp, importHmacKey, type HmacKey } from "./hotp";
 import { encodeToken } from "./token";
 
 /**
@@ -31,7 +31,7 @@ export function stepAt(unixMs: number): number {
  * the engine kept no copy, but nothing this code owns does.
  * </p>
  */
-export async function deriveDayKey(secret: CryptoKey, clubDay: string): Promise<CryptoKey> {
+export async function deriveDayKey(secret: HmacKey, clubDay: string): Promise<HmacKey> {
   const tag = await hmac(secret, new TextEncoder().encode(KDAY_LABEL_PREFIX + clubDay));
   const raw = tag.slice(0, KDAY_BYTES);
   try {
@@ -53,13 +53,13 @@ export type MemberCodeAt = {
 /**
  * Remembers each club day's key for the member it was derived for, so a code every thirty
  * seconds is one HMAC for ON and one for OFF rather than three. Keyed by the secret's handle,
- * so a re-enrolment (a new `CryptoKey`) can never be answered from the old member's day keys.
+ * so a re-enrolment (a new key) can never be answered from the old member's day keys.
  */
 export class DayKeyCache {
-  private owner: CryptoKey | null = null;
-  private days = new Map<string, Promise<CryptoKey>>();
+  private owner: HmacKey | null = null;
+  private days = new Map<string, Promise<HmacKey>>();
 
-  get(secret: CryptoKey, clubDay: string): Promise<CryptoKey> {
+  get(secret: HmacKey, clubDay: string): Promise<HmacKey> {
     if (this.owner !== secret) {
       this.owner = secret;
       this.days = new Map();
@@ -79,7 +79,7 @@ export class DayKeyCache {
 
 /** The whole token at one step. Pure apart from the WebCrypto calls; no clock is read here. */
 export async function memberCodeAt(
-  secret: CryptoKey,
+  secret: HmacKey,
   ref: string,
   tz: string,
   step: number,

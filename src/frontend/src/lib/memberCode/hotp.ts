@@ -9,13 +9,44 @@
  * page can do with it is `sign`: it cannot be read back, logged, serialised or sent anywhere,
  * which is the whole reason the member secret S is held as a key handle and not as a string.
  * </p>
+ *
+ * <p>
+ * <b>The one exception is a page with no WebCrypto at all.</b> Browsers expose `crypto.subtle`
+ * only in a secure context (`https://` or `localhost`), and the club's stack on its LAN is plain
+ * `http://<server IP>`. There the key is a {@link SoftHmacKey} — the bytes, frozen, signed with by
+ * `sha256.ts` — because a phone that cannot make a code at all is worse than one whose key is
+ * readable by the page. Production is https and never takes this path.
+ * </p>
  */
 
-/** WebCrypto's `SubtleCrypto`, or a loud failure — a phone without it cannot make a code at all. */
+import { hmacSha256 } from "./sha256";
+
+/** WebCrypto's `SubtleCrypto`, or a loud failure. Only for callers that need WebCrypto itself. */
 export function subtle(): SubtleCrypto {
-  const s = globalThis.crypto?.subtle;
+  const s = maybeSubtle();
   if (!s) throw new Error("This browser has no WebCrypto (crypto.subtle), so it cannot make a member code.");
   return s;
+}
+
+/** WebCrypto when the page is in a secure context; null on a plain-http origin. */
+function maybeSubtle(): SubtleCrypto | null {
+  return globalThis.crypto?.subtle ?? null;
+}
+
+/** The fallback key on a page with no WebCrypto: the raw bytes, which only `hmac` reads. */
+export type SoftHmacKey = { readonly kind: "soft-hmac-sha256"; readonly bytes: Uint8Array };
+
+/** An HMAC-SHA-256 signing key: a non-extractable WebCrypto key, or the no-WebCrypto fallback. */
+export type HmacKey = CryptoKey | SoftHmacKey;
+
+export function isSoftHmacKey(key: unknown): key is SoftHmacKey {
+  const k = key as Partial<SoftHmacKey> | null;
+  return !!k && typeof k === "object" && k.kind === "soft-hmac-sha256" && k.bytes instanceof Uint8Array;
+}
+
+/** Is `value` a key `hmac` can sign with — what a stored record must hold to be used. */
+export function isHmacKey(value: unknown): value is HmacKey {
+  return isSoftHmacKey(value) || (typeof CryptoKey !== "undefined" && value instanceof CryptoKey);
 }
 
 /**
@@ -33,13 +64,23 @@ function buffer(bytes: Uint8Array): ArrayBuffer {
   return out;
 }
 
-/** Imports raw bytes as an HMAC-SHA-256 signing key. Non-extractable unless a test says otherwise. */
-export function importHmacKey(raw: Uint8Array, extractable = false): Promise<CryptoKey> {
-  return subtle().importKey("raw", buffer(raw), { name: "HMAC", hash: "SHA-256" }, extractable, ["sign"]);
+/**
+ * Imports raw bytes as an HMAC-SHA-256 signing key. Non-extractable unless a test says otherwise.
+ *
+ * <p>
+ * Without WebCrypto the bytes are COPIED into a frozen {@link SoftHmacKey}, so the caller's
+ * zeroing of its own array still leaves the key intact.
+ * </p>
+ */
+export async function importHmacKey(raw: Uint8Array, extractable = false): Promise<HmacKey> {
+  const s = maybeSubtle();
+  if (!s) return Object.freeze({ kind: "soft-hmac-sha256", bytes: raw.slice() }) as SoftHmacKey;
+  return s.importKey("raw", buffer(raw), { name: "HMAC", hash: "SHA-256" }, extractable, ["sign"]);
 }
 
 /** HMAC-SHA-256 of `data` under `key` — the full 32-byte tag. */
-export async function hmac(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+export async function hmac(key: HmacKey, data: Uint8Array): Promise<Uint8Array> {
+  if (isSoftHmacKey(key)) return hmacSha256(key.bytes, data);
   return new Uint8Array(await subtle().sign("HMAC", key, buffer(data)));
 }
 
@@ -75,7 +116,7 @@ export function truncate(digest: Uint8Array, digits: number): string {
 }
 
 /** HOTP(key, step, digits) with HMAC-SHA-256 — which is TOTP's SHA-256 mode when `step = floor(t / 30)`. */
-export async function hotp(key: CryptoKey, step: number, digits: number): Promise<string> {
+export async function hotp(key: HmacKey, step: number, digits: number): Promise<string> {
   return truncate(await hmac(key, counterBytes(step)), digits);
 }
 
