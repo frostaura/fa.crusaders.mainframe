@@ -36,9 +36,28 @@ async function large(page: Page, root: number) {
   await page.evaluate(() => document.fonts.ready);
 }
 
-/** The longest vertical run of points through the element's middle column that hit it. */
+/**
+ * The longest vertical run of points through the element's middle column that hit it.
+ *
+ * Reached the way a person reaches it. For two seconds after the day draws, `useOpenAtWeek` pins
+ * `<main>` to the week strip against any scroll but a person's (wheel, touch, pointer, key); a
+ * scripted scroll inside that window was pulled back above the banner, and on a loaded CI runner
+ * the measurement then hit nothing (run 0 at 320 / 200 %). So: a wheel on `<main>` first, then
+ * centre the button and sample once its box has held still for a few frames.
+ */
 async function tapRun(page: Page, name: string) {
-  return page.getByRole("button", { name }).first().evaluate((button) => {
+  return page.getByRole("button", { name }).first().evaluate(async (button) => {
+    button.closest("main")?.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+    button.scrollIntoView({ block: "center" });
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    let last = "";
+    for (let still = 0, i = 0; still < 3 && i < 120; i++) {
+      await frame();
+      const r = button.getBoundingClientRect();
+      const now = `${r.top},${r.left},${r.height}`;
+      still = now === last ? still + 1 : 0;
+      last = now;
+    }
     const box = button.getBoundingClientRect();
     const x = box.left + box.width / 2;
     let run = 0;

@@ -994,11 +994,17 @@ class Simulator:
         firmware paints a row at a time. The intermediate ones are microseconds
         apart and are an artefact of the transcript; the LAST frame of each
         burst is the screen. Every deadline in this firmware is a second or
-        more, so the two can be told apart by the gap alone."""
+        more, so the two can be told apart by the gap alone.
+
+        The newest frame is settled only once the gap has passed with nothing
+        after it: read sooner, it can be row 0 of a repaint whose row 1 has not
+        arrived yet (seen on CI: `CHECKING CODE / TO PLAY`)."""
         frames = self.lcd_since(mark)
+        now = time.monotonic()
         out: list[LcdFrame] = []
         for i, frame in enumerate(frames):
-            if i + 1 == len(frames) or frames[i + 1].at - frame.at > LCD_BURST_GAP_SECONDS:
+            last = i + 1 == len(frames)
+            if (now - frame.at > LCD_BURST_GAP_SECONDS) if last else (frames[i + 1].at - frame.at > LCD_BURST_GAP_SECONDS):
                 out.append(frame)
         return out
 
