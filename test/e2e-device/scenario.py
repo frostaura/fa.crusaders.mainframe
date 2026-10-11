@@ -1869,7 +1869,9 @@ def extend_lit_court(w: World, sim: Optional[Simulator]) -> None:
         shown = sim.expect_screen(
             lambda f: f.row(0) == lcd_pad(IDLE_ROW0) and f.row(1).rstrip() in
             (f"COURT B {minutes_left} MIN", f"COURT B {minutes_left - 1} MIN"),
-            4, "the landing screen's minutes for court B after the extension", landing)
+            # An earlier step's scan can still hold the glass ("CHECKING CODE ... READY IN
+            # <n> s", up to kRevertSeconds); the landing screen is what follows it.
+            15, "the landing screen's minutes for court B after the extension", landing)
         REPORT.check("EXT", "the Mega's landing row 1 reads the extended minutes for court B (what an unscanned "
                             "press then shows as SCAN TO EXTEND)", True, shown.text())
 
@@ -2089,6 +2091,10 @@ def mega_half(sim: Simulator) -> None:
     REPORT.check("M-serial", "a duration press after the window lapsed is dropped again", sim.no_frame(lambda f: f.verb == "BTN", 1.5))
 
     # The relay timer is the Mega's own: AUTOOFF fires with no bridge involvement.
+    # Court B may still be lit from the EXT step, and an !ON on a lit court only
+    # moves its deadline (no mask change, so no immediate !STATE): release it first.
+    sim.send("OFF", "B")
+    sim.expect_frame(lambda f: f.verb == "STATE" and int(f.args[0]) & 0b0010 == 0, 12, "!STATE with B released")
     sim.send("ON", "B", "1")
     on = sim.expect_frame(lambda f: f.verb == "STATE" and int(f.args[0]) & 0b0010, 5, "!STATE with B")
     REPORT.check("M-serial", "!ON,B,1 closes relay B: !STATE mask bit 1 set, remaining B <= 1", int(on.args[2]) <= 1, str(on))
