@@ -53,6 +53,24 @@ public static class DeviceActivateEndpoint
     public static async Task<DeviceActivateResponse> ActivateForDeviceAsync(
         Device device, DeviceActivateRequest req, DeviceActivateServices services, CancellationToken ct)
     {
+        var (answer, recognised) = await DecideAsync(device, req, services, ct);
+        if (recognised is not { } userId) return answer;
+
+        // Every answer about a member this tenant knows — lit or refused — carries their first name
+        // and what they may spend, read AFTER the decision so a charge it made is in the figure. An
+        // unrecognised code gets neither: the fields' presence is what "recognised" means on the wire.
+        var settings = await services.Settings.GetAsync(ct);
+        return answer with
+        {
+            GreetingName = await MemberDisplay.GreetingNameAsync(services.Db, userId, ct),
+            BalanceMinutes = await MemberDisplay.SpendableMinutesAsync(services.Db, userId, settings, services.Clock.GetUtcNow(), ct),
+        };
+    }
+
+    /// <summary>The decision itself, and the member it was about when the code resolved to one.</summary>
+    private static async Task<(DeviceActivateResponse Answer, Guid? UserId)> DecideAsync(
+        Device device, DeviceActivateRequest req, DeviceActivateServices services, CancellationToken ct)
+    {
         var now = services.Clock.GetUtcNow();
 
         // A box asking this question is a box that is reporting (finding L-F5). Recorded
@@ -64,11 +82,11 @@ public static class DeviceActivateEndpoint
         // stamp, and it must not be refused by the accident of having an empty court list —
         // see GateAccess.NotACourtBox. 200 with activated:false, like every other refusal on
         // this path, so a misflashed board shows it and stops.
-        if (device.Kind != DeviceKind.CourtBox) return Refused(GateAccess.NotACourtBox);
+        if (device.Kind != DeviceKind.CourtBox) return (Refused(GateAccess.NotACourtBox), null);
 
         // Same rule as the walk-up: only a method that identifies a member globally. A PIN
         // against the whole roll is an oracle, not an identification.
-        if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return Refused("not_recognised");
+        if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return (Refused("not_recognised"), null);
 
         // A v1 member code (19 characters) is CHECKED — both halves, at the instant the box read
         // it — and then identifies its member exactly as an ident code does (member-code §4). A
@@ -76,7 +94,7 @@ public static class DeviceActivateEndpoint
         var settings = await services.Settings.GetAsync(ct);
         var (resolved, match) = await MemberCodeIdentity.ResolveAsync(
             services.Codes, services.MemberCodes, new ScannedCode(req.Token, req.ScanAgeMs), settings, now, ct);
-        if (resolved is null) return Refused("not_recognised");
+        if (resolved is null) return (Refused("not_recognised"), null);
 
         // Resolved ONCE, here, and carried onto every branch below including the refusals.
         // The box paints the member's card before it knows the outcome, so a refusal without a
@@ -101,25 +119,25 @@ public static class DeviceActivateEndpoint
         };
         if (await MembershipAccess.IsBarredFromCourtsAsync(services.Db, resolved.UserId, ct))
         {
-            return await BookingRefusalAsync(new Found(null, null, "no_booking"), who, services, ct);
+            return (await BookingRefusalAsync(new Found(null, null, "no_booking"), who, services, ct), resolved.UserId);
         }
 
         // A court named in the request narrows the search, and must be one of this box's.
         if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed))
         {
-            return await BookingRefusalAsync(new Found(null, null, "wrong_court"), who, services, ct);
+            return (await BookingRefusalAsync(new Found(null, null, "wrong_court"), who, services, ct), resolved.UserId);
         }
 
         var found = resolved.Purpose == AccessCodePurpose.BookingActivation
             ? await ForBookingCodeAsync(device, req, resolved, services, now, ct)
             : await ForIdentCodeAsync(device, req, resolved, services, now, ct);
 
-        if (found.Reason is not null) return await BookingRefusalAsync(found, who, services, ct);
+        if (found.Reason is not null) return (await BookingRefusalAsync(found, who, services, ct), resolved.UserId);
 
         // One acting use per code per class (§4.4): claimed before the court is lit, given back
         // below if it is not. A used code is a DECISION — `code_used` — never a second opinion.
         var (used, claim) = await ClaimCourtUseAsync(match, device, services, ct);
-        if (used) return await CodeUsedAsync(found.Court, who, services);
+        if (used) return (await CodeUsedAsync(found.Court, who, services), resolved.UserId);
 
         // Given back if the activation THROWS, too: a claim stranded by a 500 refused the member's
         // own code as `code_used` for the rest of its window, at a court that never lit.
@@ -150,7 +168,7 @@ public static class DeviceActivateEndpoint
         // did not come on, which is the sentence an admin needs.
         if (!answer.Activated) services.Faults.ActivationRefused(device, answer.Reason);
 
-        return answer;
+        return (answer, resolved.UserId);
     }
 
     private sealed record Found(Booking? Booking, Court? Court, string? Reason);
@@ -410,4 +428,22 @@ public sealed record DeviceActivateResponse(
     /// case surfaced as copy. Last in the record so the field is purely additive on the wire.
     /// </para>
     /// </summary>
-    [property: JsonPropertyName("member_display")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MemberDisplay = null);
+    [property: JsonPropertyName("member_display")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MemberDisplay = null)
+{
+    /// <summary>
+    /// The member's FIRST name for the box's greeting (<see cref="Services.MemberDisplay.GreetingNameAsync"/>):
+    /// ASCII, upper-case, at most 16 characters, empty when the club has no name on file. Present on
+    /// every answer whose code resolved to a member of this tenant, lit or refused; absent otherwise.
+    /// </summary>
+    [JsonPropertyName("greeting_name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GreetingName { get; init; }
+
+    /// <summary>
+    /// What that member may spend now, in whole minutes — the ledger sum less held shares, read after
+    /// the decision. Present exactly when <see cref="GreetingName"/> is.
+    /// </summary>
+    [JsonPropertyName("balance_minutes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? BalanceMinutes { get; init; }
+}

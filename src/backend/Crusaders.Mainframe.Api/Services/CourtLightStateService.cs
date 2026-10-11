@@ -103,6 +103,21 @@ public sealed class CourtLightStateService
     }
 
     /// <summary>
+    /// Moves a lit court's believed end LATER — an extension bought at the box keeps the same light
+    /// running, so <c>OnSince</c> and the cause stay as they are and only <c>OnUntil</c> moves.
+    /// Staged, not saved; null (nothing changed) when the court is not believed on or already ends later.
+    /// </summary>
+    public async Task<CourtLightState?> ExtendOnUntilAsync(Guid courtId, DateTimeOffset until, CancellationToken ct)
+    {
+        var row = await RowForAsync(courtId, ct);
+        if (row.State != LightState.On) return null;
+        if (row.OnUntil is { } current && current >= until) return null;
+        row.OnUntil = until;
+        row.UpdatedAt = _clock.GetUtcNow();
+        return row;
+    }
+
+    /// <summary>
     /// Records that a court's lights are believed OFF.
     ///
     /// <para>

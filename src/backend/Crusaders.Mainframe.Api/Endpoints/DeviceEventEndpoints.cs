@@ -50,6 +50,9 @@ public static class DeviceEventEndpoints
 
         g.MapPost("/events", UploadAsync);
         g.MapPost("/walkup", WalkUpAsync);
+        // Extending play on a lit court, paid from the scanner's own minutes — the walk-up's wire,
+        // starting at the end of the session in play. See DeviceExtendEndpoint.
+        g.MapPost("/extend", DeviceExtendEndpoint.HandleAsync);
         // The pre-booked member's path — the mirror of the walk-up, on the same signed
         // device group and the same rate limit. See DeviceActivateEndpoint.
         g.MapPost("/activate", DeviceActivateEndpoint.HandleAsync);

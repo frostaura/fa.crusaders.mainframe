@@ -1238,6 +1238,7 @@ public static class TraceKinds
         var doing = facts.Attempt switch
         {
             "walkup" => " buying light time",
+            "extend" => " extending play",
             "pay_for" => " paying for somebody's booking",
             _ => "",
         };

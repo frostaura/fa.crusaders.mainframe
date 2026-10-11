@@ -293,11 +293,15 @@ public static class GateAccess
     /// </para>
     ///
     /// <para>
-    /// Nothing in this product extends a booking. The two writers of <c>EndsAt</c> after a
+    /// Nothing in this product extends a booking's row. The two writers of <c>EndsAt</c> after a
     /// mint — the no-show sweep and <c>BookingService</c>'s reversal narrowing — only shorten
     /// it or restore it toward the end it was sold to, so a code's <c>ExpiresAt</c> (minted
-    /// from the sold end plus the grace window) is never behind the row. If an extend-booking
-    /// feature ever lands, the mint path has to move with it or this edge silently narrows.
+    /// from the sold end plus the grace window) is never behind the row. Extending play at the
+    /// box (<c>/device/extend</c>) does NOT move an end: it sells a new walk-up-shaped booking
+    /// starting at the old one's end, which mints no per-booking code and admits its member at
+    /// the door through <see cref="HoldsALiveBookingAsync"/> like any other booking of theirs.
+    /// If a feature ever moves an existing <c>EndsAt</c> later, the mint path has to move with it
+    /// or this edge silently narrows.
     /// </para>
     ///
     /// <para>

@@ -88,6 +88,42 @@ public static class MemberDisplay
     }
 
     /// <summary>
+    /// The court box's <c>greeting_name</c>: the member's FIRST name only — the first
+    /// whitespace-separated word of their full name, folded to printable ASCII and upper-cased
+    /// like <see cref="Shorten"/>, cut to <see cref="MaxLength"/>. Empty (never null) for a member
+    /// the club has no name for: the field's presence says "recognised", its content the name.
+    /// </summary>
+    public static async Task<string> GreetingNameAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
+    {
+        var full = await db.Memberships.AsNoTracking()
+            .Where(m => m.UserId == userId)
+            .Select(m => m.FullName)
+            .FirstOrDefaultAsync(ct);
+        return FirstName(full);
+    }
+
+    /// <summary>The first word of a full name, as <see cref="GreetingNameAsync"/> sends it. Empty when there is none.</summary>
+    public static string FirstName(string? fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName)) return "";
+        var folded = FoldToAscii(fullName).ToUpperInvariant();
+        var first = folded.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+        return first.Length <= MaxLength ? first : first[..MaxLength];
+    }
+
+    /// <summary>
+    /// What a member may spend right now, in whole minutes: the ledger sum less the shares held for
+    /// their partners — <see cref="LedgerService.GetSpendableAsync"/>'s arithmetic, for a caller that
+    /// holds only the context and the settings. Never a stored field.
+    /// </summary>
+    public static async Task<int> SpendableMinutesAsync(
+        MainframeDbContext db, Guid userId, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
+        var balance = await db.LedgerEntries.Where(l => l.UserId == userId).SumAsync(l => (int?)l.AmountMinutes, ct) ?? 0;
+        return balance - (await ShareHolds.ForAsync(db, userId, settings, now, ct)).Reserved;
+    }
+
+    /// <summary>
     /// The surname's initial: the first LETTER of the last word that has one (review round 12,
     /// D12-1). "THABO (TJ) MOKOENA" read "THABO (" — the second word's first character, a bracket.
     /// R14 D14-5: a generational suffix is not the surname — "ROBERTA SMITHSON JR." is ROBERTA S,

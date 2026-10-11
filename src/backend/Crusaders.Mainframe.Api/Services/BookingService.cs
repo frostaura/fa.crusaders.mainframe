@@ -456,6 +456,101 @@ public sealed class BookingService
     }
 
     /// <summary>
+    /// Extends play on a lit court at the box: a NEW booking for the scanning member that starts
+    /// exactly at <paramref name="startsAt"/> (the end of the session in play), sold and charged like
+    /// a walk-up of the same length at that time — whole minutes, truncated at the next booking's
+    /// start and at closing, the same group rules — and checked in at creation.
+    ///
+    /// <para>
+    /// <b>Checked in at creation, in the same INSERT as the charge.</b> The member identified at the
+    /// court now and the lights are already on; the extension is the same light running on. So
+    /// <c>CheckedInAt</c> is the scan instant (attendance is identification, never the clock), which
+    /// keeps the no-show sweep away from it and makes the lights-off sweep treat the court as held
+    /// through to the extension's end. No activation step follows, so the confirmation is sent here.
+    /// </para>
+    ///
+    /// <para>
+    /// A new row rather than a longer <c>EndsAt</c> on the session in play: that booking may be
+    /// somebody else's, its price and its codes were fixed when it was sold, and nothing in this
+    /// product moves an end later (see <c>GateAccess</c>).
+    /// </para>
+    /// </summary>
+    public async Task<BookingResult> CreateExtensionAsync(
+        Guid courtId, Guid userId, DateTimeOffset startsAt, int requestedMinutes, string externalReference, CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(ct);
+        var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == courtId && c.IsActive, ct);
+        if (court is null) return new BookingResult.NotFound();
+        if (requestedMinutes <= 0) return new BookingResult.NoTimeAvailable(requestedMinutes, 0);
+
+        var now = _clock.GetUtcNow();
+
+        // Closing time bounds the extension exactly as it bounds a walk-up; an extension starting
+        // at or after closing has nothing to sell, which is no time rather than a closed club.
+        var window = OpenWindowUtc(startsAt, settings);
+        if (startsAt < window.OpensAtUtc || startsAt >= window.ClosesAtUtc)
+        {
+            return new BookingResult.NoTimeAvailable(requestedMinutes, 0);
+        }
+
+        var requestedEnd = startsAt.AddMinutes(requestedMinutes);
+        var nextStart = await _db.Bookings
+            .Where(b => b.CourtId == courtId
+                && b.Status != BookingStatus.Cancelled
+                && b.StartsAt < requestedEnd && b.EndsAt > startsAt)
+            .OrderBy(b => b.StartsAt)
+            .Select(b => (DateTimeOffset?)b.StartsAt)
+            .FirstOrDefaultAsync(ct);
+        var endsAt = nextStart is { } next && next < requestedEnd ? next : requestedEnd;
+        if (endsAt > window.ClosesAtUtc) endsAt = window.ClosesAtUtc;
+
+        var grantedMinutes = (int)Math.Floor((endsAt - startsAt).TotalMinutes);
+        if (grantedMinutes <= 0) return new BookingResult.NoTimeAvailable(requestedMinutes, 0);
+        endsAt = startsAt.AddMinutes(grantedMinutes);
+
+        var subject = await SubjectAsync(new BookingPayer(userId, userId), startsAt, settings, ct);
+        var slot = new RuleSlot(courtId, startsAt, endsAt, 1, IsWalkUp: true);
+        if (await _rules.EvaluateAsync(subject, slot, settings, ct) is RuleVerdict.Refused refusal) return refusal.Result;
+
+        var totalCost = grantedMinutes;
+        var balance = await _ledger.GetSpendableAsync(userId, ct);
+        if (balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
+
+        var booking = new Booking
+        {
+            TenantId = _tenant.TenantId,
+            CourtId = courtId,
+            UserId = userId,
+            BookedByUserId = userId,
+            PaidByUserId = userId,
+            ActorUserId = userId,
+            StartsAt = startsAt,
+            EndsAt = endsAt,
+            SliceMinutes = grantedMinutes,
+            SliceCount = 1,
+            AmountChargedMinutes = totalCost,
+            Status = BookingStatus.Booked,
+            ChargedAt = now,
+            CheckedInAt = now,
+            LightsOnCuedAt = now,
+        };
+        _db.Bookings.Add(booking);
+
+        // IsWalkUp: light time bought at the court — a LightsPurchase, no per-booking code minted, and
+        // the mail's "already started, nothing to cancel" wording, all of which hold for an extension.
+        return await CommitAsync(new NewBooking(
+            Row: booking,
+            Court: court,
+            Settings: settings,
+            TotalCost: totalCost,
+            DurationLabel: MoneyFormat.Minutes(grantedMinutes),
+            IsWalkUp: true,
+            ExternalReference: externalReference,
+            DeferConfirmation: false,
+            Rules: (subject, slot)), ct);
+    }
+
+    /// <summary>
     /// Hands one booking confirmation to the background: the member's address, the club's identity
     /// and the receipt PDF are read and built there, in a scope of its own, and the request returns
     /// without waiting for any of it. The one place the mail is queued, so the commit path and the
