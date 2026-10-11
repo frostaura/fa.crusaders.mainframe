@@ -93,6 +93,14 @@
       "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
       "subject_hex": "51225c58e9ff",
       "body_hex": "7b226d6163223a22356363663766306131623263222c22757074696d655f6d73223a38363430303030302c226576656e7473223a5b7b22736571223a372c22757074696d655f6d73223a38363339303030302c226b696e64223a22756e6b6e6f776e5f7363616e222c22636f757274223a2d312c226d6574686f64223a227172222c227375626a656374223a22515c225c5c585c75303065395c7530306666222c226475726174696f6e5f6d73223a307d5d7d"
+    },
+    {
+      "id": "extend-request",
+      "note": "bridge 2.3.0: extending a LIT court at the panel. Same wire as the walk-up (device auth, the box's MAC, the member's scanned token, the club court NUMBER, a 16-hex nonce reused only on a retry of the same undecided extension) in the order bridgelogic::renderExtendBody writes it: mac, method, token, court, minutes, nonce. Thirty minutes on court 3. A v1 member code would add scan_age_ms exactly as the walk-up does.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/extend",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d6574686f64223a227172222c22746f6b656e223a2237513346394b4d32585a3842222c22636f757274223a332c226d696e75746573223a33302c226e6f6e6365223a2239663261346336653862306431663361227d"
     }
   ],
   "responses": [
@@ -412,6 +420,72 @@
         "court_number": 1,
         "granted_seconds": 2700,
         "member_display": "BARTHOLOMEW MONTGOMERY-FEATHERSTONEHAUGH"
+      }
+    },
+    {
+      "id": "extend-response-ok",
+      "kind": "extend",
+      "status": 200,
+      "note": "a granted extension: extended_minutes is what the server ACTUALLY added (truncated before the next booking) and is what the relay is given, never what was asked; balance_after_minutes is the member's balance after the charge and reads BALANCE <n> MIN on the glass. greeting_name rides along and the box does not need it here.",
+      "body_hex": "7b22626f6f6b696e675f6964223a2233666138356636342d353731372d343536322d623366632d326339363366363661666136222c22657874656e6465645f6d696e75746573223a33302c22616d6f756e745f6d696e75746573223a33302c2262616c616e63655f61667465725f6d696e75746573223a3135302c22656e64735f6174223a22323032332d31312d31345432333a34353a30305a222c227265706c61796564223a66616c73652c226772656574696e675f6e616d65223a224445414e204d227d",
+      "expect": {
+        "extended_minutes": 30,
+        "balance_after_minutes": 150,
+        "replayed": false
+      }
+    },
+    {
+      "id": "extend-response-truncated",
+      "kind": "extend",
+      "status": 200,
+      "note": "the server could only sell twenty of the sixty minutes asked before the next booking: the relay gets twenty and the glass says +20. No balance_after_minutes (an older server): the box reads ENJOY YOUR GAME instead of a balance it was not told.",
+      "body_hex": "7b22626f6f6b696e675f6964223a2233666138356636342d353731372d343536322d623366632d326339363366363661666136222c22657874656e6465645f6d696e75746573223a32302c227265706c61796564223a747275657d",
+      "expect": {
+        "extended_minutes": 20,
+        "replayed": true
+      }
+    },
+    {
+      "id": "extend-response-court-not-lit",
+      "kind": "extend",
+      "status": 409,
+      "note": "nothing is in play on that court any more (it went dark between the press and the request): COURT NOT ON / PICK ANOTHER, decided, nonce spent, scan kept.",
+      "body_hex": "7b226572726f72223a22636f7572745f6e6f745f6c6974227d",
+      "expect": {
+        "error": "court_not_lit"
+      }
+    },
+    {
+      "id": "extend-response-no-time",
+      "kind": "extend",
+      "status": 409,
+      "note": "the next booking starts at the session's end: NO TIME BEFORE / NEXT BOOKING.",
+      "body_hex": "7b226572726f72223a226e6f5f74696d655f617661696c61626c65227d",
+      "expect": {
+        "error": "no_time_available"
+      }
+    },
+    {
+      "id": "extend-response-insufficient",
+      "kind": "extend",
+      "status": 402,
+      "note": "the scanning member's balance cannot pay for the extension: TOO FEW MINUTES / BUY & RETRY.",
+      "body_hex": "7b226572726f72223a22696e73756666696369656e745f62616c616e6365222c2263757272656e745f6d696e75746573223a31302c2272657175697265645f6d696e75746573223a33307d",
+      "expect": {
+        "error": "insufficient_balance"
+      }
+    },
+    {
+      "id": "activate-response-greeting",
+      "kind": "activate",
+      "status": 200,
+      "note": "bridge 2.3.0's greeting: greeting_name and balance_minutes are read TOLERANTLY (either may be absent) and greet a recognised scan with HI <NAME> / BALANCE <n> MIN before the outcome. The server sends the member's first name ASCII-folded and upper-cased (MemberDisplay.GreetingNameAsync, at most sixteen characters); the box keeps printable ASCII only, upper-cases it again, cut to thirteen columns on the glass (HI plus thirteen is the 1602's sixteen). Additive: an older backend that sends neither greets HI / WELCOME.",
+      "body_hex": "7b22616374697661746564223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a332c22626f6f6b696e675f6964223a2233666138356636342d353731372d343536322d623366632d326339363366363661666136222c226772616e7465645f7365636f6e6473223a323730302c226772656574696e675f6e616d65223a224445414e222c2262616c616e63655f6d696e75746573223a3132307d",
+      "expect": {
+        "activated": true,
+        "granted_seconds": 2700,
+        "greeting_name": "DEAN",
+        "balance_minutes": 120
       }
     }
   ]

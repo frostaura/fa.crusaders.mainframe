@@ -36,12 +36,36 @@ constexpr uint8_t kRelayChannelCount = 4U;
 constexpr PinLevel kRelayAssertedLevel = PinLevel::kLow;
 constexpr PinLevel kRelayReleasedLevel = PinLevel::kHigh;
 
-/// The one and only place the active-LOW inversion is written down. A driver
-/// that computes the level any other way is a defect, and a test that asserts
-/// this mapping is asserting the safety property, not a coding style.
-constexpr PinLevel relayLevelFor(bool on) {
-  return on ? kRelayAssertedLevel : kRelayReleasedLevel;
+/// Which level closes the contact. A FACT ABOUT THE FITTED RELAY MODULE, not a
+/// preference: the SONGLE coil board above is ACTIVE LOW, and the
+/// normally-open solid-state relays the club fitted for Mega 2.1.0 close on a
+/// HIGH input (`RELAY_ACTIVE_LOW=0`). A build names its polarity; nothing
+/// guesses it.
+enum class RelayPolarity : uint8_t { kActiveLow = 0U, kActiveHigh = 1U };
+
+/// The build flag `RELAY_ACTIVE_LOW` read as a polarity: non-zero is the coil
+/// board, zero the solid-state relays.
+constexpr RelayPolarity relayPolarityFor(bool activeLowFlag) {
+  return activeLowFlag ? RelayPolarity::kActiveLow : RelayPolarity::kActiveHigh;
 }
+
+/// The one and only place the logical-to-electrical mapping is written down,
+/// for either polarity. A driver that computes the level any other way is a
+/// defect, and a test that asserts this mapping is asserting the safety
+/// property, not a coding style. One return statement: the Arduino cores
+/// compile this at gnu++11.
+constexpr PinLevel relayLevelFor(bool on, RelayPolarity polarity) {
+  return (on == (polarity == RelayPolarity::kActiveHigh)) ? PinLevel::kHigh : PinLevel::kLow;
+}
+
+/// The ACTIVE-LOW mapping, kept as the default the host fakes model unless a
+/// test names the other polarity.
+constexpr PinLevel relayLevelFor(bool on) {
+  return relayLevelFor(on, RelayPolarity::kActiveLow);
+}
+
+static_assert(relayLevelFor(true) == kRelayAssertedLevel && relayLevelFor(false) == kRelayReleasedLevel,
+              "the active-LOW default must stay the coil board's mapping");
 
 /// Drives the four court-light relays.
 ///

@@ -135,9 +135,10 @@ public:
   /// over-long line. A rising count is a failing cable, not a failing peer.
   uint16_t rxErrors() const { return rxErrors_; }
 
-  /// Debounced presses discarded because the authorisation window was shut.
-  /// The count that tells "nobody is using this court" apart from "the bridge
-  /// stopped sending `!AUTH` and every press is being thrown away".
+  /// Debounced DURATION presses discarded because the authorisation window was
+  /// shut (court presses are forwarded either way since Mega 2.1.0). The count
+  /// that tells "nobody is using this court" apart from "the bridge stopped
+  /// sending `!AUTH` and every press is being thrown away".
   uint16_t unauthorisedPresses() const { return unauthorised_; }
 
   /// Scanner lines thrown away as too long — a reader configured for a
@@ -162,6 +163,7 @@ private:
   void drainBridge(uint32_t nowMs);
   void drainScanner(uint32_t nowMs);
   void pollButtons(uint32_t nowMs);
+  void pollButtonsUnarmed(uint8_t pressed, uint32_t nowMs);
   void releaseExpired(uint32_t nowMs);
   void noteAuthLapse(uint32_t nowMs);
   void flushOverrun();

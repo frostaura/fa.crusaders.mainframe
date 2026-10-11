@@ -6,7 +6,7 @@
 
 namespace posix_hal {
 
-ConsoleRelay::ConsoleRelay() : state_() {
+ConsoleRelay::ConsoleRelay(hal::RelayPolarity polarity) : polarity_(polarity), state_() {
   for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
     state_[i] = false;
   }
@@ -23,7 +23,7 @@ void ConsoleRelay::set(uint8_t channel, bool on) {
   }
   state_[channel] = on;
   printf("[relay] court %c %s (pin level %s)\n", static_cast<char>('A' + channel), on ? "ON " : "OFF",
-         hal::relayLevelFor(on) == hal::PinLevel::kLow ? "LOW" : "HIGH");
+         hal::relayLevelFor(on, polarity_) == hal::PinLevel::kLow ? "LOW" : "HIGH");
   static_cast<void>(fflush(stdout));
 }
 

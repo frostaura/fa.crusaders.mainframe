@@ -84,11 +84,25 @@ RELAY_HARD_CAP_SECONDS = 5400
 LCD_COLS = 20
 LCD_ROWS = 4
 
-#: courtlogic::kIdleLine1 / kIdleLine2 — the landing screen's top two rows.
-IDLE_ROW0 = "CRUSADERS COURTS"
-IDLE_ROW1 = "SCAN YOUR CODE"
-#: The one sentence the Mega itself can say about a press it had to drop.
+#: courtlogic::kIdleLine1 / kIdleLine2 — the landing screen's top two rows (Mega
+#: 2.1.0). The call to action LEADS, because the club's fitted panel is a 16x2
+#: and rows 2-3 are off-glass there; row 1 is TO PLAY while every court is dark
+#: and the lit courts' minutes left (LANDING_SUMMARY) while any is lit.
+IDLE_ROW0 = "SCAN YOUR CODE"
+IDLE_ROW1 = "TO PLAY"
+#: Row 1 of the landing screen with courts lit: `COURT B 45 MIN` for one,
+#: four-column cells (`A45 C 5`) for several.
+LANDING_SUMMARY = re.compile(r"^(COURT [A-D] \d+ MIN|([A-D][ \d]\d ?)+)$")
+#: The one sentence the Mega itself can say about a press it had to drop — on
+#: the action row of the 20x4, and on row 1 (HINT_ROW1) for the 16x2.
 HINT_ROW = "SCAN YOUR CODE FIRST"
+HINT_ROW1 = "SCAN CODE FIRST"
+#: courtlogic::kScanFeedbackLine1/2 — painted the instant a scan completes.
+SCAN_FEEDBACK_ROW0 = "CHECKING CODE"
+SCAN_FEEDBACK_ROW1 = "PLEASE WAIT"
+#: courtlogic::kHintFallbackMs — how long a court press forwarded with the window
+#: shut waits for the bridge's answer before the Mega paints HINT_ROW1 itself.
+HINT_FALLBACK_SECONDS = 1.5
 #: courtlogic::kDefaultHoldMs — what `!LCD` and a scan's own feedback hold for.
 DEFAULT_HOLD_SECONDS = 10
 #: courtlogic::kHintMs and kHintRateLimitMs.
@@ -874,6 +888,13 @@ def lcd_pad(text: str) -> str:
     return text.ljust(LCD_COLS)[:LCD_COLS]
 
 
+def is_landing(frame: "LcdFrame") -> bool:
+    """The Mega's own landing screen: SCAN YOUR CODE over TO PLAY, or over the lit
+    courts' minutes left (Mega 2.1.0). A hint on row 1 is NOT the landing screen."""
+    row1 = frame.row(1).rstrip()
+    return frame.row(0) == lcd_pad(IDLE_ROW0) and (row1 == IDLE_ROW1 or bool(LANDING_SUMMARY.match(row1)))
+
+
 class Simulator:
     """The firmware's Mega half: courtlogic::CourtBox over posix_hal, one TCP peer."""
 
@@ -1013,11 +1034,9 @@ class Simulator:
         correctly never comes, and it is the wrong question: this predicate is
         about a steady state, and the steady state may already be true."""
         already = self.screen()
-        if already.row(0) == lcd_pad(IDLE_ROW0) and already.row(1) == lcd_pad(IDLE_ROW1):
+        if is_landing(already):
             return already
-        return self.expect_screen(
-            lambda f: f.row(0) == lcd_pad(IDLE_ROW0) and f.row(1) == lcd_pad(IDLE_ROW1),
-            timeout, "the landing screen", mark)
+        return self.expect_screen(is_landing, timeout, "the landing screen", mark)
 
     def no_screen(self, pred: Callable[[LcdFrame], bool], window: float, mark: int) -> bool:
         """True when no settled screen in the window matches — a refusal's claim."""
@@ -1165,6 +1184,7 @@ class World:
     b6: dict = field(default_factory=dict)  # court 2 in 3h, too_early
     b7: dict = field(default_factory=dict)  # court 4, member N, no-show
     tokens: dict[int, str] = field(default_factory=dict)  # relay -> roster token
+    walkup: dict = field(default_factory=dict)  # the walk-up grant on court 2, and when it was made
 
 
 def admin_login(w: World) -> None:
@@ -1585,6 +1605,19 @@ def online_activation(w: World, sim: Optional[Simulator]) -> None:
                  0 < granted <= RELAY_HARD_CAP_SECONDS and abs(granted - expected) <= 3, f"granted={granted} expected~{expected}")
     REPORT.check("C3", "the activate response no longer carries server_unix: the box has no clock to seed",
                  "server_unix" not in act.json, f"keys={sorted(act.json)}")
+    # Bridge 2.3.0's greeting: HI <NAME> / BALANCE <n> MIN before the outcome.
+    # The box reads both fields tolerantly, but the server owes them for every
+    # answer about a recognised member — the box cannot greet with what it was
+    # not sent.
+    wallet = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
+    name = act.get("greeting_name")
+    REPORT.check("GREET", "the activate response greets the member: greeting_name is their first name, upper-case "
+                          "ASCII, at most 16 characters (the box shows HI plus thirteen)",
+                 isinstance(name, str) and 0 < len(name) <= 16 and name == name.upper() and name.isascii()
+                 and name.split()[0] == name, f"greeting_name={name!r}")
+    REPORT.check("GREET", "...and balance_minutes is M's spendable balance in whole minutes, read after the decision",
+                 isinstance(act.get("balance_minutes"), int) and act.get("balance_minutes") == wallet,
+                 f"balance_minutes={act.get('balance_minutes')!r} wallet={wallet}")
 
     if sim is not None:
         # And the lights: the bridge's decision goes to the Mega as !ON on relay C.
@@ -1593,8 +1626,13 @@ def online_activation(w: World, sim: Optional[Simulator]) -> None:
         rem_c = int(state.args[3])
         REPORT.check("M-serial", "!ON,C,<granted> closes relay C: !STATE mask has bit 2 and remaining C ~= granted (<= 5400)",
                      granted - 3 <= rem_c <= min(granted, RELAY_HARD_CAP_SECONDS), str(state))
-        sim.expect_stdout(lambda l: "[relay] court C ON" in l, 5)
+        on_line = sim.expect_stdout(lambda l: "[relay] court C ON" in l, 5)
         REPORT.check("M-serial", "the simulated relay driver reports court C ON", True)
+        # Mega 2.1.0: the club's normally-open solid-state relays close on HIGH.
+        # The simulator is built with the Mega's own RELAY_ACTIVE_LOW=0, so its
+        # transcript names the level the fitted relays actually see.
+        REPORT.check("RELAY-POL", "relays are ACTIVE HIGH: court C ON is driven at pin level HIGH",
+                     "(pin level HIGH)" in on_line, on_line)
 
     time.sleep(1.2)
     again = expect_status(w.box.call("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "re-activate B3")
@@ -1613,6 +1651,9 @@ def online_activation(w: World, sim: Optional[Simulator]) -> None:
         evt = sim.expect_frame(lambda f: f.verb == "EVT" and f.args[:2] == ["OFF", "C"], 5, "!EVT,OFF,C")
         state = sim.expect_frame(lambda f: f.verb == "STATE" and int(f.args[0]) & 0b0100 == 0, 12, "!STATE with C clear")
         REPORT.check("M-serial", "!OFF,C opens the relay: !EVT,OFF,C is reported and the next !STATE mask has C clear", bool(evt) and bool(state), f"{evt} / {state}")
+        off_line = sim.expect_stdout(lambda l: "[relay] court C OFF" in l, 5)
+        REPORT.check("RELAY-POL", "...and released is pin level LOW — the AVR's reset state, so a reset never "
+                                  "flashes a court on", "(pin level LOW)" in off_line, off_line)
 
 
 def offline_attendance(w: World) -> None:
@@ -1689,6 +1730,7 @@ def walk_up(w: World) -> None:
     nonce = secrets.token_hex(8)
     req = {"minutes": 60, "method": "qr", "token": w.ident_code, "court": 2, "nonce": nonce}
     first = expect_status(w.box.call("POST", "/api/v1/device/walkup", req), 200, "walkup")
+    w.walkup = dict(first.json, granted_at=now_utc())
     REPORT.check("C5", f"walk-up on court 2 (named in the request, on the box) is granted {minutes} minutes (<= 90) for {cost} minutes",
                  first.get("granted_minutes") == minutes and first.get("amount_minutes") == cost and first.get("replayed") is False, f"resp={first.json}")
     REPORT.check("C5", f"balance_after_minutes == wallet before - {cost}", first.get("balance_after_minutes") == wallet_before - cost)
@@ -1718,6 +1760,168 @@ def walk_up(w: World) -> None:
     too_long = w.box.call("POST", "/api/v1/device/walkup", {"minutes": 240, "method": "qr", "token": w.ident_code, "court": 2, "nonce": secrets.token_hex(8)})
     REPORT.check("M1", "240 minutes is refused with the effective cap (min(walk_up_max, relay cap 90))",
                  too_long.status == 400 and too_long.get("error") == "minutes_out_of_range" and too_long.get("max_minutes") == 90)
+
+
+def wallet_of(w: World) -> int:
+    return mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
+
+
+def extend_call(w: World, court: int, minutes: int, nonce: Optional[str], token: Optional[str] = None) -> Resp:
+    """POST /device/extend exactly as bridgelogic::renderExtendBody shapes it."""
+    assert w.box is not None
+    body: dict[str, Any] = {"method": "qr", "token": token or w.ident_code, "court": court, "minutes": minutes}
+    if nonce is not None:
+        body["nonce"] = nonce
+    return w.box.call("POST", "/api/v1/device/extend", body)
+
+
+def extend_dark_court(w: World) -> None:
+    """EXT-0 — there is nothing to extend on a court nobody is playing on.
+
+    Runs BEFORE the walk-up, while court 2 holds only B6, three hours out: a box
+    that pressed a court it believed lit, on a court the server knows is dark,
+    is answered `court_not_lit` (COURT NOT ON / PICK ANOTHER) and charged nothing."""
+    step("EXT-0  Extending a court nothing is in play on is refused, and costs nothing")
+    before = wallet_of(w)
+    r = extend_call(w, 2, 15, secrets.token_hex(8))
+    REPORT.check("EXT", "POST /device/extend on court 2 with nothing in play -> 409 court_not_lit",
+                 r.status == 409 and r.get("error") == "court_not_lit", f"{r.status} {r.text[:160]}")
+    REPORT.check("EXT", "...and the wallet is untouched", wallet_of(w) == before)
+
+
+def extend_lit_court(w: World, sim: Optional[Simulator]) -> None:
+    """EXT-1 — bridge 2.3.0's extension at the panel, end to end.
+
+    M scans, presses court 2 (lit by the walk-up), then a black button. The box
+    POSTs /device/extend; the server sells a NEW booking that starts exactly at
+    the session's end, truncated before the next booking, charged like a walk-up
+    of that length; the box re-arms the relay with `!EXT,B,min(5400, left +
+    extended)` and the Mega answers with `!STATE` AT ONCE carrying the new
+    deadline (Mega 2.1.0), so the glass can show the minutes just bought."""
+    step("EXT-1  Extend a lit court at the box: the money, the replay, the truncation and the relay")
+    assert w.box is not None
+    if not w.walkup.get("booking_id"):
+        raise StepFailed("no walk-up on court 2 to extend (C5 did not complete)")
+    granted_at: datetime = w.walkup["granted_at"]
+    walkup_minutes = int(w.walkup.get("granted_minutes", 0))
+    walkup_ends = granted_at + timedelta(minutes=walkup_minutes)
+
+    # The Mega half first, as the bridge left it after the walk-up: relay B lit for
+    # what the walk-up has left.
+    relay_left = 0
+    if sim is not None:
+        relay_left = max(1, int((walkup_ends - now_utc()).total_seconds()))
+        sim.send("ON", "B", str(relay_left))
+        lit = sim.expect_frame(lambda f: f.verb == "STATE" and int(f.args[0]) & 0b0010, 5, "!STATE with B lit")
+        relay_left = int(lit.args[2])
+
+    wallet_before = wallet_of(w)
+    nonce = secrets.token_hex(8)
+    first = expect_status(extend_call(w, 2, 15, nonce), 200, "extend court 2 by 15")
+    ext_minutes = first.get("extended_minutes")
+    REPORT.check("EXT", "POST /device/extend on lit court 2 for 15 minutes -> 200 extended_minutes 15, "
+                        "replayed:false, amount_minutes == extended_minutes",
+                 ext_minutes == 15 and first.get("replayed") is False and first.get("amount_minutes") == 15,
+                 f"resp={first.json}")
+    REPORT.check("EXT", "balance_after_minutes is the wallet after the charge, which the box shows as BALANCE <n> MIN",
+                 first.get("balance_after_minutes") == wallet_before - 15 and wallet_of(w) == wallet_before - 15,
+                 f"{wallet_before} -> {first.get('balance_after_minutes')}")
+    ends = parse_dt(first["ends_at"]) if first.get("ends_at") else None
+    REPORT.check("EXT", "the extension starts exactly where the walk-up ends: ends_at == walk-up end + 15 min",
+                 ends is not None and abs((ends - (walkup_ends + timedelta(minutes=15))).total_seconds()) <= 61,
+                 f"ends_at={first.get('ends_at')} walk-up ends ~{iso(walkup_ends)}")
+    REPORT.check("GREET", "the extend answer carries the scanner's greeting_name too",
+                 isinstance(first.get("greeting_name"), str) and first.get("greeting_name") != "", f"{first.get('greeting_name')!r}")
+
+    replay = expect_status(extend_call(w, 2, 15, nonce), 200, "extend replay")
+    REPORT.check("EXT", "the same nonce again -> replayed:true, the SAME booking_id, and no second charge",
+                 replay.get("replayed") is True and replay.get("booking_id") == first.get("booking_id")
+                 and wallet_of(w) == wallet_before - 15, f"resp={replay.json}")
+    ledger = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&limit=200", token=w.admin_token), 200, "ledger M").json
+    rows = [r for r in ledger if r.get("relatedBookingId") == first.get("booking_id")]
+    REPORT.check("EXT", "exactly ONE ledger row of -15 for the extension, across the call and its replay",
+                 len(rows) == 1 and mins(rows[0]["signedAmountMinutes"]) == -15,
+                 f"rows={[(r['type'], r['signedAmountMinutes']) for r in rows]}")
+    slot = find_slot(w, first.get("booking_id", ""), now_utc())
+    REPORT.check("EXT", "the extension is a real booking on court 2 in M's name, on the schedule",
+                 bool(slot) and slot["courtNumber"] == 2 and slot["ownerUserId"] == w.m_user_id, f"slot={slot}")
+
+    if sim is not None:
+        # The bridge's arithmetic (bridgelogic::planExtension): the new relay
+        # deadline from now is what the court had left plus what was bought,
+        # capped at ninety minutes.
+        state_mark = sim.frame_mark()
+        left_now = max(0, relay_left - 2)
+        relay_seconds = min(RELAY_HARD_CAP_SECONDS, left_now + 15 * 60)
+        landing = sim.lcd_mark()
+        sent = time.monotonic()
+        sim.send("EXT", "B", str(relay_seconds))
+        st = sim.expect_frame(lambda f: f.verb == "STATE" and int(f.args[0]) & 0b0010 and int(f.args[2]) >= relay_seconds - 3,
+                              4, "!STATE carrying the extended deadline")
+        took = time.monotonic() - sent
+        REPORT.check("EXT", f"!EXT,B,{relay_seconds} is answered by a !STATE with B's NEW deadline at once "
+                            f"(Mega 2.1.0) — not at the next {STATE_INTERVAL_SECONDS}s publish",
+                     took < 1.5 and relay_seconds - 3 <= int(st.args[2]) <= relay_seconds, f"{st} after {took:.2f}s")
+        errs = [f for f in sim.frames_after(state_mark) if f.verb == "ERR"]
+        REPORT.check("EXT", "...and the Mega accepted it (no !ERR): the relay was closed, so this is a deadline "
+                            "moved, never an implicit !ON", not errs, f"{[str(f) for f in errs]}")
+        minutes_left = (int(st.args[2]) + 59) // 60
+        shown = sim.expect_screen(
+            lambda f: f.row(0) == lcd_pad(IDLE_ROW0) and f.row(1).rstrip() in
+            (f"COURT B {minutes_left} MIN", f"COURT B {minutes_left - 1} MIN"),
+            4, "the landing screen's minutes for court B after the extension", landing)
+        REPORT.check("EXT", "the Mega's landing row 1 reads the extended minutes for court B (what an unscanned "
+                            "press then shows as SCAN TO EXTEND)", True, shown.text())
+
+    # Truncation, and the refusal behind it: B6 starts three hours out on court 2,
+    # and every extension chains onto the end of the one before. Each 90 is
+    # expected to be exactly what fits before B6 (whole minutes, rounded down);
+    # the last one that fits is cut short, and the one after it has nothing to sell.
+    chain_end = ends or walkup_ends
+    b6_start: datetime = w.b6["starts_at"]
+    truncated = False
+    grants: list[str] = []
+    r = extend_call(w, 2, 90, secrets.token_hex(8))
+    for _ in range(4):
+        if r.status != 200:
+            break
+        got_end = parse_dt(r["ends_at"]) if r.get("ends_at") else None
+        expected = min(90, int((b6_start - chain_end).total_seconds() // 60))
+        got = r.get("extended_minutes", 0)
+        grants.append(f"{got}/{expected}")
+        REPORT.check("EXT", f"a chained 90-minute extension sells what fits before B6: {got} of an expected {expected}, "
+                            f"ending at or before B6's start",
+                     abs(got - expected) <= 1 and got_end is not None and got_end <= b6_start + timedelta(seconds=1),
+                     f"resp={r.json} chain end {iso(chain_end)} b6 {iso(b6_start)}")
+        truncated = truncated or 0 < got < 90
+        chain_end = got_end or chain_end
+        r = extend_call(w, 2, 90, secrets.token_hex(8))
+    REPORT.check("EXT", "an extension that would run into the next booking (B6) is TRUNCATED before it",
+                 truncated, f"grants={grants}")
+    REPORT.check("EXT", "with B6 next and no minute left before it -> 409 no_time_available "
+                        "(NO TIME BEFORE / NEXT BOOKING)",
+                 r.status == 409 and r.get("error") == "no_time_available", f"{r.status} {r.text[:160]}")
+
+    before = wallet_of(w)
+    too_long = extend_call(w, 2, 91, secrets.token_hex(8))
+    REPORT.check("EXT", "91 minutes -> 400 minutes_out_of_range with max_minutes 90 (the relay cap)",
+                 too_long.status == 400 and too_long.get("error") == "minutes_out_of_range" and too_long.get("max_minutes") == 90,
+                 f"{too_long.status} {too_long.text[:160]}")
+    no_nonce = extend_call(w, 2, 15, None)
+    REPORT.check("EXT", "no nonce -> 400 nonce_required (an extension moves money; a retry must replay, never re-buy)",
+                 no_nonce.status == 400 and no_nonce.get("error") == "nonce_required", f"{no_nonce.status} {no_nonce.text[:160]}")
+    booking_code = w.tokens.get(2)
+    if booking_code:
+        as_wallet = extend_call(w, 2, 15, secrets.token_hex(8), token=booking_code)
+        REPORT.check("EXT", "B3's BOOKING code as the buyer -> 400 not_recognised (a roster code is not a wallet)",
+                     as_wallet.status == 400 and as_wallet.get("error") == "not_recognised", f"{as_wallet.status} {as_wallet.text[:160]}")
+    off_box = extend_call(w, 5, 15, secrets.token_hex(8))
+    REPORT.check("EXT", "court 5 (not on this box) -> 400 court_not_on_device",
+                 off_box.status == 400 and off_box.get("error") == "court_not_on_device", f"{off_box.status} {off_box.text[:160]}")
+    REPORT.check("EXT", "none of the refusals moved the wallet", wallet_of(w) == before)
+    if sim is not None:
+        sim.send("OFF", "B")
+        sim.expect_frame(lambda f: f.verb == "EVT" and f.args[:2] == ["OFF", "B"], 5, "!EVT,OFF,B")
 
 
 def early_scan(w: World) -> None:
@@ -1861,19 +2065,28 @@ def mega_half(sim: Simulator) -> None:
                  int(pong.args[2]) >= 0 and int(pong.args[3]) >= 0 and int(pong.args[4]) >= 0,
                  f"txDropped={pong.args[2]} rxErrors={pong.args[3]} unauthorised={pong.args[4]}")
 
-    # Button without authorisation: dropped, never queued.
+    # A DURATION key without authorisation: dropped, never queued — it is the
+    # only press that can buy anything, and held over it would buy on the next
+    # member's scan.
+    sim.console("btn 1")
+    REPORT.check("M-serial", "a DURATION press while !AUTH is not armed produces no !BTN frame (dropped, not queued)", sim.no_frame(lambda f: f.verb == "BTN", 1.5))
+    # A COURT key is forwarded with the window shut (Mega 2.1.0): on its own it
+    # buys nothing and lights nothing, and only the bridge can answer it with the
+    # court's minutes left or SCAN YOUR CODE.
     sim.console("btn A")
-    REPORT.check("M-serial", "a button press while !AUTH is not armed produces no !BTN frame (dropped, not queued)", sim.no_frame(lambda f: f.verb == "BTN", 1.5))
+    court_key = sim.expect_frame(lambda f: f.verb == "BTN", 3, "!BTN,A with the window shut")
+    REPORT.check("M-serial", "a COURT press with the window shut is forwarded as !BTN,A for the bridge to answer",
+                 court_key.args == ["A"], str(court_key))
     sim.send("AUTH", "30")
     time.sleep(0.2)
-    sim.console("btn A")
-    btn = sim.expect_frame(lambda f: f.verb == "BTN", 3, "!BTN,A")
-    REPORT.check("M-serial", "after !AUTH,30 the same press arrives as !BTN,A (debounced once)", btn.args == ["A"], str(btn))
+    sim.console("btn 1")
+    btn = sim.expect_frame(lambda f: f.verb == "BTN", 3, "!BTN,1")
+    REPORT.check("M-serial", "after !AUTH,30 the duration press arrives as !BTN,1 (debounced once)", btn.args == ["1"], str(btn))
     sim.send("AUTH", "1")
     expired = sim.expect_frame(lambda f: f.verb == "EVT" and f.args[:1] == ["AUTHEXPIRED"], 4, "!EVT,AUTHEXPIRED")
     REPORT.check("M-serial", "!AUTH,1 lapses into exactly one !EVT,AUTHEXPIRED", bool(expired), str(expired))
-    sim.console("btn B")
-    REPORT.check("M-serial", "a press after the window lapsed is dropped again", sim.no_frame(lambda f: f.verb == "BTN", 1.5))
+    sim.console("btn 2")
+    REPORT.check("M-serial", "a duration press after the window lapsed is dropped again", sim.no_frame(lambda f: f.verb == "BTN", 1.5))
 
     # The relay timer is the Mega's own: AUTOOFF fires with no bridge involvement.
     sim.send("ON", "B", "1")
@@ -1983,8 +2196,11 @@ def screen_deadlines(sim: Simulator, label: str) -> None:
     scan = sim.expect_frame(lambda f: f.verb == "SCAN", 5, "!SCAN,RANDOMRECEIPT42")
     REPORT.check("E-LCD-1", f"[{label}] the unrecognised receipt reaches the bridge link as !SCAN",
                  scan.args == ["RANDOMRECEIPT42"], str(scan))
-    sim.expect_screen(lambda f: f.row(0) == lcd_pad("CHECKING YOUR CODE"), 4,
-                      "the scan's own local feedback", mark)
+    feedback = sim.expect_screen(lambda f: f.row(0) == lcd_pad(SCAN_FEEDBACK_ROW0), 4,
+                                 "the scan's own local feedback", mark)
+    REPORT.check("E-LCD-1", f"[{label}] the scan's own feedback fits the club's 16x2: "
+                            f"`{SCAN_FEEDBACK_ROW0}` / `{SCAN_FEEDBACK_ROW1}`",
+                 feedback.row(1) == lcd_pad(SCAN_FEEDBACK_ROW1), feedback.text())
     sim.send("LCD", "CODE NOT RECOGNISED", "THEN SCAN AGAIN")
     refusal = sim.expect_screen(lambda f: f.row(0) == lcd_pad("CODE NOT RECOGNISED"), 4,
                                 "the refusal screen", mark)
@@ -1997,8 +2213,9 @@ def screen_deadlines(sim: Simulator, label: str) -> None:
     # And the buttons behind it are not silent: the Mega answers a press it had
     # to drop, which is the other half of the same incident.
     press = sim.lcd_mark()
-    sim.console("btn A")
-    sim.expect_screen(lambda f: f.row(3) == lcd_pad(HINT_ROW), 3, "the dropped-press hint", press)
+    sim.console("btn 1")
+    sim.expect_screen(lambda f: f.row(3) == lcd_pad(HINT_ROW) and f.row(1) == lcd_pad(HINT_ROW1), 3,
+                      "the dropped-press hint", press)
     REPORT.check("E-LCD-1", f"[{label}] ...and a press behind it is ANSWERED rather than swallowed",
                  True)
 
@@ -2122,7 +2339,7 @@ def atomic_commit(sim: Simulator, label: str) -> None:
     time.sleep(0.5)
     mixed = [f for f in sim.settled_since(lapse)
              if f.row(0) == lcd_pad(IDLE_ROW0) and f.row(1) == lcd_pad("45 MIN")]
-    REPORT.check("E-LCD-3", f"[{label}] the auth window lapsing repaints NOTHING: `CRUSADERS COURTS` "
+    REPORT.check("E-LCD-3", f"[{label}] the auth window lapsing repaints NOTHING: `{IDLE_ROW0}` "
                             f"never appears above the grant screen's `45 MIN`",
                  not mixed and sim.screen().row(0) == lcd_pad(staged[0]),
                  f"mixed={[f.text() for f in mixed]} now={sim.screen().text()}")
@@ -2148,13 +2365,18 @@ def lit_court_row(sim: Simulator, label: str) -> None:
     REPORT.check("E-LCD-4", f"[{label}] !MAP,1,2,3,4 then !ON,A,2700 -> row 2 reads "
                             f"`A 45 B -- C -- D --`, with `--` for a mapped court that is dark",
                  lit.row(2) == lcd_pad("A 45 B -- C -- D --"), repr(lit.row(2)))
+    REPORT.check("E-LCD-4", f"[{label}] ...and row 1 — the only row besides the scan prompt a 16x2 shows — "
+                            f"reads `COURT A 45 MIN` under `{IDLE_ROW0}` (Mega 2.1.0)",
+                 lit.row(0) == lcd_pad(IDLE_ROW0) and lit.row(1) == lcd_pad("COURT A 45 MIN"), lit.text())
 
     quiet_from = sim.frame_mark()
     print("  waiting ~60s for the court row to tick down a minute, with the link silent ...", flush=True)
     ticked = sim.expect_screen(lambda f: f.row(2).startswith("A 44"), 80, "the court row at 44 minutes",
                                sim.lcd_mark())
-    REPORT.check("E-LCD-4", f"[{label}] ...and a minute later, with nobody asked, `A 44`",
-                 ticked.row(2) == lcd_pad("A 44 B -- C -- D --"), repr(ticked.row(2)))
+    REPORT.check("E-LCD-4", f"[{label}] ...and a minute later, with nobody asked, `A 44` — on row 2 and "
+                            f"on the 16x2's row 1",
+                 ticked.row(2) == lcd_pad("A 44 B -- C -- D --") and ticked.row(1) == lcd_pad("COURT A 44 MIN"),
+                 ticked.text())
     between = sim.frames_after(quiet_from)
     REPORT.check("E-LCD-4", f"[{label}] and NOTHING crossed the link between the two but the periodic "
                             f"!STATE — the countdown is rendered from RelayGuard and costs the bridge "
@@ -2182,7 +2404,7 @@ def dropped_press(sim: Simulator, label: str) -> None:
     window exists to close. The SILENCE was the bug — six presses across all
     eight channels produced no frame, no pixel and no sound, and the box was
     indistinguishable from broken."""
-    step(f"E-BTN-1  [{label}] a dropped press is answered once, rate-limited, and never queued")
+    step(f"E-BTN-1  [{label}] a dropped DURATION press is answered once, rate-limited, and never queued")
     sim.send("RST")
     sim.send("AUTH", "0")
     sim.send("IDLE", "7", "1345")
@@ -2195,10 +2417,11 @@ def dropped_press(sim: Simulator, label: str) -> None:
 
     first = sim.lcd_mark()
     btn_from = sim.frame_mark()
-    sim.console("btn A")
+    sim.console("btn 1")
     hinted = sim.expect_screen(lambda f: f.row(3) == lcd_pad(HINT_ROW), 3, "the hint", first)
-    REPORT.check("E-BTN-1", f"[{label}] with the window shut, `btn A` paints `{HINT_ROW}` in the action row",
-                 True, repr(hinted.row(3)))
+    REPORT.check("E-BTN-1", f"[{label}] with the window shut, `btn 1` paints `{HINT_ROW}` in the action row "
+                            f"and `{HINT_ROW1}` on row 1, under `{IDLE_ROW0}` — the 16x2 shows rows 0-1 only",
+                 hinted.row(1) == lcd_pad(HINT_ROW1) and hinted.row(0) == lcd_pad(IDLE_ROW0), hinted.text())
 
     # A SECOND PRESS INSIDE THE RATE LIMIT PAINTS NOTHING MORE — and the way to
     # see that is that it does not extend the first hint either. A press that
@@ -2206,7 +2429,7 @@ def dropped_press(sim: Simulator, label: str) -> None:
     # stuck contact would strobe the panel at loop rate.
     time.sleep(0.4)
     second = sim.lcd_mark()
-    sim.console("btn B")
+    sim.console("btn 2")
     reverted = sim.expect_screen(lambda f: f.row(3) != lcd_pad(HINT_ROW), HINT_SECONDS + 1.5,
                                  "the action row coming back", second)
     REPORT.check("E-BTN-1", f"[{label}] a second press {HINT_RATE_LIMIT_SECONDS}s inside the limit paints "
@@ -2216,7 +2439,7 @@ def dropped_press(sim: Simulator, label: str) -> None:
 
     # And after the limit one fires again — a rate limit, not a mute.
     third = sim.lcd_mark()
-    sim.console("btn C")
+    sim.console("btn 3")
     again = sim.expect_screen(lambda f: f.row(3) == lcd_pad(HINT_ROW), 3, "the hint firing again", third)
     REPORT.check("E-BTN-1", f"[{label}] once the limit has passed the next press is answered again — a "
                             f"rate limit, not a mute", True, repr(again.row(3)))
@@ -2232,6 +2455,63 @@ def dropped_press(sim: Simulator, label: str) -> None:
                  len(after.args) == 5 and int(after.args[4]) - int(before.args[4]) == 3,
                  f"{before.args[4] if len(before.args) == 5 else '?'} -> "
                  f"{after.args[4] if len(after.args) == 5 else '?'} (ping mark {ping})")
+
+
+def unscanned_court_press(sim: Simulator, label: str) -> None:
+    """E-BTN-2 — a COURT press with the window shut is the BRIDGE's to answer.
+
+    Mega 2.1.0 forwards court keys whatever the window says: an unscanned court
+    press asks a question ("how long is left on court B?") that only the bridge
+    can answer, and a court key on its own buys nothing. If the bridge does not
+    answer — dead, rebooting, mid-flash — the Mega paints its own hint after
+    kHintFallbackMs, so the press is never met with silence. Neither is an
+    unauthorised press: `!PONG`'s counter means "a press thrown away"."""
+    step(f"E-BTN-2  [{label}] an unscanned court press reaches the bridge, and the Mega covers for a silent one")
+    sim.send("RST")
+    sim.send("AUTH", "0")
+    sim.send("IDLE", "7", "1345")
+    sim.expect_landing(6, sim.lcd_mark())
+    time.sleep(HINT_RATE_LIMIT_SECONDS + HINT_SECONDS + 0.4)  # past any hint this step did not make
+    sim.send("PING")
+    before = sim.expect_frame(lambda f: f.verb == "PONG", 5, "!PONG before the presses")
+
+    # (a) Nobody answers: the Mega's own hint, after the grace and not before.
+    first = sim.lcd_mark()
+    pressed = time.monotonic()
+    sim.console("btn B")
+    fwd = sim.expect_frame(lambda f: f.verb == "BTN", 3, "!BTN,B with the window shut")
+    REPORT.check("E-BTN-2", f"[{label}] with the window shut a court key is FORWARDED as !BTN,B",
+                 fwd.args == ["B"], str(fwd))
+    hinted = sim.expect_screen(lambda f: f.row(1) == lcd_pad(HINT_ROW1), HINT_FALLBACK_SECONDS + 2.0,
+                               "the Mega's own hint for an unanswered court press", first)
+    waited = hinted.at - pressed
+    REPORT.check("E-BTN-2", f"[{label}] the bridge stays silent: the Mega paints `{HINT_ROW1}` on row 1 "
+                            f"(and `{HINT_ROW}` on row 3) after its {HINT_FALLBACK_SECONDS}s grace — not at once",
+                 HINT_FALLBACK_SECONDS - 0.3 <= waited <= HINT_FALLBACK_SECONDS + 1.5
+                 and hinted.row(3) == lcd_pad(HINT_ROW), f"after {waited:.2f}s: {hinted.text()}")
+
+    # (b) The bridge answers inside the grace, as bridge 2.3.0 does for a lit
+    # court with no scan behind it: MinutesLeft. Its words stay; no hint.
+    time.sleep(HINT_SECONDS + HINT_RATE_LIMIT_SECONDS + 0.4)
+    second = sim.lcd_mark()
+    sim.console("btn C")
+    sim.expect_frame(lambda f: f.verb == "BTN" and f.args == ["C"], 3, "!BTN,C with the window shut")
+    for row, text in enumerate(("COURT C 45 MIN", "SCAN TO EXTEND", "Then press the court", "SCAN WHEN READY")):
+        sim.send("ROW", str(row), text)
+    sim.send("SHOW", "10", "1")
+    answered = sim.expect_screen(lambda f: f.row(1) == lcd_pad("SCAN TO EXTEND"), 3, "the bridge's answer", second)
+    time.sleep(HINT_FALLBACK_SECONDS + 1.0)
+    REPORT.check("E-BTN-2", f"[{label}] the bridge answers inside the grace (`COURT C 45 MIN` / `SCAN TO "
+                            f"EXTEND`) and the Mega's fallback never paints over it",
+                 not any(f.row(1) == lcd_pad(HINT_ROW1) for f in sim.settled_since(second))
+                 and answered.row(0) == lcd_pad("COURT C 45 MIN"),
+                 f"{[f.text() for f in sim.settled_since(second)]}")
+
+    sim.send("PING")
+    after = sim.expect_frame(lambda f: f.verb == "PONG" and f is not before, 5, "!PONG after the presses")
+    REPORT.check("E-BTN-2", f"[{label}] neither court press is an unauthorised press: !PONG's counter did not move",
+                 len(after.args) == 5 and len(before.args) == 5 and after.args[4] == before.args[4],
+                 f"{before.args[4] if len(before.args) == 5 else '?'} -> {after.args[4] if len(after.args) == 5 else '?'}")
 
 
 def retry_wrong_court(sim: Simulator, label: str) -> None:
@@ -2316,6 +2596,7 @@ def glass_steps(sim: Simulator, label: str, quick: bool) -> None:
     atomic_commit(sim, label)
     lit_court_row(sim, label)
     dropped_press(sim, label)
+    unscanned_court_press(sim, label)
     retry_wrong_court(sim, label)
     refused_extension(sim, label)
     if quick:
@@ -2389,7 +2670,9 @@ def main() -> int:
         run_step(lambda: heartbeat_roster(w), "C2")
         run_step(lambda: online_activation(w, sim), "C3")
         run_step(lambda: offline_attendance(w), "C6")
+        run_step(lambda: extend_dark_court(w), "EXT")
         run_step(lambda: walk_up(w), "C5")
+        run_step(lambda: extend_lit_court(w, sim), "EXT")
         run_step(lambda: early_scan(w), "A2-15")
         if mb:
             run_step(lambda: money_leg(w, mb), "money")

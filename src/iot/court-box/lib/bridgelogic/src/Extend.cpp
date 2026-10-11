@@ -41,6 +41,86 @@ constexpr ExtendError kExtendErrors[] = {
     {"insufficient_balance", "TOO FEW MINUTES", "BUY & RETRY"},
 };
 
+/// The value of one hex digit, or 16 for a byte that is not one.
+uint8_t hexDigit(char c) {
+  if (c >= '0' && c <= '9') {
+    return static_cast<uint8_t>(c - '0');
+  }
+  if (c >= 'a' && c <= 'f') {
+    return static_cast<uint8_t>(c - 'a' + 10);
+  }
+  if (c >= 'A' && c <= 'F') {
+    return static_cast<uint8_t>(c - 'A' + 10);
+  }
+  return 16U;
+}
+
+/// The glyph the JSON string text at `raw[i]` stands for, in `out` — or NUL
+/// for one the glass cannot draw — and how many bytes of `raw` it used.
+/// `\uXXXX` is decoded and kept only inside printable ASCII; `\"`, `\\` and
+/// `\/` are themselves; every other escape and every byte outside 0x20-0x7E is
+/// dropped. A truncated escape uses what is there and draws nothing.
+size_t glassCharAt(const char* raw, size_t i, char& out) {
+  out = '\0';
+  const char c = raw[i];
+  if (c != '\\') {
+    if (c >= 0x20 && c <= 0x7E) {
+      out = c;
+    }
+    return 1U;
+  }
+  const char e = raw[i + 1U];
+  if (e != 'u') {
+    if (e == '"' || e == '\\' || e == '/') {
+      out = e;
+    }
+    return e == '\0' ? 1U : 2U;
+  }
+  uint32_t code = 0U;
+  size_t used = 2U;
+  while (used < 6U && hexDigit(raw[i + used]) < 16U) {
+    code = (code << 4U) | hexDigit(raw[i + used]);
+    ++used;
+  }
+  if (used == 6U && code >= 0x20U && code <= 0x7EU) {
+    out = static_cast<char>(code);
+  }
+  return used;
+}
+
+/// A 200. The server SOLD something — or answered with a body this box could
+/// not read whole, which is not the same as selling nothing.
+///
+/// A cut or unreadable 200 is UNDECIDED, not NO TIME BEFORE: the extension may
+/// well be on the ledger, and spending the nonce on it would make the member's
+/// retry a SECOND purchase. Kept undecided, the retry carries the same nonce
+/// and the server answers it with the first purchase (`replayed:true`). Only a
+/// whole body that names `extended_minutes: 0` is the decided "nothing added".
+ExtendResult onExtendGranted(const char* body, size_t len) {
+  ExtendResult result;
+  uint32_t minutes = 0U;
+  if (body == nullptr || !devapi::json::isCompleteObject(body, len) ||
+      !devapi::json::topLevelUnsignedField(body, len, "extended_minutes", minutes)) {
+    result.decided = false;
+    result.refusal = lines("BUSY", "PRESS AGAIN");
+    return result;
+  }
+  result.decided = true;
+  if (minutes == 0U) {
+    // A 200 that added nothing: the next booking starts now.
+    result.refusal = lines("NO TIME BEFORE", "NEXT BOOKING");
+    return result;
+  }
+  result.extended = true;
+  result.extendedMinutes = minutes;
+  uint32_t balance = 0U;
+  if (devapi::json::topLevelUnsignedField(body, len, "balance_after_minutes", balance)) {
+    result.hasBalance = true;
+    result.balanceAfterMinutes = balance;
+  }
+  return result;
+}
+
 } // namespace
 
 void readGreeting(const char* body, size_t len, Greeting& out) {
@@ -52,16 +132,18 @@ void readGreeting(const char* body, size_t len, Greeting& out) {
   if (devapi::json::topLevelStringField(body, len, "greeting_name", raw, sizeof(raw))) {
     // Printable ASCII only, upper-cased: the HD44780 has no glyph for an
     // escaped byte, and an upper-case name matches every other word on glass.
+    // The field arrives as its RAW JSON text — the server escapes every
+    // non-ASCII letter as \uXXXX — so escapes are decoded here, not painted:
+    // `Zo\u00EB` used to reach the glass as `ZO\U00EB`.
     size_t at = 0U;
-    for (size_t i = 0U; raw[i] != '\0' && at < kGreetingNameCols; ++i) {
-      char c = raw[i];
-      if (c < 0x20 || c > 0x7E) {
+    size_t i = 0U;
+    while (raw[i] != '\0' && at < kGreetingNameCols) {
+      char c = '\0';
+      i += glassCharAt(raw, i, c);
+      if (c == '\0') {
         continue;
       }
-      if (c >= 'a' && c <= 'z') {
-        c = static_cast<char>(c - 'a' + 'A');
-      }
-      out.name[at] = c;
+      out.name[at] = c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
       ++at;
     }
     // A name cut mid-way ending in a space reads as a trailing blank; trim it.
@@ -80,7 +162,16 @@ void readGreeting(const char* body, size_t len, Greeting& out) {
 ScreenId greetingScreen(const Greeting& greeting, ScreenFacts& facts) {
   snprintf(facts.name, sizeof(facts.name), "%s", greeting.name);
   facts.balance = greeting.balanceMinutes;
-  return greeting.hasBalance ? ScreenId::Greeting : ScreenId::GreetingNoBalance;
+  return greeting.hasBalance && greeting.balanceMinutes <= kMaxBalanceOnGlass ? ScreenId::Greeting
+                                                                              : ScreenId::GreetingNoBalance;
+}
+
+ScreenId extendedScreen(const ExtendResult& result, uint8_t court, ScreenFacts& facts) {
+  facts.court = court;
+  facts.minutes = result.extendedMinutes;
+  facts.balance = result.balanceAfterMinutes;
+  return result.hasBalance && result.balanceAfterMinutes <= kMaxBalanceOnGlass ? ScreenId::Extended
+                                                                               : ScreenId::ExtendedNoBalance;
 }
 
 size_t renderExtendBody(char* out, size_t cap, const ExtendRequest& request) {
@@ -120,21 +211,7 @@ ExtendResult onExtendResponse(uint16_t status, const char* body, size_t len) {
   }
 
   if (status == 200U) {
-    uint32_t minutes = 0U;
-    if (body != nullptr && devapi::json::isCompleteObject(body, len) &&
-        devapi::json::topLevelUnsignedField(body, len, "extended_minutes", minutes) && minutes > 0U) {
-      result.extended = true;
-      result.extendedMinutes = minutes;
-      uint32_t balance = 0U;
-      if (devapi::json::topLevelUnsignedField(body, len, "balance_after_minutes", balance)) {
-        result.hasBalance = true;
-        result.balanceAfterMinutes = balance;
-      }
-      return result;
-    }
-    // A 200 that added nothing: the next booking starts now.
-    result.refusal = lines("NO TIME BEFORE", "NEXT BOOKING");
-    return result;
+    return onExtendGranted(body, len);
   }
 
   if (status < 500U) {

@@ -40,7 +40,8 @@ enum class RowArg : uint8_t {
   CourtPlusMinutes,
   /// The member's balance in minutes.
   Balance,
-  /// The greeting name, or NOTHING (`HI` alone) when the API sent none.
+  /// ` <NAME>` after a bare `HI`, or NOTHING (`HI` alone) when the API sent
+  /// none — never `HI ` with a dangling space on the wire.
   GreetName,
 };
 
@@ -413,17 +414,11 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
     // The greeting is an acknowledgement (card hold); whatever the scan
     // decided follows it on its own. No countdown: it is gone in seconds.
     {ScreenId::Greeting,
-     {{"HI ", RowArg::GreetName, ""},
-      {"BALANCE ", RowArg::Balance, " MIN"},
-      kBlank,
-      kBlank},
+     {{"HI", RowArg::GreetName, ""}, {"BALANCE ", RowArg::Balance, " MIN"}, kBlank, kBlank},
      kCardSeconds,
      0U},
     {ScreenId::GreetingNoBalance,
-     {{"HI ", RowArg::GreetName, ""},
-      {"WELCOME", RowArg::None, ""},
-      kBlank,
-      kBlank},
+     {{"HI", RowArg::GreetName, ""}, {"WELCOME", RowArg::None, ""}, kBlank, kBlank},
      kCardSeconds,
      0U},
     // Court cells on row 3, so the scan-left clamp applies (invitesCourtPress).
@@ -457,10 +452,7 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
      kRevertSeconds,
      kShowFlagCountdown},
     {ScreenId::ExtendedNoBalance,
-     {{"COURT ", RowArg::CourtPlusMinutes, " MIN"},
-      {"ENJOY YOUR GAME", RowArg::None, ""},
-      kBlank,
-      kBlank},
+     {{"COURT ", RowArg::CourtPlusMinutes, " MIN"}, {"ENJOY YOUR GAME", RowArg::None, ""}, kBlank, kBlank},
      kRevertSeconds,
      kShowFlagCountdown},
 };
@@ -530,55 +522,57 @@ void appendCells(RowArg arg, const ScreenFacts& facts, char* out, size_t cap) {
   renderActionRow(map, arg == RowArg::CourtCells ? kCourtCellsFrom : kDurationCellsFrom, out, cap);
 }
 
-/// The row's variable part, appended to `out`.
-void appendArg(RowArg arg, const ScreenFacts& facts, char* out, size_t cap) {
-  switch (arg) {
-  case RowArg::None:
-    return;
-  case RowArg::CourtLetter:
+/// The bridge 2.3.0 slots — greeting, minutes left and extend — kept apart
+/// from appendArg so neither switch outgrows the complexity gate.
+void appendGreetingArg(RowArg arg, const ScreenFacts& facts, char* out, size_t cap) {
+  if (arg == RowArg::CourtAndMinutes || arg == RowArg::CourtPlusMinutes) {
     appendChar(out, cap, courtLetter(facts.court));
-    return;
-  case RowArg::CourtNumber:
-    appendU32(out, cap, facts.courtNumber > 0 ? static_cast<uint32_t>(facts.courtNumber) : 0U);
-    return;
-  case RowArg::Minutes:
+    append(out, cap, arg == RowArg::CourtPlusMinutes ? " +" : " ");
     appendU32(out, cap, facts.minutes);
-    return;
-  case RowArg::EndsAt:
-  case RowArg::AtTime:
-    append(out, cap, timeFor(arg, facts));
-    return;
-  case RowArg::FromTo:
+  } else if (arg == RowArg::Balance) {
+    // Clamped as a last line of defence only: the screens that name a balance
+    // are chosen by greetingScreen() / extendedScreen(), which never pick one
+    // for a balance past kMaxBalanceOnGlass.
+    appendU32(out, cap, facts.balance > kMaxBalanceOnGlass ? kMaxBalanceOnGlass : facts.balance);
+  } else if (arg == RowArg::GreetName && facts.name[0] != '\0') {
+    append(out, cap, " ");
+    append(out, cap, facts.name);
+  }
+}
+
+/// The bridge 2.3.0 slots, which appendGreetingArg renders.
+bool isGreetingArg(RowArg arg) {
+  return arg == RowArg::CourtAndMinutes || arg == RowArg::CourtPlusMinutes || arg == RowArg::Balance ||
+         arg == RowArg::GreetName;
+}
+
+/// The row's variable part, appended to `out`.
+///
+/// An if-chain over GROUPS rather than one switch over every slot: -Wswitch-enum
+/// makes a switch list all of them, and the complexity gate counts every label,
+/// so the table outgrew one function the day bridge 2.3.0 added four. Each
+/// group's own function stays small; a slot no group claims renders nothing.
+void appendArg(RowArg arg, const ScreenFacts& facts, char* out, size_t cap) {
+  if (isGreetingArg(arg)) {
+    appendGreetingArg(arg, facts, out, cap);
+  } else if (arg == RowArg::CourtCells || arg == RowArg::DurationCells) {
+    appendCells(arg, facts, out, cap);
+  } else if (arg == RowArg::FromTo) {
     append(out, cap, facts.fromTime);
     append(out, cap, "-");
     append(out, cap, facts.toTime);
-    return;
-  case RowArg::Name:
+  } else if (arg == RowArg::EndsAt || arg == RowArg::AtTime) {
+    append(out, cap, timeFor(arg, facts));
+  } else if (arg == RowArg::CourtLetter) {
+    appendChar(out, cap, courtLetter(facts.court));
+  } else if (arg == RowArg::CourtNumber) {
+    appendU32(out, cap, facts.courtNumber > 0 ? static_cast<uint32_t>(facts.courtNumber) : 0U);
+  } else if (arg == RowArg::Minutes) {
+    appendU32(out, cap, facts.minutes);
+  } else if (arg == RowArg::Name) {
     append(out, cap, facts.name[0] == '\0' ? kNoName : facts.name);
-    return;
-  case RowArg::Amount:
+  } else if (arg == RowArg::Amount) {
     append(out, cap, facts.amount);
-    return;
-  case RowArg::CourtAndMinutes:
-    appendChar(out, cap, courtLetter(facts.court));
-    append(out, cap, " ");
-    appendU32(out, cap, facts.minutes);
-    return;
-  case RowArg::CourtPlusMinutes:
-    appendChar(out, cap, courtLetter(facts.court));
-    append(out, cap, " +");
-    appendU32(out, cap, facts.minutes);
-    return;
-  case RowArg::Balance:
-    appendU32(out, cap, facts.balance);
-    return;
-  case RowArg::GreetName:
-    append(out, cap, facts.name);
-    return;
-  case RowArg::CourtCells:
-  case RowArg::DurationCells:
-    appendCells(arg, facts, out, cap);
-    return;
   }
 }
 

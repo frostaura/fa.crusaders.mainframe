@@ -44,6 +44,11 @@ public:
     bool on;
   };
 
+  /// The relay module the fake stands in for. Active LOW unless a test names
+  /// the solid-state relays (Mega 2.1.0): the electrical channel then asserts
+  /// THAT board's levels through the same hal::relayLevelFor().
+  explicit FakeRelay(hal::RelayPolarity polarity = hal::RelayPolarity::kActiveLow) : polarity_(polarity) {}
+
   void set(uint8_t channel, bool on) override {
     if (channel >= hal::kRelayChannelCount) {
       ++badChannelCalls_;
@@ -69,7 +74,9 @@ public:
 
   /// The level a correct driver would have put on the pin for the current
   /// logical state. Out-of-range channels report the released level.
-  hal::PinLevel level(uint8_t channel) const { return hal::relayLevelFor(isOn(channel)); }
+  hal::PinLevel level(uint8_t channel) const { return hal::relayLevelFor(isOn(channel), polarity_); }
+
+  hal::RelayPolarity polarity() const { return polarity_; }
 
   /// The same thing as the 0/1 a digitalWrite() would receive, for tests that
   /// want to assert the raw number rather than the enum.
@@ -133,6 +140,7 @@ private:
     ++eventCount_;
   }
 
+  hal::RelayPolarity polarity_;
   bool state_[hal::kRelayChannelCount] = {false, false, false, false};
   uint16_t transitions_[hal::kRelayChannelCount] = {0U, 0U, 0U, 0U};
   Event events_[kMaxEvents] = {};

@@ -272,6 +272,34 @@ void test_relay_guard_drives_the_active_low_level(void) {
   TEST_ASSERT_EQUAL_UINT8(1U, guard.mask());
 }
 
+/// Mega 2.1.0: the club fitted NORMALLY-OPEN SOLID-STATE relays, which close
+/// on a HIGH input. The same RelayGuard, over a fake of THAT board, must drive
+/// HIGH for on and LOW for off — through hal::relayLevelFor(), the one mapping
+/// the Arduino driver also calls with the polarity its build flag names.
+void test_relay_guard_drives_the_active_high_level_for_the_solid_state_relays(void) {
+  fakes::FakeRelay relay(hal::RelayPolarity::kActiveHigh);
+  courtlogic::RelayGuard guard(relay);
+
+  TEST_ASSERT_EQUAL_UINT8(hal::toDigital(hal::PinLevel::kLow), relay.digitalLevel(kCourtA));
+  TEST_ASSERT_TRUE(guard.on(kCourtA, 900U, kBaseMid));
+  TEST_ASSERT_EQUAL_UINT8(hal::toDigital(hal::PinLevel::kHigh), relay.digitalLevel(kCourtA));
+  TEST_ASSERT_EQUAL_UINT8(hal::toDigital(hal::PinLevel::kLow), relay.digitalLevel(kCourtB));
+  TEST_ASSERT_TRUE(guard.off(kCourtA));
+  TEST_ASSERT_EQUAL_UINT8(hal::toDigital(hal::PinLevel::kLow), relay.digitalLevel(kCourtA));
+
+  // court_mega is built with RELAY_ACTIVE_LOW=0, which is THIS polarity...
+  TEST_ASSERT_TRUE(hal::relayPolarityFor(false) == hal::RelayPolarity::kActiveHigh);
+  TEST_ASSERT_TRUE(hal::relayPolarityFor(true) == hal::RelayPolarity::kActiveLow);
+  // ...and BOOT SAFETY, the host-checkable half of it. ArduinoRelay::begin()
+  // writes the RELEASED level while the pin is still an input, then makes it an
+  // output. An AVR resets with PORT=0 (LOW), so for the solid-state relays the
+  // released level IS the reset state: writing it first leaves the pullup off
+  // and pinMode() latches off. For the coil board released is HIGH, and the
+  // same order is what stops pinMode() latching the reset LOW = all courts on.
+  TEST_ASSERT_TRUE(hal::relayLevelFor(false, hal::RelayPolarity::kActiveHigh) == hal::PinLevel::kLow);
+  TEST_ASSERT_TRUE(hal::relayLevelFor(false, hal::RelayPolarity::kActiveLow) == hal::PinLevel::kHigh);
+}
+
 void test_relay_guard_releases_at_the_deadline_at_every_base(void) {
   for (size_t i = 0; i < kBaseCount; ++i) {
     const uint32_t base = kBases[i];
@@ -743,15 +771,177 @@ void test_box_a_dead_bridge_still_loses_the_lights(void) {
   TEST_ASSERT_TRUE(b.box.droppedTxFrames() > 0U);
 }
 
+/// The first key a member presses at a dark panel. A DURATION key is the only
+/// press that can buy anything, and outside the window it is dropped — never
+/// queued for the next member's scan — and counted (Mega 2.1.0: duration keys
+/// only; court keys are forwarded, see below).
+constexpr uint8_t kFirstDurationKey = hal::kDurationButtonBase;
+
 void test_box_drops_presses_outside_the_auth_window(void) {
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Box b(base);
+
+    uint32_t at = base;
+    for (uint8_t key = hal::kDurationButtonBase; key < hal::kButtonCount; ++key) {
+      b.buttons.press(key);
+      b.step(at += 10U);
+      b.step(at += courtlogic::kDebounceMs);
+      b.buttons.release(key);
+      b.step(at += 10U);
+      b.step(at += courtlogic::kDebounceMs);
+    }
+
+    TEST_ASSERT_FALSE(sentLineStarting(b.bridge, "!BTN"));
+    TEST_ASSERT_EQUAL_UINT16(4U, b.box.unauthorisedPresses());
+  }
+}
+
+/// Mega 2.1.0. A COURT key is forwarded with the window shut: on its own it
+/// buys nothing and lights nothing, and only the bridge knows whether to answer
+/// it with the court's minutes left (SCAN TO EXTEND) or SCAN YOUR CODE. It is
+/// NOT an unauthorised press — the `!PONG` counter still means "a press thrown
+/// away" — and the Mega paints nothing of its own yet: the bridge answers.
+void test_box_a_court_key_with_the_window_shut_is_forwarded_and_not_counted(void) {
+  const char* const frames[hal::kCourtButtonCount] = {"!BTN,A", "!BTN,B", "!BTN,C", "!BTN,D"};
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    for (uint8_t key = 0U; key < hal::kCourtButtonCount; ++key) {
+      Box b(base);
+      TEST_ASSERT_FALSE(b.box.auth().allows(base));
+
+      b.buttons.press(key);
+      b.step(base + 10U);
+      b.step(base + 10U + courtlogic::kDebounceMs);
+
+      TEST_ASSERT_TRUE_MESSAGE(sentLineStarting(b.bridge, frames[key]), frames[key]);
+      TEST_ASSERT_EQUAL_UINT8(1U, countLinesStarting(b.bridge, "!BTN"));
+      TEST_ASSERT_EQUAL_UINT16(0U, b.box.unauthorisedPresses());
+      TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine2), b.display.row(1U));
+      TEST_ASSERT_EQUAL_STRING(padded("READY"), b.display.row(3U));
+    }
+  }
+}
+
+/// A court key and a duration key settling on the same pass, window shut: the
+/// court key goes to the bridge, the duration key is dropped and counted once,
+/// and the drop is answered on the glass at once.
+void test_box_a_court_and_a_duration_key_together_split_with_the_window_shut(void) {
   Box b(kBaseMid);
 
   b.buttons.press(0U);
-  b.step(kBaseMid);
-  b.step(kBaseMid + courtlogic::kDebounceMs);
+  b.buttons.press(kFirstDurationKey);
+  b.step(kBaseMid + 10U);
+  b.step(kBaseMid + 10U + courtlogic::kDebounceMs);
 
-  TEST_ASSERT_FALSE(sentLineStarting(b.bridge, "!BTN"));
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!BTN,A"));
+  TEST_ASSERT_FALSE(sentLineStarting(b.bridge, "!BTN,1"));
   TEST_ASSERT_EQUAL_UINT16(1U, b.box.unauthorisedPresses());
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kHintLine), b.display.row(1U));
+}
+
+/// The bridge is dead, rebooting or mid-flash and paints nothing in answer to a
+/// forwarded court press. The Mega waits kHintFallbackMs for it — a live
+/// bridge answers within a pass — and then paints SCAN CODE FIRST itself, on
+/// row 1 (the club's 16x2 shows rows 0-1 only) and on the full action row.
+void test_box_the_mega_paints_its_own_hint_when_the_bridge_does_not_answer(void) {
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Box b(base);
+
+    b.buttons.press(1U);
+    b.step(base + 10U);
+    const uint32_t pressedAt = base + 10U + courtlogic::kDebounceMs;
+    b.step(pressedAt);
+    TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!BTN,B"));
+
+    // Silence is not answered early: the bridge still has the grace.
+    b.step(pressedAt + courtlogic::kHintFallbackMs - 1U);
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine2), b.display.row(1U));
+
+    b.step(pressedAt + courtlogic::kHintFallbackMs);
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kHintLine), b.display.row(1U));
+    TEST_ASSERT_EQUAL_STRING(padded("SCAN YOUR CODE FIRST"), b.display.row(3U));
+    // Still not an unauthorised press: the court key was forwarded.
+    TEST_ASSERT_EQUAL_UINT16(0U, b.box.unauthorisedPresses());
+
+    // And it goes on its own, the landing rows put back.
+    b.step(pressedAt + courtlogic::kHintFallbackMs + courtlogic::kHintMs);
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine2), b.display.row(1U));
+    TEST_ASSERT_EQUAL_STRING(padded("READY"), b.display.row(3U));
+  }
+}
+
+/// A bridge that DOES answer inside the grace cancels the fallback, whichever
+/// verb it paints with: its words are what stays on the glass.
+void test_box_a_bridge_answer_inside_the_grace_cancels_the_fallback(void) {
+  for (uint8_t shape = 0U; shape < 2U; ++shape) {
+    Box b(kBaseWrapSoon);
+    b.buttons.press(0U);
+    b.step(kBaseWrapSoon + 10U);
+    const uint32_t pressedAt = kBaseWrapSoon + 10U + courtlogic::kDebounceMs;
+    b.step(pressedAt);
+
+    if (shape == 0U) {
+      feedFrame(b.bridge, proto::Frame::lcd("COURT A 45 MIN", "SCAN TO EXTEND"));
+    } else {
+      feedFrame(b.bridge, proto::Frame::row(0U, "COURT A 45 MIN"));
+      feedFrame(b.bridge, proto::Frame::row(1U, "SCAN TO EXTEND"));
+      feedFrame(b.bridge, proto::Frame::show(10U, 0U));
+    }
+    b.step(pressedAt + 200U);
+    b.step(pressedAt + 400U);
+    TEST_ASSERT_EQUAL_STRING(padded("SCAN TO EXTEND"), b.display.row(1U));
+
+    b.step(pressedAt + courtlogic::kHintFallbackMs + 500U);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(padded("SCAN TO EXTEND"), b.display.row(1U),
+                                     "the Mega's fallback painted over the bridge's answer");
+    TEST_ASSERT_EQUAL_UINT16(0U, b.box.screens().suppressedHints());
+  }
+}
+
+/// A court key that could not be SENT — the link is down — is answered on the
+/// glass at once (there is no bridge to wait for), and is not an unauthorised
+/// press: the link failed, and that is counted as a dropped frame instead.
+void test_box_a_court_key_the_link_cannot_carry_is_hinted_at_once(void) {
+  Box b(kBaseMid);
+  b.bridge.setConnected(false);
+
+  b.buttons.press(2U);
+  b.step(kBaseMid + 10U);
+  b.step(kBaseMid + 10U + courtlogic::kDebounceMs);
+
+  TEST_ASSERT_TRUE(b.box.droppedTxFrames() > 0U);
+  TEST_ASSERT_EQUAL_UINT16(0U, b.box.unauthorisedPresses());
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kHintLine), b.display.row(1U));
+}
+
+/// Mega 2.1.0. An accepted `!EXT` is followed at once by a `!STATE` carrying
+/// the new deadline, so the minutes a member just paid for are on the bridge's
+/// glass now rather than at the next ten-second publish. A refused one (relay
+/// open) is `!ERR,BADARG` and publishes nothing.
+void test_box_an_accepted_ext_publishes_state_at_once(void) {
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Box b(base);
+
+    feedFrame(b.bridge, proto::Frame::on(proto::Court::A, 600U));
+    b.step(base + 1U);
+    TEST_ASSERT_EQUAL_UINT8(1U, countLinesStarting(b.bridge, "!STATE,1,600,"));
+
+    // Two seconds later: well inside the periodic interval, mask unchanged.
+    feedFrame(b.bridge, proto::Frame::ext(proto::Court::A, 1800U));
+    b.step(base + 2001U);
+    TEST_ASSERT_EQUAL_UINT8(1U, countLinesStarting(b.bridge, "!STATE,1,1800,0,0,0"));
+
+    // An `!EXT` on a dark court is refused and says nothing else.
+    feedFrame(b.bridge, proto::Frame::ext(proto::Court::B, 1800U));
+    b.step(base + 2002U);
+    TEST_ASSERT_EQUAL_UINT8(1U, countLinesStarting(b.bridge, "!ERR,BADARG"));
+    TEST_ASSERT_EQUAL_UINT8(2U, countLinesStarting(b.bridge, "!STATE,1,"));
+    TEST_ASSERT_FALSE(b.bridge.captureOverflowed());
+  }
 }
 
 void test_box_forwards_a_press_inside_the_auth_window(void) {
@@ -939,7 +1129,13 @@ void test_box_a_scan_is_acknowledged_on_the_glass_before_any_answer(void) {
   b.step(kBaseMid + 1U);
 
   TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine1), b.display.row(0U));
-  TEST_ASSERT_EQUAL_STRING(padded(""), b.display.row(1U));
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine2), b.display.row(1U));
+  // Both inside the sixteen columns the club's 16x2 shows: the old
+  // "CHECKING YOUR CODE" clipped to "CHECKING YOUR CO" there.
+  TEST_ASSERT_EQUAL_STRING("CHECKING CODE", courtlogic::kScanFeedbackLine1);
+  TEST_ASSERT_EQUAL_STRING("PLEASE WAIT", courtlogic::kScanFeedbackLine2);
+  TEST_ASSERT_TRUE(strlen(courtlogic::kScanFeedbackLine1) <= court::kSafeSubsetCols);
+  TEST_ASSERT_TRUE(strlen(courtlogic::kScanFeedbackLine2) <= court::kSafeSubsetCols);
   TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!SCAN,MEM-0042"));
 }
 
@@ -1130,32 +1326,39 @@ void test_box_the_button_window_closing_does_not_take_the_screen_away(void) {
 void test_box_a_dropped_press_paints_a_hint_and_is_rate_limited(void) {
   Box b(kBaseMid);
 
-  // The window is shut: the press is correctly dropped and correctly counted.
-  b.buttons.press(0U);
+  // The window is shut: a DURATION press is correctly dropped and correctly
+  // counted (a court press is forwarded instead — Mega 2.1.0).
+  b.buttons.press(kFirstDurationKey);
   b.step(kBaseMid + 10U);
   b.step(kBaseMid + 10U + courtlogic::kDebounceMs);
   TEST_ASSERT_EQUAL_UINT16(1U, b.box.unauthorisedPresses());
   TEST_ASSERT_FALSE(sentLineStarting(b.bridge, "!BTN"));
 
   // What is new is that the member can tell the difference between a dropped
-  // press and a dead box.
+  // press and a dead box — on row 3 of the 20x4, and on row 1, which is the
+  // only row besides the scan prompt a 16x2 shows.
   TEST_ASSERT_EQUAL_STRING(padded("SCAN YOUR CODE FIRST"), b.display.row(3U));
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kHintLine), b.display.row(1U));
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+  TEST_ASSERT_TRUE(strlen(courtlogic::kHintLine) <= court::kSafeSubsetCols);
 
   // A second press inside the rate limit paints nothing more — a jammed contact
   // must not strobe the glass or flood the I2C bus at loop rate.
-  b.buttons.release(0U);
+  b.buttons.release(kFirstDurationKey);
   b.step(kBaseMid + 200U);
   b.step(kBaseMid + 200U + courtlogic::kDebounceMs);
-  b.buttons.press(0U);
+  b.buttons.press(kFirstDurationKey);
   b.step(kBaseMid + 400U);
   b.step(kBaseMid + 400U + courtlogic::kDebounceMs);
   TEST_ASSERT_EQUAL_UINT16(1U, b.box.screens().suppressedHints());
+  TEST_ASSERT_EQUAL_UINT16(2U, b.box.unauthorisedPresses());
 
-  // And it reverts on its own, back to the action row underneath it.
-  b.buttons.release(0U);
+  // And it reverts on its own, back to the rows underneath it.
+  b.buttons.release(kFirstDurationKey);
   b.step(kBaseMid + 600U);
   b.step(kBaseMid + courtlogic::kHintMs + 1200U);
   TEST_ASSERT_EQUAL_STRING(padded("READY"), b.display.row(3U));
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine2), b.display.row(1U));
 }
 
 // --- D1-5: a lit court is visible ------------------------------------------
@@ -1181,6 +1384,73 @@ void test_box_the_landing_screen_shows_what_is_burning(void) {
   // `CRUSADERS COURTS / 45 MIN` was on the glass for one I2C write. Now the
   // grant's own hold has already taken it away and the court is still visible.
   TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+}
+
+/// Mega 2.1.0. The landing screen LEADS with the call to action, because the
+/// club's panel is a 16x2 and rows 2-3 are off-glass there: row 0 is SCAN YOUR
+/// CODE, and row 1 is TO PLAY while every court is dark or the lit courts'
+/// minutes left while any is lit — one court as a sentence, several as cells.
+void test_box_the_landing_screen_leads_with_scan_your_code(void) {
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Box b(base);
+
+    TEST_ASSERT_EQUAL_STRING("SCAN YOUR CODE", courtlogic::kIdleLine1);
+    TEST_ASSERT_EQUAL_STRING("TO PLAY", courtlogic::kIdleLine2);
+    TEST_ASSERT_EQUAL_STRING(padded("SCAN YOUR CODE"), b.display.row(0U));
+    TEST_ASSERT_EQUAL_STRING(padded("TO PLAY"), b.display.row(1U));
+
+    // One lit court: a sentence. 2700 s is 45 minutes.
+    feedFrame(b.bridge, proto::Frame::on(proto::Court::B, 2700U));
+    b.step(base + 1U);
+    b.step(base + 1100U);
+    TEST_ASSERT_EQUAL_STRING(padded("SCAN YOUR CODE"), b.display.row(0U));
+    TEST_ASSERT_EQUAL_STRING(padded("COURT B 45 MIN"), b.display.row(1U));
+
+    // Two: four-column cells, letter then minutes, rounded UP — 240 s is 4
+    // minutes, and a single digit is right-aligned in its cell.
+    feedFrame(b.bridge, proto::Frame::on(proto::Court::D, 240U));
+    b.step(base + 1101U);
+    b.step(base + 2200U);
+    TEST_ASSERT_EQUAL_STRING(padded("B45 D 4"), b.display.row(1U));
+
+    // All four fit sixteen columns.
+    feedFrame(b.bridge, proto::Frame::on(proto::Court::A, 5400U));
+    feedFrame(b.bridge, proto::Frame::on(proto::Court::C, 30U));
+    b.step(base + 2201U);
+    b.step(base + 3300U);
+    TEST_ASSERT_EQUAL_STRING(padded("A90 B45 C 1 D 4"), b.display.row(1U));
+    TEST_ASSERT_TRUE(strlen("A90 B45 C 1 D 4") <= court::kSafeSubsetCols);
+
+    // Back to one, with a single-digit remainder: the pad space is closed up
+    // ("COURT D 4 MIN", never "COURT D  4 MIN"). A, B and C go off.
+    feedFrame(b.bridge, proto::Frame::off(proto::Court::A));
+    feedFrame(b.bridge, proto::Frame::off(proto::Court::B));
+    feedFrame(b.bridge, proto::Frame::off(proto::Court::C));
+    b.step(base + 3301U);
+    b.step(base + 4400U);
+    TEST_ASSERT_EQUAL_STRING(padded("COURT D 4 MIN"), b.display.row(1U));
+
+    // And dark again: TO PLAY.
+    feedFrame(b.bridge, proto::Frame::off(proto::Court::D));
+    b.step(base + 4401U);
+    b.step(base + 5500U);
+    TEST_ASSERT_EQUAL_STRING(padded("TO PLAY"), b.display.row(1U));
+  }
+}
+
+/// An overlay's hold ending puts the LANDING rows back — summary included — not
+/// whatever the overlay staged.
+void test_box_the_landing_summary_returns_when_an_overlay_leaves(void) {
+  Box b(kBaseMid);
+  feedFrame(b.bridge, proto::Frame::on(proto::Court::C, 1800U));
+  feedFrame(b.bridge, proto::Frame::lcd("HI DEAN", "BALANCE 120 MIN"));
+  b.step(kBaseMid + 1U);
+  TEST_ASSERT_EQUAL_STRING(padded("BALANCE 120 MIN"), b.display.row(1U));
+
+  b.step(kBaseMid + 1U + courtlogic::kDefaultHoldMs);
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded("COURT C 30 MIN"), b.display.row(1U));
 }
 
 void test_box_an_unmapped_relay_is_blank_not_a_dark_court(void) {
@@ -1403,7 +1673,8 @@ void test_box_a_corrupt_scanner_line_is_reported_under_its_own_name(void) {
 void test_box_pong_carries_the_counters_nothing_could_read(void) {
   Box b(kBaseMid);
 
-  b.buttons.press(0U);
+  // A duration press with the window shut — the one press still thrown away.
+  b.buttons.press(kFirstDurationKey);
   b.step(kBaseMid + 10U);
   b.step(kBaseMid + 10U + courtlogic::kDebounceMs);
   TEST_ASSERT_EQUAL_UINT16(1U, b.box.unauthorisedPresses());
@@ -1438,6 +1709,15 @@ int main(int, char**) {
   UNITY_BEGIN();
 
   RUN_TEST(test_box_a_scan_is_acknowledged_on_the_glass_before_any_answer);
+  RUN_TEST(test_box_a_court_key_with_the_window_shut_is_forwarded_and_not_counted);
+  RUN_TEST(test_box_a_court_and_a_duration_key_together_split_with_the_window_shut);
+  RUN_TEST(test_box_the_mega_paints_its_own_hint_when_the_bridge_does_not_answer);
+  RUN_TEST(test_box_a_bridge_answer_inside_the_grace_cancels_the_fallback);
+  RUN_TEST(test_box_a_court_key_the_link_cannot_carry_is_hinted_at_once);
+  RUN_TEST(test_box_an_accepted_ext_publishes_state_at_once);
+  RUN_TEST(test_box_the_landing_screen_leads_with_scan_your_code);
+  RUN_TEST(test_box_the_landing_summary_returns_when_an_overlay_leaves);
+  RUN_TEST(test_relay_guard_drives_the_active_high_level_for_the_solid_state_relays);
   RUN_TEST(test_box_a_dead_bridge_still_gets_the_scan_acknowledged);
   RUN_TEST(test_box_the_bridges_answer_replaces_the_acknowledgement_and_then_leaves);
   RUN_TEST(test_box_a_refusal_plus_auth_zero_still_leaves_the_glass);

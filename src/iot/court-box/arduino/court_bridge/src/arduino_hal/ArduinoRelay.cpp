@@ -19,9 +19,10 @@ namespace {
 // with RELAY_ACTIVE_LOW=0. A build that does not say is refused: guessing the
 // polarity of a building's lighting circuit is not a default.
 //
-// hal::relayLevelFor() (shared, active-LOW) is still what the host fakes and
-// the simulator model; this is the one place THIS board's level is decided,
-// and ArduinoRelay is its only caller.
+// The mapping itself is hal::relayLevelFor(on, polarity) — shared, pure and
+// host-tested for BOTH polarities (test_hal_fakes, test_courtlogic). This file
+// only names which polarity THIS board has, from the build flag, and
+// ArduinoRelay is its only caller.
 //
 // Here and not in Pins.h because the bridge compiles this library too (for its
 // clock, serial and store) and has no relays: only the Mega must name it.
@@ -31,20 +32,16 @@ namespace {
 #endif
 #define RELAY_ACTIVE_LOW 0
 #endif
-constexpr hal::PinLevel kCourtRelayOnLevel = RELAY_ACTIVE_LOW ? hal::PinLevel::kLow : hal::PinLevel::kHigh;
-constexpr hal::PinLevel kCourtRelayOffLevel = RELAY_ACTIVE_LOW ? hal::PinLevel::kHigh : hal::PinLevel::kLow;
-
-constexpr hal::PinLevel courtRelayLevelFor(bool on) {
-  return on ? kCourtRelayOnLevel : kCourtRelayOffLevel;
-}
+constexpr hal::RelayPolarity kCourtRelayPolarity = hal::relayPolarityFor(RELAY_ACTIVE_LOW != 0);
 
 /// The single translation from "the lights are on" to a level on a pin. It goes
-/// through courtRelayLevelFor() (above, from the RELAY_ACTIVE_LOW build flag)
+/// through hal::relayLevelFor() with kCourtRelayPolarity (above, from the
+/// RELAY_ACTIVE_LOW build flag)
 /// and nowhere else: an inverted digitalWrite written out by hand here would put
 /// the building's lights on whenever the system believed they were off, and
 /// nothing in software would ever notice.
 void drive(uint8_t pin, bool on) {
-  digitalWrite(pin, hal::toDigital(courtRelayLevelFor(on)));
+  digitalWrite(pin, hal::toDigital(hal::relayLevelFor(on, kCourtRelayPolarity)));
 }
 
 } // namespace

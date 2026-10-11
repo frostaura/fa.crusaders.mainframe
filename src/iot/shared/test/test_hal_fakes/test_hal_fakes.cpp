@@ -90,6 +90,36 @@ void test_relay_fake_separates_logical_state_from_electrical_level(void) {
   TEST_ASSERT_NOT_EQUAL(static_cast<uint8_t>(true), code(hal::relayLevelFor(true)));
 }
 
+// Mega 2.1.0's solid-state relays close on HIGH. The same mapping, the other
+// polarity: a fake of THAT board reads HIGH for on and LOW for off, and the
+// whole truth table is pinned against literals in both polarities so neither
+// can be "fixed" by flipping the other.
+void test_relay_level_mapping_is_pinned_for_both_polarities(void) {
+  const hal::RelayPolarity low = hal::RelayPolarity::kActiveLow;
+  const hal::RelayPolarity high = hal::RelayPolarity::kActiveHigh;
+  TEST_ASSERT_EQUAL_UINT8(0U, code(hal::relayLevelFor(true, low)));
+  TEST_ASSERT_EQUAL_UINT8(1U, code(hal::relayLevelFor(false, low)));
+  TEST_ASSERT_EQUAL_UINT8(1U, code(hal::relayLevelFor(true, high)));
+  TEST_ASSERT_EQUAL_UINT8(0U, code(hal::relayLevelFor(false, high)));
+  // The one-argument form is the coil board's, unchanged.
+  TEST_ASSERT_EQUAL_UINT8(code(hal::relayLevelFor(true, low)), code(hal::relayLevelFor(true)));
+  TEST_ASSERT_EQUAL_UINT8(code(hal::relayLevelFor(false, low)), code(hal::relayLevelFor(false)));
+  // RELAY_ACTIVE_LOW=1 is the coil board, 0 the solid-state relays.
+  TEST_ASSERT_TRUE(hal::relayPolarityFor(true) == low);
+  TEST_ASSERT_TRUE(hal::relayPolarityFor(false) == high);
+
+  fakes::FakeRelay ssr(high);
+  TEST_ASSERT_TRUE(ssr.polarity() == high);
+  for (uint8_t ch = 0U; ch < hal::kRelayChannelCount; ++ch) {
+    TEST_ASSERT_EQUAL_UINT8(0U, ssr.digitalLevel(ch)); // released = LOW
+  }
+  ssr.set(1U, true);
+  TEST_ASSERT_EQUAL_UINT8(1U, ssr.digitalLevel(1U)); // HIGH == lights on
+  TEST_ASSERT_EQUAL_UINT8(0U, ssr.digitalLevel(0U));
+  ssr.allOff();
+  TEST_ASSERT_EQUAL_UINT8(0U, ssr.digitalLevel(1U));
+}
+
 void test_relay_fake_records_call_order_and_counts_transitions(void) {
   fakes::FakeRelay relay;
   relay.set(1U, true);
@@ -765,6 +795,7 @@ int main(int, char**) {
 
   RUN_TEST(test_relay_fake_starts_released_and_electrically_high);
   RUN_TEST(test_relay_fake_separates_logical_state_from_electrical_level);
+  RUN_TEST(test_relay_level_mapping_is_pinned_for_both_polarities);
   RUN_TEST(test_relay_fake_records_call_order_and_counts_transitions);
   RUN_TEST(test_relay_fake_flags_log_overflow_instead_of_wrapping);
   RUN_TEST(test_relay_fake_ignores_an_out_of_range_channel_and_counts_it);

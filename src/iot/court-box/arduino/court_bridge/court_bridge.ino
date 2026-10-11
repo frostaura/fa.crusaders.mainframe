@@ -685,7 +685,8 @@ uint32_t relaySecondsLeft(uint8_t court, uint32_t nowMs) {
 /// Relight is holding the court to past the ninety-minute cap.
 uint32_t courtSecondsLeft(uint8_t court, uint32_t nowMs) {
   const uint32_t relay = relaySecondsLeft(court, nowMs);
-  const uint32_t booking = court < bridgelogic::kStateCourts ? gRelight.bookingRemainingMs(court, nowMs) / 1000UL : 0U;
+  const uint32_t booking =
+      court < bridgelogic::kStateCourts ? gRelight.bookingRemainingMs(court, nowMs) / 1000UL : 0U;
   return booking > relay ? booking : relay;
 }
 
@@ -1312,7 +1313,8 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
       // duration press may follow an unscanned court press.
       gPad.clear();
       gExtendCourt = kNoExtend;
-      sendScreen(screenNow(lit ? bridgelogic::ScreenId::MinutesLeft : bridgelogic::ScreenId::ScanFirst, facts));
+      sendScreen(
+          screenNow(lit ? bridgelogic::ScreenId::MinutesLeft : bridgelogic::ScreenId::ScanFirst, facts));
       return;
     }
     if (lit) {
@@ -1658,69 +1660,31 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   applyAuth(gAuth.afterWalkUp(answer.outcome, nowMs));
 }
 
-/// Extends a lit court on the scanning member's minutes (bridge 2.3.0).
-///
-/// Needs the network — extending moves money — and is never decided here:
-/// the server truncates before the next booking and answers with what it
-/// actually added, which is what the relay is given. The `!EXT` sets the new
-/// relay deadline from now, capped at ninety minutes; a longer session is
-/// held past the cap by Relight exactly as a long booking is.
-///
-/// (The D10 pay-for flow is no longer reachable from the panel: a lit court
-/// press is an extension now. bridgelogic::PayFor stays compiled.)
-void requestExtend(const court::WalkUpIntent& intent) {
-  uint32_t nowMs = gClock.nowMs();
+/// Whether an extension on `intent` may be asked for at all, painting the
+/// reason when it may not. Needs a scan, a court this box drives and a link —
+/// extending moves money, so it is NEVER done offline.
+bool extendPreflight(const court::WalkUpIntent& intent, uint32_t nowMs) {
   if (gLastScan[0] == '\0') {
     showScreen(bridgelogic::ScreenId::ScanFirst, nowMs);
-    return;
+    return false;
   }
   if (intent.court >= gCourtCount || intent.court >= bridgelogic::kStateCourts) {
     showScreen(bridgelogic::ScreenId::SeeTheDesk, nowMs);
-    return;
+    return false;
   }
   if (!gWifiUp || gBreaker.open(nowMs)) {
-    sendLinesNow("NO CONNECTION", "EXTEND NEEDS NET");
-    return;
+    const court::Outcome offline = bridgelogic::onExtendResponse(0U, nullptr, 0U).refusal;
+    sendLinesNow(offline.line1, offline.line2);
+    return false;
   }
+  return true;
+}
 
-  showScreen(bridgelogic::ScreenId::OneMoment, nowMs);
-
-  bridgelogic::ExtendRequest request;
-  request.mac = gMacHex;
-  request.courtNumber = gCourtNumbers[intent.court];
-  request.minutes = intent.minutes;
-  request.token = gLastScan;
-  request.nonce = gExtendNonce.forPurchase(intent, gLastScan, gRequestEntropy);
-  request.scanAgeMs = scanAgeMs();
-  char body[bridgelogic::kExtendBodyCap];
-  if (bridgelogic::renderExtendBody(body, sizeof(body), request) == 0U) {
-    showScreen(bridgelogic::ScreenId::SeeTheDesk, gClock.nowMs());
-    return;
-  }
-
-  static char response[384];
-  response[0] = '\0';
-  const uint16_t status = callApi(bridgelogic::kPathExtend, body, response, sizeof(response));
-  const bridgelogic::ExtendResult answer = bridgelogic::onExtendResponse(status, response, strlen(response));
-  if (answer.decided) {
-    gExtendNonce.decided();
-  }
-  nowMs = gClock.nowMs();
-
-  if (!answer.extended) {
-    if ((!answer.decided || answer.invitesPress) && !holdForPressAgain(nowMs)) {
-      // SCAN AGAIN is already on the glass (R19).
-      return;
-    }
-    sendLinesNow(answer.refusal.line1, answer.refusal.line2);
-    if (answer.forgetsScan) {
-      forgetScan();
-    }
-    return;
-  }
-
+/// The server granted `answer.extendedMinutes` on relay `court`: re-arm the
+/// relay with `!EXT`, hold anything past the ninety-minute cap with Relight,
+/// and say so on the glass.
+void applyExtension(uint8_t court, const bridgelogic::ExtendResult& answer, uint32_t nowMs) {
   noteOnlineUse(gLastScan);
-  const uint8_t court = intent.court;
   const uint32_t relayLeft = relaySecondsLeft(court, nowMs);
   const bridgelogic::ExtendPlan plan =
       bridgelogic::planExtension(courtSecondsLeft(court, nowMs), answer.extendedMinutes);
@@ -1745,14 +1709,62 @@ void requestExtend(const court::WalkUpIntent& intent) {
   }
 
   bridgelogic::ScreenFacts facts = screenFacts(nowMs);
-  facts.court = court;
-  facts.minutes = answer.extendedMinutes;
-  facts.balance = answer.balanceAfterMinutes;
-  sendScreen(screenNow(answer.hasBalance ? bridgelogic::ScreenId::Extended
-                                         : bridgelogic::ScreenId::ExtendedNoBalance,
-                       facts));
+  const bridgelogic::ScreenId id = bridgelogic::extendedScreen(answer, court, facts);
+  sendScreen(screenNow(id, facts));
   // The identity is spent on the purchase, as a walk-up's is.
   spendScan();
+}
+
+/// Extends a lit court on the scanning member's minutes (bridge 2.3.0).
+///
+/// Never decided here: the server truncates before the next booking and
+/// answers with what it actually added, which is what the relay is given. The
+/// `!EXT` sets the new relay deadline from now, capped at ninety minutes; a
+/// longer session is held past the cap by Relight exactly as a long booking is.
+///
+/// (The D10 pay-for flow is no longer reachable from the panel: a lit court
+/// press is an extension now. bridgelogic::PayFor stays compiled.)
+void requestExtend(const court::WalkUpIntent& intent) {
+  uint32_t nowMs = gClock.nowMs();
+  if (!extendPreflight(intent, nowMs)) {
+    return;
+  }
+  showScreen(bridgelogic::ScreenId::OneMoment, nowMs);
+
+  bridgelogic::ExtendRequest request;
+  request.mac = gMacHex;
+  request.courtNumber = gCourtNumbers[intent.court];
+  request.minutes = intent.minutes;
+  request.token = gLastScan;
+  request.nonce = gExtendNonce.forPurchase(intent, gLastScan, gRequestEntropy);
+  request.scanAgeMs = scanAgeMs();
+  char body[bridgelogic::kExtendBodyCap];
+  if (bridgelogic::renderExtendBody(body, sizeof(body), request) == 0U) {
+    showScreen(bridgelogic::ScreenId::SeeTheDesk, gClock.nowMs());
+    return;
+  }
+
+  static char response[384];
+  response[0] = '\0';
+  const uint16_t status = callApi(bridgelogic::kPathExtend, body, response, sizeof(response));
+  const bridgelogic::ExtendResult answer = bridgelogic::onExtendResponse(status, response, strlen(response));
+  if (answer.decided) {
+    gExtendNonce.decided();
+  }
+  nowMs = gClock.nowMs();
+
+  if (answer.extended) {
+    applyExtension(intent.court, answer, nowMs);
+    return;
+  }
+  if ((!answer.decided || answer.invitesPress) && !holdForPressAgain(nowMs)) {
+    // SCAN AGAIN is already on the glass (R19).
+    return;
+  }
+  sendLinesNow(answer.refusal.line1, answer.refusal.line2);
+  if (answer.forgetsScan) {
+    forgetScan();
+  }
 }
 
 /// Moves at most ONE due fault into the event queue per pass.

@@ -7,6 +7,10 @@
 // shows up in the simulator's transcript, which is one of the few places a
 // human actually reads it.
 //
+// The polarity is the composition root's to name (the simulator reads the same
+// RELAY_ACTIVE_LOW build flag the Mega does), so the transcript's `pin level`
+// is the level the fitted relays would actually see.
+//
 // Rejected: reusing fakes::FakeRelay. The fakes latch an overflow flag when
 // their event log fills and stop recording, because a test that overran its own
 // fixture must fail loudly. A simulator runs for hours; that behaviour would
@@ -24,7 +28,7 @@ namespace posix_hal {
 
 class ConsoleRelay final : public hal::IRelayPort {
 public:
-  ConsoleRelay();
+  explicit ConsoleRelay(hal::RelayPolarity polarity = hal::RelayPolarity::kActiveLow);
 
   void set(uint8_t channel, bool on) override;
 
@@ -33,6 +37,7 @@ public:
   void allOff() override;
 
 private:
+  hal::RelayPolarity polarity_;
   bool state_[hal::kRelayChannelCount];
 };
 

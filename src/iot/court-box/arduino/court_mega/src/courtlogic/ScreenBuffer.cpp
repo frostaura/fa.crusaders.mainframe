@@ -91,8 +91,8 @@ void readyIn(char* out, uint8_t cols, uint16_t seconds) {
 } // namespace
 
 ScreenBuffer::ScreenBuffer(hal::IDisplayPort& display)
-    : display_(display), staged_(), live_(), hold_(), hintUntil_(), hintAllowedAt_(), hintFallback_(), refresh_(),
-      holdMs_(kDefaultHoldMs), clockMinute_(kNoClockMinute), clockStampMs_(0U), courtNumbers_(),
+    : display_(display), staged_(), live_(), hold_(), hintUntil_(), hintAllowedAt_(), hintFallback_(),
+      refresh_(), holdMs_(kDefaultHoldMs), clockMinute_(kNoClockMinute), clockStampMs_(0U), courtNumbers_(),
       // "No complaint" until the bridge says otherwise. The Mega cannot know
       // what the link is doing and must not guess in either direction: the
       // quiet row claims nothing, where starting at NO WIFI would announce an

@@ -55,6 +55,12 @@
 #include "posix_hal/TcpTransport.h"
 #include "protocol/Protocol.h"
 
+// The Mega's relay polarity, from the same build flag court_mega is built
+// with, so the transcript's pin level is the fitted relays' (see platformio.ini).
+#ifndef RELAY_ACTIVE_LOW
+#error "RELAY_ACTIVE_LOW is not defined — the simulator takes the Mega's value from platformio.ini"
+#endif
+
 namespace {
 
 /// 0 asks the kernel for a free port, which is how a harness runs several
@@ -167,7 +173,7 @@ int main(int argc, char** argv) {
   // Ports first, then the box that borrows them; same order as the firmware's
   // composition root, and for the same reason.
   posix_hal::PosixClock clock(options.startMs);
-  posix_hal::ConsoleRelay relay;
+  posix_hal::ConsoleRelay relay(hal::relayPolarityFor(RELAY_ACTIVE_LOW != 0));
   posix_hal::ConsoleDisplay display;
   posix_hal::ConsoleScanner scanner;
   posix_hal::ConsoleButtons buttons(clock);

@@ -29,6 +29,7 @@
 
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/BootId.h"
+#include "bridgelogic/Extend.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/PayFor.h"
@@ -1605,6 +1606,13 @@ const char* const kBoundHttpVectors[] = {
     "heartbeat-response-relays-over-cap",
     "heartbeat-response-lcd-settings",
     "heartbeat-response-lcd-settings-out-of-range",
+    "extend-request",
+    "extend-response-ok",
+    "extend-response-truncated",
+    "extend-response-court-not-lit",
+    "extend-response-no-time",
+    "extend-response-insufficient",
+    "activate-response-greeting",
 };
 
 bool isBound(const char* id) {
@@ -3591,6 +3599,18 @@ const ScreenContract kContract[] = {
     {bridgelogic::ScreenId::Busy, "BUSY", true, false},
     // R19 D19-2. No court cells: no court press is honoured until a rescan.
     {bridgelogic::ScreenId::ScanAgain, "SCAN", false, false},
+    // Bridge 2.3.0. The greeting is the carve-out (a cut name is still a whole
+    // greeting); its second row is the whole fact and must fit untouched.
+    {bridgelogic::ScreenId::Greeting, "BALANCE", false, true},
+    {bridgelogic::ScreenId::GreetingNoBalance, "WELCOME", false, true},
+    // A known member with nothing booked: the court cells are the invitation.
+    {bridgelogic::ScreenId::PickCourt, "COURT", true, false},
+    // An unscanned press on a lit court: how long, and how to add to it.
+    {bridgelogic::ScreenId::MinutesLeft, "EXTEND", false, false},
+    // After a scan, on a lit court: the durations are the choice.
+    {bridgelogic::ScreenId::ExtendPrompt, "EXTEND", true, false},
+    {bridgelogic::ScreenId::Extended, "BALANCE", false, false},
+    {bridgelogic::ScreenId::ExtendedNoBalance, "COURT", false, false},
 };
 
 constexpr size_t kContractCount = sizeof(kContract) / sizeof(kContract[0]);
@@ -3611,6 +3631,9 @@ bridgelogic::ScreenFacts fullFacts(const court::ButtonMap* map) {
   snprintf(facts.name, sizeof(facts.name), "%s", "Dean");
   // The widest label the glass accepts: four digits of whole minutes (P13 §8).
   snprintf(facts.amount, sizeof(facts.amount), "%s", "9999");
+  // The widest balance the glass states (kMaxBalanceOnGlass): BALANCE 9999 MIN
+  // is the safe subset exactly.
+  facts.balance = bridgelogic::kMaxBalanceOnGlass;
   facts.buttons = map;
   return facts;
 }
@@ -3647,7 +3670,9 @@ void test_every_screen_holds_the_layout_contract() {
     TEST_ASSERT_TRUE_MESSAGE(screen.rows[1][0] != '\0', label);
     for (size_t row = 0U; row < 2U; ++row) {
       TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[row]) <= court::kSafeSubsetCols, label);
-      if (!contract.greeting) {
+      // The carve-out is row 0's NAME only: a greeting's second row is a whole
+      // fact (a balance, WELCOME) and may not be cut either.
+      if (!contract.greeting || row == 1U) {
         TEST_ASSERT_FALSE_MESSAGE(endsMidWord(screen.rows[row], court::kSafeSubsetCols), label);
       }
     }
@@ -3656,6 +3681,8 @@ void test_every_screen_holds_the_layout_contract() {
     snprintf(pair, sizeof(pair), "%s %s", screen.rows[0], screen.rows[1]);
     if (!contract.greeting) {
       TEST_ASSERT_NOT_NULL_MESSAGE(strstr(pair, contract.keyNoun), label);
+    } else {
+      TEST_ASSERT_NOT_NULL_MESSAGE(strstr(screen.rows[1], contract.keyNoun), label);
     }
 
     // --- rule 2: row 3 leaves columns 16-19 to the countdown ---------------
@@ -3862,6 +3889,521 @@ void test_member_display_is_read_tolerantly_and_never_truncated() {
   TEST_ASSERT_EQUAL_STRING("", facts.name);
 }
 
+// ---------------------------------------------------------------------------
+// Bridge 2.3.0 — the greeting, minutes left, and extending a lit court
+// ---------------------------------------------------------------------------
+
+void test_the_bridge_2_3_screens_say_what_the_spec_says() {
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+  facts.court = 0U;
+  facts.minutes = 45U;
+  facts.balance = 120U;
+  snprintf(facts.name, sizeof(facts.name), "%s", "DEAN");
+
+  bridgelogic::Screen s = bridgelogic::screenFor(bridgelogic::ScreenId::Greeting, facts);
+  TEST_ASSERT_EQUAL_STRING("HI DEAN", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("BALANCE 120 MIN", s.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("", s.rows[2]);
+  TEST_ASSERT_EQUAL_STRING("", s.rows[3]);
+  // An acknowledgement: the card hold, no countdown.
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kCardSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_UINT8(0U, s.flags);
+  TEST_ASSERT_TRUE(bridgelogic::holdClassOf(bridgelogic::ScreenId::Greeting) == bridgelogic::HoldClass::Card);
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::GreetingNoBalance, facts);
+  TEST_ASSERT_EQUAL_STRING("HI DEAN", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("WELCOME", s.rows[1]);
+
+  // No name at all: `HI` alone — never `HI ` with a dangling space, and never
+  // the member_display card's `HI THERE`.
+  facts.name[0] = '\0';
+  TEST_ASSERT_EQUAL_STRING("HI", bridgelogic::screenFor(bridgelogic::ScreenId::Greeting, facts).rows[0]);
+  TEST_ASSERT_EQUAL_STRING("HI",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::GreetingNoBalance, facts).rows[0]);
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::PickCourt, facts);
+  TEST_ASSERT_EQUAL_STRING("PICK A COURT", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("THEN A TIME", s.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("A   B   C   D", s.rows[3]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kChoiceSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_UINT8(bridgelogic::kShowFlagCountdown, s.flags);
+  // Court cells on row 3, so the scan-left clamp applies to it.
+  TEST_ASSERT_TRUE(bridgelogic::invitesCourtPress(bridgelogic::ScreenId::PickCourt));
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::MinutesLeft, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT A 45 MIN", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("SCAN TO EXTEND", s.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("SCAN WHEN READY", s.rows[3]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kRevertSeconds, s.holdSeconds);
+  TEST_ASSERT_FALSE(bridgelogic::invitesCourtPress(bridgelogic::ScreenId::MinutesLeft));
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::ExtendPrompt, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT A 45 MIN", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("EXTEND:PICK TIME", s.rows[1]);
+  TEST_ASSERT_EQUAL_size_t(court::kSafeSubsetCols, strlen(s.rows[1]));
+  TEST_ASSERT_EQUAL_STRING("15  30  45  60", s.rows[3]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kChoiceSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_UINT8(bridgelogic::kShowFlagCountdown, s.flags);
+  TEST_ASSERT_FALSE(bridgelogic::invitesCourtPress(bridgelogic::ScreenId::ExtendPrompt));
+
+  facts.minutes = 30U;
+  facts.balance = 90U;
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::Extended, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT A +30 MIN", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("BALANCE 90 MIN", s.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME", s.rows[3]);
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::ExtendedNoBalance, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT A +30 MIN", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME", s.rows[1]);
+
+  // The unscanned press on a DARK court reads the existing ScanFirst words.
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::ScanFirst, facts);
+  TEST_ASSERT_EQUAL_STRING("SCAN YOUR CODE", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("Then a court", s.rows[1]);
+
+  // The renderer's last line of defence: a balance past what fits is never
+  // printed wide, whatever picked the screen.
+  facts.balance = 123456U;
+  TEST_ASSERT_TRUE(strlen(bridgelogic::screenFor(bridgelogic::ScreenId::Extended, facts).rows[1]) <=
+                   court::kSafeSubsetCols);
+}
+
+void test_read_greeting_is_tolerant_of_absence_and_shapes_the_name_for_the_glass() {
+  bridgelogic::Greeting g;
+
+  // Both fields: name upper-cased, balance read.
+  const char both[] = "{\"activated\":true,\"greeting_name\":\"Dean\",\"balance_minutes\":120}";
+  bridgelogic::readGreeting(both, len(both), g);
+  TEST_ASSERT_EQUAL_STRING("DEAN", g.name);
+  TEST_ASSERT_TRUE(g.hasBalance);
+  TEST_ASSERT_EQUAL_UINT32(120U, g.balanceMinutes);
+
+  // Neither — an older backend, or a refusal: HI / WELCOME, never a failure.
+  const char neither[] = "{\"activated\":false,\"reason\":\"no_booking\"}";
+  bridgelogic::readGreeting(neither, len(neither), g);
+  TEST_ASSERT_EQUAL_STRING("", g.name);
+  TEST_ASSERT_FALSE(g.hasBalance);
+  TEST_ASSERT_EQUAL_UINT32(0U, g.balanceMinutes);
+
+  // One without the other, each way round.
+  const char nameOnly[] = "{\"greeting_name\":\"Ann\"}";
+  bridgelogic::readGreeting(nameOnly, len(nameOnly), g);
+  TEST_ASSERT_EQUAL_STRING("ANN", g.name);
+  TEST_ASSERT_FALSE(g.hasBalance);
+  const char balanceOnly[] = "{\"balance_minutes\":0}";
+  bridgelogic::readGreeting(balanceOnly, len(balanceOnly), g);
+  TEST_ASSERT_EQUAL_STRING("", g.name);
+  TEST_ASSERT_TRUE(g.hasBalance); // zero is a balance, not an absence
+  TEST_ASSERT_EQUAL_UINT32(0U, g.balanceMinutes);
+
+  // Cut to thirteen columns (HI plus thirteen is the 1602's sixteen), and a
+  // cut that ends on a space is trimmed rather than left dangling.
+  const char longName[] = "{\"greeting_name\":\"Bartholomew Jones-Smith\"}";
+  bridgelogic::readGreeting(longName, len(longName), g);
+  TEST_ASSERT_EQUAL_size_t(bridgelogic::kGreetingNameCols, strlen(g.name));
+  TEST_ASSERT_EQUAL_STRING("BARTHOLOMEW J", g.name);
+  const char cutAtSpace[] = "{\"greeting_name\":\"Mary Kate Ann Olsen\"}";
+  bridgelogic::readGreeting(cutAtSpace, len(cutAtSpace), g);
+  TEST_ASSERT_EQUAL_STRING("MARY KATE ANN", g.name);
+  const char cutBeforeSpace[] = "{\"greeting_name\":\"Abcdefghijkl  Z\"}";
+  bridgelogic::readGreeting(cutBeforeSpace, len(cutBeforeSpace), g);
+  TEST_ASSERT_EQUAL_STRING("ABCDEFGHIJKL", g.name);
+
+  // Nothing the HD44780 cannot draw: an escaped control byte and a high byte
+  // are dropped, not shown as garbage.
+  const char odd[] = "{\"greeting_name\":\"Zo\\u0001\\u00e9e\"}";
+  bridgelogic::readGreeting(odd, len(odd), g);
+  TEST_ASSERT_EQUAL_STRING("ZOE", g.name);
+  // The field arrives as raw JSON text. A real escape is DECODED, never
+  // painted as `\U00E9`: an ASCII one becomes its letter, a quote and a
+  // backslash are themselves, and the rest — \n, \t, a lone or truncated
+  // escape — draw nothing.
+  const char escaped[] = "{\"greeting_name\":\"\\u0041nn \\\"Jo\\\" O\\\\B\\n\\u12\"}";
+  bridgelogic::readGreeting(escaped, len(escaped), g);
+  TEST_ASSERT_EQUAL_STRING("ANN \"JO\" O\\B", g.name);
+  // A raw UTF-8 byte the server never sends is still not drawn.
+  const char rawHigh[] = "{\"greeting_name\":\"Zo\xc3\xab"
+                         "e\"}";
+  bridgelogic::readGreeting(rawHigh, len(rawHigh), g);
+  TEST_ASSERT_EQUAL_STRING("ZOE", g.name);
+
+  // TOP LEVEL only: a decoy in a nested object is somebody else's greeting.
+  const char decoy[] =
+      "{\"detail\":{\"greeting_name\":\"Mallory\",\"balance_minutes\":9},\"activated\":true}";
+  bridgelogic::readGreeting(decoy, len(decoy), g);
+  TEST_ASSERT_EQUAL_STRING("", g.name);
+  TEST_ASSERT_FALSE(g.hasBalance);
+
+  // Wrong types read as absent; a name too long for the read buffer is refused
+  // whole (an empty name) rather than half-read.
+  const char wrongTypes[] = "{\"greeting_name\":42,\"balance_minutes\":\"120\"}";
+  bridgelogic::readGreeting(wrongTypes, len(wrongTypes), g);
+  TEST_ASSERT_EQUAL_STRING("", g.name);
+  TEST_ASSERT_FALSE(g.hasBalance);
+  const char huge[] = "{\"greeting_name\":\"0123456789012345678901234567890123456789012345678901234567\"}";
+  bridgelogic::readGreeting(huge, len(huge), g);
+  TEST_ASSERT_EQUAL_STRING("", g.name);
+
+  // Nothing at all.
+  bridgelogic::readGreeting(nullptr, 0U, g);
+  TEST_ASSERT_EQUAL_STRING("", g.name);
+  TEST_ASSERT_FALSE(g.hasBalance);
+}
+
+void test_corpus_activate_greeting_greets_by_name_and_balance() {
+  loadHttpCorpus();
+  char body[512] = {};
+  const size_t n = bodyOf(responseVector("activate-response-greeting"), body, sizeof(body));
+
+  bridgelogic::Greeting g;
+  bridgelogic::readGreeting(body, n, g);
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+  const bridgelogic::ScreenId id = bridgelogic::greetingScreen(g, facts);
+  TEST_ASSERT_TRUE(id == bridgelogic::ScreenId::Greeting);
+  const bridgelogic::Screen s = bridgelogic::screenFor(id, facts);
+  TEST_ASSERT_EQUAL_STRING("HI DEAN", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("BALANCE 120 MIN", s.rows[1]);
+
+  // The greeting is additive: the same body still lights relay C as before.
+  const bridgelogic::ScanFlow flow;
+  const bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court);
+  TEST_ASSERT_TRUE(r.outcome.recognised);
+
+  // And the vectors without the fields greet without them.
+  const size_t m = bodyOf(responseVector("activate-response-ok"), body, sizeof(body));
+  bridgelogic::readGreeting(body, m, g);
+  TEST_ASSERT_TRUE(bridgelogic::greetingScreen(g, facts) == bridgelogic::ScreenId::GreetingNoBalance);
+  TEST_ASSERT_EQUAL_STRING("HI",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::GreetingNoBalance, facts).rows[0]);
+}
+
+void test_a_balance_the_glass_cannot_hold_is_not_stated_at_all() {
+  bridgelogic::ScreenFacts facts;
+  bridgelogic::Greeting g;
+  g.hasBalance = true;
+  g.balanceMinutes = bridgelogic::kMaxBalanceOnGlass;
+  TEST_ASSERT_TRUE(bridgelogic::greetingScreen(g, facts) == bridgelogic::ScreenId::Greeting);
+  TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMaxBalanceOnGlass, facts.balance);
+  // One more and BALANCE 10000 MIN would clip to `BALANCE 10000 MI`: a number
+  // with no unit. The greeting names no balance instead — never a wrong one.
+  g.balanceMinutes = bridgelogic::kMaxBalanceOnGlass + 1U;
+  TEST_ASSERT_TRUE(bridgelogic::greetingScreen(g, facts) == bridgelogic::ScreenId::GreetingNoBalance);
+  g.hasBalance = false;
+  g.balanceMinutes = 5U;
+  TEST_ASSERT_TRUE(bridgelogic::greetingScreen(g, facts) == bridgelogic::ScreenId::GreetingNoBalance);
+
+  bridgelogic::ExtendResult r;
+  r.extended = true;
+  r.extendedMinutes = 30U;
+  r.hasBalance = true;
+  r.balanceAfterMinutes = 150U;
+  TEST_ASSERT_TRUE(bridgelogic::extendedScreen(r, 3U, facts) == bridgelogic::ScreenId::Extended);
+  TEST_ASSERT_EQUAL_UINT8(3U, facts.court);
+  TEST_ASSERT_EQUAL_UINT32(30U, facts.minutes);
+  TEST_ASSERT_EQUAL_UINT32(150U, facts.balance);
+  r.balanceAfterMinutes = bridgelogic::kMaxBalanceOnGlass + 1U;
+  TEST_ASSERT_TRUE(bridgelogic::extendedScreen(r, 3U, facts) == bridgelogic::ScreenId::ExtendedNoBalance);
+  r.hasBalance = false;
+  r.balanceAfterMinutes = 0U;
+  TEST_ASSERT_TRUE(bridgelogic::extendedScreen(r, 0U, facts) == bridgelogic::ScreenId::ExtendedNoBalance);
+}
+
+void test_corpus_extend_body_is_byte_identical_to_the_contract() {
+  loadHttpCorpus();
+  char expected[512] = {};
+  const size_t n = bodyOf(requestVector("extend-request"), expected, sizeof(expected));
+
+  // Thirty minutes on relay C, which this box maps to club court 3.
+  bridgelogic::ExtendRequest request;
+  request.mac = corpusMac();
+  request.courtNumber = 3;
+  request.minutes = 30U;
+  request.token = "7Q3F9KM2XZ8B";
+  request.nonce = "9f2a4c6e8b0d1f3a";
+  request.scanAgeMs = 4321U; // not a member code: never rendered
+  char rendered[bridgelogic::kExtendBodyCap] = {};
+  const size_t renderedLen = bridgelogic::renderExtendBody(rendered, sizeof(rendered), request);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_STRING("/api/v1/device/extend", bridgelogic::kPathExtend);
+}
+
+void test_extend_body_ages_a_member_code_escapes_a_scan_and_refuses_what_does_not_fit() {
+  char out[bridgelogic::kExtendBodyCap] = {};
+  bridgelogic::ExtendRequest request;
+  request.mac = "5ccf7f0a1b2c";
+  request.courtNumber = 2;
+  request.minutes = 15U;
+  request.nonce = "0001020304050607";
+  request.scanAgeMs = 1500U;
+
+  // A v1 member code (nineteen characters, '1' first) carries its age, as the
+  // walk-up's does, so the server can bound how old a code it is charging is.
+  request.token = "1ABCDEFGHJKMNPQRST";
+  TEST_ASSERT_EQUAL_size_t(18U, strlen(request.token));
+  request.token = "1ABCDEFGHJKMNPQRSTU";
+  TEST_ASSERT_TRUE(bridgelogic::renderExtendBody(out, sizeof(out), request) > 0U);
+  TEST_ASSERT_EQUAL_STRING(
+      "{\"mac\":\"5ccf7f0a1b2c\",\"method\":\"qr\",\"token\":\"1ABCDEFGHJKMNPQRSTU\",\"court\":2,"
+      "\"minutes\":15,\"nonce\":\"0001020304050607\",\"scan_age_ms\":1500}",
+      out);
+
+  // A scan the Mega passed through with a quote and a backslash in it is
+  // escaped, never interpolated raw.
+  request.token = "Q\"\\X";
+  TEST_ASSERT_TRUE(bridgelogic::renderExtendBody(out, sizeof(out), request) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(out, "\"token\":\"Q\\\"\\\\X\""));
+
+  // Too small a buffer: 0 and an empty string, never a truncated body.
+  request.token = "7Q3F9KM2XZ8B";
+  char tiny[40] = {};
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderExtendBody(tiny, sizeof(tiny), request));
+  TEST_ASSERT_EQUAL_STRING("", tiny);
+
+  // Anything missing renders nothing.
+  bridgelogic::ExtendRequest missing = request;
+  missing.nonce = nullptr;
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderExtendBody(out, sizeof(out), missing));
+  missing = request;
+  missing.token = nullptr;
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderExtendBody(out, sizeof(out), missing));
+  missing = request;
+  missing.mac = "";
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderExtendBody(out, sizeof(out), missing));
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderExtendBody(nullptr, sizeof(out), request));
+}
+
+/// Reads one `extend` response vector the way the box does, with the status
+/// the vector declares.
+bridgelogic::ExtendResult extendVector(const char* id) {
+  static char body[512] = {};
+  const char* vector = responseVector(id);
+  const size_t n = bodyOf(vector, body, sizeof(body));
+  const uint16_t status = static_cast<uint16_t>(corpus::unsignedValue(corpus::member(vector, "status")));
+  return bridgelogic::onExtendResponse(status, body, n);
+}
+
+void test_corpus_extend_answers_mean_what_the_contract_says() {
+  loadHttpCorpus();
+
+  bridgelogic::ExtendResult r = extendVector("extend-response-ok");
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_TRUE(r.extended);
+  TEST_ASSERT_EQUAL_UINT32(30U, r.extendedMinutes);
+  TEST_ASSERT_TRUE(r.hasBalance);
+  TEST_ASSERT_EQUAL_UINT32(150U, r.balanceAfterMinutes);
+  TEST_ASSERT_FALSE(r.forgetsScan);
+
+  // What was SOLD, never what was asked: twenty, and no balance to state.
+  r = extendVector("extend-response-truncated");
+  TEST_ASSERT_TRUE(r.extended);
+  TEST_ASSERT_EQUAL_UINT32(20U, r.extendedMinutes);
+  TEST_ASSERT_FALSE(r.hasBalance);
+
+  struct Refusal {
+    const char* id;
+    const char* line1;
+    const char* line2;
+  };
+
+  const Refusal refusals[] = {
+      {"extend-response-court-not-lit", "COURT NOT ON", "PICK ANOTHER"},
+      {"extend-response-no-time", "NO TIME BEFORE", "NEXT BOOKING"},
+      {"extend-response-insufficient", "TOO FEW MINUTES", "BUY & RETRY"},
+  };
+  for (const Refusal& row : refusals) {
+    r = extendVector(row.id);
+    TEST_ASSERT_TRUE_MESSAGE(r.decided, row.id);
+    TEST_ASSERT_FALSE_MESSAGE(r.extended, row.id);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(row.line1, r.refusal.line1, row.id);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(row.line2, r.refusal.line2, row.id);
+    TEST_ASSERT_TRUE_MESSAGE(r.refusal.action == court::Action::Refuse, row.id);
+    // A refusal about the court or the money, not about the code: the scan
+    // stays for another try.
+    TEST_ASSERT_FALSE_MESSAGE(r.forgetsScan, row.id);
+    TEST_ASSERT_FALSE_MESSAGE(r.invitesPress, row.id);
+    TEST_ASSERT_TRUE(strlen(r.refusal.line1) <= court::kSafeSubsetCols);
+    TEST_ASSERT_TRUE(strlen(r.refusal.line2) <= court::kSafeSubsetCols);
+  }
+}
+
+void test_extend_never_happens_offline_and_an_unreadable_grant_is_undecided() {
+  // No link at all: extending moves money, so it is never done offline.
+  bridgelogic::ExtendResult r = bridgelogic::onExtendResponse(0U, nullptr, 0U);
+  TEST_ASSERT_FALSE(r.decided);
+  TEST_ASSERT_FALSE(r.extended);
+  TEST_ASSERT_EQUAL_STRING("NO CONNECTION", r.refusal.line1);
+  TEST_ASSERT_EQUAL_STRING("EXTEND NEEDS NET", r.refusal.line2);
+
+  // A rate limiter or a server fault decided nothing either: the nonce is kept
+  // and PRESS AGAIN asks the server whether THIS purchase happened.
+  const char busy[] = "{\"error\":\"conflict_retry\"}";
+  r = bridgelogic::onExtendResponse(503U, busy, len(busy));
+  TEST_ASSERT_FALSE(r.decided);
+  TEST_ASSERT_EQUAL_STRING("BUSY", r.refusal.line1);
+  r = bridgelogic::onExtendResponse(429U, nullptr, 0U);
+  TEST_ASSERT_FALSE(r.decided);
+
+  // THE BUG THIS PINS. A 200 the box could not read whole — a body cut by the
+  // transport, or one naming no extended_minutes — used to read NO TIME BEFORE
+  // and spend the nonce, while the server had very likely charged the member:
+  // the retry was then a SECOND purchase. Undecided, the retry carries the
+  // same nonce and the server answers with the first (`replayed:true`).
+  const char cut[] = "{\"booking_id\":\"3fa8\",\"extended_minutes\":30,\"balance_af";
+  r = bridgelogic::onExtendResponse(200U, cut, len(cut));
+  TEST_ASSERT_FALSE(r.decided);
+  TEST_ASSERT_FALSE(r.extended);
+  TEST_ASSERT_EQUAL_STRING("BUSY", r.refusal.line1);
+  TEST_ASSERT_EQUAL_STRING("PRESS AGAIN", r.refusal.line2);
+  const char noField[] = "{\"booking_id\":\"3fa8\",\"replayed\":false}";
+  r = bridgelogic::onExtendResponse(200U, noField, len(noField));
+  TEST_ASSERT_FALSE(r.decided);
+  r = bridgelogic::onExtendResponse(200U, nullptr, 0U);
+  TEST_ASSERT_FALSE(r.decided);
+  // A nested decoy is not the answer either.
+  const char nested[] = "{\"detail\":{\"extended_minutes\":30}}";
+  r = bridgelogic::onExtendResponse(200U, nested, len(nested));
+  TEST_ASSERT_FALSE(r.decided);
+
+  // Only a WHOLE body that says it added nothing is the decided "nothing".
+  const char zero[] = "{\"extended_minutes\":0,\"balance_after_minutes\":40}";
+  r = bridgelogic::onExtendResponse(200U, zero, len(zero));
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_FALSE(r.extended);
+  TEST_ASSERT_EQUAL_STRING("NO TIME BEFORE", r.refusal.line1);
+}
+
+void test_extend_borrows_the_walk_ups_words_and_its_scan_rules() {
+  // A used code and an unknown one are refusals of the CODE: the scan is
+  // forgotten (D8-1), exactly as the walk-up forgets it.
+  const char used[] = "{\"error\":\"code_used\"}";
+  bridgelogic::ExtendResult r = bridgelogic::onExtendResponse(409U, used, len(used));
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_TRUE(r.forgetsScan);
+  TEST_ASSERT_EQUAL_STRING("CODE USED", r.refusal.line1);
+  TEST_ASSERT_TRUE(r.refusal.action == court::Action::Refuse);
+  const char unknown[] = "{\"error\":\"not_recognised\"}";
+  r = bridgelogic::onExtendResponse(400U, unknown, len(unknown));
+  TEST_ASSERT_TRUE(r.forgetsScan);
+
+  // TOO LONG asks for another press on THIS scan.
+  const char tooLong[] = "{\"error\":\"minutes_out_of_range\",\"max_minutes\":90}";
+  r = bridgelogic::onExtendResponse(400U, tooLong, len(tooLong));
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_TRUE(r.invitesPress);
+  TEST_ASSERT_FALSE(r.forgetsScan);
+  TEST_ASSERT_EQUAL_STRING("TOO LONG", r.refusal.line1);
+
+  // An extend-specific error at a 5xx is not read: a server fault is no verdict.
+  const char notLit[] = "{\"error\":\"court_not_lit\"}";
+  r = bridgelogic::onExtendResponse(500U, notLit, len(notLit));
+  TEST_ASSERT_FALSE(r.decided);
+  TEST_ASSERT_EQUAL_STRING("BUSY", r.refusal.line1);
+
+  // A refusal never lights anything, whatever the walk-up would have done.
+  const char odd[] = "{\"error\":\"something_new\"}";
+  r = bridgelogic::onExtendResponse(400U, odd, len(odd));
+  TEST_ASSERT_TRUE(r.refusal.action == court::Action::Refuse);
+  TEST_ASSERT_FALSE(r.extended);
+}
+
+void test_plan_extension_caps_the_relay_and_holds_the_rest_for_relight() {
+  // Forty-five minutes left plus thirty bought: seventy-five, inside the cap.
+  bridgelogic::ExtendPlan plan = bridgelogic::planExtension(2700U, 30U);
+  TEST_ASSERT_EQUAL_UINT32(4500U, plan.sessionSeconds);
+  TEST_ASSERT_EQUAL_UINT32(4500U, plan.relaySeconds);
+
+  // Exactly at the cap.
+  plan = bridgelogic::planExtension(3600U, 30U);
+  TEST_ASSERT_EQUAL_UINT32(5400U, plan.sessionSeconds);
+  TEST_ASSERT_EQUAL_UINT32(5400U, plan.relaySeconds);
+
+  // Past it: the relay gets ninety minutes and the WHOLE session is what
+  // Relight holds the court to, so it is re-lit before the cap runs out.
+  plan = bridgelogic::planExtension(3600U, 60U);
+  TEST_ASSERT_EQUAL_UINT32(7200U, plan.sessionSeconds);
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(proto::kRelayHardCapSeconds), plan.relaySeconds);
+
+  // A court whose relay this half believes dark (the `!STATE` has not caught
+  // up): the extension alone.
+  plan = bridgelogic::planExtension(0U, 15U);
+  TEST_ASSERT_EQUAL_UINT32(900U, plan.sessionSeconds);
+  TEST_ASSERT_EQUAL_UINT32(900U, plan.relaySeconds);
+
+  // Never a zero-second `!EXT`: the wire's floor is one second.
+  plan = bridgelogic::planExtension(0U, 0U);
+  TEST_ASSERT_EQUAL_UINT32(0U, plan.sessionSeconds);
+  TEST_ASSERT_EQUAL_UINT32(1U, plan.relaySeconds);
+
+  // Saturates rather than wrapping, at both multiplications.
+  plan = bridgelogic::planExtension(UINT32_MAX - 10U, 90U);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, plan.sessionSeconds);
+  TEST_ASSERT_EQUAL_UINT32(5400U, plan.relaySeconds);
+  plan = bridgelogic::planExtension(100U, UINT32_MAX / 10U);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, plan.sessionSeconds);
+  TEST_ASSERT_EQUAL_UINT32(5400U, plan.relaySeconds);
+
+  // And Relight, armed the way the bridge arms it for an extension past the
+  // cap, re-lights for what is left once the relay deadline comes due.
+  bridgelogic::Relight relight;
+  court::Outcome session;
+  session.action = court::Action::TurnOn;
+  session.court = 1U;
+  session.recognised = true;
+  session.durationMs = 3600U * 1000U; // what the relay had before
+  plan = bridgelogic::planExtension(3600U, 60U);
+  session.bookingRemainingMs = plan.sessionSeconds * 1000U;
+  relight.onGrant(session, kBaseMid);
+  relight.extended(1U, plan.relaySeconds, kBaseMid);
+  TEST_ASSERT_TRUE(relight.tracking(1U));
+  TEST_ASSERT_EQUAL_UINT32(7200U * 1000U, relight.bookingRemainingMs(1U, kBaseMid));
+  TEST_ASSERT_FALSE(relight.check(1U, kBaseMid + 1000U).due);
+  const uint32_t due = kBaseMid + (5400U * 1000U) - bridgelogic::kExtLeadMs;
+  const bridgelogic::Extension ext = relight.check(1U, due);
+  TEST_ASSERT_TRUE(ext.due);
+  TEST_ASSERT_EQUAL_UINT32(1800U + (bridgelogic::kExtLeadMs / 1000U), ext.seconds);
+  // A court not tracked has no booking past its relay.
+  TEST_ASSERT_EQUAL_UINT32(0U, relight.bookingRemainingMs(0U, kBaseMid));
+  TEST_ASSERT_EQUAL_UINT32(0U, relight.bookingRemainingMs(9U, kBaseMid));
+}
+
+void test_a_known_member_with_nothing_booked_is_invited_to_walk_up() {
+  // no_booking and ended: a recognised member with nothing to light. The glass
+  // follows the greeting with PICK A COURT / THEN A TIME rather than sending
+  // them to the desk.
+  const bridgelogic::ScanFlow flow;
+  const char noBooking[] = "{\"activated\":false,\"reason\":\"no_booking\",\"granted_seconds\":0}";
+  bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, noBooking, len(noBooking), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.invitesWalkUp);
+  TEST_ASSERT_TRUE(r.outcome.recognised);
+
+  loadHttpCorpus();
+  char body[512] = {};
+  const size_t n = bodyOf(responseVector("activate-response-ended"), body, sizeof(body));
+  r = flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_TRUE(r.invitesWalkUp);
+
+  // Not for a refusal with something to say — TOO EARLY names the wait — and
+  // not for a grant.
+  const size_t early = bodyOf(responseVector("activate-response-too-early"), body, sizeof(body));
+  r = flow.onActivateResponse(200U, body, early, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_FALSE(r.invitesWalkUp);
+  const size_t ok = bodyOf(responseVector("activate-response-ok"), body, sizeof(body));
+  r = flow.onActivateResponse(200U, body, ok, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_FALSE(r.invitesWalkUp);
+  // A reason nested in a decoy object is not the answer.
+  const char decoy[] =
+      "{\"activated\":false,\"detail\":{\"reason\":\"no_booking\"},\"reason\":\"code_used\"}";
+  r = flow.onActivateResponse(200U, decoy, len(decoy), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r.invitesWalkUp);
+}
+
 } // namespace
 
 void setUp() {
@@ -3990,6 +4532,17 @@ int main(int, char**) {
   RUN_TEST(test_the_identity_screen_is_repainted_on_the_first_pong_and_after_a_mega_reset);
   RUN_TEST(test_a_heartbeat_response_ignores_every_key_this_build_does_not_read);
   RUN_TEST(test_the_uplink_decoder_keeps_every_mega_frame_around_the_noise);
+  RUN_TEST(test_the_bridge_2_3_screens_say_what_the_spec_says);
+  RUN_TEST(test_read_greeting_is_tolerant_of_absence_and_shapes_the_name_for_the_glass);
+  RUN_TEST(test_corpus_activate_greeting_greets_by_name_and_balance);
+  RUN_TEST(test_a_balance_the_glass_cannot_hold_is_not_stated_at_all);
+  RUN_TEST(test_corpus_extend_body_is_byte_identical_to_the_contract);
+  RUN_TEST(test_extend_body_ages_a_member_code_escapes_a_scan_and_refuses_what_does_not_fit);
+  RUN_TEST(test_corpus_extend_answers_mean_what_the_contract_says);
+  RUN_TEST(test_extend_never_happens_offline_and_an_unreadable_grant_is_undecided);
+  RUN_TEST(test_extend_borrows_the_walk_ups_words_and_its_scan_rules);
+  RUN_TEST(test_plan_extension_caps_the_relay_and_holds_the_rest_for_relight);
+  RUN_TEST(test_a_known_member_with_nothing_booked_is_invited_to_walk_up);
 
   return UNITY_END();
 }

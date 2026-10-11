@@ -30,7 +30,11 @@ is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
   `court_mega` is built with `RELAY_ACTIVE_LOW=0`. The pin is still driven to
   its released level (LOW) before it becomes an output, so a reset never
   flashes a court on. Fit a pull-down on each SSR input so the bootloader's
-  high-Z second is a guaranteed off.
+  high-Z second is a guaranteed off. The level mapping is one shared function,
+  `hal::relayLevelFor(on, polarity)`, host-tested for both polarities; the
+  native simulator is built with the Mega's own `RELAY_ACTIVE_LOW=0`, so its
+  transcript reads `(pin level HIGH)` for a lit court and the device e2e
+  asserts it.
 - **Landing screen (Mega-owned):** `SCAN YOUR CODE`, then `TO PLAY` while every
   court is dark, or the lit courts' minutes left — `COURT B 45 MIN` for one,
   `A45 C 5` for several.
@@ -38,7 +42,12 @@ is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
   `HI <NAME>` / `BALANCE <n> MIN` (from `/activate`'s `greeting_name` and
   `balance_minutes`; `HI` / `WELCOME` when absent, and for offline roster
   scans) for the card hold, then the outcome: the lit court and its minutes,
-  or `PICK A COURT` / `THEN A TIME` for a member with nothing booked.
+  or `PICK A COURT` / `THEN A TIME` for a member with nothing booked. The name
+  is printable ASCII, upper-cased and cut to thirteen columns (`HI` plus
+  thirteen is the 1602's sixteen); a JSON `\uXXXX` escape is decoded, never
+  painted. A balance the glass cannot hold whole — more than 9999 minutes
+  (`BALANCE 9999 MIN` is exactly sixteen columns) — is not stated at all:
+  `WELCOME` (or `ENJOY YOUR GAME` after an extension), never a clipped number.
 - **Court press with no scan:** a lit court reads `COURT A 45 MIN` /
   `SCAN TO EXTEND`; a dark one `SCAN YOUR CODE` / `Then a court`.
 - **Court press after a scan:** a dark court is a walk-up (`COURT A` /
@@ -49,7 +58,11 @@ is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
   cap by `Relight`) and reads `COURT A +30 MIN` / `BALANCE <n> MIN`. Refusals:
   `COURT NOT ON` / `PICK ANOTHER`, `NO TIME BEFORE` / `NEXT BOOKING`,
   `TOO FEW MINUTES` / `BUY & RETRY`, otherwise the walk-up's words. **Never
-  offline:** `NO CONNECTION` / `EXTEND NEEDS NET`. The D10 pay-for offer and
+  offline:** `NO CONNECTION` / `EXTEND NEEDS NET`. A `200` whose body the box
+  cannot read whole (cut by the transport, or naming no `extended_minutes`) is
+  **undecided**, not "nothing added": the purchase may be on the ledger, so the
+  nonce is kept and `BUSY` / `PRESS AGAIN` retries it — the server answers the
+  retry with the first purchase (`replayed:true`) instead of selling a second. The D10 pay-for offer and
   pressing your own lit court to switch it off are gone from the panel.
 - Every screen reverts to the landing screen on its own (revert or choice hold,
   and the Mega's 120 s clamp behind both).

@@ -103,7 +103,14 @@ network or the backend believe.
    rebooting, mid-flash) the Mega paints `SCAN CODE FIRST` on row 1 itself.
    The `!PONG` `unauthorised` counter counts **dropped duration presses only**,
    so it still means "a press thrown away" — a stuck contact, or a bridge that
-   stopped sending `!AUTH`.
+   stopped sending `!AUTH`. A court key the link itself could not carry (the
+   bridge is unplugged, the TX ring is full) is answered with the hint at once —
+   there is no bridge to wait for — and counted as a dropped frame (`tx_dropped`),
+   not as unauthorised. Host-tested in `test_courtlogic`
+   (`test_box_a_court_key_with_the_window_shut_is_forwarded_and_not_counted`,
+   `test_box_the_mega_paints_its_own_hint_when_the_bridge_does_not_answer`,
+   `test_box_a_court_key_the_link_cannot_carry_is_hinted_at_once`) and end to end
+   by `test/e2e-device` step E-BTN-2.
 
    *Who the window is for* is the bridge's rule (`bridgelogic::AuthPolicy`), and
    it matters as much as the expiry: the window is armed **only for a recognised

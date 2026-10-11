@@ -47,7 +47,8 @@ struct Greeting {
 /// absent, and a name that cannot be read is an empty name, not a refusal.
 void readGreeting(const char* body, size_t len, Greeting& out);
 
-/// The facts for ScreenId::Greeting / GreetingNoBalance.
+/// The facts for ScreenId::Greeting / GreetingNoBalance. A balance past
+/// kMaxBalanceOnGlass is not stated (GreetingNoBalance), never shortened.
 ScreenId greetingScreen(const Greeting& greeting, ScreenFacts& facts);
 
 /// Everything one extend request names. Same shape and rules as WalkUpRequest.
@@ -86,13 +87,21 @@ struct ExtendResult {
 };
 
 ///   200        → extended for `extended_minutes` (0 reads NO TIME BEFORE /
-///                NEXT BOOKING)
+///                NEXT BOOKING); a 200 whose body is cut or names no
+///                `extended_minutes` is UNDECIDED (BUSY / PRESS AGAIN) — the
+///                purchase may have happened, and the retry's same nonce is
+///                what finds out without buying twice
 ///   0          → NO CONNECTION / EXTEND NEEDS NET (undecided)
 ///   court_not_lit (409)       → COURT NOT ON / PICK ANOTHER
 ///   no_time_available (409)   → NO TIME BEFORE / NEXT BOOKING
 ///   insufficient_balance (402)→ TOO FEW MINUTES / BUY & RETRY
 ///   anything else             → the walk-up's mapping (onWalkUpResponse)
 ExtendResult onExtendResponse(uint16_t status, const char* body, size_t len);
+
+/// The facts and screen for a GRANTED extension on relay `court`:
+/// `COURT A +30 MIN` over `BALANCE <n> MIN`, or ExtendedNoBalance when the
+/// answer named no balance or one past kMaxBalanceOnGlass.
+ScreenId extendedScreen(const ExtendResult& result, uint8_t court, ScreenFacts& facts);
 
 /// The two numbers an extension turns into at the relay.
 struct ExtendPlan {

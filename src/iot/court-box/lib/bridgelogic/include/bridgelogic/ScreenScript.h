@@ -270,6 +270,14 @@ inline constexpr uint8_t kScreenCount = 41U;
 /// shortened name is still a complete greeting).
 inline constexpr size_t kGreetingNameCols = 13U;
 
+/// The largest balance the glass states, in whole minutes. `BALANCE 9999 MIN`
+/// is sixteen columns — the safe subset exactly — and a fifth digit would clip
+/// the unit off a 1602 (`BALANCE 12000 MI`), a number with no unit. A larger
+/// balance is not shortened or rounded either: greetingScreen() and
+/// extendedScreen() pick the variant that names no balance at all, because a
+/// wrong number about somebody's money is worse than none.
+inline constexpr uint32_t kMaxBalanceOnGlass = 9999U;
+
 /// What the glass shows while `/activate` is asked about a scan.
 inline constexpr ScreenId kActivateWaitScreen = ScreenId::CheckingCode;
 
