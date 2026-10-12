@@ -24,6 +24,7 @@ import { BookingBoard, BookingGridHeading, BookingGridSkeleton } from "../compon
 import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet";
 import { BookingForBar } from "../components/bookings/BookingForBar";
 import { LiftHoldSheet, type HoldToLift } from "../components/bookings/LiftHoldSheet";
+import { PlayerCard } from "../components/bookings/PlayerCard";
 import { useBookingFor, type BookingFor } from "../components/bookings/useBookingFor";
 import { UpcomingGames } from "../components/bookings/UpcomingGames";
 import { DaySummary } from "../components/bookings/DaySummary";
@@ -119,6 +120,8 @@ export default function BookingsPage() {
   // Keyed on the day, so moving to another day folds the past wall away again by itself.
   const [earlierShownFor, setEarlierShownFor] = useState<string | null>(null);
   const showEarlier = earlierShownFor === date;
+  // The player card — somebody else's booking, pressed by a member.
+  const [card, setCard] = useState<GridBooking | null>(null);
 
   // R4 M4-3 — what OTHER people do to this member's games (an organiser cancelling, a partner
   // answering) reaches the page too: on a wallet-stream move and on coming back into view.
@@ -164,6 +167,7 @@ export default function BookingsPage() {
     offline: offlineGrid,
     onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc, shown.sliceMinutes)]),
     onOpenBooking: (slot: ScheduleSlot) => openCancel([gridBookingOf(slot, shown)]),
+    onViewBooking: (slot: ScheduleSlot) => setCard(gridBookingOf(slot, shown)),
   } : null), [shown, gridRules, isAdmin, otherDay, forMember, explainer.explain, selection.api, lift.ask, openBook, openCancel, offlineGrid]);
 
   const collapsed = explainer.collapsedRows(schedule.timeSlices, schedule.pastThresholdMs, showEarlier, isAdmin, schedule.slotsByCourt);
@@ -266,6 +270,7 @@ export default function BookingsPage() {
       />
       <LiftHoldSheet hold={lift.hold} open={lift.open} onOpenChange={lift.setOpen} onLift={(id, reason) => void liftHold(id, reason)}
         onCloseAutoFocus={sheets.returnFocus} />
+      <PlayerCard booking={card} onClose={() => setCard(null)} />
       {/* Perf — lazy: mounted from its first opening (and kept, so it closes whole), fetched at
           idle once the day is on screen. */}
       {sheets.cancelMounted ? (

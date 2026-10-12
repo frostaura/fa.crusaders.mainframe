@@ -11,7 +11,7 @@ import { cellVerdict, type CellFacts, type GridReason, type ViewerRules } from "
 import { closedCellLabel, holdCellLabel, holdLiftLabel, pastCellLabel, quotaCellLabel, restrictionLabel, unavailableWhy } from "../lib/gridCopy";
 import {
   CELL_TEXT, HOLDING_CELL, OFFLINE_CELL, PARTNER_CELL_WORD, PENDING_CELL, bookCellLabel, bookedByLabel, continuesLabel, idleCellLabel,
-  mineCellLabel, minePastCellLabel, minePastOpenLabel, otherCellAdminLabel, partnerCellLabel,
+  bookedByOpenLabel, mineCellLabel, minePastCellLabel, minePastOpenLabel, otherCellAdminLabel, partnerCellLabel,
 } from "../lib/bookingsCopy";
 import { isPartnerSlot } from "../lib/bookingsApi";
 import {
@@ -68,6 +68,8 @@ export type BoardContext = {
   onBook: (court: ScheduleCourt, startsAtUtc: string) => void;
   /** A booking the viewer may act on — their own, or anybody's for an admin. */
   onOpenBooking: (slot: ScheduleSlot, court: ScheduleCourt) => void;
+  /** A member pressed somebody else's booking: the player card (photo, first name, when). */
+  onViewBooking?: (slot: ScheduleSlot, court: ScheduleCourt) => void;
   /** An admin pressed Lift on a club hold — the page asks to confirm and why (R5 A5-1). */
   onLiftHold: (hold: HoldToLift) => void;
   selection: SelectionApi;
@@ -659,6 +661,27 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
               <OwnerFace slot={slot} />
             </button>
           </Interactable>
+        </Block>
+      </Cell>
+    );
+  }
+  // A member's press opens the player card — not while choosing slots, when it would read as a pick.
+  const view = ctx.onViewBooking;
+  if (view && slot.bookingId && !ctx.selection.active) {
+    return (
+      <Cell label={where} selfFocus={false} {...cell}>
+        <Block rows={rows}>
+          <button
+            type="button"
+            tabIndex={props.roving ? 0 : -1}
+            aria-label={bookedByOpenLabel(where, slot.ownerFirstName)}
+            aria-haspopup="dialog"
+            data-other-cell=""
+            onClick={() => view(slot, court)}
+            className={cn(SURFACE, PRESSABLE, TONE.bookedAction, lead(rows))}
+          >
+            <OwnerFace slot={slot} />
+          </button>
         </Block>
       </Cell>
     );
