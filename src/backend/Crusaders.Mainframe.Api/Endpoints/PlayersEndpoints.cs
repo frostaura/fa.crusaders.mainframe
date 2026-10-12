@@ -240,7 +240,7 @@ public static class PlayersEndpoints
         Guid bookingId, Guid participantId, AcceptRequest? req, HttpContext ctx, [AsParameters] SeatDeps deps, CancellationToken ct)
     {
         if (!await SeatOnAsync(deps.Db, bookingId, participantId, ct)) return Results.NotFound(new { error = "invite_not_found" });
-        return ToResult(await deps.Players.AcceptAsync(participantId, Me(ctx), req?.ExpectedShareMinutes, ct));
+        return ToResult(await deps.Players.AcceptAsync(participantId, Me(ctx), req?.ExpectedShareMinutes, ct, payMinutes: req?.PayMinutes));
     }
 
     /// <summary>The accept route's services, bound as one parameter for the complexity gate.</summary>
@@ -261,7 +261,7 @@ public static class PlayersEndpoints
     }
 
     private static Task<IResult> AcceptLinkAsync(string token, AcceptRequest? req, HttpContext ctx, PlayersService players, CancellationToken ct) =>
-        Run(players.AcceptByTokenAsync(token, Me(ctx), req?.ExpectedShareMinutes, ct));
+        Run(players.AcceptByTokenAsync(token, Me(ctx), req?.ExpectedShareMinutes, ct, req?.PayMinutes));
 
     private static async Task<IResult> DeclineLinkAsync(string token, HttpContext ctx, PlayersService players, CancellationToken ct)
     {
@@ -346,8 +346,10 @@ public sealed record AdminAddPlayerRequest(Guid? UserId = null, string? GuestNam
 /// <summary>
 /// A partner's accept: the share they were shown on the accept sheet. Required — a share that has
 /// risen past it since is refused with <c>409 share_changed</c> and the current figure.
+/// <c>payMinutes</c>, optional, is pay what you can: the part of the share the partner pays now,
+/// the rest left for the organiser to split (players-and-splits.md §4).
 /// </summary>
-public sealed record AcceptRequest(int? ExpectedShareMinutes = null);
+public sealed record AcceptRequest(int? ExpectedShareMinutes = null, int? PayMinutes = null);
 
 /// <summary>
 /// An admin acting on one seat. The reason is required. The overdraft flag is required on a

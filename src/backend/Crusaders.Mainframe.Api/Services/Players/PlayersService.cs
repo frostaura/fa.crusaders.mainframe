@@ -642,6 +642,10 @@ public sealed partial class PlayersService
         var before = game.Live.ToDictionary(s => s.Id, s => s.ShareMinutes);
         if (Resplit(game, mode, figures) is { } error) return PlayerOutcome.Refuse(400, error);
 
+        // Pay what you can: the organiser has decided how what partners could not pay is split, so
+        // nothing is left to cover — whatever this split is, even one that leaves every share where it was.
+        foreach (var covered in game.Seats.Where(s => s.ShortfallMinutes > 0)) covered.ShortfallMinutes = 0;
+
         var changed = game.Live.Where(s => s.Seat > 1 && s.UserId is not null && before[s.Id] != s.ShareMinutes).ToList();
         foreach (var seat in changed)
         {

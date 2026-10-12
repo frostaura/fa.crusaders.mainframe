@@ -569,6 +569,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<int>("ShareWeight")
                         .HasColumnType("integer");
 
+                    b.Property<int>("ShortfallMinutes")
+                        .HasColumnType("integer");
+
                     b.Property<string>("SplitMode")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
@@ -621,6 +624,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                             t.HasCheckConstraint("ck_booking_participants_money", "\"ShareMinutes\" >= 0 AND \"ConsentedMinutes\" >= 0 AND \"ShareWeight\" >= 0");
 
                             t.HasCheckConstraint("ck_booking_participants_seat", "\"Seat\" BETWEEN 1 AND 4");
+
+                            t.HasCheckConstraint("ck_booking_participants_shortfall", "\"ShortfallMinutes\" >= 0");
 
                             t.HasCheckConstraint("ck_booking_participants_status", "\"Status\" BETWEEN 0 AND 5");
                         });

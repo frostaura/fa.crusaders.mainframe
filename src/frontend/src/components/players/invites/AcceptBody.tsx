@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Warning } from "@/components/ui/icons";
 import { TextLink } from "@/components/ui/text-link";
 import {
-  heldLine, HELD_EXPLAINER, INVITE_UNSURE, INVITES_COPY, OWED_BACK_EXPLAINER, acceptedLine, deadlineLine, declinedLine, owedBackLine, playersCount,
-  shortByLine,
+  heldLine, HELD_EXPLAINER, INVITE_UNSURE, INVITES_COPY, OWED_BACK_EXPLAINER, acceptedLine, deadlineLine, declinedLine, owedBackLine, partPaidLine,
+  payPartLabel, playersCount, shortByLine,
 } from "@/lib/playersCopy";
 import { useBalance } from "@/lib/useBalance";
 import { heldPartsLine } from "@/lib/walletCopy";
@@ -61,7 +61,7 @@ export function AcceptBody({ flow, reasonId, headed = false }: {
         <GameFacts flow={flow} />
         <MoneyFacts flow={flow} />
       </div>
-      {flow.blocked === "short" ? <ShortNotice shortBy={flow.money.shortBy} reasonId={reasonId} /> : null}
+      {flow.blocked === "short" ? <ShortNotice flow={flow} reasonId={reasonId} /> : null}
       <CapEffect flow={flow} reasonId={reasonId} />
       {/* A share of nothing has nothing to pay by and nothing to lapse (R1 F2.14). */}
       {flow.invite.share_minutes > 0 ? (
@@ -205,19 +205,35 @@ function useBuyPath(): string {
   return `${BUY_MINUTES_PATH}?returnTo=${encodeURIComponent(`${pathname}${search}`)}`;
 }
 
-/** Short of the share: what they need, and the way to get it. The sentence describes Accept. */
-function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string }) {
+/**
+ * Short of the share: what they need, and the way to get it. The sentence describes Accept.
+ * Pay what you can — with something to spend, a second way beside Buy minutes: pay what they have
+ * now and leave the rest to the other players (the organiser covers it until they split it).
+ */
+function ShortNotice({ flow, reasonId }: { flow: AcceptFlow; reasonId: string }) {
   const buy = useBuyPath();
+  const part = flow.partMinutes;
   return (
     <div role="status" data-short="" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-warning-strong/30 bg-warning-soft p-3 text-warning-strong">
       <Warning size={20} weight="bold" aria-hidden="true" className="shrink-0" />
       <p id={reasonId} className="grid min-w-0 flex-1 basis-40 gap-0.5 text-sm">
-        <span className="font-semibold">{shortByLine(shortBy)}</span>
+        <span className="font-semibold">{shortByLine(flow.money.shortBy)}</span>
         <span>{INVITES_COPY.shortBody}</span>
+        {part !== null ? <span data-pay-part-body="">{INVITES_COPY.payPartBody}</span> : null}
       </p>
-      <Button asChild variant="outline" size="sm" className="ml-auto shrink-0">
-        <Link to={buy}>{INVITES_COPY.buyMinutes}</Link>
-      </Button>
+      <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-2">
+        {part !== null ? (
+          <Button
+            variant="secondary" size="sm" className="whitespace-normal [overflow-wrap:anywhere]"
+            pending={flow.acceptAction.pending} onClick={flow.payPart} data-pay-part=""
+          >
+            {payPartLabel(part)}
+          </Button>
+        ) : null}
+        <Button asChild variant="outline" size="sm">
+          <Link to={buy}>{INVITES_COPY.buyMinutes}</Link>
+        </Button>
+      </div>
     </div>
   );
 }
@@ -255,9 +271,15 @@ function DeclinedView({ name, headed, proven }: { name: string; headed: boolean;
   );
 }
 
-/** R15 J15-11 — what this accept paid, with the seat's total beside it when it is more. */
+/**
+ * R15 J15-11 — what this accept paid, with the seat's total beside it when it is more. Pay what you
+ * can — a part payment says what was paid and that the rest is with the organiser.
+ */
 function acceptedWords(outcome: AcceptFlow["outcome"], name: string): { line: string; answer: AcceptAnswer | null; proven: ProvenBy } {
   if (outcome?.kind !== "accepted") return { line: acceptedLine(0, name, 0), answer: null, proven: false };
+  if (outcome.rest && outcome.rest > 0) {
+    return { line: partPaidLine(outcome.paidNow ?? 0, name, outcome.rest), answer: outcome.answer, proven: outcome.proven || false };
+  }
   const total = outcome.answer.paid_minutes ?? 0;
   const paidNow = Math.min(outcome.paidNow ?? total, total);
   return { line: acceptedLine(paidNow, name, total), answer: outcome.answer, proven: outcome.proven || false };

@@ -144,6 +144,11 @@ export type DetailPlayer = {
    * cancelled game read "paid 0"). Optional: an older server does not send it.
    */
   returned_minutes?: number;
+  /**
+   * Pay what you can — what this partner could not pay of the share they were asked for; the
+   * organiser covers it until they split it. Absent from an older API (read as 0).
+   */
+  shortfall_minutes?: number;
   needs_consent: boolean;
   settled_outside: boolean;
   /**
@@ -208,6 +213,11 @@ export type BookingDetail = {
     paid_by?: { user_id: string; name: string | null; photo_url: string | null } | null;
     /** R6 E6-2 — what they paid; 0 when nobody did. */
     paid_by_minutes?: number;
+    /**
+     * Pay what you can — Σ the live partners' `shortfall_minutes`: what partners could not pay that
+     * the organiser covers until they split it. Any re-split clears it. Absent from an older API.
+     */
+    left_to_cover_minutes?: number;
   };
   /** R6 E6-6 — a no-show refunded in full because no box was reachable; not held against the member. */
   refunded_for_outage?: boolean;
@@ -345,6 +355,22 @@ export function inviteMoney(
   return { spendable, toPay, after: spendable - toPay, shortBy: Math.max(0, toPay - spendable), held, owedBack };
 }
 
+/** An accept's body: the share shown, and — pay what you can — the part paid now, only when there is one. */
+export function acceptBody(expectedShareMinutes: number, payMinutes?: number): { expectedShareMinutes: number; payMinutes?: number } {
+  return payMinutes === undefined ? { expectedShareMinutes } : { expectedShareMinutes, payMinutes };
+}
+
+/**
+ * Pay what you can — the share a partner short of it can stand at: what they have already paid plus
+ * every minute they may spend, when that is something and still less than the share. Null when the
+ * whole share is affordable, or nothing is (`spendable` ≤ 0). Whole minutes, as the accept checks them.
+ */
+export function payWhatYouCan(shareMinutes: number, toPayMinutes: number, spendable: number): number | null {
+  if (spendable <= 0) return null;
+  const pay = shareMinutes - toPayMinutes + Math.floor(spendable);
+  return pay > 0 && pay < shareMinutes ? pay : null;
+}
+
 export type AcceptAnswer = {
   participant_id: string;
   booking_id: string;
@@ -393,6 +419,7 @@ export type MemberNotificationKind =
   | "players.response"
   | "players.return_waiting"
   | "players.club_seat"
+  | "players.shortfall"
   | (string & {});
 
 export type MemberNotification = {
@@ -468,8 +495,9 @@ export const playersEndpoints = {
   changeSplit: (bookingId: string, body: SplitChange) => api.put<SplitChangeAnswer>(`/api/v1/bookings/${bookingId}/split`, body),
 
   /* the partner's hand — accept names the share the partner was SHOWN */
-  accept: (bookingId: string, participantId: string, expectedShareMinutes: number) =>
-    api.post<AcceptAnswer>(`${seat(bookingId, participantId)}/accept`, { expectedShareMinutes }),
+  /** `payMinutes` — pay what you can: the part of the share paid now, the rest left for the organiser to split. */
+  accept: (bookingId: string, participantId: string, expectedShareMinutes: number, payMinutes?: number) =>
+    api.post<AcceptAnswer>(`${seat(bookingId, participantId)}/accept`, acceptBody(expectedShareMinutes, payMinutes)),
   decline: (bookingId: string, participantId: string) => api.post<SeatAnswer>(`${seat(bookingId, participantId)}/decline`),
   withdraw: (bookingId: string, participantId: string) => api.post<SeatAnswer>(`${seat(bookingId, participantId)}/withdraw`),
 
@@ -478,8 +506,8 @@ export const playersEndpoints = {
   invite: (token: string) => api.get<Invite>(`/api/v1/invites/${encodeURIComponent(token)}`),
   invitePreview: (token: string) => api.get<InvitePreview>(`/api/v1/invites/${encodeURIComponent(token)}/preview`),
   mySeat: (participantId: string) => api.get<MySeat>(`/api/v1/me/invites/${encodeURIComponent(participantId)}`),
-  acceptLink: (token: string, expectedShareMinutes: number) =>
-    api.post<AcceptAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/accept`, { expectedShareMinutes }),
+  acceptLink: (token: string, expectedShareMinutes: number, payMinutes?: number) =>
+    api.post<AcceptAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/accept`, acceptBody(expectedShareMinutes, payMinutes)),
   declineLink: (token: string) => api.post<SeatAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/decline`),
 
   /* partners */

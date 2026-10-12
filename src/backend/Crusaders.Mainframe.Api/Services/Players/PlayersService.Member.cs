@@ -15,11 +15,11 @@ public sealed partial class PlayersService
     }
 
     /// <summary>Accepts through a shared link — claiming an open seat, or answering one addressed to the caller.</summary>
-    public async Task<PlayerOutcome> AcceptByTokenAsync(string? token, Guid me, int? expectedShare, CancellationToken ct)
+    public async Task<PlayerOutcome> AcceptByTokenAsync(string? token, Guid me, int? expectedShare, CancellationToken ct, int? payMinutes = null)
     {
         var seat = await SeatForTokenAsync(token, ct);
         if (seat is null || (seat.UserId is { } owner && owner != me)) return PlayerOutcome.InviteNotFound;
-        return await AcceptAsync(seat.Id, me, expectedShare, ct, viaToken: true);
+        return await AcceptAsync(seat.Id, me, expectedShare, ct, viaToken: true, payMinutes);
     }
 
     /// <summary>
@@ -46,13 +46,21 @@ public sealed partial class PlayersService
     /// 200 — one pair on the ledger, however many times the button was pressed. Accepting an
     /// already-accepted seat whose share went UP is how a partner consents to the new figure.
     /// </para>
+    ///
+    /// <para>
+    /// <b>Pay what you can.</b> <paramref name="payMinutes"/>, when given, is the part of the share the
+    /// partner can pay: the seat accepts at that figure, the booking becomes an <c>amount</c> split, and
+    /// the rest (the seat's <c>ShortfallMinutes</c>) falls to the organiser — who already paid the whole
+    /// price, so no row moves for them — until they split it with the others (<see cref="PayWhatYouCan"/>).
+    /// </para>
     /// </summary>
-    public async Task<PlayerOutcome> AcceptAsync(Guid seatId, Guid me, int? expectedShare, CancellationToken ct, bool viaToken = false)
+    public async Task<PlayerOutcome> AcceptAsync(
+        Guid seatId, Guid me, int? expectedShare, CancellationToken ct, bool viaToken = false, int? payMinutes = null)
     {
         PlayerOutcome outcome;
         try
         {
-            outcome = await AcceptUnderLockAsync(new AcceptAsk(seatId, me, expectedShare, viaToken), ct);
+            outcome = await AcceptUnderLockAsync(new AcceptAsk(seatId, me, expectedShare, viaToken) { PayMinutes = payMinutes }, ct);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -76,7 +84,11 @@ public sealed partial class PlayersService
     private sealed record AcceptBody(Guid BookingId, Guid OrganiserId, object Answer);
 
     /// <summary>One accept: whose, of which seat, at which figure, and by which route.</summary>
-    private sealed record AcceptAsk(Guid SeatId, Guid Me, int? Expected, bool ViaToken);
+    private sealed record AcceptAsk(Guid SeatId, Guid Me, int? Expected, bool ViaToken)
+    {
+        /// <summary>Pay what you can: the part of the share the partner pays now. Null = the whole share.</summary>
+        public int? PayMinutes { get; init; }
+    }
 
     /// <summary>
     /// After a lost race: the winner's accept is this caller's answer too — but only when it was
@@ -148,6 +160,13 @@ public sealed partial class PlayersService
         }
 
         var fresh = seat.Status == ParticipantStatus.Invited;
+        var shortfall = 0;
+        if (ask.PayMinutes is { } pay)
+        {
+            var part = await PayWhatYouCanAsync(game, seat, pay, ct);
+            if (part.Refusal is { } invalid) return invalid;
+            shortfall = part.Shortfall;
+        }
         seat.UserId = me;
         seat.Status = ParticipantStatus.Accepted;
         seat.ConsentedMinutes = Math.Max(seat.ConsentedMinutes, seat.ShareMinutes);
@@ -173,7 +192,16 @@ public sealed partial class PlayersService
         {
             MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "accepted", ct), game.Settings);
             // R17 E17-8: their own yes, on the record in the accept's own save — the Night had only its money.
-            _db.AuditLogs.Add(SeatAudit(AcceptedAction, game.Booking, seat, me, new { share_minutes = seat.ShareMinutes, paid_minutes = paid + Math.Max(0, delta) }));
+            var paidNow = paid + Math.Max(0, delta);
+            // Pay what you can: the record says what they could not pay as well.
+            object details = shortfall > 0
+                ? new { share_minutes = seat.ShareMinutes, paid_minutes = paidNow, shortfall_minutes = shortfall }
+                : new { share_minutes = seat.ShareMinutes, paid_minutes = paidNow };
+            _db.AuditLogs.Add(SeatAudit(AcceptedAction, game.Booking, seat, me, details));
+        }
+        if (shortfall > 0)
+        {
+            MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ShortfallAsync(_db, game.Booking, seat, game.Settings, shortfall, ct), game.Settings);
         }
         await PlayerNotices.AnsweredAsync(_db, game.Booking.Id, me, now, ct);
 
@@ -181,6 +209,30 @@ public sealed partial class PlayersService
         await _p.Ledger.PostManyAsync(postings, ct);
         await payerLock.CommitAsync(ct);
         return PlayerOutcome.Ok(new AcceptBody(game.Booking.Id, game.Booking.UserId!.Value, await AnswerAsync(seat, ct)));
+    }
+
+    /// <summary>
+    /// Pay what you can: the partner pays <paramref name="pay"/> of their share and the rest is left for
+    /// the others to decide. Under the accept's lock and in its save, before the payment is worked out:
+    /// the booking becomes an <c>amount</c> split with every other live partner's share where it stands
+    /// and this seat's at <paramref name="pay"/> (<see cref="Resplit"/> — the organiser's seat is the
+    /// remainder, so it rises by exactly the shortfall), and the shortfall is recorded on the seat.
+    /// Refused <c>400 pay_minutes_invalid</c> unless it is a whole part of the share — more than nothing,
+    /// less than the share, and not below what the seat has already paid (nothing comes back this way).
+    /// What it costs is checked against spendable minutes by the accept itself (<c>402</c>).
+    /// </summary>
+    private async Task<(PlayerOutcome? Refusal, int Shortfall)> PayWhatYouCanAsync(Game game, BookingParticipant seat, int pay, CancellationToken ct)
+    {
+        var paid = await _p.Shares.PaidAsync(seat, ct);
+        if (!PayWhatYouCan.IsValid(pay, seat.ShareMinutes, paid))
+        {
+            return (PlayerOutcome.Refuse(400, PlayerErrors.PayMinutesInvalid, new { share_minutes = seat.ShareMinutes, paid_minutes = paid }), 0);
+        }
+        var shortfall = seat.ShareMinutes - pay;
+        var figures = new Dictionary<Guid, (int Weight, decimal Amount)> { [seat.Id] = (0, pay) };
+        if (Resplit(game, SplitModes.Amount, figures) is { } error) return (PlayerOutcome.Refuse(400, error), 0);
+        seat.ShortfallMinutes += shortfall;
+        return (null, shortfall);
     }
 
     /// <summary>

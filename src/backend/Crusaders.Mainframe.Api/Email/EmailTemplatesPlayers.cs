@@ -143,6 +143,14 @@ public sealed record ShareReminderNotice(
 public sealed record ShareLapsedNotice(
     string OtherName, string CourtName, string StartsAtLocal, int UnpaidMinutes, bool ToOrganiser, string BookingUrl);
 
+/// <summary>
+/// Pay what you can: a partner could pay only <paramref name="PaidMinutes"/> of their
+/// <paramref name="ShareMinutes"/> share; the organiser covers the rest — <paramref name="ShortfallMinutes"/> —
+/// until they split it with the other players. Told to the organiser.
+/// </summary>
+public sealed record ShareShortfallNotice(
+    string PartnerName, string CourtName, string StartsAtLocal, int PaidMinutes, int ShareMinutes, int ShortfallMinutes, string BookingUrl);
+
 /// <summary>A paid share on its way back to a partner, waiting until the organiser's minutes cover it.</summary>
 public sealed record ShareReturnWaitingNotice(
     string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes, bool ToOrganiser, string BookingUrl);
@@ -302,6 +310,31 @@ public static partial class EmailTemplates
         blocks.Add(new CallToAction(n.Accepted ? "Open the booking" : "See the invite", n.Url));
         return blocks;
     }
+
+    /// <summary>
+    /// Pay what you can: a partner paid part of their share and the rest is left to cover. The organiser
+    /// already paid the whole price at booking, so nothing more is taken from them — the wording says
+    /// they are covering it now and may split it with the others; it owes nobody anything.
+    /// </summary>
+    public static EmailMessage ShareShortfall(ClubIdentity club, string to, ShareShortfallNotice n) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: $"{n.PartnerName} paid part of their share — {n.CourtName}",
+            Preheader: $"{Min(n.ShortfallMinutes)} {Is(n.ShortfallMinutes)} left to cover. You can split it with the other players.",
+            Heading: "Part of a share is left to cover",
+            Blocks:
+            [
+                new Paragraph($"{n.PartnerName} could pay {Min(n.PaidMinutes)} of their {Min(n.ShareMinutes)} share for {CourtOn(n.CourtName, n.StartsAtLocal)} — {Min(n.ShortfallMinutes)} {Is(n.ShortfallMinutes)} left to cover."),
+                new Facts(
+                [
+                    new FactRow("Their share", Min(n.ShareMinutes)),
+                    new FactRow("They paid", Min(n.PaidMinutes)),
+                    new FactRow("Left to cover", Min(n.ShortfallMinutes)),
+                ]),
+                new Callout(CalloutTone.Info,
+                    "You're covering it for now — your booking already paid for the court, so nothing more is taken. You can split it with the other players from the booking."),
+                new CallToAction("Split what's left", n.BookingUrl),
+            ],
+            WhyThis: WhyGame));
 
     /// <summary>A share still waiting: the club's reminder, or the organiser's nudge.</summary>
     public static EmailMessage ShareReminder(ClubIdentity club, string to, ShareReminderNotice n) =>

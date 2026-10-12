@@ -9,6 +9,7 @@ import { Attendance, CancelPanel } from "@/components/players/detail/AttendanceA
 import { DetailSkeleton } from "@/components/players/detail/DetailSkeleton";
 import { NotOnGame } from "@/components/players/detail/GoneFromGame";
 import { MoneyPanel } from "@/components/players/detail/MoneyPanel";
+import { LeftToCoverNotice } from "@/components/players/detail/LeftToCover";
 import {
   ChangeSplitButton, InviteButton, OrganiserDialogs, OrganiserSeatButtons,
 } from "@/components/players/detail/OrganiserActions";
@@ -314,6 +315,8 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
           <PlayerChips detail={detail} actions={seatActions} />
         </Section>
         <div data-detail-money="" className={MONEY}>
+          {/* Pay what you can — a partner paid part: the organiser is covering the rest and may split it. */}
+          <LeftToCoverNotice hands={organiser} />
           <MoneyPanel detail={detail} actions={detail.viewer.role === "organiser" ? <ChangeSplitButton hands={organiser} /> : null} />
         </div>
         {/* R18 L18-7 — a wrapper is drawn only with something in it: two empty ones were a 96px gap. */}
