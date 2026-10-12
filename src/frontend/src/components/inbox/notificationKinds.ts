@@ -18,6 +18,8 @@ export const KIND_ICON: Record<string, Icon> = {
   "players.return_waiting": ArrowCounterClockwise,
   // Review round 1 (B8): the club added the member to a game, or put them in it.
   "players.club_seat": UserPlus,
+  // Pay what you can: a partner paid part of their share; the rest is the organiser's to cover or split.
+  "players.shortfall": Coins,
   // P12 — play (play.md §8). Only the first is mailed; all five are inbox lines.
   "play.result_to_confirm": Trophy,
   "play.result_confirmed": CheckCircle,

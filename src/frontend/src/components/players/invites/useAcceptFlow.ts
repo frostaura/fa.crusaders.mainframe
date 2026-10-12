@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { useBalance } from "@/lib/useBalance";
 import { UnsureOutcome, outcomeUnknown } from "@/lib/bookingOutcome";
-import { inviteMoney, playersEndpoints, type AcceptAnswer, type Invite, type SeatAnswer } from "@/lib/playersApi";
+import { inviteMoney, payWhatYouCan, playersEndpoints, type AcceptAnswer, type Invite, type SeatAnswer } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
 import { useAsyncAction, type AsyncAction } from "@/lib/useAsyncAction";
 import { codeOf } from "./inviteFacts";
@@ -21,7 +21,8 @@ import { answerReasonOf, provenBy, type Landed, type ProvenBy } from "@/lib/lost
  * </p>
  */
 export type AcceptPort = {
-  accept: (expectedShareMinutes: number) => Promise<AcceptAnswer>;
+  /** `payMinutes` — pay what you can: the share the seat stands at after a part payment (omitted: the whole share). */
+  accept: (expectedShareMinutes: number, payMinutes?: number) => Promise<AcceptAnswer>;
   /** Null when this seat cannot be declined (an open link seat — the server answers 404). */
   decline: (() => Promise<SeatAnswer>) | null;
   /** Read the invite again (after any answer). Never rejects. */
@@ -34,7 +35,11 @@ export type AcceptPort = {
  * reply was unsure (an error the club answered is not a reply that did not arrive).
  */
 /** R15 J15-11 — `paidNow`: what this accept was asked to pay (the button's figure), beside the seat's total. */
-export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer; proven?: ProvenBy; paidNow?: number } | { kind: "declined"; proven?: ProvenBy } | null;
+/** Pay what you can — `rest`: on a part payment, what was left for the organiser to cover or split. */
+export type AcceptOutcome =
+  | { kind: "accepted"; answer: AcceptAnswer; proven?: ProvenBy; paidNow?: number; rest?: number }
+  | { kind: "declined"; proven?: ProvenBy }
+  | null;
 
 /** Why Accept cannot be pressed, most pressing first — or null when it can. */
 export type Blocked = "rereading" | "cap" | "short" | null;
@@ -48,9 +53,16 @@ export type AcceptFlow = {
   /** The last refusal or failure, from either action. */
   error: unknown;
   errorCode: string | null;
-  acceptAction: AsyncAction<[number], Accepted>;
+  acceptAction: AsyncAction<[number, number | undefined], Accepted>;
   declineAction: AsyncAction<[], Landed<SeatAnswer>>;
   accept: () => void;
+  /**
+   * Pay what you can: on a sheet short of the share, the minutes this member can pay now — every
+   * spendable minute — or null when there is no part to pay (not short, or nothing to spend).
+   */
+  partMinutes: number | null;
+  /** Accepts paying {@link partMinutes} now; the organiser covers the rest until the others split it. */
+  payPart: () => void;
   /** The first tap: asks whether to decline for good (R1 F2.6). Nothing is sent. */
   decline: () => void;
   /** Declining is final, so it waits for this second, explicit tap. */
@@ -79,9 +91,13 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
     try { await port.reread(); } finally { setRereading(false); }
   }, [port]);
 
-  const acceptAction = useAsyncAction((expected: number) => acceptOrProve(port, invite, expected), {
-    success: (result) => {
-      setOutcome({ kind: "accepted", answer: result.answer, proven: result.proven, paidNow: invite.to_pay_minutes });
+  const acceptAction = useAsyncAction((expected: number, pay?: number) => acceptOrProve(port, invite, expected, pay), {
+    success: (result, _expected, pay) => {
+      // Pay what you can: this tap paid what the seat stands at less what it had paid; the rest went to the organiser.
+      const already = invite.share_minutes - invite.to_pay_minutes;
+      setOutcome(pay === undefined
+        ? { kind: "accepted", answer: result.answer, proven: result.proven, paidNow: invite.to_pay_minutes }
+        : { kind: "accepted", answer: result.answer, proven: result.proven, paidNow: pay - already, rest: invite.share_minutes - pay });
       void balance.refresh({ expectSelf: true });
       void port.reread();
       void refreshUnread();
@@ -107,6 +123,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
 
   const money = inviteMoney(invite);
   const blocked: Blocked = rereading ? "rereading" : invite.cap ? "cap" : money.shortBy > 0 ? "short" : null;
+  const part = blocked === "short" ? payWhatYouCan(invite.share_minutes, money.toPay, money.spendable) : null;
   // R9 X9-5 — a 402 the re-read explains (the sheet is now short) is said once, by the short
   // notice and its Buy minutes; the red refusal above it said the same thing a second time.
   const raw = acceptAction.error ?? declineAction.error;
@@ -116,8 +133,13 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
   const accept = useCallback(() => {
     if (blocked) return;
     declineAction.reset();
-    void runAccept(invite.share_minutes);
+    void runAccept(invite.share_minutes, undefined);
   }, [blocked, runAccept, invite.share_minutes, declineAction]);
+  const payPart = useCallback(() => {
+    if (part === null) return;
+    declineAction.reset();
+    void runAccept(invite.share_minutes, part);
+  }, [part, runAccept, invite.share_minutes, declineAction]);
   const decline = useCallback(() => {
     acceptAction.reset();
     setKeptInvite(false);
@@ -132,7 +154,8 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
   return {
     invite, money, blocked, outcome, error, errorCode: codeOf(error),
     canDecline: Boolean(port.decline) && invite.status === "invited" && !invite.open_link,
-    acceptAction, declineAction, accept, decline, askingDecline, confirmDecline, keepInvite, keptInvite,
+    acceptAction, declineAction, accept, decline, askingDecline,
+    partMinutes: part === null ? null : part - (invite.share_minutes - money.toPay), payPart, confirmDecline, keepInvite, keptInvite,
     readingAgain: INVITES_COPY.readingAgain,
   };
 }
@@ -146,9 +169,9 @@ type Accepted = { answer: AcceptAnswer; proven: ProvenBy };
  * the member was shown; anything else is an {@link UnsureOutcome} that says what was found. It
  * used to say "Couldn't accept" after the money had been taken.
  */
-async function acceptOrProve(port: AcceptPort, invite: Invite, expected: number): Promise<Accepted> {
+async function acceptOrProve(port: AcceptPort, invite: Invite, expected: number, pay?: number): Promise<Accepted> {
   try {
-    return { answer: await port.accept(expected), proven: false };
+    return { answer: await port.accept(expected, pay), proven: false };
   } catch (error) {
     if (!outcomeUnknown(error)) throw error;
     let seat;
@@ -160,7 +183,8 @@ async function acceptOrProve(port: AcceptPort, invite: Invite, expected: number)
     if (seat.status !== "accepted" || seat.lapsed || seat.booking_status === "cancelled") throw new UnsureOutcome(error, true);
     const answer: AcceptAnswer = {
       participant_id: seat.participant_id, booking_id: seat.booking_id, status: seat.status,
-      share_minutes: seat.share_minutes, consented_minutes: seat.share_minutes, paid_minutes: invite.to_pay_minutes,
+      share_minutes: seat.share_minutes, consented_minutes: seat.share_minutes,
+      paid_minutes: pay === undefined ? invite.to_pay_minutes : pay - (invite.share_minutes - invite.to_pay_minutes),
       balance_minutes: invite.balance_minutes,
     };
     return { answer, proven: answerReasonOf(error) };
@@ -170,7 +194,7 @@ async function acceptOrProve(port: AcceptPort, invite: Invite, expected: number)
 /** The seat's routes — by seat id, as the invite mail and the list both know it. */
 export function seatPort(invite: Pick<Invite, "booking_id" | "participant_id" | "open_link">, reread: () => Promise<unknown>): AcceptPort {
   return {
-    accept: (expected) => playersEndpoints.accept(invite.booking_id, invite.participant_id, expected),
+    accept: (expected, pay) => playersEndpoints.accept(invite.booking_id, invite.participant_id, expected, pay),
     decline: invite.open_link ? null : () => playersEndpoints.decline(invite.booking_id, invite.participant_id),
     reread,
   };

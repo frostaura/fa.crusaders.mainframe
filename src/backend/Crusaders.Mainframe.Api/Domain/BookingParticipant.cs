@@ -88,6 +88,14 @@ public sealed class BookingParticipant : ITenantScoped
     /// </summary>
     public int ConsentedMinutes { get; set; }
 
+    /// <summary>
+    /// What this partner could NOT pay of the share they were asked for, in whole minutes — set when
+    /// they accepted paying only part of it ("pay what you can"). The organiser covers it until they
+    /// re-split; any successful re-split clears it on every seat (the others have decided). Always
+    /// 0 on the organiser's seat and a guest's.
+    /// </summary>
+    public int ShortfallMinutes { get; set; }
+
     /// <summary>The ratio weight this seat was split with. 1 under an equal split, 0 under an amount split.</summary>
     public int ShareWeight { get; set; }
 

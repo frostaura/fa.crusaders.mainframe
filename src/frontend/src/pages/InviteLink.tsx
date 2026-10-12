@@ -59,7 +59,7 @@ function InviteLinkFor({ token, userId }: { token: string; userId: string }) {
   const snapshot = useInviteSnapshot(read);
   const { reread } = snapshot;
   const port = useMemo<AcceptPort>(() => ({
-    accept: (expected) => forgetting(token, () => playersEndpoints.acceptLink(token, expected)),
+    accept: (expected, pay) => forgetting(token, () => playersEndpoints.acceptLink(token, expected, pay)),
     decline: () => forgetting(token, () => playersEndpoints.declineLink(token)),
     reread,
   }), [token, reread]);

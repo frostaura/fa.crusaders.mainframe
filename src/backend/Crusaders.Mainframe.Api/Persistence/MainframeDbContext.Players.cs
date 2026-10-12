@@ -34,6 +34,7 @@ public partial class MainframeDbContext
                 t.HasCheckConstraint(
                     "ck_booking_participants_money",
                     "\"ShareMinutes\" >= 0 AND \"ConsentedMinutes\" >= 0 AND \"ShareWeight\" >= 0");
+                t.HasCheckConstraint("ck_booking_participants_shortfall", "\"ShortfallMinutes\" >= 0");
                 // A guest pays nothing and is nobody's account.
                 t.HasCheckConstraint(
                     "ck_booking_participants_guest",

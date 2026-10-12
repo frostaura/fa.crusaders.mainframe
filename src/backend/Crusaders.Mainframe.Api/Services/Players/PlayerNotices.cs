@@ -1,4 +1,5 @@
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -230,6 +231,25 @@ public static class PlayerNotices
         {
             Email = false,
         };
+    }
+
+    /// <summary>
+    /// Pay what you can: the partner on <paramref name="seat"/> could pay only part of their share. The
+    /// organiser — who paid the whole price at booking and so already covers the rest — is told, inbox
+    /// and mail, with the booking to split it from. One per partial accept.
+    /// </summary>
+    public static async Task<MemberNotice> ShortfallAsync(
+        MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, int shortfall, CancellationToken ct)
+    {
+        var game = await GameText.ForAsync(db, booking, settings, ct);
+        var partner = await NameAsync(db, seat.UserId, "A player", ct);
+        var (paid, share) = (seat.ShareMinutes, seat.ShareMinutes + shortfall);
+        return new MemberNotice(
+            booking.UserId!.Value, MemberEventCatalogue.Shortfall, $"shortfall:{seat.Id:N}:{DateTimeOffset.UtcNow.UtcTicks}",
+            new ShortfallPayload(booking.Id, partner, game.CourtName, game.StartsLocal, paid, share, shortfall, seat.Id),
+            $"{partner} could pay {MoneyFormat.Minutes(paid)} of their {MoneyFormat.Minutes(share)} share for {game.CourtName}, {game.StartsLocal} — "
+            + $"{MoneyFormat.Minutes(shortfall)} {EmailTemplates.Is(shortfall)} left to cover. You're covering it for now; you can split it with the other players.",
+            $"/bookings/{booking.Id}", booking.Id);
     }
 
     /// <summary>A partner's answer, told to the organiser on the inbox only.</summary>

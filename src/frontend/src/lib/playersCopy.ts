@@ -605,6 +605,38 @@ export const CHANGE_SPLIT = {
   noChange: "Nobody's share changes.",
 } as const;
 
+/**
+ * Pay what you can — the organiser's side: a partner paid part of their share, the organiser covers the
+ * rest for now, and "Split what's left" shares it with the other players. Calm: nobody owes anybody.
+ */
+export const LEFT_TO_COVER = {
+  /** "4 minutes left to cover" — the notice's heading. */
+  title: (left: string) => `${left} left to cover`,
+  body: (who: string[], left: string) => (who.length === 1
+    ? `${who[0]} could pay only part of their share. You're covering the other ${left} for now — you can split it with the other players.`
+    : `${who.length} players could pay only part of their share. You're covering the other ${left} for now — you can split it with the other players.`),
+  open: "Split what's left",
+  dialogTitle: "Split what's left",
+  dialogDescription: (left: string) => `${left} ${agrees(left, "is", "are")} left to cover. Choose how much each player takes on, in whole minutes.`,
+  /** The short partner's figure, locked. */
+  paidPart: (name: string, paid: string, share: string) => `${name} paid ${paid} of their ${share} share.`,
+  locked: "Locked at what they paid",
+  portionLabel: (name: string) => `Minutes for ${name}`,
+  you: "You",
+  /** "6 of 8 minutes assigned" — the bar's words, in plain minutes so the two figures compare. */
+  assigned: (done: number, total: number) => `${done} of ${total} ${total === 1 ? "minute" : "minutes"} assigned`,
+  barLabel: "Minutes assigned",
+  over: (extra: string) => `That's ${extra} too many.`,
+  under: (left: string) => `${left} still to assign.`,
+  consent: "Anyone asked for more is asked to agree first — nothing more is taken from them until they say yes.",
+  save: "Save the split",
+  cancel: "Cancel",
+  sending: "Saving the split — waiting for the club. This stays open until it answers.",
+  action: "split what's left",
+  done: "What's left is split.",
+  doneAsked: "What's left is split. Anyone asked for more has been asked to agree.",
+} as const;
+
 /** R1 F2.1 — a player added to an amount or ratio split is asked for a share the organiser names. */
 export const SHARE_ASK = {
   title: (who: string) => `What should ${who} pay?`,
@@ -1078,6 +1110,8 @@ export const INVITES_COPY = {
   /** P13 — the short-balance way out is a package; the verb is "buy" (§6). */
   buyMinutes: BUY_MINUTES_ACTION,
   shortBody: "Buy a package, then come back — the invite waits for you until it lapses.",
+  /** Pay what you can — beside Buy minutes: what happens to the rest, in one line. */
+  payPartBody: "Or pay what you have now — the other players decide how to split the rest.",
   capBlocked: "You can't accept this one while it would break your limit.",
   acceptedTitle: "You're in",
   seeBooking: "See the booking",
@@ -1205,6 +1239,23 @@ export function acceptedLine(paid: number, organiser: string, total = paid): str
   return `${minutesSpoken(paid)} paid to ${organiser}${inAll}. See you on court.`;
 }
 
+/** Pay what you can — the short sheet's second way: "Pay the 6 minutes I have". */
+export function payPartLabel(minutes: number): string {
+  return `Pay the ${minutesSpoken(minutes)} I have`;
+}
+
+/**
+ * Pay what you can — after a part payment: what was paid, and that the rest is with the organiser.
+ * "6 minutes paid to Olive. The other 4 minutes are with Olive, who covers them or splits them with the other players. See you on court."
+ */
+export function partPaidLine(paid: number, organiser: string, rest: number): string {
+  const spoken = minutesSpoken(rest);
+  // "1 minute is", "1 hour is", "1 hour 5 minutes are" — the verb follows the words, not the number.
+  const one = /^1 [a-z]+$/.test(spoken);
+  return `${minutesSpoken(paid)} paid to ${organiser}. The other ${spoken} ${one ? "is" : "are"} with ${organiser}, `
+    + `who covers ${one ? "it" : "them"} or splits ${one ? "it" : "them"} with the other players. See you on court.`;
+}
+
 /** "Sam's been told." — after a decline. */
 export function declinedLine(organiser: string): string {
   return `${organiser} has been told. They can't ask you into this game again.`;
@@ -1314,6 +1365,7 @@ export const INBOX_KIND_WORD: Record<string, string> = {
   "players.response": "Reply",
   "players.return_waiting": "Share on its way back",
   "players.club_seat": "Added by the club",
+  "players.shortfall": "Part of a share left to cover",
 };
 
 /* ═══════════════════════════════════ WALLET · REPORTS · PRIVACY ═══════════════════════════════════ */

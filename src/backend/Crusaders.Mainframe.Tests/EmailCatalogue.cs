@@ -199,6 +199,7 @@ internal static class EmailCatalogue
             ("PlayersChangedShare", EmailTemplates.PlayersChanged(club, to, new PlayersChange("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", false, 16, true, GameUrl))),
             ("ShareReturnWaiting", EmailTemplates.ShareReturnWaiting(club, to, new ShareReturnWaitingNotice("Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12, false, GameUrl))),
             ("ShareReturnWaitingOrganiser", EmailTemplates.ShareReturnWaiting(club, to, new ShareReturnWaitingNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12, true, GameUrl))),
+            ("ShareShortfall", EmailTemplates.ShareShortfall(club, to, new ShareShortfallNotice("Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 10, 16, 6, GameUrl))),
 
             // D14's one play message.
             ("ResultToConfirm", EmailTemplates.ResultToConfirm(club, to, new ResultToConfirmNotice(
