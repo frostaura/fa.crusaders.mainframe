@@ -59,7 +59,7 @@ import { StillTrying } from "../lib/offline/StillTrying";
  * Bookings — the week strip, the grid and the two sheets it opens (R1–R6, D8).
  *
  * <p>
- * <b>A tap books one; a selection books many — for everyone (D8).</b> The toolbar's select
+ * <b>Selection mode is ON by default; a tap ticks, and the bar books many — for everyone (D8).</b> The toolbar's select
  * toggle, a long press, a desktop's hover checkbox, a drag and Shift+click are five ways into
  * one selection; a floating action bar over the tab bar carries it. The grid pre-filters what it
  * can (past, taken, closed, group window, peak, the member's daily cap); the server refuses the
@@ -132,7 +132,7 @@ export default function BookingsPage() {
     // FIRST. Re-drawing ~250 cells and the games lists rode in the same commit and held the
     // "Court booked" back ~70–130 ms on a phone; as a transition they follow a frame later.
     startTransition(() => setChanges((n) => n + 1));
-    if (selection.api.active) selection.api.leave();
+    selection.clear();
     // Read off a fresh schedule after a lost reply (F1.1): the grid already has it, and nobody
     // stated the balance — ask for it.
     if (outcome.proven) {
@@ -144,16 +144,16 @@ export default function BookingsPage() {
     startTransition(() => { setSending(null); setDay((d) => withBooked(d, outcome)); });
     if (outcome.ownBalanceAfter !== null) applyBalance(outcome.ownBalanceAfter);
     void reconcile();
-  }, [setDay, applyBalance, refreshBalance, selection.api, reconcile, setSending, wrote]);
+  }, [setDay, applyBalance, refreshBalance, selection, reconcile, setSending, wrote]);
 
   const onCancelled = useCallback((outcome: CancelledOutcome) => {
     wrote();
     setChanges((n) => n + 1);
     setDay((d) => (d ? { ...d, slots: d.slots.filter((s) => !s.bookingId || !outcome.cancelledIds.includes(s.bookingId)) } : d));
     if (outcome.ownMoneyMoved) void refreshBalance({ expectSelf: true });
-    if (selection.api.active) selection.api.leave();
+    selection.clear();
     void reconcile();
-  }, [setDay, refreshBalance, selection.api, reconcile, wrote]);
+  }, [setDay, refreshBalance, selection, reconcile, wrote]);
 
   const { openCancel } = sheets;
   // R4 wave B — a grid drawn from the phone because the club could not be reached books nothing:

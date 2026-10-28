@@ -170,7 +170,9 @@ function hapticTick() {
 
 export function useGridSelection(options: Options): Selection {
   const { cap, announce, capSentence, capShort, onSentence, offSentence } = options;
-  const [active, setActive] = useState(false);
+  // On by default: a player should not have to know to tap-and-hold. The header toggle (or the
+  // bar's ×) still turns it off, and a tap then books one slot as before.
+  const [active, setActive] = useState(true);
   const [keys, setKeys] = useState<SelectionKey[]>([]);
   const [anchor, setAnchor] = useState<GridCoord | null>(null);
   /** The set an extension is measured against, so a second drag from one corner REPLACES the first. */

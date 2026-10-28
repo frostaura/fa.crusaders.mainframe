@@ -35,15 +35,15 @@ const BOOKED = slotRow({
 const DAY = dayFixture({ slots: [BOOKED] });
 
 const toggle = () => screen.getByRole("button", { name: BOOKINGS_COPY.selectOn });
+const modeOff = () => screen.getByRole("button", { name: BOOKINGS_COPY.selectOff });
 const bar = () => screen.getByRole("toolbar", { name: BOOKINGS_COPY.actionBarLabel });
 const cellAt = (name: string) => screen.getByRole("gridcell", { name });
 const chosen = () => screen.getAllByRole("gridcell").filter((c) => c.getAttribute("aria-selected") === "true");
 const names = () => chosen().map((c) => c.getAttribute("aria-label"));
 
-/** Turn selection mode on from the header, and tick the named cells. */
+/** Selection mode is on by default; tick the named cells. */
 async function select(labels: RegExp[]) {
   await screen.findByRole("grid");
-  await act(async () => { fireEvent.click(toggle()); });
   for (const name of labels) {
     const cell = await screen.findByRole("button", { name });
     await act(async () => { fireEvent.click(cell); });
@@ -51,17 +51,26 @@ async function select(labels: RegExp[]) {
 }
 
 describe("entering and leaving — R4", () => {
-  it("is an icon toggle in the page header, for a member too (D8)", async () => {
+  it("is ON by default, with an icon toggle in the page header, for a member too (D8)", async () => {
     openBookings({ day: DAY });
     await screen.findByRole("grid");
-    const button = toggle();
+    const button = modeOff();
     expect(button.closest("[data-page-actions]")).toBeTruthy();
     expect(button.textContent).toBe("");
-    expect(button).toHaveAttribute("aria-pressed", "false");
-    await act(async () => { fireEvent.click(button); });
-    expect(screen.getByRole("button", { name: BOOKINGS_COPY.selectOff })).toHaveAttribute("aria-pressed", "true");
-    // The floating bar arrives with the mode, and says what to do.
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    // The floating bar is there from the start, and says what to do.
     expect(within(bar()).getByText(BOOKINGS_COPY.chooseSlots)).toBeInTheDocument();
+    // …and the toggle still turns it off, so a tap books one slot again.
+    await act(async () => { fireEvent.click(button); });
+    expect(toggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("books nothing on a plain tap by default — it ticks the cell", async () => {
+    openBookings({ day: DAY });
+    const cell = await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ });
+    await act(async () => { fireEvent.click(cell); });
+    expect(names()).toEqual(["Court 1 at 16:00"]);
+    expect(screen.queryByRole("dialog", { name: "Book sheet" })).toBeNull();
   });
 
   it("marks what is chosen with a checkbox AND an inset edge, never colour alone", async () => {
@@ -144,14 +153,15 @@ describe("the floating action bar", () => {
     expect(sheets.cancel?.bookings[0].memberFirstName).toBe("Thandi");
   });
 
-  it("leaves selection mode once the sheet reports the booking", async () => {
+  it("clears the choices but stays in selection mode once the sheet reports the booking", async () => {
     openBookings({ day: DAY });
     await select([/^Book Court 1 at 16:00/]);
     await act(async () => { fireEvent.click(within(bar()).getByRole("button", { name: BOOKINGS_COPY.bookSelection })); });
     await act(async () => {
       sheets.book!.onBooked!({ booked: sheets.book!.slots, ownBalanceAfter: 850, forMemberId: null, hold: false });
     });
-    expect(screen.queryByRole("toolbar", { name: BOOKINGS_COPY.actionBarLabel })).toBeNull();
+    expect(chosen()).toHaveLength(0);
+    expect(bar()).toBeInTheDocument();
   });
 });
 
@@ -282,9 +292,10 @@ describe("ranges — Shift, drag, long press, hover checkbox", () => {
     ]);
   });
 
-  it("leaves an ordinary click alone — it books that one slot", async () => {
+  it("leaves an ordinary click alone once the mode is off — it books that one slot", async () => {
     openBookings({ day: DAY });
     const cell = await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ });
+    await act(async () => { fireEvent.click(modeOff()); });
     await act(async () => {
       fireEvent.pointerDown(cell, { pointerType: "mouse", button: 0, bubbles: true });
       fireEvent.pointerUp(window);
@@ -308,6 +319,7 @@ describe("ranges — Shift, drag, long press, hover checkbox", () => {
   it("enters the mode on a long press, holding that cell, and does not also book it", async () => {
     openBookings({ day: DAY });
     const cell = await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ });
+    await act(async () => { fireEvent.click(modeOff()); });
     vi.useFakeTimers();
     await act(async () => { fireEvent.pointerDown(cell, { pointerType: "touch", clientX: 5, clientY: 5 }); });
     await act(async () => { vi.advanceTimersByTime(LONG_PRESS_MS + 10); });

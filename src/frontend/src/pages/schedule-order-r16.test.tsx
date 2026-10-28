@@ -27,7 +27,6 @@ const bar = () => screen.getByRole("toolbar", { name: BOOKINGS_COPY.actionBarLab
 
 async function select(labels: RegExp[]) {
   await screen.findByRole("grid");
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.selectOn })); });
   for (const name of labels) {
     const cell = await screen.findByRole("button", { name });
     await act(async () => { fireEvent.click(cell); });
