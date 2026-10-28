@@ -1,12 +1,12 @@
 import { Link } from "react-router-dom";
 import { intentProps } from "@/routeChunks";
-import { UPCOMING } from "@/lib/bookingsCopy";
+import { TICKER } from "@/lib/tickerCopy";
 import { bookingsApi, type UpcomingGame } from "@/lib/bookingsApi";
 import { memberReads } from "@/lib/offline/memberReads";
 import { RESULT_READABLE } from "@/lib/bookingLink";
 import { cn } from "@/lib/utils";
 import { useGamesRead } from "./useGamesRead";
-import { when } from "./gameWhen";
+import { clubClock, clubShortDate } from "@/lib/clubClock";
 
 /**
  * The member's upcoming games as one line that drifts sideways, stock-ticker style — every game
@@ -22,6 +22,12 @@ import { when } from "./gameWhen";
  */
 const SECONDS_PER_GAME = 8;
 
+/** "Thu 1 Oct · 10:30–11:00" in the club's zone, to the time the game was sold to end. Kept here, not imported from the games lists, so My Code's first load stays light. */
+function when(game: UpcomingGame, zone: string | undefined): string {
+  const start = new Date(game.starts_at);
+  return `${clubShortDate(start, zone)} · ${clubClock(start, zone)}–${clubClock(game.sold_ends_at ?? game.ends_at, zone)}`;
+}
+
 export function UpcomingTicker({ refreshKey, fallbackZone, className }: { refreshKey: unknown; fallbackZone?: string; className?: string }) {
   const { state } = useGamesRead(bookingsApi.upcoming, refreshKey, memberReads.upcoming.key);
   if (state.status !== "ready" || state.items.length === 0) return null;
@@ -29,11 +35,11 @@ export function UpcomingTicker({ refreshKey, fallbackZone, className }: { refres
   const duration = `${Math.max(20, state.items.length * SECONDS_PER_GAME)}s`;
   return (
     <section
-      aria-label={UPCOMING.tickerLabel} data-upcoming-ticker=""
-      className={cn("group flex min-w-0 items-center gap-3 overflow-hidden rounded-xl border border-border bg-bg-surface px-3", className)}
+      aria-label={TICKER.label} data-upcoming-ticker=""
+      className={cn("group flex min-w-0 items-center gap-3 overflow-hidden rounded-xl border border-border bg-bg-surface px-3 [&_:focus-visible]:-outline-offset-2", className)}
     >
-      <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-text-secondary">{UPCOMING.tickerLabel}</span>
-      <div className="min-w-0 flex-1 overflow-x-auto motion-safe:overflow-hidden">
+      <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-text-secondary">{TICKER.label}</span>
+      <div className="min-w-0 flex-1 overflow-x-auto motion-safe:overflow-hidden [&_:focus-visible]:-outline-offset-2">
         <div
           style={{ ["--ticker-duration" as string]: duration }}
           className="flex w-max motion-safe:animate-ticker-scroll motion-safe:group-hover:[animation-play-state:paused] motion-safe:group-focus-within:[animation-play-state:paused]"
@@ -57,7 +63,7 @@ function Run({ games, zone, copy = false }: { games: readonly UpcomingGame[]; zo
           >
             <span className="font-semibold">{game.court_name}</span>
             <span className="text-text-secondary">{when(game, zone)}</span>
-            {game.needs_action ? <span className="font-semibold text-warning-strong">· {UPCOMING.needsAction}</span> : null}
+            {game.needs_action ? <span className="font-semibold text-warning-strong">· {TICKER.needsAction}</span> : null}
             <span aria-hidden="true" className="pl-3 text-text-muted">•</span>
           </Link>
         </li>

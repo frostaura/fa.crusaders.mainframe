@@ -25,6 +25,7 @@ import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet"
 import { BookingForBar } from "../components/bookings/BookingForBar";
 import { LiftHoldSheet, type HoldToLift } from "../components/bookings/LiftHoldSheet";
 import { useBookingFor, type BookingFor } from "../components/bookings/useBookingFor";
+import { UpcomingGames } from "../components/bookings/UpcomingGames";
 import { UpcomingTicker } from "../components/bookings/UpcomingTicker";
 import { DaySummary } from "../components/bookings/DaySummary";
 import { useScheduleLiveness } from "../components/bookings/useScheduleLiveness";
@@ -192,7 +193,7 @@ export default function BookingsPage() {
         {/* The games are one drifting line, not a rail: the grid owns the page's width. */}
         {expanded ? null : (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            {bookAsUserId ? <DaySummary bookingFor={bookingFor} className="w-full" /> : (
+            {bookAsUserId ? <div className="min-w-0 flex-1 basis-80" /> : (
               <UpcomingTicker refreshKey={changes} fallbackZone={day?.timezone} className="min-w-0 flex-1 basis-80" />
             )}
             <InvitesBadgeLink className={INVITES_LINK} />
@@ -231,8 +232,23 @@ export default function BookingsPage() {
             </StateBlock>
           )}
         </div>
-        {/* R2 F1-1 — finished games, whose results are recorded here. */}
-        {expanded || bookAsUserId ? null : <div className="@container/aside"><RecentGames refreshKey={changes} fallbackZone={day?.timezone} /></div>}
+        {/* The detail behind the ticker, under the grid so it never costs the grid its width:
+            what the member can spend, then the games in full and the finished ones. */}
+        {expanded ? null : (
+          <div className="@container/aside flex flex-col gap-4">
+            <DaySummary
+              className="flex" bookingFor={bookAsUserId ? bookingFor : null}
+              moreToday={date === today && !isAdmin && !rules.adminExempt && rules.maxSlotsPerDay !== null ? rules.remainingToday : null}
+            />
+            {bookAsUserId ? null : (
+              <>
+                <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />
+                {/* R2 F1-1 — finished games, whose results are recorded here. */}
+                <RecentGames refreshKey={changes} fallbackZone={day?.timezone} />
+              </>
+            )}
+          </div>
+        )}
       </div>
       <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
       <BookSheet

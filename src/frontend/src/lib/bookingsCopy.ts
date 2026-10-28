@@ -586,8 +586,6 @@ export const UPCOMING = {
   /** R7 E7-5 — a court the member paid for at the box: someone else's booking. */
   payerBadge: "Paid for",
   needsAction: "Needs you",
-  /** The one-line ticker of upcoming games (Bookings, My Code). */
-  tickerLabel: "Upcoming games",
   more: (n: number) => `Show ${n} more`,
   less: "Show fewer",
   share: (minutes: number) => `Your share ${minutesSpoken(minutes)}`,
