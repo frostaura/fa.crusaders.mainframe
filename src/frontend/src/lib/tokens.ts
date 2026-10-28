@@ -411,8 +411,7 @@ export function channels(hex: string): string {
   return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
 }
 
-function slotVariables(theme: ThemeName): Record<string, string> {
-  const r = roles(theme);
+function slotVariables(theme: ThemeName, r: Record<RoleName, string> = roles(theme)): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [state, token] of Object.entries(components.slot[theme])) {
     if (token.fill) out[`--color-slot-${state}-fill`] = channels(r[token.fill]);
@@ -434,10 +433,11 @@ function watermarkVariables(theme: ThemeName): Record<string, string> {
  * alpha, the watermark opacities and the elevation shadows. `:root` and `.dark` must declare the
  * same set — `theme-emission.test.ts` — or a role silently falls back to the light value at night.
  */
-export function cssVariables(theme: ThemeName): Record<string, string> {
+export function cssVariables(theme: ThemeName, overrides: Record<RoleName, string> = {}): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [name, hex] of Object.entries(roles(theme))) out[`--color-${name}`] = channels(hex);
-  Object.assign(out, slotVariables(theme));
+  const r = { ...roles(theme), ...overrides };
+  for (const [name, hex] of Object.entries(r)) out[`--color-${name}`] = channels(hex);
+  Object.assign(out, slotVariables(theme, r));
   out["--alpha-overlay"] = String(scrim[theme]);
   Object.assign(out, watermarkVariables(theme));
   for (const [size, value] of Object.entries(shadow[theme])) out[`--shadow-${size}`] = value;

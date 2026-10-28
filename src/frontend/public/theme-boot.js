@@ -22,6 +22,15 @@
     var root = document.documentElement;
     root.classList.toggle("dark", resolved === "dark");
     root.style.colorScheme = resolved;
+    /* A member's own colours (lib/themeOverrides.ts): the compiled stylesheet text it cached. */
+    var css = null;
+    try { css = window.localStorage.getItem("crusaders:theme-css"); } catch (e) { css = null; }
+    if (css && document.head) {
+      var style = document.createElement("style");
+      style.id = "crusaders-user-theme";
+      style.textContent = css;
+      document.head.appendChild(style);
+    }
     if (choice !== "system") {
       var metas = document.querySelectorAll('meta[name="theme-color"]');
       for (var i = 0; i < metas.length; i++) metas[i].setAttribute("content", APP[resolved]);

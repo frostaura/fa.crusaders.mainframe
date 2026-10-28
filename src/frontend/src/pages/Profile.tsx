@@ -20,6 +20,8 @@ import { TextLink } from "../components/ui/text-link";
 import { BookOpen, Camera, Fingerprint, Plus, WarningCircle } from "../components/ui/icons";
 import { isPasskeySupported, registerPasskey } from "../lib/webauthn";
 import { ChangePasswordForm } from "./ChangePassword";
+import { AppearanceCard } from "../components/profile/AppearanceCard";
+import { APPEARANCE_COPY } from "../lib/appearanceCopy";
 import { cn } from "../lib/utils";
 // doors: member — W1.8, the member's own door history, on the page they already think of
 // as their record. Gated on the club having a door at all; see MemberDoorHistory below.
@@ -201,6 +203,9 @@ function AccountCards({ profile }: { profile: MyProfile }) {
         </div>
       </ProfileCard>
       <PasswordCard />
+      <ProfileCard title={APPEARANCE_COPY.title} description={APPEARANCE_COPY.description}>
+        <AppearanceCard />
+      </ProfileCard>
       <MemberDoorHistory />
       <PasskeysCard />
       <ProfileCard title={SIGN_OUT_EVERYWHERE_COPY.title} description={SIGN_OUT_EVERYWHERE_COPY.description}>

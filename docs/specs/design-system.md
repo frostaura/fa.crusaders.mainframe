@@ -62,6 +62,23 @@ squash court's tin). Never as a state colour.
 > **`brand_accent_hex` is not read by anything.** Per-tenant theming is a hook, not a feature. If it is
 > ever wired, it must emit channel variables for both themes and pass the contrast matrix.
 
+### Per-member theming
+
+A member may repaint the roles in `OVERRIDABLE` (`lib/themeOverrides.ts`: backgrounds, text, edges,
+primary/accent family, ring) separately for light and dark, from Profile → Account → Appearance. An
+override is a hex written over a role before the same `cssVariables` emission the stylesheet uses, so
+derived slot tokens follow. `resolveOverrides` measures every pair those roles take part in at the
+shipped floors (4.5:1 text, 3:1 non-text, status colours included) and **refuses** an override that
+breaks one, naming the pair; pairs already failing in the shipped theme are not the member's doing.
+Not overridable: the crest (`brand.*`), status colours, `danger`/`armed`, the scrim. The accent is a
+bundle (primary, hover, ink, `accent.strong`/`soft`, ring) applied all-or-nothing.
+
+Storage is **per device, keyed by member id** (`crusaders:theme-overrides:<id>`); the compiled
+`<style id="crusaders-user-theme">` text is cached under `crusaders:theme-css` for `theme-boot.js` to
+inject before first paint, and `UserThemeSync` removes it on sign-out. It is not yet synced across a
+member's devices — that needs a profile column and an EF migration. Tenant `brand_accent_hex` below
+remains unread.
+
 ### Slot-state component tokens (booking grid)
 
 | State | Fill | Text | Edge | Non-colour cue | Watermark | Selectable |

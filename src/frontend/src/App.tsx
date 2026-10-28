@@ -1,6 +1,7 @@
 import { Suspense, lazy as reactLazy, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider } from "./lib/auth";
+import { UserThemeSync } from "./lib/UserThemeSync";
 import AppShell from "./components/shell/AppShell";
 import { ToastProvider } from "./components/Toast";
 import { BalanceProvider } from "./lib/balance";
@@ -154,6 +155,7 @@ export default function App() {
       */}
       <RouteAnnouncer />
       <AuthProvider>
+        <UserThemeSync />
         <ProfileProvider>
         {/* Inside ProfileProvider, because that is where the club's money symbol arrives, and
             outside everything that formats money. */}
