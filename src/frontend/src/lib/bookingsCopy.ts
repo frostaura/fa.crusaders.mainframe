@@ -23,6 +23,8 @@ import { playersWhen } from "./playersCopy";
 
 /* ═══════════════════════════════════ GRID ═══════════════════════════════════ */
 
+export const GRID_FULLSCREEN = { enter: "Fill the screen with the grid", leave: "Back to the page" } as const;
+
 export const BOOKINGS_COPY = {
   title: "Bookings",
   /** R4 form factor (SPEC 3.1) — the rail beside the grid from a 72rem page. */
@@ -584,6 +586,8 @@ export const UPCOMING = {
   /** R7 E7-5 — a court the member paid for at the box: someone else's booking. */
   payerBadge: "Paid for",
   needsAction: "Needs you",
+  /** The one-line ticker of upcoming games (Bookings, My Code). */
+  tickerLabel: "Upcoming games",
   more: (n: number) => `Show ${n} more`,
   less: "Show fewer",
   share: (minutes: number) => `Your share ${minutesSpoken(minutes)}`,

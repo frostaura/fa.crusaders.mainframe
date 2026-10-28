@@ -305,6 +305,9 @@ export function whatsNextSteps(booking: { courtNumber: number | null; day: strin
 export const GUIDE_PATH = "/how-it-works";
 export const GUIDE_LINK_LABEL = "How it works";
 export const GUIDE_TILE_HINT = "Booking, the door, and the court box";
+/** The help icon beside the code: setup, how the code is used, and the guide, on demand. */
+export const CODE_HELP = { label: "Help with your code" } as const;
+
 export const GUIDE_FROM_CODE = "New here? How it works, step by step";
 
 /**
