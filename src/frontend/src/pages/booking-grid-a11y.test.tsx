@@ -4,6 +4,7 @@ import SchedulePage from "./Schedule";
 import { BalanceProvider } from "../lib/balance";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 import { sheets } from "../test/fakeSheets";
+import { singleTap } from "../test/bookingsKit";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -107,6 +108,7 @@ describe("every slot in the booking grid says what it is", () => {
     signIn({ isAdmin: false });
     stubFetch(routes());
     renderPage(<BalanceProvider><SchedulePage /></BalanceProvider>);
+    await singleTap();
 
     const slot = await screen.findByRole("button", { name: /^Book Court 1 at 06:00$/ });
     fireEvent.click(slot);
