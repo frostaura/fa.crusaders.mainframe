@@ -1,4 +1,6 @@
+import { act, fireEvent, screen } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
+import { BOOKINGS_COPY } from "../lib/bookingsCopy";
 import BookingsPage from "../pages/Schedule";
 import { renderPage, signIn, stubFetch, type FetchStub, type StubRoute } from "./harness";
 
@@ -100,4 +102,13 @@ export function openBookings(options: OpenOptions = {}): FetchStub {
 /** Every path the page asked the schedule for, query and all, in order. */
 export function scheduleCalls(stub: FetchStub): string[] {
   return stub.calls.filter((c) => c.path.startsWith("/api/v1/schedule")).map((c) => c.path);
+}
+
+/**
+ * Selection mode is ON by default, so a plain tap ticks a cell. A test of the one-tap path
+ * (tap a slot, the sheet opens) turns the mode off first, the way a player would from the header.
+ */
+export async function singleTap(): Promise<void> {
+  await screen.findByRole("grid");
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.selectOff })); });
 }

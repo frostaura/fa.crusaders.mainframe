@@ -118,7 +118,6 @@ describe("F1.8 — the selection line never claims a span it does not have", () 
   it("the bar says it on the page", async () => {
     openBookings();
     await screen.findByRole("grid");
-    fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.selectOn }));
     fireEvent.click(screen.getByRole("button", { name: /^Book Court 1 at 16:00/ }));
     fireEvent.click(screen.getByRole("button", { name: /^Book Court 2 at 17:00/ }));
     const bar = await screen.findByRole("toolbar", { name: BOOKINGS_COPY.actionBarLabel });
@@ -165,7 +164,6 @@ describe("F1.12 — upcoming games above the grid, and a partner's game on it", 
     openBookings({ day: dayFixture({ slots: [partner] }) });
     const cell = await screen.findByRole("link", { name: partnerCellLabel("Court 1 at 17:00") });
     expect(cell).toHaveAttribute("href", "/bookings/bk-partner");
-    fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.selectOn }));
     // In selection mode it is not a choice: a partner cannot cancel the organiser's booking.
     const gridcell = cell.closest('[role="gridcell"]')!;
     expect(gridcell.getAttribute("data-select-key")).toBeNull();
