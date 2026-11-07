@@ -118,6 +118,8 @@ const config: Config = {
           "25%": { transform: "translateY(0)", opacity: "1" },
           to: { transform: "translateY(-10px)", opacity: "0" },
         },
+        /** The upcoming-games ticker: its content is drawn twice, so half its width is one seamless loop. */
+        "ticker-scroll": { from: { transform: "translateX(0)" }, to: { transform: "translateX(-50%)" } },
         /** A scrim fading in and out under a dialog or sheet. */
         "overlay-in": { from: { opacity: "0" }, to: { opacity: "1" } },
         "overlay-out": { from: { opacity: "1" }, to: { opacity: "0" } },
@@ -148,6 +150,7 @@ const config: Config = {
         "fb-draw": `fb-draw ${motion.duration.in} ${motion.easing.out} 1 forwards`,
         "fb-pop": `fb-pop ${motion.duration.in} ${motion.easing.out} 1`,
         "chip-breathe": `chip-breathe ${motion.duration.breathe} ${motion.easing.standard} 3`,
+        "ticker-scroll": "ticker-scroll var(--ticker-duration, 30s) linear infinite",
         "flyout-rise": `flyout-rise 900ms ${motion.easing.out} 1 forwards`,
         "overlay-in": `overlay-in ${motion.duration.enter} ${motion.easing.out}`,
         "overlay-out": `overlay-out ${motion.duration.fast} ${motion.easing.in} forwards`,

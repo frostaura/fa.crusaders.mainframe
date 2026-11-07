@@ -1773,7 +1773,9 @@ describe("MyCode at a club with a door", () => {
     const order = (node: Element | null) => [...document.querySelectorAll("*")].indexOf(node!);
     const qr = order(qrImage);
     expect(qr).toBeLessThan(order(screen.getByText(/The lock released/)));
-    expect(qr).toBeLessThan(order(screen.getByText(/Show this at the club door/)));
+    // The explanation sits behind the help icon now, not on the page by default.
+    expect(screen.queryByText(/Show this at the club door/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Help with your code/ })).toBeTruthy();
     expect(qr).toBeLessThan(order(screen.getByRole("heading", { name: /What opens the door/ })));
     // D1: there is no choice of code to put above it — the heading is the only thing that is.
     expect(screen.queryByRole("tablist")).toBeNull();

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
 import { formatClubDayLabel } from "@/components/ui/date-picker-day";
 import { IconButton } from "@/components/ui/icon-button";
-import { CheckSquare, SquaresFour } from "@/components/ui/icons";
+import { ArrowsInSimple, ArrowsOutSimple, CheckSquare, SquaresFour } from "@/components/ui/icons";
 import { PageHeader, PageShell } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
@@ -26,8 +26,8 @@ import { BookingForBar } from "../components/bookings/BookingForBar";
 import { LiftHoldSheet, type HoldToLift } from "../components/bookings/LiftHoldSheet";
 import { useBookingFor, type BookingFor } from "../components/bookings/useBookingFor";
 import { UpcomingGames } from "../components/bookings/UpcomingGames";
+import { UpcomingTicker } from "../components/bookings/UpcomingTicker";
 import { DaySummary } from "../components/bookings/DaySummary";
-import { WithAside } from "@/components/ui/with-aside";
 import { useScheduleLiveness } from "../components/bookings/useScheduleLiveness";
 import { useOpenAtWeek, useStickyDayStrip } from "../components/bookings/useStickyDayStrip";
 import { cn } from "../lib/utils";
@@ -39,7 +39,7 @@ import type { GridBooking, SelectedSlot } from "../components/bookings/types";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
 import { useAuth } from "../lib/useAuth";
 import { useBalance } from "../lib/useBalance";
-import { BOOKINGS_COPY, cancelSelectionLabel, selectionCapSentence, selectionCapShort, selectionHeadline } from "../lib/bookingsCopy";
+import { BOOKINGS_COPY, GRID_FULLSCREEN, cancelSelectionLabel, selectionCapSentence, selectionCapShort, selectionHeadline } from "../lib/bookingsCopy";
 import { firstNameOf, memberGridRules } from "../lib/bookingsApi";
 import { describePlaces, type Place } from "../lib/bookingSpan";
 import { clubClock } from "../lib/clubClock";
@@ -119,6 +119,8 @@ export default function BookingsPage() {
   // Keyed on the day, so moving to another day folds the past wall away again by itself.
   const [earlierShownFor, setEarlierShownFor] = useState<string | null>(null);
   const showEarlier = earlierShownFor === date;
+  // The grid takes the page: everything but the day picker and the grid steps aside.
+  const [expanded, setExpanded] = useState(false);
 
   // R4 M4-3 — what OTHER people do to this member's games (an organiser cancelling, a partner
   // answering) reaches the page too: on a wallet-stream move and on coming back into view.
@@ -177,55 +179,32 @@ export default function BookingsPage() {
         actions={(
           <>
             <SelectToggle selection={selection} />
+            <ExpandToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
             <RefreshButton label={BOOKINGS_COPY.refresh} onRefresh={schedule.refresh} loading={schedule.loading} />
           </>
         )}
-        freshness={<Freshness at={schedule.readAt} />}
+        freshness={expanded ? undefined : <Freshness at={schedule.readAt} />}
       />
       {/* The floating bar's room under the grid is the shell's: a docked bar publishes its height
           and <main> grows by it (R4 form factor), so the last row is never under the bar. */}
       <div className="flex flex-col gap-4">
         <StaleNotice stale={schedule.stale} readAt={schedule.readAt} offline={offlineGrid} extra={offlineGrid ? OFFLINE_COPY.gridStale : undefined} />
         {bookAsUserId ? <BookingForBar booking={bookingFor} /> : null}
-        {/*
-          The rail (SPEC 3.1): on a phone it is the compact games strip above the week (first in
-          reading order, so the grid starts on the first screen); from a 72rem page it stands
-          beside the grid — the day at a glance, then the games and the invites waiting.
-        */}
-        <WithAside
-          placement="first"
-          asideLabel={BOOKINGS_COPY.railLabel}
-          gap="md"
-          // R5 F5-6 — from 3xl the courts are capped, so the main column hugs the grid (strip and
-          // picker align with it) and the rail stands right beside it: no ~180px dead gutter.
-          className={HUG_GRID}
-          aside={(
-            <>
-              <DaySummary
-                className="hidden @[72rem]/aside:flex" bookingFor={bookAsUserId ? bookingFor : null}
-                moreToday={date === today && !isAdmin && !rules.adminExempt && rules.maxSlotsPerDay !== null ? rules.remainingToday : null}
-              />
-              {/* R5 §4.2 — on a phone the games and the invites are ONE sideways strip (SPEC 3.1: the
-                  invite chip inline at its end), so the week and the grid start on the first screen. */}
-              <div data-rail-strip="" className={RAIL_STRIP}>
-                {bookAsUserId ? null : (
-                  <>
-                    <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />
-                    {/* R2 F1-1 — finished games, whose results are recorded here. */}
-                    <RecentGames refreshKey={changes} fallbackZone={day?.timezone} />
-                  </>
-                )}
-                {/* R5 X5-12 — a full 44px target, not the 36px small button; X5-11 — it wraps at 320/200 %. */}
-                <InvitesBadgeLink className={INVITES_LINK} />
-              </div>
-            </>
-          )}
-        >
+        {/* The games are one drifting line, not a rail: the grid owns the page's width. */}
+        {expanded ? null : (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {bookAsUserId ? <div className="min-w-0 flex-1 basis-80" /> : (
+              <UpcomingTicker refreshKey={changes} fallbackZone={day?.timezone} className="min-w-0 flex-1 basis-80" />
+            )}
+            <InvitesBadgeLink className={INVITES_LINK} />
+          </div>
+        )}
+        <div className="flex min-w-0 flex-col gap-4">
           <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} drawn={ctx !== null} keepInView={bookAsUserId ? BOOKING_FOR_BAR : null} />
-          <ScheduleNotices
+          {expanded ? null : <ScheduleNotices
             notices={explainer.notices(bookAsUserId ? null : balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}
             onDismiss={explainer.dismiss} onNextDay={schedule.nextDay}
-          />
+          />}
           <BookingGridHeading />
           {/* R8 X8-2 — a cold start that cannot reach the club, with no day kept: said as offline, once. */}
           {/* R9 X9-6 — nothing kept and no answer yet: after a few seconds, say it is still trying. */}
@@ -252,7 +231,24 @@ export default function BookingsPage() {
               ) : null}
             </StateBlock>
           )}
-        </WithAside>
+        </div>
+        {/* The detail behind the ticker, under the grid so it never costs the grid its width:
+            what the member can spend, then the games in full and the finished ones. */}
+        {expanded ? null : (
+          <div className="@container/aside flex flex-col gap-4">
+            <DaySummary
+              className="flex" bookingFor={bookAsUserId ? bookingFor : null}
+              moreToday={date === today && !isAdmin && !rules.adminExempt && rules.maxSlotsPerDay !== null ? rules.remainingToday : null}
+            />
+            {bookAsUserId ? null : (
+              <>
+                <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />
+                {/* R2 F1-1 — finished games, whose results are recorded here. */}
+                <RecentGames refreshKey={changes} fallbackZone={day?.timezone} />
+              </>
+            )}
+          </div>
+        )}
       </div>
       <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
       <BookSheet
@@ -281,23 +277,9 @@ export default function BookingsPage() {
   );
 }
 
-/**
- * R5 §4.2 — the rail's games and invites: a sideways, snapping strip on a phone (the lists inside
- * it lie flat, `GAMES_LIST`), a column from a 40rem rail. Empty, it takes no room.
- */
-const RAIL_STRIP = [
-  // R16 L16-1: it scrolls sideways, so it clips top and bottom too — "1 invite waiting" lost the
-  // top of its ring. Rings inside it are drawn inside their controls.
-  "-mx-4 flex snap-x snap-proximity scroll-px-4 items-end gap-4 overflow-x-auto px-4 pb-1 empty:hidden [&>*]:shrink-0 [&_:focus-visible]:-outline-offset-2",
-  "@[40rem]/aside:mx-0 @[40rem]/aside:flex-col @[40rem]/aside:items-stretch @[40rem]/aside:overflow-visible @[40rem]/aside:px-0 @[40rem]/aside:pb-0 @[40rem]/aside:[&>*]:shrink",
-].join(" ");
-
 /** R5 X5-12 / X5-11 — the invites link: a 44px target that wraps rather than running off a 320 phone at 200 %. */
 // R16 L16-5: capped at the rail (`100cqw`), not `max-w-full` — the strip is as wide as its content.
 const INVITES_LINK = "min-h-touch max-w-container whitespace-normal text-left";
-
-/** R5 F5-6 — WithAside's inner grid, from 3xl: the main column as wide as its content (the capped grid), no wider. */
-const HUG_GRID = "3xl:[&>div]:grid-cols-[minmax(0,max-content)_var(--aside-w)] 3xl:[&>div]:justify-start";
 
 /**
  * `open`, unless the grid on screen is the phone's copy because the club could not be reached —
@@ -324,6 +306,15 @@ function useForMember(booking: BookingFor): ForMember | null {
 }
 
 /* ─────────────────────────────── the header's toggle ─────────────────────────────── */
+
+function ExpandToggle({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+  const Icon = expanded ? ArrowsInSimple : ArrowsOutSimple;
+  return (
+    <IconButton label={expanded ? GRID_FULLSCREEN.leave : GRID_FULLSCREEN.enter} aria-pressed={expanded} variant={expanded ? "secondary" : "ghost"} onClick={onToggle}>
+      <Icon aria-hidden="true" />
+    </IconButton>
+  );
+}
 
 function SelectToggle({ selection }: { selection: Selection }) {
   const on = selection.api.active;

@@ -15,7 +15,7 @@ import {
   staleContact,
 } from "../lib/memberDoorCopy";
 import { useMemberCode, type MemberCodeView } from "../lib/memberCode/useMemberCode";
-import { barredReason, codeUseLine, MY_CODE, newCodeIn } from "../lib/myCodeCopy";
+import { barredReason, MY_CODE, newCodeIn } from "../lib/myCodeCopy";
 import { useProfileOrNull } from "../components/onboarding/useOnboarding";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { useSplitLayout } from "../components/ui/use-split-layout";
@@ -32,8 +32,8 @@ import { DoorSection } from "../components/member-door/DoorSection";
 import { useBoundaryRefresh } from "../components/member-door/useBoundaryRefresh";
 import { useMemberDoor, useShownDecision } from "../components/member-door/useMemberDoor";
 import { WhatsNextCard } from "../components/onboarding/WhatsNextCard";
-import { GUIDE_FROM_CODE, GUIDE_PATH } from "../lib/onboardingCopy";
-import { SetupChecklist } from "../components/onboarding/SetupChecklist";
+import { CodeHelp } from "../components/onboarding/CodeHelp";
+import { UpcomingTicker } from "../components/bookings/UpcomingTicker";
 import { WalletGlance } from "../components/member-code/WalletGlance";
 
 /**
@@ -186,7 +186,8 @@ export default function MyCodePage() {
         "My Code"; D8: the code first). It is still the page's one h1 — the route announcer
         focuses it and a screen reader lands on it.
       */}
-      <PageHeader title={MY_CODE.title} />
+      <PageHeader title={MY_CODE.title} actions={<CodeHelp doors={facts.doorsClub} signedOut={view.signedOut} />} />
+      {view.signedOut ? null : <UpcomingTicker refreshKey={null} fallbackZone={facts.door?.timezone} />}
 
       <div ref={attachLayout} data-my-code-layout="" className={LAYOUT}>
         <div data-my-code-pass="" className={PASS_COLUMN}>
@@ -206,12 +207,7 @@ export default function MyCodePage() {
 
         <div data-my-code-rest="" className={cn(REST, placed.columns)}>
           <div className={COLUMN}>
-            {/* Setup leads the rest (Dean, R5): a to-do list is read first or not at all, and it
-                is dismissable (its ×), so it costs a finished member nothing. */}
-            {view.signedOut ? null : <SetupChecklist />}
-            <p className="text-sm text-text-secondary">{codeUseLine(facts.doorsClub)}</p>
             {placed.inRest}
-            <Link to={GUIDE_PATH} className={MEMBER_DOOR_LINK_TAPPABLE}>{GUIDE_FROM_CODE}</Link>
             <DoorBlocks facts={facts} code={code} codeSecondsLeft={codeSecondsLeft} onRefreshCode={view.resync} />
           </div>
           <div data-my-code-side="" className={COLUMN}>

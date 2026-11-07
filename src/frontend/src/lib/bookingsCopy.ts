@@ -23,6 +23,8 @@ import { playersWhen } from "./playersCopy";
 
 /* ═══════════════════════════════════ GRID ═══════════════════════════════════ */
 
+export const GRID_FULLSCREEN = { enter: "Fill the screen with the grid", leave: "Back to the page" } as const;
+
 export const BOOKINGS_COPY = {
   title: "Bookings",
   /** R4 form factor (SPEC 3.1) — the rail beside the grid from a 72rem page. */

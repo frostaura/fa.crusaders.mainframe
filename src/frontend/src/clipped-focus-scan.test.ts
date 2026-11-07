@@ -163,7 +163,7 @@ describe("a box that clips or scrolls insets its focus rings (R15 L15-1, widened
 
   it("finds the boxes R16 widened it to (overflow-clip, -auto, -x-auto), the ones fixed in this lane among them", () => {
     expect(lists).toEqual(expect.arrayContaining([
-      "pages/Wallet.tsx", "pages/admin/member/MemberWallet.tsx", "components/DataTable.tsx", "pages/Schedule.tsx", "components/bookings/BookingGrid.tsx",
+      "pages/Wallet.tsx", "pages/admin/member/MemberWallet.tsx", "components/DataTable.tsx", "components/bookings/UpcomingTicker.tsx", "components/bookings/BookingGrid.tsx",
     ]));
   });
 
@@ -182,7 +182,7 @@ describe("a box that clips or scrolls insets its focus rings (R15 L15-1, widened
     ["an allow-listed file that grows a button", "components/bookings/BulkResults.tsx", "<RowIcon ok={row.ok} />", "<RowIcon ok={row.ok} /><button type=\"button\">Retry</button>"],
     ["the wallet's ledger card without its inset (R16)", "pages/Wallet.tsx", ` ${INSET_ALL}`, ""],
     ["DataTable's frame without its inset (R16)", "components/DataTable.tsx", ` ${INSET_ALL}`, ""],
-    ["the rail strip without its inset (R16)", "pages/Schedule.tsx", ` ${INSET_ALL}",`, `",`],
+    ["the upcoming-games ticker without its inset", "components/bookings/UpcomingTicker.tsx", ` ${INSET_ALL}"`, `"`],
     ["the wallet's chart carousel without its inset (R16 FE16s2)", "components/Carousel.tsx", ` ${INSET_ALL}`, ""],
     ["the admin rail without its inset (R16 FE16s2)", "components/admin/AdminRail.tsx", ` ${INSET_ALL}`, ""],
     ["a court's event list without its inset (R16 FE16s2)", "components/monitoring/CourtTile.tsx", ` ${INSET_ALL}`, ""],
