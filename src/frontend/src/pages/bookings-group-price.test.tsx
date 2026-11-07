@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
-import { dayFixture, openBookings } from "../test/bookingsKit";
+import { dayFixture, openBookings, singleTap } from "../test/bookingsKit";
 import { BOOK_SHEET, CELL_TEXT, bookCellLabel, sliceLengthLine } from "../lib/bookingsCopy";
 import { BUY_MINUTES_PATH } from "../lib/minutes";
 import { walletNotice } from "../lib/gridExplain";
@@ -51,6 +51,7 @@ describe("a booking costs its minutes — the grid carries no price", () => {
       day: dayFixture({ rules: STALE_PRICE }),
       routes: [{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-new", balance_after_minutes: 25 } }],
     });
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00") }));
     const dialog = await screen.findByRole("dialog");
     await toConfirm(dialog);
@@ -69,6 +70,7 @@ describe("a booking costs its minutes — the grid carries no price", () => {
 
   it("tells a member short of one slice what they need, and points them at the package shelf", async () => {
     openBookings({ balance: 10, day: dayFixture() });
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00") }));
     const dialog = await screen.findByRole("dialog");
     await toConfirm(dialog);

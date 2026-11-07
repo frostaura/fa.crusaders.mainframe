@@ -4,7 +4,7 @@ import { forgetClubZone } from "../lib/clubZone";
 import { BOOKINGS_COPY, PENDING_CELL, adminWalletNote } from "../lib/bookingsCopy";
 import { emptyWalletSentence } from "../lib/gridCopy";
 import { refuse, signOut } from "../test/harness";
-import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast, sheets, slotRow } from "../test/bookingsKit";
+import { COURT_A, COURT_B, dayFixture, openBookings, singleTap, resetSheets, sast, sheets, slotRow } from "../test/bookingsKit";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -30,7 +30,6 @@ vi.setConfig({ testTimeout: 20_000 });
 beforeEach(() => { forgetClubZone(); resetSheets(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
 
-const toggle = () => screen.getByRole("button", { name: BOOKINGS_COPY.selectOn });
 const chosen = () => screen.getAllByRole("gridcell").filter((c) => c.getAttribute("aria-selected") === "true");
 
 describe("the wallet notice follows the actor's role (R19)", () => {
@@ -67,7 +66,6 @@ describe("two courts at the same time", () => {
   it("keeps both picks — nothing is ever dropped silently — and hands both to the sheet", async () => {
     openBookings({ isAdmin: true, balance: 0 });
     await screen.findByRole("grid");
-    await act(async () => { fireEvent.click(toggle()); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^Book Court 1 at 16:45/ })); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^Book Court 2 at 16:45/ })); });
     expect(chosen().map((c) => c.getAttribute("aria-label"))).toEqual(["Court 1 at 16:45", "Court 2 at 16:45"]);
@@ -93,6 +91,7 @@ describe("a booking just made, before the confirming read", () => {
         respond: () => (phase === "failing" ? refuse(503, { error: "unavailable" }) : phase === "confirmed" ? booked : dayFixture()),
       }],
     });
+    await singleTap();
     const free = await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ });
     await act(async () => { fireEvent.click(free); });
     expect(sheets.book?.open).toBe(true);
@@ -111,7 +110,7 @@ describe("a booking just made, before the confirming read", () => {
     expect(sheets.cancel?.open ?? false).toBe(false);
 
     // Not choosable either: a bulk cancel would carry the provisional id.
-    await act(async () => { fireEvent.click(toggle()); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.selectOn })); });
     expect(cell).not.toHaveAttribute("data-select-key");
     expect(cell.querySelector("[data-cell-check]")).toBeNull();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.selectOff })); });

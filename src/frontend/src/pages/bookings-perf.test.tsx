@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
-import { COURT_B, openBookings, resetSheets, sast, sheets } from "../test/bookingsKit";
+import { COURT_B, openBookings, singleTap, resetSheets, sast, sheets } from "../test/bookingsKit";
 import { HOLDING_CELL, PENDING_CELL } from "../lib/bookingsCopy";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
@@ -29,6 +29,7 @@ describe("a tap re-renders the cells it changed, not the grid", () => {
    */
   it("re-draws a handful of cells when a tap moves the tab stop", async () => {
     openBookings();
+    await singleTap();
     const cell = await screen.findByRole("button", { name: /^Book Court 2 at 16:15/ });
     await waitFor(() => expect(verdicts.count).toBeGreaterThan(20));
     const before = verdicts.count;
@@ -46,6 +47,7 @@ describe("the grid under an open sheet", () => {
    */
   it("holds its own pointer-events from the sheet's opening until its focus has returned", async () => {
     openBookings();
+    await singleTap();
     const grid = await screen.findByRole("grid");
     expect(grid.style.pointerEvents).toBe("");
     fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15/ }));
@@ -67,6 +69,7 @@ describe("a booking on its way", () => {
 
   it("holds the cell while the club answers, then draws it confirming in one step", async () => {
     openBookings();
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15/ }));
     await screen.findByRole("dialog", { name: "Book sheet" });
     await act(async () => { sheets.book?.onSending?.([SLOT]); });
@@ -88,6 +91,7 @@ describe("a booking on its way", () => {
 
   it("puts the free cell straight back when the booking fails", async () => {
     openBookings();
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15/ }));
     await screen.findByRole("dialog", { name: "Book sheet" });
     await act(async () => { sheets.book?.onSending?.([SLOT]); });

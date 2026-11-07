@@ -5,7 +5,7 @@ import { BOOKINGS_COPY, CELL_TEXT, PENDING_CELL } from "../lib/bookingsCopy";
 import { liftWithReason } from "../test/liftHold";
 import { HOLD_LIFTED, HOLD_LIFT_FAILED } from "../lib/scheduleEnd";
 import { signOut, refuse } from "../test/harness";
-import { COURT_A, COURT_B, ME, dayFixture, openBookings, resetSheets, sast, scheduleCalls, sheets, slotRow } from "../test/bookingsKit";
+import { COURT_A, COURT_B, ME, dayFixture, openBookings, singleTap, resetSheets, sast, scheduleCalls, sheets, slotRow } from "../test/bookingsKit";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -169,6 +169,7 @@ describe("the day — R5", () => {
 describe("a tap hands the right thing to the right sheet", () => {
   it("books one slot: the court, the instant, one slice — costing its playing minutes (P13 §1.1)", async () => {
     openBookings();
+    await singleTap();
     // P13 §3.12 — the cell's name carries no price: "Book Court 2 at 16:15", nothing after it.
     fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15$/ }));
     await screen.findByRole("dialog", { name: "Book sheet" });
@@ -182,6 +183,7 @@ describe("a tap hands the right thing to the right sheet", () => {
 
   it("opens the cancel sheet on the member's own booking, in the grid's own clock (D4 §2.4)", async () => {
     openBookings({ day: dayFixture({ slots: [MY_SLOT] }) });
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: "Cancel your booking on Court 1 at 17:00" }));
     await screen.findByRole("dialog", { name: "Cancel sheet" });
     const [booking] = sheets.cancel!.bookings;
@@ -193,6 +195,7 @@ describe("a tap hands the right thing to the right sheet", () => {
 
   it("lets an admin open another member's booking — first name and photo only", async () => {
     openBookings({ isAdmin: true, day: dayFixture({ slots: [THEIRS] }) });
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: "Thandi — cancel on their behalf, Court 2 at 16:30" }));
     const [booking] = sheets.cancel!.bookings;
     expect(booking).toMatchObject({ mine: false, memberFirstName: "Thandi", memberPhotoUrl: null });
@@ -223,6 +226,7 @@ describe("a tap hands the right thing to the right sheet", () => {
 describe("what the page does with a sheet's outcome — R12", () => {
   it("paints a booking the moment the sheet reports it, before the day is read again", async () => {
     openBookings();
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ }));
     hangScheduleReads();
     await act(async () => {
@@ -243,6 +247,7 @@ describe("what the page does with a sheet's outcome — R12", () => {
 
   it("paints an on-behalf booking as somebody else's, never as the admin's own", async () => {
     openBookings({ isAdmin: true });
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ }));
     hangScheduleReads();
     await act(async () => {
@@ -261,6 +266,7 @@ describe("what the page does with a sheet's outcome — R12", () => {
 
   it("takes a cancelled booking off the grid at once", async () => {
     openBookings({ day: dayFixture({ slots: [MY_SLOT] }) });
+    await singleTap();
     fireEvent.click(await screen.findByRole("button", { name: "Cancel your booking on Court 1 at 17:00" }));
     hangScheduleReads();
     await act(async () => { sheets.cancel!.onCancelled!({ cancelledIds: ["mine-1"], ownMoneyMoved: true }); });
@@ -278,6 +284,7 @@ describe("what the page does with a sheet's outcome — R12", () => {
 
   it("does not rebuild the grid when a sheet opens", async () => {
     openBookings();
+    await singleTap();
     const cell = await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ });
     cellLookups.count = 0;
     await act(async () => { fireEvent.click(cell); });
