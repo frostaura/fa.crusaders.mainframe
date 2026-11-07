@@ -205,6 +205,7 @@ describe("a tap hands the right thing to the right sheet", () => {
 
   it("opens the player card on somebody else's booking — photo, first name and when, nothing else", async () => {
     openBookings({ day: dayFixture({ slots: [THEIRS] }) });
+    await singleTap();
     const cell = await screen.findByRole("gridcell", { name: "Court 2 at 16:30" });
     expect(cell.textContent).toContain("Thandi");
     fireEvent.click(within(cell).getByRole("button", { name: "Court 2 at 16:30 — booked by Thandi. Show who is playing" }));
@@ -376,6 +377,7 @@ describe("the cells wear the slot tokens — R6", () => {
 
   it("gives no fingerprint to a cell that does not respond", async () => {
     openBookings({ day: dayFixture({ slots: [THEIRS] }) });
+    await singleTap();
     // Somebody else's booking opens the player card, but books and cancels nothing: no fingerprint.
     const cell = await screen.findByRole("gridcell", { name: "Court 2 at 16:30" });
     expect(cell.querySelector("[data-watermark]")).toBeNull();

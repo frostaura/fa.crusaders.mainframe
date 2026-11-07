@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import SchedulePage from "./Schedule";
 import { forgetClubZone } from "../lib/clubZone";
+import { singleTap } from "../test/bookingsKit";
 import { renderPage, signIn, signOut, stubFetch, type FetchStub } from "../test/harness";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
@@ -182,6 +183,7 @@ describe("the grid's cells", () => {
   it("names the closed cell as a button that answers, not as a dead surface — D4 §2.9", async () => {
     stubDay(futureDay());
     renderPage(<SchedulePage />);
+    await singleTap();
 
     const closed = await screen.findByRole("button", { name: /Court 1 at 07:00–08:00 — the club is closed/ });
     await act(async () => { closed.click(); });
