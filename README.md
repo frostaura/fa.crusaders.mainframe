@@ -54,6 +54,162 @@ nginx/          The gateway: nginx.conf plus the Dockerfile that bakes it in
 Makefile        The entry point for every task — there is no scripts/ directory
 ```
 
+## Knowledge graph
+
+How the pieces relate. Nodes are the system's parts; edges are labelled with the relationship.
+Solid edges are runtime data flow; dotted edges are "specified by" / "verified by" links into
+`docs/`, `src/contracts/` and the test suites. Every node is a path in this repository or a
+named external party.
+
+```mermaid
+graph LR
+  %% ---------- People & places ----------
+  subgraph Actors
+    Player([Player])
+    Admin([Club admin])
+    Tenant[(Tenant: club<br/>Crusaders Squash Club)]
+  end
+
+  %% ---------- Client ----------
+  subgraph Frontend["src/frontend — React 19 PWA"]
+    Grid[Booking grid<br/>photo + name only]
+    Wallet[Minutes balance &<br/>package purchase]
+    AdminUI[Admin screens]
+    DS[Design system<br/>tokens + shadcn/ui]
+  end
+
+  %% ---------- Backend ----------
+  subgraph Backend["src/backend — .NET 10 Minimal API"]
+    Auth[Security<br/>JWT HS256 + WebAuthn]
+    MT[Multitenancy<br/>tenant_id on every entity]
+    Book[Endpoints/Booking<br/>charge at booking]
+    Ledger[(Ledger<br/>immutable minute entries)]
+    Pkg[MinutePackage &<br/>MemberGroup discounts]
+    Pay[Payments<br/>PayFast ITN]
+    Dev[Device endpoints<br/>activate · gate · events · pay-for]
+    Bio[Biometric<br/>IBiometricDevice + Null]
+    Lights[Lights<br/>court light state]
+    Mail[Email<br/>outbox → worker → SMTP]
+    Hooks[Webhooks<br/>HMAC-signed mirror]
+    Work[Workers<br/>outbox · webhooks · reconcile]
+    DB[(PostgreSQL 16<br/>EF Core migrations)]
+  end
+
+  %% ---------- Firmware ----------
+  subgraph IoT["src/iot — PlatformIO firmware"]
+    Box[court-box<br/>Mega 2560 + ESP8266]
+    Gate[door-gate<br/>ESP32 per door]
+    Shared[shared/lib<br/>timebase · hal · devcrypto · devapi<br/>eventq · roster · memcode · devlink]
+    Relay[Relay bank → court lights]
+    Lock[Door lock relay]
+  end
+
+  %% ---------- External ----------
+  subgraph External["External, tenant-controlled"]
+    PayFast{{PayFast ZAR}}
+    SMTP{{SMTP}}
+    Consumer{{Webhook consumers}}
+    Tunnel{{Cloudflared tunnel}}
+    Hub{{Docker Hub images}}
+  end
+
+  %% ---------- Runtime flow ----------
+  Player --> Grid
+  Player --> Wallet
+  Admin --> AdminUI
+  Grid -->|book slot| Book
+  Wallet -->|buy package| Pay
+  AdminUI -->|act on behalf of user| Book
+  AdminUI --> Pkg
+  Auth --> MT
+  MT --> Tenant
+  Book -->|BookingCharge debit,<br/>same unit of work| Ledger
+  Pay -->|top-up credited in minutes| Ledger
+  Pay <-->|checkout + ITN| PayFast
+  Pkg -->|prices the purchase| Pay
+  Book --> DB
+  Ledger --> DB
+  Book -->|player-affecting event| Mail
+  Mail --> Work
+  Work -->|send| SMTP
+  Book --> Hooks
+  Hooks --> Work
+  Work -->|signed delivery| Consumer
+
+  Player -->|PIN · QR · biometric| Box
+  Player -->|QR| Gate
+  Box --> Shared
+  Gate --> Shared
+  Box -->|pull roster / activate| Dev
+  Gate -->|pull roster / may enter?| Dev
+  Dev --> Bio
+  Dev -->|attendance event:<br/>CheckedInAt| Book
+  Dev --> Lights
+  Box -->|switches| Relay
+  Gate -->|switches| Lock
+  Tunnel -.->|members reach the stack| Frontend
+  Hub -.->|manual pull of :latest| Backend
+
+  %% ---------- Specs & verification ----------
+  Spec1[/"docs/specs/minutes-and-packages.md"/]
+  Spec2[/"docs/specs/settlement-model.md"/]
+  Spec3[/"docs/specs/payments-payfast.md"/]
+  Spec4[/"docs/specs/device-serial-protocol.md<br/>lights-controller · door-gate · member-code"/]
+  Spec5[/"docs/specs/multi-tenancy.md"/]
+  Spec6[/"docs/specs/design-system.md"/]
+  Blueprint[/"docs/specs/client-blueprints<br/>the customer's word on economics"/]
+  Deltas[/"client-blueprint-deltas.md"/]
+  CPay[(src/contracts/payfast)]
+  CDev[(src/contracts/device-protocol)]
+  E2E[test/e2e-device<br/>hardware-free proof]
+  Virt[test/virtualization<br/>PayFast imposter]
+  Tests[Crusaders.Mainframe.Tests<br/>cross-tenant injection tests]
+  Go[/"docs/go-live-checklist.md"/]
+
+  Spec1 -.-> Ledger
+  Spec2 -.-> Ledger
+  Spec3 -.-> Pay
+  Spec4 -.-> Dev
+  Spec4 -.-> Box
+  Spec4 -.-> Gate
+  Spec5 -.-> MT
+  Spec6 -.-> DS
+  DS -.-> Frontend
+  Blueprint -.->|outranks internal specs| Spec1
+  Deltas -.->|records deviations, e.g.<br/>charge at booking, not lights-on| Blueprint
+  CPay -.->|fixtures from an independent impl.| Pay
+  CDev -.->|shared corpus| Dev
+  CDev -.->|shared corpus| Shared
+  Tests -.-> MT
+  Tests -.-> Ledger
+  E2E -.-> Box
+  E2E -.-> Dev
+  Virt -.-> PayFast
+  Go -.->|what stops go-live| Relay
+
+  classDef inv fill:#fde,stroke:#c36,color:#000;
+  class Ledger,MT,Tenant inv;
+```
+
+### Invariants the graph encodes
+
+| Node | Invariant |
+| --- | --- |
+| Ledger | Balance is the sum of immutable entries, never a stored field. Whole minutes are the unit; rand appears only where money changed hands. |
+| Book → Ledger | The booking row and its `BookingCharge` debit flush together. Cancellation refunds in full less the late-cancel penalty; once `CheckedInAt` is set there is no refund. |
+| MT / Tenant | Every persisted entity carries `tenant_id`; every endpoint resolves the tenant first. Cross-tenant leakage is a P0 incident. |
+| Dev → Book | The at-court identification event is the source of truth for attendance; a no-show is the absence of a match inside the grace window. |
+| Mail | Email only ever queues; the worker sends. Webhooks mirror the same events and never replace player email. |
+| Grid | Other players see photo and name only. |
+| Box / Gate | The court box's Mega is a thin I/O layer; volatile logic lives on the ESP8266. Anything a generated Arduino sketch links must be valid C++11 as well as C++17. |
+
+### Reading paths
+
+- **Money:** `minutes-and-packages.md` → `settlement-model.md` → `Ledger` → `payments-payfast.md` → `src/contracts/payfast`
+- **Lights:** booking → `Dev` → `lights-controller.md` → `device-serial-protocol.md` → `court-box` → relay bank
+- **Doors:** `door-gate.md` → `member-code.md` → `Dev` → `door-gate` → lock relay
+- **Tenancy:** `multi-tenancy.md` → `Multitenancy/` → cross-tenant tests in `Crusaders.Mainframe.Tests`
+
 ## Before this goes live
 
 Every phase is built and the suites are green — which is not the same as done, and this
