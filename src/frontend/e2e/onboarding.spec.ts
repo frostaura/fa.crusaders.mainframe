@@ -340,6 +340,29 @@ test.describe("P8: the welcome wizard", () => {
     await expect(page.getByRole("heading", { level: 2, name: GET_STARTED.steps.welcome.title })).toBeVisible();
   });
 
+  // Go-live BM-07 — a 36rem column in a 1440 window left two thirds of it empty.
+  test("uses a wide screen: the steps stand in a rail beside the step in hand", async ({ page }) => {
+    const recorder: Recorder = { calls: [] };
+    await signIn(page);
+    await serveApi(page, p8Routes({ recorder }));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/get-started?step=passkey");
+    const rail = page.getByRole("navigation", { name: GET_STARTED.stepsLabel });
+    await expect(rail).toBeVisible();
+    await expect(rail.locator("[aria-current='step']")).toContainText(GET_STARTED.steps.passkey.title);
+    const used = await page.evaluate(() => {
+      const main = document.querySelector("#main-content")!.getBoundingClientRect();
+      const boxes = [...document.querySelectorAll<HTMLElement>("[data-step-rail], [data-onboarding-progress]")].map((el) => el.getBoundingClientRect());
+      const left = Math.min(...boxes.map((b) => b.left));
+      const right = Math.max(...boxes.map((b) => b.right));
+      return (right - left) / main.width;
+    });
+    expect(used).toBeGreaterThan(0.6);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(rail).toBeHidden();
+  });
+
   test("fits a 320px phone at a 16px root or a 32px one", async ({ page }) => {
     const recorder: Recorder = { calls: [] };
     await signIn(page);

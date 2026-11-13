@@ -375,6 +375,8 @@ export const GET_STARTED = {
   title: "Welcome to the club",
   description: "A few things worth setting up now. Every step can wait — skip anything and come back from My Code.",
   stepOf: (n: number, total: number) => `Step ${n} of ${total}`,
+  /** BM-07 — the wide screen's list of the steps beside the one in hand. */
+  stepsLabel: "The welcome's steps",
   back: "Back",
   next: "Next",
   finish: "Finish",

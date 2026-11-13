@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/components/toastContext";
 import { Button } from "@/components/ui/button";
 import { PageHeader, PageShell } from "@/components/ui/page-shell";
+import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { LANDING_PATH } from "@/components/shell/nav";
 import { useOnboarding } from "@/components/onboarding/useOnboarding";
@@ -89,19 +90,55 @@ export default function GetStartedPage() {
   const go = (action: "next" | "back") => dispatch({ type: action });
 
   return (
-    <PageShell width="narrow">
+    // BM-07 — one 36rem column in a 1440 window left two thirds of the screen empty. From `lg` the
+    // steps stand in a rail beside the one in hand; a phone keeps the single column.
+    <PageShell width="content">
       <PageHeader title={GET_STARTED.title} description={GET_STARTED.description} />
-      <div className="flex flex-col gap-2">
-        <p className="text-sm font-semibold text-text-secondary" data-onboarding-progress="">
-          {GET_STARTED.stepOf(state.index + 1, state.steps.length)}
-        </p>
-        <Progress value={state.index + 1} max={state.steps.length} aria-label={GET_STARTED.stepOf(state.index + 1, state.steps.length)} />
+      <div className="grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)] lg:items-start xl:grid-cols-[18rem_minmax(0,48rem)]">
+        <StepRail steps={state.steps} index={state.index} />
+        <div className="flex min-w-0 flex-col gap-6">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-semibold text-text-secondary" data-onboarding-progress="">
+              {GET_STARTED.stepOf(state.index + 1, state.steps.length)}
+            </p>
+            <Progress value={state.index + 1} max={state.steps.length} aria-label={GET_STARTED.stepOf(state.index + 1, state.steps.length)} />
+          </div>
+          <div className="rounded-2xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6">
+            {View ? <View key={step} focusOnMount={state.touched} /> : null}
+          </div>
+          <WizardFooter first={state.index === 0} last={isLastStep(state)} onMove={go} />
+        </div>
       </div>
-      <div className="rounded-2xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6">
-        {View ? <View key={step} focusOnMount={state.touched} /> : null}
-      </div>
-      <WizardFooter first={state.index === 0} last={isLastStep(state)} onMove={go} />
     </PageShell>
+  );
+}
+
+/**
+ * BM-07 — every step's name, the one in hand marked, beside the step on a wide screen. Not a way
+ * to jump: each step is read in order, and Next and Back are the moves (the phone's single column
+ * draws no rail, and its progress line says the same thing).
+ */
+const STEP_TITLES: Partial<Record<MemberStepId, { title: string }>> = GET_STARTED.steps;
+
+function StepRail({ steps, index }: { steps: readonly MemberStepId[]; index: number }) {
+  return (
+    <nav aria-label={GET_STARTED.stepsLabel} data-step-rail="" className="hidden lg:block">
+      <ol className="flex flex-col gap-1 rounded-2xl border border-border bg-bg-surface p-3">
+        {steps.map((id, i) => (
+          <li
+            key={id}
+            aria-current={i === index ? "step" : undefined}
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm",
+              i === index ? "bg-accent-soft font-semibold text-text-primary" : i < index ? "text-text-secondary" : "text-text-muted",
+            )}
+          >
+            <span aria-hidden="true" className="w-5 shrink-0 text-right tabular-nums">{i + 1}</span>
+            <span className="min-w-0 break-words">{STEP_TITLES[id]?.title ?? id}</span>
+          </li>
+        ))}
+      </ol>
+    </nav>
   );
 }
 
