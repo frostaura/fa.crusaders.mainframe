@@ -82,9 +82,9 @@ public static class AdminDeviceV3Endpoints
     /// The value is never echoed back by this route and never logged.
     /// </summary>
     private static async Task<IResult> RestoreAsync(
-        KeyRestoreRequest? req, DeviceKeyRing keys, TenantSettingsAccessor settings, InherentAdmins owners,
-        MainframeDbContext db, HttpContext ctx, CancellationToken ct)
+        KeyRestoreRequest? req, [AsParameters] KeyRestoreServices services, HttpContext ctx, CancellationToken ct)
     {
+        var (keys, settings, owners, db) = services;
         if (InDemo(ctx)) return Services.Demo.DemoTenants.Refusal(DemoKeyRefusal);
         var actor = ctx.User.Id() ?? Guid.Empty;
         var email = await db.Users.AsNoTracking().Where(u => u.Id == actor).Select(u => u.Email).FirstOrDefaultAsync(ct);
@@ -158,6 +158,9 @@ public static class AdminDeviceV3Endpoints
         return Results.Bytes(image, "application/octet-stream");
     }
 }
+
+/// <summary>What the owner-only restore needs, bundled for the parameter gate.</summary>
+public sealed record KeyRestoreServices(DeviceKeyRing Keys, TenantSettingsAccessor Settings, InherentAdmins Owners, MainframeDbContext Db);
 
 /// <summary>The retire body: the typed confirmation, required only when boards would be stranded.</summary>
 public sealed record KeyConfirmRequest([property: JsonPropertyName("confirm")] string? Confirm);

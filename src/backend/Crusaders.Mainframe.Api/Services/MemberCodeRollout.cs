@@ -129,13 +129,17 @@ public sealed class MemberCodeRollout
     public const int KeyedBeatWithinMinutes = 60;
 
     /// <summary>An enabled court box nobody has acknowledged, heard in the last week (MCV1-03).</summary>
-    public static bool BlocksUnacknowledged(Device d, DateTimeOffset now) =>
-        d.Enabled && d.Kind == DeviceKind.CourtBox && !Endpoints.MemberCodeHeartbeat.Acknowledged(d)
-        && d.LastSeenAt is { } seen && seen >= now.AddDays(-UnacknowledgedBlocksDays);
+    public static bool BlocksUnacknowledged(Device d, DateTimeOffset now)
+    {
+        return d.Enabled && d.Kind == DeviceKind.CourtBox && !Endpoints.MemberCodeHeartbeat.Acknowledged(d)
+               && d.LastSeenAt >= now.AddDays(-UnacknowledgedBlocksDays);
+    }
 
     /// <summary>Whether the server sent this board a heartbeat carrying its keys in the last hour.</summary>
-    public static bool HasKeyedBeat(Device d, DateTimeOffset now) =>
-        d.CodeKeysAt is { } at && at >= now.AddMinutes(-KeyedBeatWithinMinutes);
+    public static bool HasKeyedBeat(Device d, DateTimeOffset now)
+    {
+        return d.CodeKeysAt >= now.AddMinutes(-KeyedBeatWithinMinutes);
+    }
 
     /// <summary>
     /// Ends every legacy access code at the cut-off (§8 step 4): <c>v1_only</c> refuses them on

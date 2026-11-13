@@ -243,9 +243,12 @@ public sealed class DeviceKeyRing
             [.. notOnNew.Where(d => !DeviceCaps.Has(d, DeviceCaps.Key1)).Select(Board)]);
     }
 
-    private static KeyBoard Board(Device d) => new(
-        d.Id, d.DeviceCode, Endpoints.DeviceView.Named(d.Name), d.Kind.ToString(),
-        d.LastKeyId is { } id ? DeviceProvision.KeyId(id) : null);
+    private static KeyBoard Board(Device d)
+    {
+        return new KeyBoard(
+            d.Id, d.DeviceCode, Endpoints.DeviceView.Named(d.Name), d.Kind.ToString(),
+            d.LastKeyId.HasValue ? DeviceProvision.KeyId(d.LastKeyId.Value) : null);
+    }
 
     private async Task<List<Device>> AcknowledgedBoardsAsync(CancellationToken ct)
     {

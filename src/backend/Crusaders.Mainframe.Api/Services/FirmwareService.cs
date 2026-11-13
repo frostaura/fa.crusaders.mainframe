@@ -94,22 +94,12 @@ public sealed class FirmwareService
     public async Task<(FirmwareRelease? Release, string? Error)> UploadAsync(
         byte[]? image, FirmwareManifest? manifest, Guid actorUserId, CancellationToken ct)
     {
-        if (_key.Modulus is not { } modulus) return (null, OtaNotConfigured);
-        if (image is null || image.Length == 0) return (null, ImageRequired);
-        if (manifest is null || manifest.Target is null || manifest.Version is null || manifest.Size is null
-            || manifest.Sha256 is null || manifest.Sig is null)
-        {
-            return (null, ManifestInvalid);
-        }
-        if (!DeviceOta.TargetMaxBytes.TryGetValue(manifest.Target, out var max)) return (null, TargetUnknown);
-        if (DeviceOta.VersionTuple(manifest.Version) is null) return (null, VersionFormat);
-        if (manifest.Size != image.Length) return (null, SizeMismatch);
-        if (image.Length > max) return (null, SizeTooLarge);
-        var sha = Convert.ToHexStringLower(SHA256.HashData(image));
-        if (!string.Equals(sha, manifest.Sha256, StringComparison.Ordinal)) return (null, Sha256Mismatch);
+        if (Refusal(image, manifest) is { } refused) return (null, refused);
+        var sha = Convert.ToHexStringLower(SHA256.HashData(image!));
+        if (!string.Equals(sha, manifest!.Sha256, StringComparison.Ordinal)) return (null, Sha256Mismatch);
 
-        var text = DeviceOta.ManifestText(manifest.Target, manifest.Version, image.Length, sha);
-        if (DeviceOta.Verify(text, manifest.Sig, modulus) != "ok") return (null, SigInvalid);
+        var text = DeviceOta.ManifestText(manifest.Target!, manifest.Version!, image!.Length, sha);
+        if (DeviceOta.Verify(text, manifest.Sig!, _key.Modulus!) != "ok") return (null, SigInvalid);
 
         var versions = await _db.FirmwareReleases.AsNoTracking()
             .Where(r => r.Target == manifest.Target)
@@ -120,11 +110,11 @@ public sealed class FirmwareService
         var release = new FirmwareRelease
         {
             TenantId = _tenant.TenantId,
-            Target = manifest.Target,
-            Version = manifest.Version,
+            Target = manifest.Target!,
+            Version = manifest.Version!,
             Size = image.Length,
             Sha256 = sha,
-            Signature = manifest.Sig,
+            Signature = manifest.Sig!,
             Image = image,
             UploadedByUserId = actorUserId,
             UploadedAt = _clock.GetUtcNow(),
@@ -141,14 +131,38 @@ public sealed class FirmwareService
         return (release, null);
     }
 
+    /// <summary>The refusal decided from the request alone — configuration, presence, target, version and size — or null.</summary>
+    private string? Refusal(byte[]? image, FirmwareManifest? manifest)
+    {
+        if (_key.Modulus is null) return OtaNotConfigured;
+        if (image is null || image.Length == 0) return ImageRequired;
+        if (manifest is null || manifest.Target is null || manifest.Version is null || manifest.Size is null
+            || manifest.Sha256 is null || manifest.Sig is null)
+        {
+            return ManifestInvalid;
+        }
+        if (!DeviceOta.TargetMaxBytes.TryGetValue(manifest.Target, out var max)) return TargetUnknown;
+        if (DeviceOta.VersionTuple(manifest.Version) is null) return VersionFormat;
+        if (manifest.Size != image.Length) return SizeMismatch;
+        return image.Length > max ? SizeTooLarge : null;
+    }
+
     /// <summary><c>GET …/firmware</c>: every release, newest first, with its rollout and the boards of its target by state.</summary>
     public async Task<object> ListAsync(CancellationToken ct)
     {
         var releases = await _db.FirmwareReleases.AsNoTracking()
             .Select(r => new
             {
-                r.Id, r.Target, r.Version, r.Size, r.Sha256, r.UploadedAt, r.UploadedByUserId,
-                r.Rollout, r.RolloutDeviceId, r.Paused,
+                r.Id,
+                r.Target,
+                r.Version,
+                r.Size,
+                r.Sha256,
+                r.UploadedAt,
+                r.UploadedByUserId,
+                r.Rollout,
+                r.RolloutDeviceId,
+                r.Paused,
             })
             .ToListAsync(ct);
         var boards = (await _db.Devices.AsNoTracking().Where(d => d.Enabled).ToListAsync(ct))
@@ -251,15 +265,18 @@ public sealed class FirmwareService
     }
 
     /// <summary>The <c>ota</c> object in the wire's key order.</summary>
-    public static JsonObject OfferObject(string target, string version, long size, string sha256, string sig, string path) => new()
+    public static JsonObject OfferObject(string target, string version, long size, string sha256, string sig, string path)
     {
-        ["target"] = target,
-        ["version"] = version,
-        ["size"] = size,
-        ["sha256"] = sha256,
-        ["sig"] = sig,
-        ["path"] = path,
-    };
+        return new JsonObject
+        {
+            ["target"] = target,
+            ["version"] = version,
+            ["size"] = size,
+            ["sha256"] = sha256,
+            ["sig"] = sig,
+            ["path"] = path,
+        };
+    }
 
     /// <summary>The image a board of this club downloads, or null — another club's id is not found, not forbidden.</summary>
     public async Task<byte[]?> ImageAsync(string id, CancellationToken ct)

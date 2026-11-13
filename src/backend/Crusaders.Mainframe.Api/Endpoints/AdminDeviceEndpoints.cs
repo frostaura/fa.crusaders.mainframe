@@ -168,15 +168,7 @@ public static class AdminDeviceEndpoints
 
         if (ParseButtonMapPatch(req.ButtonMap, out var buttons) is { } badMap) return badMap;
 
-        // Device contract v3 (device-api.md §5, §10, §12): this board's own layout, marquee and
-        // hardware facts, three-valued like button_map, and the explicit network push. A door has
-        // no glass, relays or scanner settings of this kind, so it is refused them.
-        if (device.Kind == DeviceKind.Gate && DeviceBoardOverrides.Mentions(req.Extra))
-        {
-            return Results.BadRequest(new { error = "court_box_fields_on_gate" });
-        }
-        var (board, badBoard) = DeviceBoardOverrides.Parse(req.Extra);
-        if (badBoard is not null) return Results.BadRequest(badBoard);
+        if (BoardPatch(device, req, out var board) is { } badBoard) return badBoard;
 
         // The effective map after this PATCH — the override it sets, else the one the row
         // keeps, else the club's — must be able to address the effective court list, and a
@@ -215,6 +207,24 @@ public static class AdminDeviceEndpoints
         return Results.Ok(DeviceView.Of(
             updated, await HeartbeatSecondsAsync(settingsAccessor, ct),
             PersonNames.Of(updated.ShutByUserId, names), unchanged: changes.Count == 0));
+    }
+
+    /// <summary>
+    /// Device contract v3 (device-api.md §5, §10, §12): this board's own layout, marquee and
+    /// hardware facts, three-valued like button_map, and the explicit network push. A door has no
+    /// glass, relays or scanner settings of this kind, so it is refused them.
+    /// </summary>
+    private static IResult? BoardPatch(Device device, UpdateDeviceRequest req, out DeviceBoardOverrides.Patch board)
+    {
+        board = DeviceBoardOverrides.Patch.Empty;
+        if (device.Kind == DeviceKind.Gate && DeviceBoardOverrides.Mentions(req.Extra))
+        {
+            return Results.BadRequest(new { error = "court_box_fields_on_gate" });
+        }
+        var (parsed, refusal) = DeviceBoardOverrides.Parse(req.Extra);
+        if (refusal is not null) return Results.BadRequest(refusal);
+        board = parsed;
+        return null;
     }
 
     /// <summary>

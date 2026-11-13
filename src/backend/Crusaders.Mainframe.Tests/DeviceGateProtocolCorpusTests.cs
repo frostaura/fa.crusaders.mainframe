@@ -288,8 +288,7 @@ public class DeviceGateProtocolCorpusTests
             var body = GateHeartbeatView.Of(
                 device,
                 root.GetProperty("tenant_slug").GetString()!,
-                root.GetProperty("heartbeat_seconds").GetInt32(),
-                root.GetProperty("gate").GetProperty("unlock_seconds").GetInt32(),
+                new GateTiming(root.GetProperty("heartbeat_seconds").GetInt32(), root.GetProperty("gate").GetProperty("unlock_seconds").GetInt32()),
                 root.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList(),
                 VectorNow,
                 V3PartsOf(root));

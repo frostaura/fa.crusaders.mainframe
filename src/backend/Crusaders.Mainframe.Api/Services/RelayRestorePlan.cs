@@ -48,9 +48,10 @@ public sealed record SnapshotCourt(int Relay, int CourtNumber, Guid? CourtId, Re
     public bool Lit => Item is not null;
 
     /// <summary><c>&lt;relay&gt;|&lt;lit&gt;|&lt;seconds_left&gt;|&lt;kind&gt;|&lt;ref&gt;</c> — <c>"1|0|0|-|-"</c> when dark.</summary>
-    public string ToWire() => Item is { } i
-        ? $"{Relay}|1|{i.RemainingSeconds}|{Kind}|{i.Reference}"
-        : $"{Relay}|0|0|-|-";
+    public string ToWire()
+    {
+        return Item is null ? $"{Relay}|0|0|-|-" : $"{Relay}|1|{Item.RemainingSeconds}|{Kind}|{Item.Reference}";
+    }
 }
 
 /// <summary>
@@ -147,22 +148,7 @@ public static class RelayRestorePlan
             .ToListAsync(ct);
         var courtIds = courts.Select(c => c.Id).ToList();
 
-        // Every checked-in, uncancelled booking on these courts near now — the in-play ones, the
-        // links chained after them and the ones they were chained onto. One query for all four
-        // relays: a heartbeat runs every minute per board. The window is wider than any run can
-        // be (16 links of at most a day each are bounded far tighter by real bookings), and a
-        // link outside it simply ends the walk early, never lengthens it.
-        var lookBack = now.AddHours(-24);
-        var lookAhead = now.AddHours(24);
-        var lit = await db.Bookings.AsNoTracking()
-            .Where(b => courtIds.Contains(b.CourtId)
-                        && b.CheckedInAt != null
-                        && b.CancelledAt == null
-                        && b.Status != BookingStatus.Cancelled
-                        && b.Status != BookingStatus.AdminBlock
-                        && b.EndsAt > lookBack
-                        && b.StartsAt < lookAhead)
-            .ToListAsync(ct);
+        var lit = await LitNearAsync(db, courtIds, now, ct);
 
         var runs = new Dictionary<Guid, Run>();
         foreach (var court in courts)
@@ -177,22 +163,45 @@ public static class RelayRestorePlan
         for (var relay = 0; relay < numbers.Count; relay++)
         {
             var court = courts.FirstOrDefault(c => c.CourtNumber == numbers[relay]);
-            if (court is null || !runs.TryGetValue(court.Id, out var run) || released.Contains(run.InPlay.Id))
-            {
-                elements.Add(new SnapshotCourt(relay, numbers[relay], court?.Id, null, '-'));
-                continue;
-            }
-
-            var remaining = (int)Math.Min(int.MaxValue, Math.Ceiling((run.EndsAt - now).TotalSeconds));
-            var b = run.InPlay;
-            var item = new RelayRestoreItem(
-                relay, court.Id, court.CourtNumber, b.Id, remaining, run.EndsAt,
-                b.PaidByUserId ?? b.UserId, b.UserId);
-            var kind = run.InPlayIsExtension ? 'e' : walkUps.Contains(b.Id) ? 'w' : 'b';
-            elements.Add(new SnapshotCourt(relay, court.CourtNumber, court.Id, item, kind));
+            Run? run = null;
+            var isLit = court is not null && runs.TryGetValue(court.Id, out run) && !released.Contains(run.InPlay.Id);
+            elements.Add(isLit ? ElementOf(relay, court!, run!, walkUps, now) : new SnapshotCourt(relay, numbers[relay], court?.Id, null, '-'));
         }
 
         return elements;
+    }
+
+    /// <summary>
+    /// Every checked-in, uncancelled booking on these courts near now — the in-play ones, the links
+    /// chained after them and the ones they were chained onto. One query for all four relays: a
+    /// heartbeat runs every minute per board. The window is wider than any run can be, and a link
+    /// outside it simply ends the walk early, never lengthens it.
+    /// </summary>
+    private static async Task<List<Booking>> LitNearAsync(MainframeDbContext db, List<Guid> courtIds, DateTimeOffset now, CancellationToken ct)
+    {
+        var lookBack = now.AddHours(-24);
+        var lookAhead = now.AddHours(24);
+        return await db.Bookings.AsNoTracking()
+            .Where(b => courtIds.Contains(b.CourtId)
+                        && b.CheckedInAt != null
+                        && b.CancelledAt == null
+                        && b.Status != BookingStatus.Cancelled
+                        && b.Status != BookingStatus.AdminBlock
+                        && b.EndsAt > lookBack
+                        && b.StartsAt < lookAhead)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>A lit relay's element: the booking in play, the uncapped remainder to the end of its run, and its kind.</summary>
+    private static SnapshotCourt ElementOf(int relay, Court court, Run run, HashSet<Guid> walkUps, DateTimeOffset now)
+    {
+        var remaining = (int)Math.Min(int.MaxValue, Math.Ceiling((run.EndsAt - now).TotalSeconds));
+        var b = run.InPlay;
+        var item = new RelayRestoreItem(
+            relay, court.Id, court.CourtNumber, b.Id, remaining, run.EndsAt,
+            b.PaidByUserId ?? b.UserId, b.UserId);
+        var kind = run.InPlayIsExtension ? 'e' : walkUps.Contains(b.Id) ? 'w' : 'b';
+        return new SnapshotCourt(relay, court.CourtNumber, court.Id, item, kind);
     }
 
     /// <summary>

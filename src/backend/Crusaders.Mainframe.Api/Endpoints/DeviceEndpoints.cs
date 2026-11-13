@@ -279,8 +279,7 @@ public static class DeviceEndpoints
             // sent verbatim to a board that clamps to 300, while the console showed 300 —
             // the exact failure HeartbeatCadence exists to prevent, reproduced on the one
             // path that bypassed it.
-            device, services.Tenant.TenantSlug, cadence,
-            GateAccess.UnlockSecondsFor(s), gateRoster, now, parts);
+            device, services.Tenant.TenantSlug, new GateTiming(cadence, GateAccess.UnlockSecondsFor(s)), gateRoster, now, parts);
         var max = DeviceHeartbeatBudget.For(device);
         if (!lifeline.Any || DeviceHeartbeatBudget.SizeOf(body) <= max || !DeviceHeartbeatBudget.LifelineTurn(now, cadence)) return body;
         return DeviceHeartbeatBudget.LifelineOnly(now, services.Tenant.TenantSlug, device, cadence, lifeline);
@@ -378,7 +377,7 @@ public static class DeviceEndpoints
         var body = DeviceHeartbeatBudget.Fit(
             codes => GateHeartbeatView.WithCodes(
                 device, services.Tenant.TenantSlug,
-                new GateTiming(cadence, GateAccess.UnlockSecondsFor(s)), roster, now, codes, parts),
+                new GateTiming(cadence, GateAccess.UnlockSecondsFor(s)), roster, now, new GateTail(codes, parts)),
             sync, DeviceHeartbeatBudget.For(device), parts.Lifeline,
             () => DeviceHeartbeatBudget.LifelineOnly(now, services.Tenant.TenantSlug, device, cadence, parts.Lifeline),
             DeviceHeartbeatBudget.LifelineTurn(now, cadence));

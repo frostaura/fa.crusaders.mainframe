@@ -142,10 +142,7 @@ public static class DeviceActivateEndpoint
         // rescan-then-extend at their own lit court can still buy with the same code. It adds no
         // purchase a photo of the code could not already make there: an unused step at the
         // victim's own lit court can already buy an extension directly.
-        var repeat = match is not null && await IsLitHereAsync(found.Booking!, device, now, services, ct);
-        var (used, claim) = repeat
-            ? (await services.MemberCodes.IsUsedAsync(match!, MemberCodeUseClass.Money, ct), (MemberCodeClaim?)null)
-            : await ClaimCourtUseAsync(match, device, services, ct);
+        var (used, claim) = await ClaimUnlessRepeatAsync(match, found.Booking!, device, services, now, ct);
         if (used) return (await CodeUsedAsync(found.Court, who, services), resolved.UserId);
 
         // Given back if the activation THROWS, too: a claim stranded by a 500 refused the member's
@@ -188,6 +185,14 @@ public static class DeviceActivateEndpoint
     }
 
     private sealed record Found(Booking? Booking, Court? Court, string? Reason);
+
+    /// <summary>The court-use claim — none for a repeat activation of the session lit here (MCV1-02), whose code is still refused if it bought something.</summary>
+    private static async Task<(bool Used, MemberCodeClaim? Claim)> ClaimUnlessRepeatAsync(
+        MemberCodeMatch? match, Booking booking, Device device, DeviceActivateServices services, DateTimeOffset now, CancellationToken ct)
+    {
+        if (match is null || !await IsLitHereAsync(booking, device, now, services, ct)) return await ClaimCourtUseAsync(match, device, services, ct);
+        return (await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.Money, ct), null);
+    }
 
     /// <summary>Whether <paramref name="booking"/> is checked in and its court is believed lit by this very box for it (MCV1-02).</summary>
     private static async Task<bool> IsLitHereAsync(

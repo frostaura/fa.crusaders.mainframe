@@ -79,6 +79,21 @@ public static class DeviceEventEndpoints
     /// </summary>
     public const string ReleaseKind = "release";
 
+    /// <summary>
+    /// The release's money settlement — except for a relay a Mega reset opened or a provisional
+    /// light the box itself withdrew, which measure nothing the member did (device-api.md §3, §9):
+    /// the court is re-lit from the snapshot, so settling would refund minutes for time the member
+    /// goes on playing, and the later real release would settle the same booking a second time.
+    /// </summary>
+    private static async Task<string> SettleUnlessBoxsOwnAsync(
+        BookingService bookings, Booking booking, LitWindow window, string? cause, CancellationToken ct)
+    {
+        if (IsBoxsOwnRelease(cause)) return ActivationOutcome.Ok;
+        // The charge's minutes, rounded down: the release may only move money the payer's way.
+        var settled = await bookings.SettleReleaseAsync(booking, window.ChargeMinutes, window.End, Guid.Empty, ct);
+        return settled.Code == ReleaseSettlement.NotApplicable.Code ? ActivationOutcome.Ok : settled.Code;
+    }
+
     /// <summary>Longest a relay can stay closed: <c>relay_authorisation_cap_minutes</c> at its upper bound plus a minute (§9).</summary>
     public static readonly long ImplausibleReleaseMs = (DeviceSettings.RelayAuthorisationCapMinutes.Max + 1) * 60_000L;
 
@@ -1209,12 +1224,10 @@ public static class DeviceEventEndpoints
         // cap at its upper bound plus a minute — is a box's arithmetic, not a member leaving (a
         // 2.3.0 bridge sent 4294967272 after a wrapped age). Receipted and audited, never paired,
         // never settled, and never a reason to drop a booking from the snapshot.
-        // The verdict row the upload writes for every non-ok outcome is the audit:
-        // `device.release_implausible`, carrying the event's own details (relay, seq, duration).
-        if (e.DurationMs > ImplausibleReleaseMs)
-        {
-            return new ActivationOutcome(RelayRestorePlan.ImplausibleOutcome, null, ReleaseKind);
-        }
+        // MCV1-01 (device-api.md §9): longer than any relay can stay closed is a box's arithmetic,
+        // not a member leaving. The upload's verdict row for it is the audit,
+        // `device.release_implausible`, carrying the event's own details.
+        if (e.DurationMs > ImplausibleReleaseMs) return new ActivationOutcome(RelayRestorePlan.ImplausibleOutcome, null, ReleaseKind);
 
         if (e.Court is not { } relay || relay < 0) return new ActivationOutcome("unpaired", null, ReleaseKind);
 
@@ -1242,17 +1255,7 @@ public static class DeviceEventEndpoints
         // other bound that applies to it.
         var window = LitWindowOf(booking, session.OccurredAt, grantMs: 0, heldMs: e.DurationMs);
 
-        // A relay a Mega reset opened, or a provisional light the box itself withdrew, measures
-        // nothing the member did (device-api.md §3, §9): the court is re-lit from the snapshot, so
-        // settling it would refund minutes for time the member goes on playing, and the later
-        // real release would settle the same booking a second time.
-        var code = ActivationOutcome.Ok;
-        if (!IsBoxsOwnRelease(e.Cause))
-        {
-            // The charge's minutes, rounded down: the release may only move money the payer's way.
-            var settled = await bookings.SettleReleaseAsync(booking, window.ChargeMinutes, window.End, Guid.Empty, ct);
-            code = settled.Code == ReleaseSettlement.NotApplicable.Code ? ActivationOutcome.Ok : settled.Code;
-        }
+        var code = await SettleUnlessBoxsOwnAsync(bookings, booking, window, e.Cause, ct);
 
         // The lights are believed OFF, and the MEASURED end is kept on the row so the control
         // board and the night trace can still say how long the court was actually lit. This is

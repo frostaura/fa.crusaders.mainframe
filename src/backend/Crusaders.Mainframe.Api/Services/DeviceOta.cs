@@ -51,8 +51,10 @@ public static partial class DeviceOta
     /// the signature, so a bridge image cannot be offered to a door, nor an old signed image as a
     /// new version.
     /// </summary>
-    public static string ManifestText(string target, string version, long size, string sha256) =>
-        string.Create(CultureInfo.InvariantCulture, $"{ManifestMagic}\n{target}\n{version}\n{size}\n{sha256}\n");
+    public static string ManifestText(string target, string version, long size, string sha256)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"{ManifestMagic}\n{target}\n{version}\n{size}\n{sha256}\n");
+    }
 
     /// <summary>The target a board of this kind runs.</summary>
     public static string TargetOf(Domain.DeviceKind kind) => kind == Domain.DeviceKind.Gate ? DoorGate : CourtBridge;
@@ -68,8 +70,12 @@ public static partial class DeviceOta
     }
 
     /// <summary>Whether <paramref name="a"/> is strictly newer than <paramref name="b"/>, numerically; false when either is malformed.</summary>
-    public static bool IsNewer(string? a, string? b) =>
-        VersionTuple(a) is { } x && VersionTuple(b) is { } y && x.CompareTo(y) > 0;
+    public static bool IsNewer(string? a, string? b)
+    {
+        var x = VersionTuple(a);
+        var y = VersionTuple(b);
+        return x.HasValue && y.HasValue && x.Value.CompareTo(y.Value) > 0;
+    }
 
     /// <summary>
     /// The board's version gate: <c>ok</c>, <c>version_format</c>, <c>running_unknown</c>,
@@ -100,16 +106,27 @@ public static partial class DeviceOta
         if (target is null || !TargetMaxBytes.ContainsKey(target)) return "target_unknown";
         if (target != ownTarget) return "target_mismatch";
         if (VersionTuple(Str(ota, "version")) is null) return "version_format";
-        var size = ota.GetProperty("size");
-        if (size.ValueKind != JsonValueKind.Number || !size.TryGetInt64(out var n) || n < 1 || n > TargetMaxBytes[ownTarget]) return "size";
+        if (!SizeOk(ota.GetProperty("size"), TargetMaxBytes[ownTarget])) return "size";
+        return ShapeOf(ota);
+    }
+
+    private static bool SizeOk(JsonElement size, int max) =>
+        size.ValueKind == JsonValueKind.Number && size.TryGetInt64(out var n) && n >= 1 && n <= max;
+
+    /// <summary>The offer's three text fields' grammar: <c>ok</c>, or the first that fails.</summary>
+    private static string ShapeOf(JsonElement ota)
+    {
         if (Str(ota, "sha256") is not { } sha || !ShaRe().IsMatch(sha)) return "sha256_format";
         if (Str(ota, "sig") is not { } sig || !SigEncodingOk(sig)) return "sig_encoding";
         if (Str(ota, "path") is not { } path || !PathRe().IsMatch(path)) return "path";
         return "ok";
     }
 
-    private static string? Str(JsonElement e, string name) =>
-        e.GetProperty(name) is { ValueKind: JsonValueKind.String } v ? v.GetString() : null;
+    private static string? Str(JsonElement e, string name)
+    {
+        var v = e.GetProperty(name);
+        return v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    }
 
     private static bool SigEncodingOk(string sig) => sig.Length == SigB64Length && B64UrlRe().IsMatch(sig);
 

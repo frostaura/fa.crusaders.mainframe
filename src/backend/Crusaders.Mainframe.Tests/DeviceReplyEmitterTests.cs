@@ -87,9 +87,20 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
         {
             db.Bookings.Add(new Booking
             {
-                TenantId = club.TenantId, CourtId = club.Courts[1], UserId = club.Pam, BookedByUserId = club.Pam, PaidByUserId = club.Pam,
-                ActorUserId = club.Pam, StartsAt = run.EndsAt, EndsAt = run.EndsAt.AddMinutes(30), SliceMinutes = 15, SliceCount = 2,
-                AmountChargedMinutes = 30, Status = BookingStatus.Booked, ChargedAt = now, CheckedInAt = now.Storable(),
+                TenantId = club.TenantId,
+                CourtId = club.Courts[1],
+                UserId = club.Pam,
+                BookedByUserId = club.Pam,
+                PaidByUserId = club.Pam,
+                ActorUserId = club.Pam,
+                StartsAt = run.EndsAt,
+                EndsAt = run.EndsAt.AddMinutes(30),
+                SliceMinutes = 15,
+                SliceCount = 2,
+                AmountChargedMinutes = 30,
+                Status = BookingStatus.Booked,
+                ChargedAt = now,
+                CheckedInAt = now.Storable(),
             });
             return Task.CompletedTask;
         });
@@ -133,7 +144,12 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = club.AdminId, Type = LedgerEntryType.TopUp, AmountMinutes = 200, ActorUserId = club.AdminId, Reason = "seed",
+                TenantId = club.TenantId,
+                UserId = club.AdminId,
+                Type = LedgerEntryType.TopUp,
+                AmountMinutes = 200,
+                ActorUserId = club.AdminId,
+                Reason = "seed",
             });
             return Task.CompletedTask;
         });
@@ -145,11 +161,21 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
         await SendAsync(device, replies, "walkup-refused", "walkup", "court_box", club.WalkUp("ZZZZZZZZZZZZ", court: 3, nonce: "replay-walkup-2"), expectOk: false);
         await SendAsync(device, replies, "extend-grant", "extend", "court_box", club.Device("/api/v1/device/extend", new JsonObject
         {
-            ["mac"] = club.BoxMac, ["method"] = "qr", ["token"] = club.Code(club.Pam), ["court"] = 3, ["minutes"] = 15, ["nonce"] = "replay-extend-1",
+            ["mac"] = club.BoxMac,
+            ["method"] = "qr",
+            ["token"] = club.Code(club.Pam),
+            ["court"] = 3,
+            ["minutes"] = 15,
+            ["nonce"] = "replay-extend-1",
         }));
         await SendAsync(device, replies, "extend-refused", "extend", "court_box", club.Device("/api/v1/device/extend", new JsonObject
         {
-            ["mac"] = club.BoxMac, ["method"] = "qr", ["token"] = club.Code(club.Pam), ["court"] = 2, ["minutes"] = 15, ["nonce"] = "replay-extend-2",
+            ["mac"] = club.BoxMac,
+            ["method"] = "qr",
+            ["token"] = club.Code(club.Pam),
+            ["court"] = 2,
+            ["minutes"] = 15,
+            ["nonce"] = "replay-extend-2",
         }), expectOk: false);
         await SendAsync(device, replies, "pay-for-quote", "pay-for", "court_box", club.PayFor(club.Code(club.Pam), 4, "replay-payfor-1", confirm: false));
         await SendAsync(device, replies, "events-accepted", "events", "court_box",

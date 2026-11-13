@@ -42,8 +42,20 @@ public static class GateHeartbeatView
     // memory/gotchas.md.
     public static object Of(
         Device device, string tenantSlug, int heartbeatSeconds, int unlockSeconds,
-        IReadOnlyList<string> roster, DateTimeOffset now, GateV3Parts? v3 = null)
+        IReadOnlyList<string> roster, DateTimeOffset now)
     {
+        return Legacy(device, tenantSlug, heartbeatSeconds, unlockSeconds, roster, now);
+    }
+
+    /// <summary>
+    /// The legacy-shaped answer for a door — exactly <see cref="Of(Device, string, int, int, IReadOnlyList{string}, DateTimeOffset)"/>
+    /// for a 1.x door, and for a v3 door the same keys with the gate object grown at its end and
+    /// the lifeline objects after the roster.
+    /// </summary>
+    public static object Of(
+        Device device, string tenantSlug, GateTiming timing, IReadOnlyList<string> roster, DateTimeOffset now, GateV3Parts? v3)
+    {
+        var (heartbeatSeconds, unlockSeconds) = timing;
         if (v3 is null || (v3.Settings is null && !v3.Lifeline.Any))
         {
             return Legacy(device, tenantSlug, heartbeatSeconds, unlockSeconds, roster, now);
@@ -90,8 +102,17 @@ public static class GateHeartbeatView
     /// </summary>
     public static Dictionary<string, object?> WithCodes(
         Device device, string tenantSlug, GateTiming timing,
-        IReadOnlyList<string> roster, DateTimeOffset now, MemberCodeSync? codes, GateV3Parts? v3 = null)
+        IReadOnlyList<string> roster, DateTimeOffset now, MemberCodeSync? codes)
     {
+        return WithCodes(device, tenantSlug, timing, roster, now, new GateTail(codes, null));
+    }
+
+    /// <summary>The member-code answer with the v3 gate settings and lifeline (door-gate.md §14) — <paramref name="tail"/> bundles both with the sync.</summary>
+    public static Dictionary<string, object?> WithCodes(
+        Device device, string tenantSlug, GateTiming timing,
+        IReadOnlyList<string> roster, DateTimeOffset now, GateTail tail)
+    {
+        var (codes, v3) = tail;
         var (heartbeatSeconds, unlockSeconds) = timing;
         var body = new Dictionary<string, object?>
         {
@@ -156,6 +177,9 @@ public sealed record GateV3Settings(
             Services.BoxSettings.DeviceFaultReporting(s),
             Services.BoxSettings.DeviceFaultMaxPerHour(s));
 }
+
+/// <summary>The tail of a member-code door answer: the code sync and, for a v3 door, its settings and lifeline.</summary>
+public sealed record GateTail(MemberCodeSync? Codes, GateV3Parts? V3);
 
 /// <summary>What a v3 door's answer adds: the v3 gate settings (null for a 1.x door) and the lifeline.</summary>
 public sealed record GateV3Parts(GateV3Settings? Settings, DeviceLifeline Lifeline);

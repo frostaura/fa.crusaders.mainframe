@@ -77,49 +77,46 @@ public static class DeviceBoardOverrides
 
     private static object? ParseHardware(IReadOnlyDictionary<string, JsonElement> extra, List<(string, Action<Device>, Func<Device, bool>)> writes)
     {
-        var relay = DeviceSettings.HwRelayActiveLevel;
-        if (Find(extra, relay.Key) is { } r)
-        {
-            if (Text(r, relay) is not { } ok) return new { error = $"{relay.Key}_invalid", values = relay.Values };
-            var v = ok.Value;
-            writes.Add(Write(relay.Key, d => d.HwRelayActiveLevel = v, d => d.HwRelayActiveLevel != v));
-        }
+        return ParseText(extra, writes, DeviceSettings.HwRelayActiveLevel, (d, v) => d.HwRelayActiveLevel = v, d => d.HwRelayActiveLevel)
+            ?? ParseText(extra, writes, DeviceSettings.HwScannerLineEnd, (d, v) => d.HwScannerLineEnd = v, d => d.HwScannerLineEnd)
+            ?? ParseChoice(extra, writes, DeviceSettings.HwLcdI2cAddress, (d, v) => d.HwLcdI2cAddress = v, d => d.HwLcdI2cAddress)
+            ?? ParseChoice(extra, writes, DeviceSettings.HwScannerBaud, (d, v) => d.HwScannerBaud = v, d => d.HwScannerBaud)
+            ?? ParseGap(extra, writes);
+    }
 
-        var end = DeviceSettings.HwScannerLineEnd;
-        if (Find(extra, end.Key) is { } e)
-        {
-            if (Text(e, end) is not { } ok) return new { error = $"{end.Key}_invalid", values = end.Values };
-            var v = ok.Value;
-            writes.Add(Write(end.Key, d => d.HwScannerLineEnd = v, d => d.HwScannerLineEnd != v));
-        }
+    private static object? ParseText(
+        IReadOnlyDictionary<string, JsonElement> extra, List<(string, Action<Device>, Func<Device, bool>)> writes,
+        TextChoice choice, Action<Device, string?> set, Func<Device, string?> get)
+    {
+        if (Find(extra, choice.Key) is not { } e) return null;
+        if (Text(e, choice) is not { } ok) return new { error = $"{choice.Key}_invalid", values = choice.Values };
+        var v = ok.Value;
+        writes.Add(Write(choice.Key, d => set(d, v), d => get(d) != v));
+        return null;
+    }
 
-        var address = DeviceSettings.HwLcdI2cAddress;
-        if (Find(extra, address.Key) is { } a)
-        {
-            if (Number(a, address) is not { } ok) return new { error = $"{address.Key}_invalid", values = address.Values };
-            var v = ok.Value;
-            writes.Add(Write(address.Key, d => d.HwLcdI2cAddress = v, d => d.HwLcdI2cAddress != v));
-        }
+    private static object? ParseChoice(
+        IReadOnlyDictionary<string, JsonElement> extra, List<(string, Action<Device>, Func<Device, bool>)> writes,
+        IntChoice choice, Action<Device, int?> set, Func<Device, int?> get)
+    {
+        if (Find(extra, choice.Key) is not { } e) return null;
+        if (Number(e, choice) is not { } ok) return new { error = $"{choice.Key}_invalid", values = choice.Values };
+        var v = ok.Value;
+        writes.Add(Write(choice.Key, d => set(d, v), d => get(d) != v));
+        return null;
+    }
 
-        var baud = DeviceSettings.HwScannerBaud;
-        if (Find(extra, baud.Key) is { } b)
-        {
-            if (Number(b, baud) is not { } ok) return new { error = $"{baud.Key}_invalid", values = baud.Values };
-            var v = ok.Value;
-            writes.Add(Write(baud.Key, d => d.HwScannerBaud = v, d => d.HwScannerBaud != v));
-        }
-
+    private static object? ParseGap(IReadOnlyDictionary<string, JsonElement> extra, List<(string, Action<Device>, Func<Device, bool>)> writes)
+    {
         var gap = DeviceSettings.HwScannerGapMs;
-        if (Find(extra, gap.Key) is { } g)
+        if (Find(extra, gap.Key) is not { } g) return null;
+        int? v = null;
+        if (g.ValueKind != JsonValueKind.Null)
         {
-            int? v = null;
-            if (g.ValueKind != JsonValueKind.Null)
-            {
-                if (g.ValueKind != JsonValueKind.Number || !g.TryGetInt32(out var n) || n < gap.Min || n > gap.Max) return DeviceSettings.OutOfRange(gap);
-                v = n;
-            }
-            writes.Add(Write(gap.Key, d => d.HwScannerGapMs = v, d => d.HwScannerGapMs != v));
+            if (g.ValueKind != JsonValueKind.Number || !g.TryGetInt32(out var n) || n < gap.Min || n > gap.Max) return DeviceSettings.OutOfRange(gap);
+            v = n;
         }
+        writes.Add(Write(gap.Key, d => d.HwScannerGapMs = v, d => d.HwScannerGapMs != v));
         return null;
     }
 

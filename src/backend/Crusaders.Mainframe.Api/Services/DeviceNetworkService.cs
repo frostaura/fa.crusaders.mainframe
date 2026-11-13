@@ -80,13 +80,8 @@ public sealed class DeviceNetworkService
         var saved = Profiles(row).ToList();
 
         // The net object exactly as a board would be sent it, run through the board's own rule.
-        var resolved = new List<(string Ssid, string Psk)>();
-        for (var slot = 0; slot < wifi.Count; slot++)
-        {
-            var psk = wifi[slot].Psk ?? (slot < saved.Count ? _cipher.Unprotect(saved[slot].PskCipher, _tenant.TenantId) : null);
-            if (psk is null) return $"wifi{slot}_psk";
-            resolved.Add((wifi[slot].Ssid ?? "", psk));
-        }
+        var (resolved, missing) = Resolve(wifi, saved);
+        if (missing is not null) return missing;
 
         var nextVersion = (row?.Version ?? 0) + 1;
         var candidate = NetObject(nextVersion, req.Base, resolved);
@@ -98,14 +93,7 @@ public sealed class DeviceNetworkService
             row = new DeviceNetwork { TenantId = _tenant.TenantId };
             _db.DeviceNetworks.Add(row);
         }
-        row.Version = nextVersion;
-        row.BaseUrl = req.Base;
-        row.Wifi0Ssid = resolved.Count > 0 ? resolved[0].Ssid : null;
-        row.Wifi0PskCipher = resolved.Count > 0 ? _cipher.Protect(resolved[0].Psk, _tenant.TenantId) : null;
-        row.Wifi1Ssid = resolved.Count > 1 ? resolved[1].Ssid : null;
-        row.Wifi1PskCipher = resolved.Count > 1 ? _cipher.Protect(resolved[1].Psk, _tenant.TenantId) : null;
-        row.UpdatedAt = _clock.GetUtcNow();
-        row.UpdatedByUserId = actorUserId;
+        Store(row, nextVersion, req.Base, resolved, actorUserId);
 
         // The change record names the SSIDs and the address, never a password.
         await _changes.StageAsync(new AdminChange(
@@ -116,6 +104,36 @@ public sealed class DeviceNetworkService
             After: new { ver = nextVersion, @base = req.Base, ssids = resolved.Select(p => p.Ssid) }), ct);
         await _db.SaveChangesAsync(ct);
         return null;
+    }
+
+    /// <summary>
+    /// Each profile's password: the one sent, or — <c>null</c> — the one saved in the same slot.
+    /// The second value names the first slot with neither.
+    /// </summary>
+    private (List<(string Ssid, string Psk)> Resolved, string? Missing) Resolve(
+        IReadOnlyList<DeviceWifiProfile> wifi, List<(string Ssid, string? PskCipher)> saved)
+    {
+        var resolved = new List<(string Ssid, string Psk)>();
+        for (var slot = 0; slot < wifi.Count; slot++)
+        {
+            var psk = wifi[slot].Psk ?? (slot < saved.Count ? _cipher.Unprotect(saved[slot].PskCipher, _tenant.TenantId) : null);
+            if (psk is null) return (resolved, $"wifi{slot}_psk");
+            resolved.Add((wifi[slot].Ssid ?? "", psk));
+        }
+        return (resolved, null);
+    }
+
+    /// <summary>The validated set onto the row, passwords encrypted.</summary>
+    private void Store(DeviceNetwork row, int version, string? baseUrl, List<(string Ssid, string Psk)> resolved, Guid actorUserId)
+    {
+        row.Version = version;
+        row.BaseUrl = baseUrl;
+        row.Wifi0Ssid = resolved.Count > 0 ? resolved[0].Ssid : null;
+        row.Wifi0PskCipher = resolved.Count > 0 ? _cipher.Protect(resolved[0].Psk, _tenant.TenantId) : null;
+        row.Wifi1Ssid = resolved.Count > 1 ? resolved[1].Ssid : null;
+        row.Wifi1PskCipher = resolved.Count > 1 ? _cipher.Protect(resolved[1].Psk, _tenant.TenantId) : null;
+        row.UpdatedAt = _clock.GetUtcNow();
+        row.UpdatedByUserId = actorUserId;
     }
 
     /// <summary>

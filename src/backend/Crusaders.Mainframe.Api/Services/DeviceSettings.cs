@@ -27,9 +27,17 @@ public sealed record IntChoice(string Key, int Default, int[] Values)
 {
     public string Camel => DeviceSettings.CamelOf(Key);
 
-    public int Resolve(int? raw) => raw is { } v && Values.Contains(v) ? v : Default;
+    // Block bodies: lizard's C# parser mis-scopes an expression-bodied member holding a `{ }`
+    // pattern into a global pseudo-function (memory/gotchas-build.md).
+    public int Resolve(int? raw)
+    {
+        return raw.HasValue && Values.Contains(raw.Value) ? raw.Value : Default;
+    }
 
-    public bool Allows(int? raw) => raw is { } v && Values.Contains(v);
+    public bool Allows(int? raw)
+    {
+        return raw.HasValue && Values.Contains(raw.Value);
+    }
 }
 
 /// <summary>
@@ -207,7 +215,7 @@ public static class DeviceSettings
 
     /// <summary>This board's layout: its own override, else the club's (§5, resolved before sending).</summary>
     public static string LayoutFor(Domain.Device device, TenantSettingsView s) =>
-        device.LcdLayoutOverride is { } own ? NormaliseLayout(own) : ClubLayout(s);
+        device.LcdLayoutOverride is not null ? NormaliseLayout(device.LcdLayoutOverride) : ClubLayout(s);
 
     public static bool MarqueeFor(Domain.Device device, TenantSettingsView s) =>
         device.LcdMarqueeOverride ?? ClubMarquee(s);
@@ -217,36 +225,33 @@ public static class DeviceSettings
     /// <summary>The raw v3 values out of a settings document — "what the column says", as the accessor's contract is.</summary>
     public static DeviceSettingsRaw Read(JsonElement root)
     {
-        var layout = root.ValueKind == JsonValueKind.Object && root.TryGetProperty(LcdLayoutKey, out var l) && l.ValueKind == JsonValueKind.String
-            ? l.GetString() ?? Compact
-            : Compact;
-        var marquee = root.ValueKind == JsonValueKind.Object && root.TryGetProperty(LcdMarqueeEnabledKey, out var m)
-            && m.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? m.GetBoolean()
-                : DefaultMarqueeEnabled;
-        var ints = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var key in StoredInts)
-        {
-            ints[key] = root.ValueKind == JsonValueKind.Object && root.TryGetProperty(key, out var v)
-                && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i)
-                    ? i
-                    : DefaultOf(key);
-        }
-        var texts = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var c in TextChoices)
-        {
-            texts[c.Key] = root.ValueKind == JsonValueKind.Object && root.TryGetProperty(c.Key, out var t)
-                && t.ValueKind == JsonValueKind.String
-                    ? t.GetString() ?? c.Default
-                    : c.Default;
-        }
+        if (root.ValueKind != JsonValueKind.Object) return DeviceSettingsRaw.Defaults;
+        var layout = root.TryGetProperty(LcdLayoutKey, out var l) && l.ValueKind == JsonValueKind.String ? l.GetString() ?? Compact : Compact;
+        var marquee = root.TryGetProperty(LcdMarqueeEnabledKey, out var m) && m.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? m.GetBoolean()
+            : DefaultMarqueeEnabled;
+        var ints = StoredInts.ToDictionary(key => key, key => ReadInt(root, key), StringComparer.Ordinal);
+        var texts = TextChoices.ToDictionary(c => c.Key, c => ReadText(root, c), StringComparer.Ordinal);
         return new DeviceSettingsRaw(layout, marquee, ints, texts);
+    }
+
+    private static int ReadInt(JsonElement root, string key)
+    {
+        return root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i) ? i : DefaultOf(key);
+    }
+
+    private static string ReadText(JsonElement root, TextChoice c)
+    {
+        return root.TryGetProperty(c.Key, out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? c.Default : c.Default;
     }
 
     // ---- The settings PUT ----
 
     /// <summary>A refusal in the shape §5 fixes: <c>{"error": "&lt;key&gt;_out_of_range", "min": n, "max": n}</c>.</summary>
-    public static object OutOfRange(IntSetting s) => new { error = $"{s.Key}_out_of_range", min = s.Min, max = s.Max };
+    public static object OutOfRange(IntSetting s)
+    {
+        return new { error = $"{s.Key}_out_of_range", min = s.Min, max = s.Max };
+    }
 
     /// <summary>
     /// Validates the v3 keys a PUT carries, under either spelling, and returns the writes to make
@@ -256,55 +261,56 @@ public static class DeviceSettings
     {
         var writes = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         if (extra is null || extra.Count == 0) return (writes, null);
+        var refusal = ParseDisplay(extra, writes) ?? ParseChoices(extra, writes) ?? ParseRanges(extra, writes);
+        return (writes, refusal);
+    }
 
+    private static object? ParseDisplay(IReadOnlyDictionary<string, JsonElement> extra, Dictionary<string, JsonElement> writes)
+    {
         if (Find(extra, LcdLayoutKey) is { } layout)
         {
             if (layout.ValueKind != JsonValueKind.String || !Layouts.Contains(layout.GetString()))
             {
-                return (writes, new { error = $"{LcdLayoutKey}_invalid", values = Layouts });
+                return new { error = $"{LcdLayoutKey}_invalid", values = Layouts };
             }
             writes[LcdLayoutKey] = layout.Clone();
         }
 
         if (Find(extra, LcdMarqueeEnabledKey) is { } marquee)
         {
-            if (marquee.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-            {
-                return (writes, new { error = $"{LcdMarqueeEnabledKey}_invalid" });
-            }
+            if (marquee.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return new { error = $"{LcdMarqueeEnabledKey}_invalid" };
             writes[LcdMarqueeEnabledKey] = marquee.Clone();
         }
+        return null;
+    }
 
+    private static object? ParseChoices(IReadOnlyDictionary<string, JsonElement> extra, Dictionary<string, JsonElement> writes)
+    {
         foreach (var c in TextChoices)
         {
             if (Find(extra, c.Key) is not { } text) continue;
-            if (text.ValueKind != JsonValueKind.String || !c.Allows(text.GetString()))
-            {
-                return (writes, new { error = $"{c.Key}_invalid", values = c.Values });
-            }
+            if (text.ValueKind != JsonValueKind.String || !c.Allows(text.GetString())) return new { error = $"{c.Key}_invalid", values = c.Values };
             writes[c.Key] = text.Clone();
         }
 
         foreach (var c in IntChoices)
         {
             if (Find(extra, c.Key) is not { } number) continue;
-            if (number.ValueKind != JsonValueKind.Number || !number.TryGetInt32(out var n) || !c.Allows(n))
-            {
-                return (writes, new { error = $"{c.Key}_invalid", values = c.Values });
-            }
+            if (number.ValueKind != JsonValueKind.Number || !number.TryGetInt32(out var n) || !c.Allows(n)) return new { error = $"{c.Key}_invalid", values = c.Values };
             writes[c.Key] = number.Clone();
         }
+        return null;
+    }
 
+    private static object? ParseRanges(IReadOnlyDictionary<string, JsonElement> extra, Dictionary<string, JsonElement> writes)
+    {
         foreach (var s in V3Ints)
         {
             if (Find(extra, s.Key) is not { } value) continue;
-            if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var n) || n < s.Min || n > s.Max)
-            {
-                return (writes, OutOfRange(s));
-            }
+            if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var n) || n < s.Min || n > s.Max) return OutOfRange(s);
             writes[s.Key] = value.Clone();
         }
-        return (writes, null);
+        return null;
     }
 
     /// <summary>The value under <paramref name="snake"/> or its camelCase spelling; snake wins when both arrive. Null when absent or JSON null.</summary>
@@ -348,6 +354,6 @@ public static class DeviceSettings
         yield return new(HwLcdI2cAddress.Key, HwLcdI2cAddress.Resolve(device.HwLcdI2cAddress ?? s.Device.Raw(HwLcdI2cAddress)));
         yield return new(HwScannerBaud.Key, HwScannerBaud.Resolve(device.HwScannerBaud ?? s.Device.Raw(HwScannerBaud)));
         yield return new(HwScannerLineEnd.Key, HwScannerLineEnd.Resolve(device.HwScannerLineEnd ?? s.Device.Raw(HwScannerLineEnd)));
-        yield return new(HwScannerGapMs.Key, device.HwScannerGapMs is { } gap ? HwScannerGapMs.Clamp(gap) : Value(s, HwScannerGapMs));
+        yield return new(HwScannerGapMs.Key, device.HwScannerGapMs.HasValue ? HwScannerGapMs.Clamp(device.HwScannerGapMs.Value) : Value(s, HwScannerGapMs));
     }
 }

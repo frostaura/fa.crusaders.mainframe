@@ -377,7 +377,8 @@ public sealed class DeviceV3CorpusTests
             // Lower-priority keys after the vector's own: the budget must shed exactly these.
             keys.AddRange(Enumerable.Range(0, extraKeys).Select(i => MemberCodeWire.KeyElement(MemberCodeMath.RefText(0x50000 + i), 1, new byte[12])));
             sync = new MemberCodeSync(root.GetProperty("code_step").GetInt64(), root.GetProperty("code_step_ms").GetInt32(),
-                Strings(root, "code_days")!, keys) { Wanted = keys.Count };
+                Strings(root, "code_days")!, keys)
+            { Wanted = keys.Count };
         }
 
         var lifeline = new DeviceLifeline(Obj(root, "ota"), Obj(root, "key_next"), Obj(root, "net"));
@@ -550,8 +551,12 @@ public sealed class DeviceV3CorpusTests
     {
         var device = new Device
         {
-            DeviceCode = "gate-" + new string('c', 12), Name = "x", MacAddress = "5ccf7f0a1b2c",
-            Kind = DeviceKind.Gate, GateKey = new string('g', 64), Capabilities = ["codes:m1", "ota:1", "key:1", "net:1"],
+            DeviceCode = "gate-" + new string('c', 12),
+            Name = "x",
+            MacAddress = "5ccf7f0a1b2c",
+            Kind = DeviceKind.Gate,
+            GateKey = new string('g', 64),
+            Capabilities = ["codes:m1", "ota:1", "key:1", "net:1"],
         };
         var roster = Enumerable.Range(0, 48)
             .Select(i => $"m{MemberCodeMath.RefText(0x40000 + (i * 4))}{MemberCodeMath.RefText(0x40001 + (i * 4))}{MemberCodeMath.RefText(0x40002 + (i * 4))}{MemberCodeMath.RefText(0x40003 + (i * 4))}|0|-864000|999999")
@@ -564,7 +569,7 @@ public sealed class DeviceV3CorpusTests
         var parts = new GateV3Parts(new GateV3Settings(120, 60, 60, false, 1000), lifeline);
 
         var body = DeviceHeartbeatBudget.Fit(
-            codes => GateHeartbeatView.WithCodes(device, new string('w', 64), new GateTiming(300, 30), roster, DateTimeOffset.UtcNow, codes, parts),
+            codes => GateHeartbeatView.WithCodes(device, new string('w', 64), new GateTiming(300, 30), roster, DateTimeOffset.UtcNow, new GateTail(codes, parts)),
             sync, DeviceHeartbeatBudget.GateV3, lifeline, () => throw new InvalidOperationException("must fit"), lifelineTurn: true);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(body).Length;
         Assert.True(bytes <= DeviceHeartbeatBudget.GateV3, $"widest v3 door body is {bytes} bytes");

@@ -79,9 +79,19 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var booking = new Booking
         {
-            TenantId = club.TenantId, CourtId = club.Courts[courtIndex], UserId = user, BookedByUserId = user, PaidByUserId = user,
-            ActorUserId = user, StartsAt = startsAt.Storable(), EndsAt = startsAt.AddMinutes(minutes).Storable(), SliceMinutes = 15,
-            SliceCount = minutes / 15, AmountChargedMinutes = minutes, Status = BookingStatus.Booked, ChargedAt = DateTimeOffset.UtcNow,
+            TenantId = club.TenantId,
+            CourtId = club.Courts[courtIndex],
+            UserId = user,
+            BookedByUserId = user,
+            PaidByUserId = user,
+            ActorUserId = user,
+            StartsAt = startsAt.Storable(),
+            EndsAt = startsAt.AddMinutes(minutes).Storable(),
+            SliceMinutes = 15,
+            SliceCount = minutes / 15,
+            AmountChargedMinutes = minutes,
+            Status = BookingStatus.Booked,
+            ChargedAt = DateTimeOffset.UtcNow,
             CheckedInAt = checkedIn ? DateTimeOffset.UtcNow.AddMinutes(-1).Storable() : null,
         };
         db.Bookings.Add(booking);
@@ -186,13 +196,20 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
         // The box's own activation event, then its release ten minutes later: a session to pair with.
         var release = new JsonObject
         {
-            ["seq"] = 2, ["uptime_ms"] = 99_990_000, ["kind"] = "release", ["court"] = 0, ["method"] = null,
-            ["subject"] = "", ["duration_ms"] = 600_000,
+            ["seq"] = 2,
+            ["uptime_ms"] = 99_990_000,
+            ["kind"] = "release",
+            ["court"] = 0,
+            ["method"] = null,
+            ["subject"] = "",
+            ["duration_ms"] = 600_000,
         };
         if (cause is not null) release["cause"] = cause;
         await OkAsync(await device.SendAsync(club.Device("/api/v1/device/events", new JsonObject
         {
-            ["mac"] = club.BoxMac, ["boot_id"] = 9, ["uptime_ms"] = 100_000_000,
+            ["mac"] = club.BoxMac,
+            ["boot_id"] = 9,
+            ["uptime_ms"] = 100_000_000,
             ["events"] = new JsonArray(Activation(club), release),
         })));
 
@@ -209,8 +226,13 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
     /// <summary>Olga's offline activation on relay 0, uploaded at uptime 99 390 000 (about ten minutes before the upload).</summary>
     private static JsonObject Activation(MemberCodeClub club) => new()
     {
-        ["seq"] = 1, ["uptime_ms"] = 99_390_000, ["kind"] = "activation", ["court"] = 0, ["method"] = "qr",
-        ["subject"] = club.Code(club.Olga, DateTimeOffset.UtcNow.AddMilliseconds(-610_000)), ["duration_ms"] = 0,
+        ["seq"] = 1,
+        ["uptime_ms"] = 99_390_000,
+        ["kind"] = "activation",
+        ["court"] = 0,
+        ["method"] = "qr",
+        ["subject"] = club.Code(club.Olga, DateTimeOffset.UtcNow.AddMilliseconds(-610_000)),
+        ["duration_ms"] = 0,
     };
 
     /// <summary>MCV1-01: a release longer than any relay can hold (a wrapped age) is receipted and audited, never paired.</summary>
@@ -225,11 +247,18 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
 
         await OkAsync(await device.SendAsync(club.Device("/api/v1/device/events", new JsonObject
         {
-            ["mac"] = club.BoxMac, ["boot_id"] = 9, ["uptime_ms"] = 100_000_000,
+            ["mac"] = club.BoxMac,
+            ["boot_id"] = 9,
+            ["uptime_ms"] = 100_000_000,
             ["events"] = new JsonArray(Activation(club), new JsonObject
             {
-                ["seq"] = 2, ["uptime_ms"] = 99_999_000, ["kind"] = "release", ["court"] = 0, ["method"] = null,
-                ["subject"] = "", ["duration_ms"] = 4_294_967_272L,
+                ["seq"] = 2,
+                ["uptime_ms"] = 99_999_000,
+                ["kind"] = "release",
+                ["court"] = 0,
+                ["method"] = null,
+                ["subject"] = "",
+                ["duration_ms"] = 4_294_967_272L,
             }),
         })));
 
@@ -308,8 +337,14 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
 
         await BeatAsync(device, club, Beat(club.BoxMac, new
         {
-            fw_state = "rolled_back", fw_failed = "3.0.1", fw_error = "probation", net_ver = 4, net_src = "server",
-            lcd_layout = "expanded", restore = "cold", mega_version = "3.0.0",
+            fw_state = "rolled_back",
+            fw_failed = "3.0.1",
+            fw_error = "probation",
+            net_ver = 4,
+            net_src = "server",
+            lcd_layout = "expanded",
+            restore = "cold",
+            mega_version = "3.0.0",
             mega = new { reset = "08", lcd = "00", relay = "high", scan_baud = 9600, scan_end = "auto", keys = "0F", diag = new[] { 1, 2, 3, 4, 5 }, future = new { x = 1 } },
             diag = new { reset = "exception", exc = 4294967295L, epc1 = 3, heap = 20000, heap_min = 9000, block = 3000, stack_min = 400, sketch_free = 1044464, flash_mb = 4, extra = "kept out" },
             drift = new[] { "config.lcd_layout", "roster" },
@@ -481,7 +516,12 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
 
         var extend = await device.SendAsync(club.Device("/api/v1/device/extend", new JsonObject
         {
-            ["mac"] = club.BoxMac, ["method"] = "qr", ["token"] = club.Code(club.Olga), ["court"] = 1, ["minutes"] = 30, ["nonce"] = "cap-30",
+            ["mac"] = club.BoxMac,
+            ["method"] = "qr",
+            ["token"] = club.Code(club.Olga),
+            ["court"] = 1,
+            ["minutes"] = 30,
+            ["nonce"] = "cap-30",
         }));
         Assert.Equal(HttpStatusCode.BadRequest, extend.StatusCode);
         var why = JsonDocument.Parse(await extend.Content.ReadAsStringAsync()).RootElement;
@@ -644,7 +684,10 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
         var sig = Signer.SignData(Encoding.ASCII.GetBytes(DeviceOta.ManifestText(target, version, size, sha)), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var manifest = new JsonObject
         {
-            ["target"] = target, ["version"] = version, ["size"] = size, ["sha256"] = sha,
+            ["target"] = target,
+            ["version"] = version,
+            ["size"] = size,
+            ["sha256"] = sha,
             ["sig"] = Convert.ToBase64String(sig).TrimEnd('=').Replace('+', '-').Replace('/', '_'),
         };
         tamper?.Invoke(manifest);
@@ -771,9 +814,15 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
         {
             db.CourtLightStates.Add(new CourtLightState
             {
-                TenantId = club.TenantId, CourtId = club.Courts[0], State = LightState.On, BookingId = booking.Id,
-                OnSince = DateTimeOffset.UtcNow.AddMinutes(-4), OnUntil = booking.EndsAt, Cause = LightCause.Member,
-                LastEventAt = DateTimeOffset.UtcNow.AddMinutes(-4), UpdatedAt = DateTimeOffset.UtcNow,
+                TenantId = club.TenantId,
+                CourtId = club.Courts[0],
+                State = LightState.On,
+                BookingId = booking.Id,
+                OnSince = DateTimeOffset.UtcNow.AddMinutes(-4),
+                OnUntil = booking.EndsAt,
+                Cause = LightCause.Member,
+                LastEventAt = DateTimeOffset.UtcNow.AddMinutes(-4),
+                UpdatedAt = DateTimeOffset.UtcNow,
             });
             return Task.CompletedTask;
         });
@@ -788,7 +837,12 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
 
         var extended = await device.SendAsync(club.Device("/api/v1/device/extend", new JsonObject
         {
-            ["mac"] = club.BoxMac, ["method"] = "qr", ["token"] = code, ["court"] = 1, ["minutes"] = 15, ["nonce"] = "own-court-15",
+            ["mac"] = club.BoxMac,
+            ["method"] = "qr",
+            ["token"] = code,
+            ["court"] = 1,
+            ["minutes"] = 15,
+            ["nonce"] = "own-court-15",
         }));
         Assert.Equal(HttpStatusCode.OK, extended.StatusCode);
         // At most what was asked (the extension may be truncated by what follows on the court).
@@ -825,13 +879,21 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
         var club = await MemberCodeClub.SeedAsync(app, cause ?? "v3offline");
         var scan = new JsonObject
         {
-            ["seq"] = 1, ["uptime_ms"] = 99_999_000, ["kind"] = "unknown_scan", ["court"] = 0, ["method"] = "qr",
-            ["subject"] = club.Code(club.Olga), ["duration_ms"] = 0,
+            ["seq"] = 1,
+            ["uptime_ms"] = 99_999_000,
+            ["kind"] = "unknown_scan",
+            ["court"] = 0,
+            ["method"] = "qr",
+            ["subject"] = club.Code(club.Olga),
+            ["duration_ms"] = 0,
         };
         if (cause is not null) scan["cause"] = cause;
         await OkAsync(await app.CreateClient().SendAsync(club.Device("/api/v1/device/events", new JsonObject
         {
-            ["mac"] = club.DoorMac, ["boot_id"] = 3, ["uptime_ms"] = 100_000_000, ["events"] = new JsonArray(scan),
+            ["mac"] = club.DoorMac,
+            ["boot_id"] = 3,
+            ["uptime_ms"] = 100_000_000,
+            ["events"] = new JsonArray(scan),
         })));
 
         var row = await club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
