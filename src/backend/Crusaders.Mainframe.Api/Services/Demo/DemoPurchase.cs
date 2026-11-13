@@ -38,7 +38,10 @@ public static class DemoPurchase
             ActorUserId: pending.UserId,
             Reason: $"Demo purchase: {TopUpEndpoints.PackageWords(pending.PackageName, pending.Minutes)} for {Email.EmailTemplates.Zar(pending.AmountZar, symbol)}",
             ExternalReference: TopUpEndpoints.TopUpReference(pending.TenantId, paymentId),
-            ZarPaid: pending.AmountZar), ct);
+            ZarPaid: pending.AmountZar)
+        {
+            PurchaseId = pending.Id,
+        }, ct);
 
         return Results.Ok(new
         {

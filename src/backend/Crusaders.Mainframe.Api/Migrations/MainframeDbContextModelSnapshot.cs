@@ -1361,6 +1361,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<Guid?>("PurchaseId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Reason")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
@@ -1385,6 +1388,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("ExternalReference")
                         .IsUnique()
                         .HasFilter("\"ExternalReference\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "PurchaseId")
+                        .IsUnique()
+                        .HasFilter("\"PurchaseId\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "ActorUserId", "CreatedAt");
 

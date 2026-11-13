@@ -726,6 +726,8 @@ public partial class MainframeDbContext : DbContext
             e.HasIndex(l => new { l.TenantId, l.ActorUserId, l.CreatedAt });
 
             e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
+            // One credit per PayFast checkout (money lane BM-2): see LedgerEntry.PurchaseId.
+            e.HasIndex(l => new { l.TenantId, l.PurchaseId }).IsUnique().HasFilter("\"PurchaseId\" IS NOT NULL");
             e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
             e.Property(l => l.Type).HasConversion<int>();
 

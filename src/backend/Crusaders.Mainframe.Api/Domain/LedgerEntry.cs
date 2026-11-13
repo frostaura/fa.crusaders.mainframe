@@ -170,5 +170,16 @@ public sealed class LedgerEntry : ITenantScoped
     public string? Reason { get; set; }
     public string? ExternalReference { get; set; } // unique on the gateway transaction id
 
+    /// <summary>
+    /// On a <see cref="LedgerEntryType.TopUp"/> posted by the PayFast ITN: the purchase
+    /// (<c>pending_topups.Id</c>) it credits. Unique per club where set
+    /// (<c>IX_ledger_entries_TenantId_PurchaseId</c>), so <b>one checkout is credited at most
+    /// once</b> whatever arrives — the database's answer to money lane BM-2, where eight
+    /// concurrent COMPLETEs carrying different <c>pf_payment_id</c>s credited one R120 purchase
+    /// three times because each built a different <see cref="ExternalReference"/>. Null on every
+    /// other row, and on purchases credited before the column existed.
+    /// </summary>
+    public Guid? PurchaseId { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

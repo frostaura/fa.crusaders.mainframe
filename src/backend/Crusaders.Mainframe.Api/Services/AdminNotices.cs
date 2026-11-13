@@ -195,6 +195,18 @@ public static class AdminNotices
             reason, pending?.AmountZar, memberName, pending is null ? null : pending.ExternalReference ?? pending.IdempotencyKey,
             pending?.PackageName, pending?.Minutes));
 
+    /// <summary>
+    /// A payment PayFast took that was not credited (<c>TopUpAlerts.PaidTwice</c> /
+    /// <c>PaidAfterClose</c>). The payload's reference and amount are THAT payment's, and the
+    /// member is the subject so the desk lands on them.
+    /// </summary>
+    public static AdminNotice TopUpUncredited(string reason, string paymentId, decimal? amountZar, string? memberName, PendingTopup pending)
+    {
+        var notice = PurchaseFailed(reason, paymentId, memberName, new TopUpFailedPayload(
+            reason, amountZar, memberName, paymentId, pending.PackageName, pending.Minutes));
+        return notice with { SubjectUserId = pending.UserId };
+    }
+
     private static AdminNotice PurchaseFailed(string reason, string identity, string? memberName, TopUpFailedPayload payload)
     {
         var headline = memberName is null

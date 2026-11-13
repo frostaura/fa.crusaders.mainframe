@@ -563,6 +563,7 @@ public sealed class LedgerService
             ActorUserId = posting.ActorUserId,
             Reason = posting.Reason,
             ExternalReference = posting.ExternalReference,
+            PurchaseId = posting.PurchaseId,
             CreatedAt = posting.At ?? DateTimeOffset.UtcNow,
         };
     }
@@ -580,6 +581,7 @@ public sealed class LedgerService
             ActorUserId = posting.ActorUserId,
             Reason = posting.Reason,
             ExternalReference = posting.ExternalReference,
+            PurchaseId = posting.PurchaseId,
             CreatedAt = posting.At ?? DateTimeOffset.UtcNow,
         };
         _db.LedgerEntries.Add(entry);
@@ -633,6 +635,9 @@ public sealed record LedgerPosting(
     /// the row's <c>CreatedAt</c>, so a device decision and its money are on one clock.
     /// </summary>
     public DateTimeOffset? At { get; init; }
+
+    /// <summary>On a PayFast purchase's <see cref="LedgerEntryType.TopUp"/>: the purchase it credits, stored and unique per club (<see cref="LedgerEntry.PurchaseId"/>).</summary>
+    public Guid? PurchaseId { get; init; }
 
     /// <summary>Review round 12, C1: on a cancellation's refund and penalty, who cancelled (<see cref="WalletCancelledBy"/>). Never stored.</summary>
     public string? CancelledBy { get; init; }
