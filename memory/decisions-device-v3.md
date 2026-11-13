@@ -44,3 +44,7 @@ court-box firmware, door-gate firmware, frontend-admin).
   2.3.0, and it can return by bridge OTA alone.
 - **Deferred, not rejected:** a remote "switch a court off" (needs only a server change and a bridge
   OTA, since the Mega obeys `!OFF`); a configuration QR at the door (the portal covers it).
+- **The same day's addendum** made the frozen firmware forward-compatible for its whole life, moved
+  every compiled hardware fact to a setting, and made every board report its own health:
+  `decisions-device-v3-compat.md`, `decisions-device-v3-hardware.md`, and for the member code
+  `decisions-member-code-cutover.md`.
