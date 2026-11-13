@@ -55,4 +55,5 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
 - **Versions** are the device contract's, not this topic's: the v3 last flash (Mega 3.0.0, bridge
   3.0.0, door 2.0.0) is [`decisions-device-v3.md`](decisions-device-v3.md); the flash order and
   what is owed are in [`state.md`](state.md). The bridge unflags `[common]`'s MINOR/PATCH by its
-  own tokens. Server half: `decisions-member-code-backend.md`.
+  own tokens. Server half: `decisions-member-code-backend.md`; keys in every phase, the cut-over's
+  blockers and the v1 extend fix (2026-11-13): `decisions-member-code-cutover.md`.
