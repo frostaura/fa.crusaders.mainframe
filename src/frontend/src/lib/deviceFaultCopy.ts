@@ -259,6 +259,20 @@ function bootUptime(detail: string | null | undefined): string | null {
   return `It had been running for ${minutesSpoken(minutes)} when it said so.`;
 }
 
+/** R16 D16-5: which of the three `malformed_body` variants this row is, said as that one — or null. */
+function malformedBodyExplanation(row: Pick<DeviceErrorRow, "headline" | "detail">) {
+  const said = bodyFaultOf(row.detail);
+  const kind = said ? READ_ANYWAY[said.kind] : undefined;
+  if (!said || !kind) return null;
+  // The server's headline follows the detail (`DeviceErrorCodes.HeadlineOf(code, detail)`), so it
+  // is the title — except on a row filed before it did, whose headline is the dropped one; on a
+  // two-boards row, whose headline is the dropped one too ("could not read" a message it read);
+  // and on a row carrying the R19 board list, which the server's variant match does not see past.
+  const ownTitle = said.legacy || said.kind === "twoBoards" || said.boards.length > 0;
+  const headline = ownTitle ? "" : (row.headline ?? "").trim();
+  return { title: headline || kind.title, means: kind.means, doThis: kind.doThis, unrecognised: false };
+}
+
 /** BA-22: a restart says what it means, with its raw uptime turned into a sentence. */
 function bootExplanation(row: Pick<DeviceErrorRow, "headline" | "detail">) {
   const known = EXPLANATIONS.boot;
@@ -286,19 +300,8 @@ export function explainFault(
   /** True when nothing in the closed table matched — the page shows the raw code alongside. */
   unrecognised: boolean;
 } {
-  if (row.code === "malformed_body") {
-    const said = bodyFaultOf(row.detail);
-    const kind = said ? READ_ANYWAY[said.kind] : undefined;
-    if (said && kind) {
-      // The server's headline follows the detail (`DeviceErrorCodes.HeadlineOf(code, detail)`), so it
-      // is the title — except on a row filed before it did, whose headline is the dropped one; on a
-      // two-boards row, whose headline is the dropped one too ("could not read" a message it read);
-      // and on a row carrying the R19 board list, which the server's variant match does not see past.
-      const ownTitle = said.legacy || said.kind === "twoBoards" || said.boards.length > 0;
-      const headline = ownTitle ? "" : (row.headline ?? "").trim();
-      return { title: headline || kind.title, means: kind.means, doThis: kind.doThis, unrecognised: false };
-    }
-  }
+  const body = row.code === "malformed_body" ? malformedBodyExplanation(row) : null;
+  if (body) return body;
   if (row.code === "boot") return bootExplanation(row);
   const known = explanationFor(row);
   const headline = (row.headline ?? "").trim();
