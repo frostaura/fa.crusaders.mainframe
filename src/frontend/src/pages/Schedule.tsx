@@ -177,7 +177,9 @@ export default function BookingsPage() {
   return (
     // R4 form factor (SPEC 3.1): `wide`, then the 120rem frame from 3xl, where the grid's courts are
     // capped and the extra width goes to the rail rather than to 300px-wide slots.
-    <PageShell width="wide" fullFrom3xl>
+    // BM-04 — the page's own gaps are half the shell's: every row of chrome above the grid is a row
+    // of the day the member cannot see (a 32px top, a 32px gap and an empty ticker row at 1440×723).
+    <PageShell width="wide" fullFrom3xl className="gap-4 lg:gap-4 lg:pt-4">
       <PageHeader
         title={BOOKINGS_COPY.title}
         actions={(
@@ -196,7 +198,8 @@ export default function BookingsPage() {
         {bookAsUserId ? <BookingForBar booking={bookingFor} /> : null}
         {/* The games are one drifting line, not a rail: the grid owns the page's width. */}
         {expanded ? null : (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          // BM-04 — `empty:hidden`: with no games and no invites the row drew nothing and kept its gap.
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 empty:hidden">
             {bookAsUserId ? <div className="min-w-0 flex-1 basis-80" /> : (
               <UpcomingTicker refreshKey={changes} fallbackZone={day?.timezone} className="min-w-0 flex-1 basis-80" />
             )}

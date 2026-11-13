@@ -153,10 +153,20 @@ export function BookingBoard(props: BoardProps) {
 const PAGE_BOTTOM_PX = 42;
 export const SELECTION_ROOM_PX = 64;
 export const GRID_MIN_PX = 280;
+/**
+ * Go-live BM-04 — the grid showed three to five rows of a sixteen-hour day at 390×667 and
+ * 1440×723: the room under the week strip, the notices and the toolbar was all it ever took, and
+ * that room was the 280px floor. Where the screen can afford it the grid is at least this tall
+ * (about seven rows and the court header), never taller than the screen between the app bar and
+ * the docked bars, so its whole height can be brought into view at once and then scrolls itself.
+ */
+export const GRID_COMFORT_REM = 26;
+const GRID_COMFORT_GAP_PX = 16;
 
 function scrollerMaxHeight(): string {
   const estimate = `calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - var(--day-strip-height, 0px) - ${PAGE_BOTTOM_PX}px)`;
-  return `max(${GRID_MIN_PX}px, var(${FILL_ROOM_VAR}, ${estimate}))`;
+  const screen = `calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - ${GRID_COMFORT_GAP_PX}px)`;
+  return `max(${GRID_MIN_PX}px, min(${screen}, ${GRID_COMFORT_REM}rem), var(${FILL_ROOM_VAR}, ${estimate}))`;
 }
 
 /**
