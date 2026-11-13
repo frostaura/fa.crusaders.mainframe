@@ -2294,7 +2294,11 @@ export const endpoints = {
       membershipNumber: req.membershipNumber,
       photoUrl: req.photoUrl ?? null,
     }),
-  verifyEmail: (token: string) => api.post<{ verified: boolean }>(`/api/v1/auth/verify-email/${token}`),
+  /**
+   * `approved` (go-live BM-11): whether the club has already approved this account. Absent from an
+   * API that predates it, and the page then says only what it knows.
+   */
+  verifyEmail: (token: string) => api.post<{ verified: boolean; approved?: boolean }>(`/api/v1/auth/verify-email/${token}`),
   login: (email: string, password: string) => api.post<LoginResponse>("/api/v1/auth/login", { email, password }),
   refresh: () => api.post<LoginResponse>("/api/v1/auth/refresh"),
   devAdminLogin: () => api.post<LoginResponse>("/api/v1/auth/dev/admin-login"),

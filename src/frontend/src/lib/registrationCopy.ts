@@ -147,6 +147,22 @@ export const VERIFY_OK_BODY = "That's your address confirmed. Somebody at the cl
   + "number against their records and approves your account — you'll get a second email when they have.";
 
 /**
+ * Go-live BM-11 — an admin may approve before the address is confirmed, and the page told that
+ * member to wait for an approval that had already happened. When the API says so, it says the
+ * account is ready; when the API does not say, it claims neither.
+ */
+export const VERIFY_OK_BODY_APPROVED = "That's your address confirmed, and the club has already approved your account. "
+  + "You can sign in now.";
+export const VERIFY_OK_BODY_UNKNOWN = "That's your address confirmed. If the club hasn't approved your account yet, "
+  + "somebody there checks your membership number against their records — you'll get an email when they have.";
+
+export function verifyOkBody(approved: boolean | undefined): string {
+  if (approved === true) return VERIFY_OK_BODY_APPROVED;
+  if (approved === false) return VERIFY_OK_BODY;
+  return VERIFY_OK_BODY_UNKNOWN;
+}
+
+/**
  * <b>"Try registering again" was the dead end.</b>
  *
  * <p>
