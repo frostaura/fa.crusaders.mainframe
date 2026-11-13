@@ -498,6 +498,12 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
 
 ## 9. D10 — paying for somebody else's court at the box
 
+> **Not in the court-box image since bridge 3.0.0** (founder, 2026-11-13). The panel stopped
+> reaching this flow at 2.3.0 and the last-flash image drops it. The server keeps serving
+> `/api/v1/device/pay-for` exactly as below, held to `membercode/payfor.json` (read by the server
+> only), because the flow needs nothing from the Mega that v3 does not render and can return by a
+> bridge OTA alone ([`device-api.md`](device-api.md) §7).
+
 ### 9.1 The flow
 
 1. The payer **scans** their code. Online, `/activate` answers as today — a member with no booking

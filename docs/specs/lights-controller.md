@@ -21,10 +21,23 @@
 > `Authorization: Bearer` header, on requests the box makes *outbound*; nothing
 > calls the box. Kept for the design rationale and the fail-safe discussion.
 
-## The installed court box at the panel (bridge 2.3.0 / Mega 2.1.0)
+## The installed court box at the panel (bridge 3.0.0 / Mega 3.0.0)
 
-What a member sees and does at the Crusaders box today. Everything essential
-is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
+What a member sees and does at the Crusaders box from the v3 flash — the last
+USB flash the Mega will ever get. The wire is
+[`device-serial-protocol.md`](device-serial-protocol.md) (v3) and the heartbeat
+[`device-api.md`](device-api.md).
+
+- **The panel size is not known, so the layout is a setting.** The code drives
+  the HD44780 at I2C 0x27 with 20×4 row offsets; the documents disagree between
+  a 1602 and a 2004A. `lcd_layout` (club default, per-board override) chooses
+  **compact** (rows 0–1, sixteen columns — whole on either panel) or
+  **expanded** (20×4). The Mega boots compact, falls back to compact whenever
+  the bridge is silent or sends a value it does not know, and the admin can
+  revert a board remotely in one heartbeat. Every bridge screen is composed for
+  the layout the Mega acknowledged; a row that does not fit scrolls as a
+  software marquee on that one row (`lcd_marquee_enabled`), never the
+  controller's display shift.
 
 - **Relays are ACTIVE HIGH.** The club fitted normally-open solid-state relays;
   `court_mega` is built with `RELAY_ACTIVE_LOW=0`. The pin is still driven to
@@ -35,9 +48,15 @@ is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
   native simulator is built with the Mega's own `RELAY_ACTIVE_LOW=0`, so its
   transcript reads `(pin level HIGH)` for a lit court and the device e2e
   asserts it.
-- **Landing screen (Mega-owned):** `SCAN YOUR CODE`, then `TO PLAY` while every
-  court is dark, or the lit courts' minutes left — `COURT B 45 MIN` for one,
-  `A45 C 5` for several.
+- **Landing screen (Mega-owned, composed from its own relay deadlines and the
+  server's snapshot):** `SCAN YOUR QR CODE` (compact: `SCAN YOUR QR`) and every
+  mapped court's state and minutes of light left — paid chained extensions
+  included — plus a status (`READY 18:05`, `NO WIFI`, `NO SERVER`,
+  `STARTING UP`). Expanded shows one court per row, three per page; compact
+  scrolls every court along row 1, or pages one court at a time with the
+  marquee off. With the bridge dead it reads `OUT OF SERVICE` / `SEE THE DESK`
+  and still shows the lit courts' minutes. The glass repaints and re-initialises
+  itself on landing, so an I2C glitch never leaves the call to action blank.
 - **Scan → greeting → outcome.** A recognised online scan reads
   `HI <NAME>` / `BALANCE <n> MIN` (from `/activate`'s `greeting_name` and
   `balance_minutes`; `HI` / `WELCOME` when absent, and for offline roster
@@ -57,7 +76,10 @@ is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
   `min(90 min, remaining + extended_minutes)` (longer sessions are held past the
   cap by `Relight`) and reads `COURT A +30 MIN` / `BALANCE <n> MIN`. Refusals:
   `COURT NOT ON` / `PICK ANOTHER`, `NO TIME BEFORE` / `NEXT BOOKING`,
-  `TOO FEW MINUTES` / `BUY & RETRY`, otherwise the walk-up's words. **Never
+  `TOO FEW MINUTES` / `BUY & RETRY`, otherwise the walk-up's words. A member
+  whose own court is lit may extend it after a rescan: the rescan keeps the scan
+  buyable and binds the window to that court instead of re-granting and spending
+  it (FSF-06). **Never
   offline:** `NO CONNECTION` / `EXTEND NEEDS NET`. A `200` whose body the box
   cannot read whole (cut by the transport, or naming no `extended_minutes`) is
   **undecided**, not "nothing added": the purchase may be on the ledger, so the
@@ -65,7 +87,25 @@ is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
   retry with the first purchase (`replayed:true`) instead of selling a second. The D10 pay-for offer and
   pressing your own lit court to switch it off are gone from the panel.
 - Every screen reverts to the landing screen on its own (revert or choice hold,
-  and the Mega's 120 s clamp behind both).
+  the Mega's 120 s clamp on any one frame) **and no non-landing state outlives
+  the absolute ceiling** (`lcd_screen_ceiling_seconds`, 60 s by default) that the
+  Mega enforces whatever the bridge sends; presses never extend a screen; once a
+  court lights the glass is back on landing within
+  `lcd_after_lights_on_seconds`.
+- **The box keeps the courts the server says are paid for lit.** Every
+  heartbeat answer carries the complete snapshot; the bridge re-lights any court
+  that should be lit and is dark — after a Mega-only watchdog or brown-out
+  reset, a lost `!ON`, or a power cut — and never switches one off on the
+  server's word. The bridge keeps the snapshot, the roster and undelivered
+  attendance in flash, so a power cut with the network down still restores paid
+  courts (for at most `device_power_restore_trust_minutes`) and loses no
+  attendance.
+- **No identity overlays.** `CONNECTED` / `CRUSADERS COURTS` are no longer
+  painted on WiFi edges; the landing status says the same thing.
+- **No reflash for an operator change.** WiFi, server address and device key
+  change from the console or at the setup portal (hold court A and court D for
+  five seconds within a minute of power-on); the bridge updates itself from
+  signed releases the club uploads.
 
 [Superseded design] The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
 

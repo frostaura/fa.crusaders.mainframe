@@ -3,6 +3,11 @@
 The behaviour oracle for a door controller: what it is told, what it decides, what it may
 never do, and what it does when the network is gone.
 
+> **Gate 2.0.0 (device contract v3, 2026-11-13) is the image flashed by cable for the last time.**
+> From it on the gate updates itself from signed releases, rotates its key, changes its WiFi and
+> server address without a visit, and keeps its roster across a reset — [§14](#14-v3--gate-200-what-survives-a-reset-and-fixing-a-door-without-a-cable).
+> Where a sentence below describes 1.x behaviour that §14 changes, §14 wins and the sentence says so.
+
 `src/contracts/device-protocol/gate/manifest.json` names this file as its authority, so a
 sentence here that the corpus contradicts is a defect in one of the two — not a difference
 of opinion. Every behavioural sentence below is pinned by a test, and the pins are listed at
@@ -73,6 +78,9 @@ deliberately *not* the 200 a decision gets, because none of them is a decision:
 | unknown MAC (any route but `/heartbeat`) | `404` |
 | the board is disabled | `403` |
 | unknown or missing bearer key | `401` |
+
+Since gate 2.0.0 the key is no longer only the compiled one: it rotates over the heartbeat with
+a grace window and can be restored after a database loss (§14.3, [`device-api.md`](device-api.md) §6).
 
 ---
 
@@ -1073,6 +1081,11 @@ A stale roster admits nobody: the firmware's own six-hour `ROSTER_MAX_AGE_MS` is
 board that has been offline for a week letting in a member whose suspension it never heard
 about.
 
+**Since 2.0.0 a reset no longer empties the board** (§14.1): a watchdog or panic reset keeps the
+roster with its true age, and a power-on reset with the server still down uses the flash copy for
+at most `device_power_restore_trust_minutes`. Under 1.x both reset cases admitted nobody until the
+server answered (DG-2, reproduced).
+
 **A club admin has no degraded mode either**, and for the same structural reason: the
 `booking_window` carve-out is an online rule, a roster holds bookings, and staff on shift hold
 none. At a cut-off door a club admin is refused like anyone else without a booking.
@@ -1434,7 +1447,7 @@ de-duplication tag, not a credential — nothing turns on it being unpredictable
 consecutive boots of one board not colliding.
 
 **`(device, seq)` alone was not enough, and the failure was silent.** The server deduplicates on a
-**permanent** unique index; the board's event ring is RAM-only so no event survives a reboot; and
+**permanent** unique index; the board's event ring was RAM-only under 1.x so no event survived a reboot (since 2.0.0 undelivered events persist, §14.1); and
 `seq` resumes from one checkpoint record in flash, written in blocks of 64. Erase or tear that
 record and the board renumbers from 1 — so every event of the next evening is receipted as a
 duplicate and discarded, **including the `boot` event the firmware queues precisely so an operator
@@ -1983,3 +1996,77 @@ chip vocabulary are the frontend lanes' and are pinned there — this table cove
 only. And no test pins that `/api/v1/device/*` gained nothing: that is an absence, and it is
 held by `DeviceForbiddenMeansOutOfServiceTests`' existing forward and reverse pair over the
 five device routes, which would go red the moment an admin route joined that group.
+
+---
+
+## 14. v3 — gate 2.0.0: what survives a reset, and fixing a door without a cable
+
+The founder's decisions of 2026-11-13 ([`device-api.md`](device-api.md), the preamble) apply to
+the door exactly as to the court box; this section is what they mean on a board with a scanner,
+one relay, one lamp and no screen. Wire shapes: `gate/` `gate-heartbeat-request-v3*` and
+`gate-heartbeat-response-v3*`, `ota/`, `provision/`.
+
+### 14.1 What survives a reset
+
+| Reset | What the board keeps | How it is dated |
+|---|---|---|
+| watchdog, panic, brown-out, software restart | roster, code keys and day slots, step clock, last `gate` settings, replay ring, undelivered events — in **`RTC_NOINIT` memory** with a magic number and a CRC | the RTC timer keeps counting across these resets, so every age continues: `restore: warm` |
+| power-on | the same records from **NVS**, written only when their content changes (each with check digits; a damaged one reads as absent) | not datable: the roster is trusted for at most `device_power_restore_trust_minutes` from boot (0 disables), with every window read as if no time had passed; offline **member-code** verification waits for the first heartbeat, because the step clock cannot be re-derived; `restore: cold` |
+
+The first accepted heartbeat replaces all of it, and its `restore` field tells the server which
+case the board ran in (DG-2, DG-11). Undelivered events are written on push and cleared by the
+server's `accepted_through`, so an offline evening survives a power cut.
+
+### 14.2 OTA
+
+[`device-api.md`](device-api.md) §7 in full, for target `door_gate`. On the gate: the image goes
+into the **other app slot** of the default partition table (two 1.25 MB slots; the image is about
+800 KB); the download feeds the task watchdog per chunk so the 15 s bound of §11a.2 still holds;
+it starts only with the lock engaged, no release window open and no scan waiting in the
+assembler; the boot partition is switched only after size, SHA-256 and the signature all agree;
+and a new image that has not had a heartbeat accepted within `device_ota_probation_minutes`, or
+resets three times first, switches back to the previous slot — which still holds the previous
+image, so the gate's rollback needs no copy. The lamp shows the update (14.5). Whether the pinned
+core's prebuilt bootloader also has app rollback enabled is a bench check; the firmware's own
+probation does not depend on it.
+
+### 14.3 Key rotation, network changes, the setup portal
+
+[`device-api.md`](device-api.md) §6 and §8, unchanged. The gate's setup gesture is the board's
+**BOOT button held for five seconds within 60 s of power-on** — after the boot blinks, never during
+power-up, which enters the ROM loader. The gate has no screen, so the portal's name is on the
+enclosure label beside `SETUP_AP_PASSWORD`.
+
+### 14.4 The link supervisor, and the checks the analysis asked for
+
+- **WiFi self-heals** ([`device-api.md`](device-api.md) §8, `provision/` `supervisor`): the core's
+  own reconnect is not trusted past 30 s, because Arduino-ESP32 stops trying for good after
+  `AUTH_FAIL` or `ASSOC_LEAVE` (DG-3).
+- **The scanner assembler drops a partial line** after 150 ms with no byte, so a stray byte at
+  power-up no longer spoils the next member's scan; a line with no CR/LF suffix ends at that idle
+  gap too, so a scanner configured without a suffix still works (DG-5).
+- **`kind` is read**: a heartbeat answer whose `kind` is not `gate` adopts no roster and files the
+  fault `kind_mismatch` (DG-9).
+- **A scan inside the post-watchdog hold-back is decided from the roster**, never online, so it
+  cannot hit the same dribbling peer again (DG-8).
+- **A failed watchdog subscription falls back** to subscribing the loop task by handle, and
+  `ESP_ERR_INVALID_ARG` from an already-subscribed task counts as armed (DG-7); the checklist's
+  "5 s core watchdog" sentence is corrected.
+
+### 14.5 The lamp
+
+Member-facing cues outrank everything, as in §11; the new patterns are idle-only and never delay a
+cue.
+
+| State | Pattern |
+|---|---|
+| a scan was read and the board is waiting on the server | **solid on**, written straight to the pin before the blocking call (DG-4) |
+| released | solid (unchanged) |
+| denied · wait · boot | 3 fast · 1 slow · 2 blinks (unchanged) |
+| link down | 1 Hz (unchanged) |
+| watchdog not armed | 4 Hz (unchanged) |
+| **healthy idle** | dark (unchanged) |
+| **degraded idle**: the last heartbeat was not a 200, the roster is empty, or it is older than two intervals | one short blip every 5 s (DG-6) |
+| **setup portal open** | long-short, repeating |
+| **downloading an update** | 2 Hz |
+| **probation** (new image not yet committed) | one double-blip every 5 s |
