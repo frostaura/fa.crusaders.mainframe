@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions-door-gate
-description: "One pull-only ESP32 per door; 200 and 403 are the only authoritative answers, all else falls back to the roster; LOCKED is asserted before the pin drives; what the door does with no power is unmeasured — the owner expects it released."
+description: "One pull-only ESP32 per door; every readable 2xx and a 403 are answers, all else falls back to the roster; LOCKED before the pin drives; no-power behaviour unmeasured, the owner expects it released."
 type: decision
-last_verified: 2026-09-19
+last_verified: 2026-11-13
 ---
 
 # Live decisions — the door gate
@@ -18,24 +18,17 @@ unchanged: [`decisions-device.md`](decisions-device.md). What follows is the gat
   and the board never needs to know it — so a spare board is a spare board. *Corrected 2026-09-19:*
   "the board learns its name from the heartbeat" was false in four documents and a `kMaxGateKeyLen`
   constant sized a buffer that did not exist. Nothing in the firmware parses `gate_key`.
-- **The gate reads the API differently from the court bridge, deliberately.** `devapi::react()`'s
-  `Rejected` class means "a 4xx this box caused — drop it", which is right for an event upload and
-  wrong for a door, so `gatelogic::onGateResponse` does not use it. **TWO statuses are answers**
-  (2026-09-19, was one): a **200**, whose `opened:false` is authoritative and is NEVER
-  second-guessed against the roster; and a **403**, which is the club taking this board out of
-  service — it denies with `out_of_service`, and a 403 on **any** of the three device paths (scan,
-  heartbeat, event drain — all three since round G2) commits an EMPTY roster.
-  Everything else — 0, 401, 404, 408, 429, any 5xx, and a 200 whose body cannot be parsed, did
-  not fit or did not FRAME — falls back to the roster. (On `/events` a 404 is read differently
-  again: see the cadence topic.) *Why the 403:* falling back after one would keep the door
-  admitting rostered members for the full six-hour staleness window after an admin pressed the
-  button that exists to stop exactly that; and whichever path a board speaks on first has to be the
-  one that hears it, or a disabled board keeps its roster until its next heartbeat. *Why the rest:*
-  both directions have a victim — second-guessing a refusal admits the member barred this morning
-  through a booking nobody cancelled; refusing on an outage leaves a member with a valid booking
-  outside because a container was restarting.
-  **Residual, narrower than it was and still not closable:** ONLY a board that cannot REACH the
-  server never hears the 403, and it keeps admitting rostered bookings until its roster goes stale.
+- **What counts as an answer** (2.0.0, 2026-11-13, superseding "only 200 and 403"): a **403** on
+  any of the three device paths is the club taking the board out of service and commits an EMPTY
+  roster; **every 2xx** whose body is one complete object with the right kinds is the server's
+  decision, and its `opened:false` is never second-guessed against the roster; everything else —
+  0, 401 after the key retry, 404, 408, 429, 5xx, a cut, HTML or over-buffer 2xx, an open with no
+  integer `unlock_seconds` — is decided offline from the roster. *Why every 2xx:* a proxy or a later
+  framework's 201 read as an outage taught the breaker the server was down (FC-4). *Why the 403:*
+  falling back after one keeps admitting rostered members for the six-hour staleness window after
+  an admin pressed the button meant to stop exactly that. **Residual:** only a board that cannot
+  reach the server never hears the 403. The v3 rules as a whole:
+  [`decisions-door-gate-v3.md`](decisions-door-gate-v3.md).
 - **A door is released for `gate.unlock_seconds`, never for what is left of the booking.** The
   roster's `grantMs` is 25 minutes for a late arrival, and a door held open for 25 minutes is not a
   door. The gate's offline degraded mode is also narrower than the court box's *by contract*: only a

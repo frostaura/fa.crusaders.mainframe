@@ -694,9 +694,11 @@ will not arm is reported by the link pattern's fault variant on the LED and by t
 It is not a heartbeat that failed to push, and folding it in would make one number mean two
 unrelated things to whoever reads it.
 
-The server **logs both against the device code and stores nothing**: a column would be an EF
-migration for a counter nothing decides anything on, and §9's "no EF migration" still holds.
-They change no part of the response.
+The server **stores the latest of each on the device row** (`NoPush`, `NoPushReportedAt`,
+`EventsLost`, `EventsLostReportedAt` — migration `AddDeviceRestoreServedBootAt`), which is
+where the go-live checklist sends an admin to read them, and logs both against the device
+code. They change no part of the response. (DG-10: this paragraph said "stores nothing"
+after the columns had been added.)
 
 **They bind as 64-bit, and an out-of-range or negative value is IGNORED rather than refused.**
 `no_push` bound as a 32-bit integer, so the very first value past the board's own saturation
