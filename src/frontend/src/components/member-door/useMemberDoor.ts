@@ -254,23 +254,40 @@ export function useShownDecision(door: MemberDoor | null, refreshCode: () => voi
 export type DoorsKnowledge = "yes" | "no" | "unknown";
 
 export function useDoorsFlag(): DoorsKnowledge {
-  const [doors, setDoors] = useState<DoorsKnowledge>(
-    () => (readLastKnown().door?.value.doors === true ? "yes" : "unknown"),
-  );
+  return useDoorFacts().doors;
+}
+
+/** Whether the club has given the app any way to reach it, from the same read (go-live BM-12). */
+export type ClubContactKnown = "yes" | "no" | "unknown";
+
+function contactOf(view: { contact?: { phone: string | null; email: string | null } | null } | undefined): ClubContactKnown {
+  if (!view?.contact) return "unknown";
+  return view.contact.phone?.trim() || view.contact.email?.trim() ? "yes" : "no";
+}
+
+/**
+ * The door flag and the club's contact, off ONE `/me/door` read — the guide needs both (BM-12).
+ * A failed read leaves each "unknown", never "no".
+ */
+export function useDoorFacts(): { doors: DoorsKnowledge; contact: ClubContactKnown } {
+  const [facts, setFacts] = useState<{ doors: DoorsKnowledge; contact: ClubContactKnown }>(() => {
+    const kept = readLastKnown().door?.value;
+    return { doors: kept?.doors === true ? "yes" : "unknown", contact: contactOf(kept) };
+  });
 
   useEffect(() => {
     let live = true;
     endpoints.meDoor()
       .then((next) => {
         if (!live) return;
-        setDoors(next.doors === true ? "yes" : "no");
+        setFacts({ doors: next.doors === true ? "yes" : "no", contact: contactOf(next) });
         rememberDoor(next);
       })
       // Still silent — but silent about the DOOR, not about the member's own record. The
       // caller is told the question went unanswered rather than answered "no".
-      .catch(() => { if (live) setDoors("unknown"); });
+      .catch(() => { if (live) setFacts((prev) => ({ doors: "unknown", contact: prev.contact })); });
     return () => { live = false; };
   }, []);
 
-  return doors;
+  return facts;
 }

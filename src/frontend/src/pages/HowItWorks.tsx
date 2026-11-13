@@ -4,7 +4,8 @@ import { cn } from "../lib/utils";
 import { TextLink } from "../components/ui/text-link";
 import { typography } from "../lib/typography";
 import { ILLUSTRATIONS } from "../components/onboarding/Illustrations";
-import { useDoorsFlag } from "../components/member-door/useMemberDoor";
+import { useDoorFacts } from "../components/member-door/useMemberDoor";
+import { useSmallestSlot } from "../components/wallet/useSmallestSlot";
 import { GUIDE_INTRO, GUIDE_TITLE, guideSteps } from "../lib/onboardingCopy";
 
 /**
@@ -56,7 +57,9 @@ export default function HowItWorksPage() {
   // doors: member — the same three-answer flag the home tile uses. "No" removes the door step
   // entirely, because a club with no gate must not meet the word; "unknown" keeps it, because
   // a member who HAS one and is not told is a member stuck outside a building.
-  const doors = useDoorsFlag();
+  const { doors, contact } = useDoorFacts();
+  // BM-12 — the club's own slot length (null signed out, or until a day has been read).
+  const sliceMinutes = useSmallestSlot(true);
 
   /*
     `button_map` is not on any member-facing read, so the court-box step describes the two
@@ -64,7 +67,7 @@ export default function HowItWorksPage() {
     takes the map the day one is served; until then a description is true at every club and a
     quoted guess is true at none.
   */
-  const steps = guideSteps({ doors });
+  const steps = guideSteps({ doors, contact, sliceMinutes });
 
   return (
     // R4 form factor (SPEC P3): `content`, `wide` from xl, the steps as cards in rows (two at

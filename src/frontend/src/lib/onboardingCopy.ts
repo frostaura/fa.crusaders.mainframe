@@ -118,7 +118,32 @@ export type GuideInput = {
   unlockSeconds?: number | null;
   /** Does this club have door scanners at all? Unknown keeps the door step's promise soft. */
   doors?: "yes" | "no" | "unknown";
+  /**
+   * Go-live BM-12 — the club's slot length (`tenant_settings.slice_minutes`), off a day the phone
+   * already holds or reads; null until known. The guide said "fifteen minutes" at every club.
+   */
+  sliceMinutes?: number | null;
+  /**
+   * Go-live BM-12 — has the club given the app a number or an address to reach it (`/me/door`'s
+   * contact)? "Unknown" when that was never read. The guide promised a number on the code screen
+   * that said "This club hasn't given the app a number to call".
+   */
+  contact?: "yes" | "no" | "unknown";
 };
+
+/** The grid's box, in the club's own slot length when it is known (BM-12). */
+export function slotSentence(sliceMinutes: number | null | undefined): string {
+  return sliceMinutes && sliceMinutes > 0
+    ? `Pick a green box on the grid. Each box is one court for ${sliceMinutes} minutes.`
+    : "Pick a green box on the grid. Each box is one court for one slot — the times run down the side of the grid.";
+}
+
+/** Where the club can be reached when the box is not doing anything (BM-12). */
+export function boxStuckSentence(contact: GuideInput["contact"]): string {
+  if (contact === "yes") return "The box is not doing anything — the club's number is at the bottom of your code screen.";
+  if (contact === "no") return "The box is not doing anything — tell somebody at the club. This club has not put a number in the app.";
+  return "The box is not doing anything — tell somebody at the club. If the club has given the app a number, it is at the bottom of your code screen.";
+}
 
 /** "the green buttons marked A, B, C and D" — or the role, when the club has not been read. */
 function namedRow(labels: readonly string[], colour: "green" | "black"): string {
@@ -174,7 +199,7 @@ export function guideSteps(input: GuideInput = {}): GuideStep[] {
       id: "book",
       title: "Book a court",
       body: [
-        "Pick a green box on the grid. Each box is one court for fifteen minutes.",
+        slotSentence(input.sliceMinutes),
         "Before anything is charged you see the court, the time, the minutes it takes and how much time your wallet has left.",
       ],
     },
@@ -235,7 +260,8 @@ export function guideSteps(input: GuideInput = {}): GuideStep[] {
       title: "No booking? Walk up",
       body: [
         "If a court is free you can start on it there and then.",
-        "On your phone, tap Member code, then use the box the same way. You are charged for the time you use.",
+        // BM-12 — the screen is called My Code everywhere else (the tab, the page's own title).
+        "On your phone, open My Code, then use the box the same way. You are charged for the time you use.",
         "Somebody else can scan right after you. The box shows how many seconds until it is ready again, and a scan "
           + "is never turned away for being too soon.",
       ],
@@ -252,7 +278,7 @@ export function guideSteps(input: GuideInput = {}): GuideStep[] {
         ...(input.doors === "no"
           ? []
           : ["The door did not open — tap The door did not open on your code screen. It will tell you what it can see."]),
-        "The box is not doing anything — the club's number is at the bottom of your code screen.",
+        boxStuckSentence(input.contact),
       ],
     },
   );
