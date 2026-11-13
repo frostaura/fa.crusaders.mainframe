@@ -357,7 +357,7 @@ corpus-check:
 	fi
 
 # The server's REAL replies through the frozen firmware's REAL parsers
-# (docs/specs/device-api.md section 12). The corpus pins bytes someone wrote down;
+# (docs/specs/device-api.md section 11). The corpus pins bytes someone wrote down;
 # this pins the bytes the server actually serialises today, for every heartbeat,
 # activate, walk-up, extend, events and gate reply the emitter's scenario matrix
 # produces, read by the bridge's and the gate's own host-compiled parsers. A

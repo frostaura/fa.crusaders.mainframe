@@ -6,7 +6,7 @@ Run it as `python3 src/contracts/device-protocol/compat/gen_cases.py`. Standard 
 
 The Mega 3.0.0 image is the last one that chip will ever get, and each ESP image is only as
 updatable as its own heartbeat parser, its key ring and its OTA path keep working against every
-server that comes after it (docs/specs/device-api.md section 12, "the lifeline"). This file is the
+server that comes after it (docs/specs/device-api.md section 11, "the lifeline"). This file is the
 reference implementation of the tolerance rules both ESP images apply to a server body, and of
 the budgets both sides hold a body to:
 
@@ -19,7 +19,7 @@ the budgets both sides hold a body to:
                        status, and how the board classifies each (decided / undecided).
 
 A consumer is checked against this file's output, never against itself. Every rule below is a
-sentence in docs/specs/device-api.md section 12; change both or neither.
+sentence in docs/specs/device-api.md section 11; change both or neither.
 """
 import json
 import pathlib
@@ -815,7 +815,7 @@ cases = {
 }
 manifest = {
     "description": cases["description"],
-    "authority": "docs/specs/device-api.md section 12; gen_cases.py beside this file is the reference implementation.",
+    "authority": "docs/specs/device-api.md section 11; gen_cases.py beside this file is the reference implementation.",
     "generator": "src/contracts/device-protocol/compat/gen_cases.py",
     "read_by": {
         "budgets": ["csharp", "fw-court-box", "fw-door-gate"],

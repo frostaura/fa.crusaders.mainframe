@@ -366,7 +366,8 @@ v3, and a `!PONG` naming anything older switches it back. Versions compare as th
 ### The new frames
 
 Verbs are **appended** to `proto::Verb` in this order — `RW CMT WANT CFG LAND NOTE LIVE ACK BOOT
-HELD DIAG` — so `kVerbCount` becomes 29 and the append-only rule above holds. No frame grows
+HELD DIAG HW` — so `kVerbCount` becomes 30 and the append-only rule above holds (`HW` is the
+2026-11-13 addendum's, *Hardware facts* below). No frame grows
 past `kMaxArgs` (5) or `kMaxArgLen` (24), so `Frame` keeps its size on an 8 KB chip.
 
 **Downlink — bridge → Mega**
@@ -390,8 +391,9 @@ past `kMaxArgs` (5) or `kMaxArgLen` (24), so `Frame` keeps its size on an 8 KB c
 | `!ACK,<id>,<code>` | `id` is a tag 1–255, or `S<seq>` for a screen commit. `code`: **0** applied · **1** duplicate (that tag was already applied; nothing changed) · **2** refused (an `!EXT` on a dark relay, a `!WANT` relay locked by the cap, an unknown `!CFG` key) · **3** incomplete (a commit whose rows did not all arrive or whose CRC did not match; nothing painted) · **4** busy (a commit inside the landing dwell; nothing painted). |
 | `!BOOT,<version>,<cause>,<held>` | The Mega's **first frame after every reset**, before the LCD is initialised: its version, the reset cause (`MCUSR`, two uppercase hex digits — bit0 power-on, bit1 external, bit2 brown-out, bit3 watchdog), and the keys held at that instant (two hex digits: bit0–3 courts A–D, bit4–7 durations 1–4). Followed at once by `!STATE`. `MCUSR` is copied to a `.noinit` variable before `.init3` clears it (FWM-12). |
 | `!HELD,<mask>,<seconds>` | A set of keys held together continuously for `seconds` (5–60, clamped) by a hold that began within **60 s of Mega boot**: the setup gesture (court A + court D = `09` opens the setup portal, [`device-api.md`](device-api.md) §8). Sent once per boot when a hold first reaches 5 s. Other masks are reserved for gestures a later bridge may define; the Mega reports, the bridge decides. |
-| `!DIAG,<lcd_timeouts>,<lcd_reinits>,<rx_overruns>,<ceilings>,<cap_offs>` | Since-boot counters, sent right after every `!PONG`: I2C timeouts on the LCD bus, controller re-initialisations (periodic and recovery), Serial3 RX overruns, screen ceilings that forced landing, and relays opened by the authorisation cap. The bridge reports per-heartbeat rises as faults (FSF-07). |
+| `!DIAG,<lcd_errors>,<lcd_reinits>,<rx_overruns>,<ceilings>,<cap_offs>` | Since-boot counters, sent right after every `!PONG`: LCD bus errors — I2C timeouts **and** NACKs, so a backpack that stopped answering is counted, not silent (HW-2) — controller re-initialisations (periodic and recovery), Serial3 RX overruns, screen ceilings that forced landing, and relays opened by the authorisation cap. The bridge reports per-heartbeat rises as faults (FSF-07). |
 | `!EVT,CAPOFF,<court>` · `!EVT,CEIL,` · `!EVT,LIVE,1` | New `!EVT` names: the authorisation cap opened this relay; the screen ceiling forced landing; the Mega revived a bridge it had declared dead (the bridge then re-sends the settings and landing figures). |
+| `!HW,<lcd>,<rpol>,<sbaud>,<ssuf>,<keys>` | The hardware facts the Mega is **actually running with** (*Hardware facts* below): the LCD backpack address that answered, two uppercase hex digits (`00` = none answered); the relay drive level (`0` active-high, `1` active-low); the scanner baud code (`0` auto, not yet locked; `1` 9600, `2` 19200, `3` 38400, `4` 57600, `5` 115200); the scanner line end (`0` auto, `1` CR/LF only); the unarmed-forward key mask, two uppercase hex digits. Sent once the LCD is initialised, after every `!DIAG`, and whenever one of them changes. Any other value is `BADARG`. |
 | `!PONG` | Unchanged; a 3.0.0 Mega always sends the five-argument form. |
 
 Direction is part of the grammar: the Mega's decoder refuses an uplink verb and the bridge's a
@@ -498,9 +500,11 @@ reintroduce a stuck screen.
 5. **The scan feedback** (`CHECKING CODE` / `PLEASE WAIT`) holds `SCANH` seconds, under the
    ceiling; with the bridge dead it is `NO CONNECTION` / `SEE THE DESK` instead, because there
    is nobody to check the code (FWM-08, DL-10).
-6. **The scanner assembler discards a partial line** after 150 ms with no byte, so one stray
-   byte is never glued onto the next member's code (FWM-14). A 9600-baud scanner streams a
-   whole code in about 25 ms.
+6. **The scanner assembler ends a line on CR, LF or an idle gap** of `SGAP` ms (default 150).
+   At the gap, a partial line of at least 8 printable characters is a scan (a scanner configured
+   with no suffix still works, HW-5) and anything shorter is discarded, so one stray byte is never
+   glued onto the next member's code (FWM-14). With `SSUF` 1 the gap only discards. A 9600-baud
+   scanner streams a whole 19-character code in about 20 ms with no gap inside it.
 
 ### The landing screen, composed on the Mega
 
@@ -531,7 +535,8 @@ what the Mega and the console's preview are tested against.
   HD44780 initialisation and a full repaint every `REINIT` seconds and on every return to
   landing, so a nibble desync that no bus timeout reports is corrected within a minute. During a
   bus holdoff the Mega's notion of the glass is "unknown", never "landing". At boot it probes
-  the backpack at 0x27 and falls back to 0x3F (FWM-10).
+  the backpack (`LCDA`, *Hardware facts* below) and reports the address that answered (FWM-10,
+  HW-2).
 
 ### The marquee
 
@@ -562,8 +567,61 @@ doubt**: at boot, while the bridge is dead, and for any `LAYOUT` value but 0 or 
 | `HINT` | the Mega's own hint, s | 1–10 | 3 | `lcd_hint_seconds` (BR-15: the setting finally reaches the glass) |
 | `SCANH` | scan feedback hold, s | 3–60 | 10 | `lcd_revert_seconds` (FWM-16) |
 | `CAP` | relay authorisation cap, minutes | 90–720 | 240 | `relay_authorisation_cap_minutes` |
+| `RPOL` | relay drive level: 0 active-high, 1 active-low | {0, 1} | the compiled `RELAY_ACTIVE_LOW` (0) | `hw_relay_active_level`, per-board override |
+| `LCDA` | LCD backpack address: 0 probe, else the address | {0, 32–39, 56–63} | 0 | `hw_lcd_i2c_address`, per-board override |
+| `SBAUD` | scanner baud: 0 auto, 1–5 as `!HW` | {0–5} | 0 | `hw_scanner_baud`, per-board override |
+| `SSUF` | scanner line end: 0 CR/LF or gap, 1 CR/LF only | {0, 1} | 0 | `hw_scanner_line_end`, per-board override |
+| `SGAP` | scanner idle gap, ms | 50–500 | 150 | `hw_scanner_gap_ms`, per-board override |
+| `KEYS` | keys forwarded as `!BTN` while the button window is shut, bit *i* = key *i* | 0–255 | 15 (`0x0F`) | derived by the bridge from `button_map` |
 
-`CEIL`'s upper bound is `kShowHoldMaxSeconds` and a `static_assert` holds the two together.
+`CEIL`'s upper bound is `kShowHoldMaxSeconds` and a `static_assert` holds the two together. A
+value outside an **enumerated** key's set (`LAYOUT`, `MARQ`, `RPOL`, `LCDA`, `SBAUD`, `SSUF`) is
+refused (`!ACK,<tag>,2`) and changes nothing; every other key clamps.
+
+### Hardware facts the Mega must never have compiled in (addendum, 2026-11-13)
+
+A late analysis (`HW-1`…`HW-11`) found that every hardware fact the court box fixed at build
+time was evidenced by a sentence, an old sketch or a photo nobody can find, and that the one
+that matters most — the relay drive level — was a single constant whose failure mode was every
+court lit all night. On the last Mega image each becomes a `!CFG` key with a safe boot default,
+delivered by the backend per board ([`device-api.md`](device-api.md) §12), and each effective
+value is reported back in `!HW`.
+
+- **A relay is released by making its pin an input, never by driving it** (HW-1). Off is
+  `DDR = 0` first, then `PORT = 0` (at worst a momentary weak pull-up, which is off for either
+  module); on is `PORT = <level>`, then `DDR = 1`. A high-Z input is **off for both** a
+  low-trigger module (input pulled to VCC) and a high-trigger one (an LED or transistor to GND),
+  so **a wrong `RPOL` fails dark, never lit**: "on" drives the module's own idle level. This is
+  why `RPOL` can be changed remotely and at any time: on a change the Mega re-drives every closed
+  relay at the new level, and an open relay stays an input. It also removes the need for the
+  pull-down the 2.1.0 notes asked an installer to fit, which the wiring rule forbids. `RPOL` is
+  RAM, reset to the compiled default at boot like every `!CFG` key; the bridge persists the
+  board's value and re-sends the whole set before any relay frame after every `!BOOT`.
+- **The LCD address is probed, not assumed** (HW-2). With `LCDA` 0 the Mega tries 0x27, then
+  0x3F, then 0x20–0x26 and 0x38–0x3E, in that order, at boot and on every re-init after a bus
+  error, and drives the first that ACKs. Each probe is bounded by the bus timeout, so the worst
+  case (sixteen timeouts) stays inside the 8 s boot watchdog. `00` in `!HW` means nothing
+  answered: the console shows a dead glass instead of a blank one nobody reports. A non-zero
+  `LCDA` drives that address only. Geometry has no readback on an HD44780, so it stays the
+  `LAYOUT` setting, compact on any doubt.
+- **The scanner's baud is found, not assumed** (HW-5). With `SBAUD` 0 the Mega starts at 9600
+  and, **only while idle** (no overlay, no bridge-pending press), moves to the next rate in the
+  order 9600 → 115200 → 57600 → 38400 → 19200 → 9600 after three consecutive bursts that are
+  garbage (any byte outside 0x20–0x7E other than CR and LF, or a framing error); it **locks** at
+  the first rate that yields a clean scan, until reboot or a `!CFG,SBAUD`. A non-zero `SBAUD` is
+  that rate only. The line end is `SSUF`/`SGAP` (rule 6 above). The Mega never writes to the
+  scanner (TX16 may not be wired), so it cannot configure one.
+- **Which keys are court keys is the bridge's decision** (HW-7). 2.1.0 dropped every press of
+  pins 30–36 while the window was shut, a compiled split the backend's `button_map` could not
+  reach. 3.0.0 forwards an unarmed press as `!BTN` exactly when its bit is set in `KEYS`; an
+  unarmed press of any other key is dropped and ends the overlay with the hint (rule 2 above). The
+  bridge sets `KEYS` from `button_map`: every key whose meaning is not `minutes:N`. An armed press
+  is always forwarded. Nothing the Mega does with a press depends on what the press means.
+
+**The serial grammar is frozen with the Mega, and the bridge adapts.** No future bridge can add a
+verb, an argument or a key the 3.0.0 Mega understands; everything a later bridge may want from
+this Mega is the frames above and the bounded `!CFG` keys in the table. A later bridge that
+needs something else does it on the ESP side, or not at all.
 
 ### Bridge liveness
 
@@ -603,12 +661,17 @@ mask + CRC), FWM-07 (scan feedback from its own buffer), FWM-08, DL-10 (liveness
 FWM-10, FWM-19, BD-7 (layouts, compact fallback, 0x27/0x3F), FWM-12 (`MCUSR` in `!BOOT`),
 FWM-13 (hint deadline disarmed), FWM-14 (scanner idle timeout), FWM-15 (armed-press fallback),
 FWM-16 (`SCANH`), FWM-17 (no dead `LCD_PHYSICAL_*` flags; comments true), FWM-18, BR-20 (software
-marquee), FWM-20 (authorisation cap), FSF-12 (`!ON` never shortens), DL-14 (chain flag).
+marquee), FWM-20 (authorisation cap), FSF-12 (`!ON` never shortens), DL-14 (chain flag); and from
+the addendum HW-1 (relay released as an input, `RPOL`), HW-2 (address probe, `LCDA`, NACKs
+counted), HW-5 (`SBAUD` auto-detect, gap-terminated lines), HW-6 (`MCUSR` kept, `!HW`), HW-7
+(`KEYS`).
 FWM-11 (bootloader survives a watchdog reset) is a **bench** check before the flash, not code.
 
 **Bridge 3.0.0, on this link** — DL-01, FSF-01 (software TX queue, never drop), DL-06 (tagged
 acknowledgement), DL-02 (relay frames ahead of screens, `%21`), BR-05 (no relay frame before
 the Mega is heard), DL-08, BR-10 (no identity overlays), DL-13, FSF-10 (`!IDLE` every beat),
-BR-15 (`HINT`), FWM-01, DL-03, FSF-03, BR-03 (Mega boot is a reconcile trigger). The bridge's
+BR-15 (`HINT`), FWM-01, DL-03, FSF-03, BR-03 (Mega boot is a reconcile trigger); from the
+addendum, the hardware `!CFG` set before any relay frame after every `!BOOT`, `KEYS` derived from
+`button_map`, and `!BOOT`/`!HW`/`!DIAG` forwarded in the heartbeat's `mega` object (HW-3, HW-6). The bridge's
 behaviour off this link is [`device-api.md`](device-api.md) §4 and
 [`lights-controller.md`](lights-controller.md).

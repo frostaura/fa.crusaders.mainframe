@@ -26,6 +26,13 @@ own behaviour is [`door-gate.md`](door-gate.md); the Mega↔bridge wire is
    courts and loses no attendance.
 4. **The LCD layout is runtime-selectable** and the landing screen shows every court (§5).
 
+**The addendum (same day, after late gap reports).** Four more lanes found what the first draft
+of v3 had not: parsers that broke on one added field, budgets nobody pinned, hardware facts that
+were single compiled constants, and boards that reported nothing about their own health. So v3
+also makes the frozen firmware **forward-compatible for its whole life** (§11), moves every
+hardware fact the Mega had compiled in to a backend setting with a safe default and a bench
+procedure (§12), and makes every board report what only it can see (§13).
+
 This reverses the 2026-09-05 "hobby grade" decision's *no OTA, no runtime credential store*
 clauses, deliberately: their premise was that a USB reflash costs nothing, and the last-flash rule
 removed it. One per-tenant key, auto-registration and plain HTTP on the LAN stand.
@@ -62,7 +69,12 @@ v3 response field on the caps of **this** request:
   `gate-heartbeat-response-codes-full` plus every v3 object at its bound — measures 5022 bytes, and
   the backend lane pins it with a server-side size test because the gate family's vectors must be
   byte-identical to what the server serialises). The server keeps every body inside its contract by
-  dropping `code_keys` last-first, then `net`, then `ota` — never `courts`, `roster` or `config`.
+  dropping `code_keys` last-first (they are written in priority order, §11.4) — never `courts`,
+  `roster`, `config` or the lifeline objects `ota`, `key_next` and `net`. If a future field ever
+  made the rest of a body exceed its budget with every key dropped, the server alternates a
+  **lifeline-only** body (§11.1) with the full one rather than drop the lifeline. The widest gate
+  body, with the v3 gate object's two fault settings, measures **5085** bytes. Every budget, both
+  directions, every endpoint, is the `compat/` family's `budgets` (§11.4).
 
 ---
 
@@ -81,9 +93,15 @@ After the 2.x fields (`mac`, `firmware_version`, `uptime_ms`, the gate's `kind`,
 | `lcd_layout` | box | The layout the Mega has **acknowledged** (`compact`/`expanded`), so the console can say what the glass is actually doing. Absent until a `!CFG,LAYOUT` was acknowledged this Mega boot. |
 | `restore` | both | First accepted beat of a boot only: `warm` (a non-power reset; state carried in RTC memory with a valid clock), `cold` (a power-on reset that used the flash copy inside the trust window, §4), `none`. |
 | `relight` | box | `"<relay>|<ref>"` for every relay the bridge re-lit **from the snapshot** since the last accepted beat. Replaces `restored_relays`, which a v3 box never sends. |
+| `mega` | box | What the Mega said about itself this Mega boot (§13): `reset` (`MCUSR` from `!BOOT`), `lcd`, `relay`, `scan_baud`, `scan_end`, `keys` (from `!HW`), `diag` (the five `!DIAG` counters). Absent until the Mega has been heard. |
+| `diag` | both | The board's own health (§13): reset reason, exception, heap, largest free block, stack low-water mark, OTA space, flash size. Every beat. |
+| `drift` | both | Up to eight names of keys the board could not read in the **previous** answer (§11.2), e.g. `"roster"`, `"config.lcd_layout"`; absent when there were none. How a server change that a frozen reader cannot follow is found within one beat instead of at the club. |
 
-Pinned: `http/` `v3-heartbeat-request`, `-first-beat`, `-rolled-back`, `-relight`; `gate/`
-`gate-heartbeat-request-v3`, `-cold-restore`, `-rolled-back`.
+The request renders into a **1536**-byte buffer on both v3 boards (bridge 2.3.0: 256); the widest,
+`v3-heartbeat-request-widest`, is 1023 bytes.
+
+Pinned: `http/` `v3-heartbeat-request`, `-first-beat`, `-rolled-back`, `-relight`, `-telemetry`,
+`-widest`; `gate/` `gate-heartbeat-request-v3`, `-cold-restore`, `-rolled-back`, `-telemetry`.
 
 ---
 
@@ -104,7 +122,10 @@ After the 2.x keys, in this order: `server_time`, `tenant_slug`, `device_code`, 
 One element per **mapped** relay of `court_numbers`, in relay order, **always complete**:
 `<relay>|<lit>|<seconds_left>|<kind>|<ref>`.
 
-- `lit` 1 means some checked-in, not-cancelled booking is in play on that court **now**.
+- `lit` 1 means some checked-in, not-cancelled booking is in play on that court **now** — and "in
+  play" starts at `StartsAt − activation_cue_window_minutes`, the same window `/activate` lights
+  in. A booking lit during its cue window is in the snapshot from the moment it is lit (MCV1-05:
+  v2's `StartsAt <= now` left it out, and a power cut in those minutes left it dark).
 - `seconds_left` is the **uncapped** paid remainder to the end of the **chained run** — the booking
   in play plus every checked-in booking that starts where the previous one ends (an extension is a
   separate booking from the end of play, `decisions-court-box-extend`), up to 16 links, the same
@@ -127,7 +148,12 @@ One element per **mapped** relay of `court_numbers`, in relay order, **always co
   watchdog reset opened every relay (BD-2, BR-03, FSF-03). Releases are matched **by court**, not
   by device.
 
-Pinned: `http/` `v3-heartbeat-response-snapshot`, `-unacknowledged`, `-widest`.
+- **Element arity is frozen and may only grow at the end** (§11.2): a v3 board reads the first five
+  fields and ignores any after them; new per-element data goes in a new field at the end or a new
+  parallel array, never in place of one of these five.
+
+Pinned: `http/` `v3-heartbeat-response-snapshot`, `-unacknowledged`, `-widest`; `compat/`
+`court_box` (the tolerance cases).
 
 ---
 
@@ -159,6 +185,17 @@ body that is not a complete JSON object is never applied at all (BR-02, FSF-04).
   released with cause `mega_reset`.
 - **The landing's minutes** come from the same snapshot: `!LAND` per relay after every accepted
   beat, so a chained extension past the 90-minute cap shows its whole paid remainder.
+- **Ages never go negative.** Every age the bridge computes from two of its own instants is
+  `now − then` with `then` stamped no later than `now`; a `then` that reads as later (stamped
+  after `now` was read in the same pass) is age 0, never a 49-day wrap. A court whose `!ON` was
+  sent less than the reconcile grace ago is never reconciled as released. MCV1-01: the first
+  online activation after a boot emitted a release with `duration_ms` 4294967272 and the server
+  dropped the court from the restore.
+- **A v3 bridge on a pre-v3 server** (no `courts`) applies `relays` exactly as 2.3.0 did, once per
+  boot and ON only, with one change: the restore is spent only by a **complete** body whose
+  `relays` was read and whose `court_numbers` was adopted (this beat or earlier). A cut, empty,
+  HTML or BOM-prefixed 2xx, or an unreadable court list, leaves it pending for up to ten minutes
+  of uptime (FC-2, BR-02).
 
 **What the bridge persists to flash** (LittleFS; written when the content changes, at most once a
 minute for the snapshot, so wear is negligible; each record carries its own check digits and a
@@ -170,6 +207,12 @@ damaged one reads as absent):
 | the roster and member-code sync | offline scans after a power cut, under the same trust window |
 | **every undelivered event** (activations, releases, faults) — written on push, cleared on the server's `accepted_through` | a power cut with the network down no longer turns members who played into no-shows (BR-07) |
 | the network set and keys (§6, §8), the OTA state (§7) | how the box reaches the club |
+
+**Flash writes happen only at the top of `loop()`.** A record that changed is marked dirty where
+it changed and written by the loop itself, never from inside a parse, a decision or an event push.
+On the ESP8266 the deepest stack in the image is a LittleFS write with directory compaction
+(about 3.8 KB of a 4 KB continuation stack when reached from inside a scan decision, ESPR-1);
+from the top of `loop()` the same write sits about 900 bytes shallower.
 
 **Warm and cold.** After a non-power reset (watchdog, exception, software restart) the ESP's RTC
 memory survives and its RTC counter keeps time, so every age continues and the trust window does
@@ -188,7 +231,7 @@ recorded (BD-5).
 
 ---
 
-## 5. The display settings
+## 5. The display and hardware settings
 
 Inside `config`, read one level deep like the 2.x settings, each **clamped independently** by the
 bridge (a bad value never costs its neighbours) and passed to the Mega as the `!CFG` key in
@@ -209,6 +252,11 @@ brackets. Every number is a `tenant_settings.<key>` with validation and an admin
 | `device_power_restore_trust_minutes` | 20 | 0–120 | — | §4; 0 disables cold restore. Also the gate's. |
 | `device_net_fallback_minutes` | 10 | 3–60 | — | §8. Also the gate's. |
 | `device_ota_probation_minutes` | 10 | 3–60 | — | §7. Also the gate's. |
+| `hw_relay_active_level` | `high` | `high` · `low` | `RPOL` | §12. **Per-board override.** Unknown → no change. |
+| `hw_lcd_i2c_address` | 0 | 0 (probe) · 32–39 · 56–63 | `LCDA` | §12. **Per-board override.** Unknown → no change. |
+| `hw_scanner_baud` | 0 | 0 (auto) · 9600 · 19200 · 38400 · 57600 · 115200 | `SBAUD` | §12. **Per-board override.** Unknown → no change. |
+| `hw_scanner_line_end` | `auto` | `auto` · `crlf` | `SSUF` | §12. **Per-board override.** Unknown → no change. |
+| `hw_scanner_gap_ms` | 150 | 50–500 | `SGAP` | §12. **Per-board override.** |
 
 `lcd_hint_seconds` (`HINT`) and `lcd_revert_seconds` (`SCANH`) are the 2.x settings, now delivered
 to the Mega as well (BR-15, FWM-16). The **per-board override** for layout and marquee is three-
@@ -218,8 +266,12 @@ layout the Mega acknowledged in `lcd_layout` (§2), so the console can show "sho
 18:05" or "asked for expanded, box still compact", and a one-press "Back to compact" is always one
 heartbeat from taking effect — and a box that cannot reach the server is compact already.
 
-Pinned: `http/` `v3-heartbeat-response-display-expanded`, `-display-out-of-range`; the glass
-itself, `display/`.
+The five `hw_*` keys follow the thirteen display keys, in the table's order, before `button_map`.
+The bridge also derives the Mega's `KEYS` mask from `button_map` (every key whose meaning is not
+`minutes:N`) and sends it with the set.
+
+Pinned: `http/` `v3-heartbeat-response-display-expanded`, `-display-out-of-range`, `-hardware`;
+the glass itself, `display/`.
 
 ---
 
@@ -366,9 +418,16 @@ left alone for 30 s; then the board disconnects and reconnects on its next profi
 reconnecting for good after some disconnect reasons (DG-3) and the ESP8266 is no better; a restart
 is safe on both — the Mega holds its relays, and the gate writes LOCKED before it drives.
 
+**The stall watchdog** (HW-8), on both chips, beside the supervisor: if the link is **up** but no
+heartbeat has been accepted for **six hours** (a radio or lwIP state that keeps yielding, which no
+hardware watchdog ever trips), the board restarts itself the next time it is idle (§7, step 2's
+rule), at most once per six hours, and reports `diag.reset: software` on the next accepted beat.
+Like the supervisor's timings it is a recovery mechanic, not a club preference, so it is a
+contract constant and not a tenant setting.
+
 ---
 
-## 9. Two smaller v3 fields
+## 9. Smaller v3 fields
 
 - **`/activate` answers `play_remaining_seconds`** beside `granted_seconds`: the uncapped time to the
   end of the chained run. `granted_seconds` stays capped at 5400 for the relay; the bridge arms its
@@ -378,6 +437,12 @@ is safe on both — the Mega holds its relays, and the gate writes LOCKED before
 - **Release events carry `cause`**: `member`, `autooff`, `cap`, `mega_reset` or `reconcile`; absent
   reads as `member` (every 2.x box). §3 says what the snapshot does with it. Pinned:
   `v3-events-request-release-cause`.
+- **An implausible release never pairs.** A release whose `duration_ms` exceeds the longest a relay
+  can stay closed (`relay_authorisation_cap_minutes` at its upper bound, 720 minutes, plus a
+  minute) is a box's arithmetic error, not a member leaving: it is receipted and audited
+  (`device.release_implausible`) and never removes a booking from the snapshot (MCV1-01).
+- **The events reply is frozen** at `{"accepted_through": <seq>, "recorded": <n>}` and at most 96
+  bytes: every firmware reads it into 192 (FC-5). New information goes in the heartbeat.
 
 ---
 
@@ -398,6 +463,16 @@ wording, and reads back after a save.
   with the acknowledged layout and since when, and a one-press *Back to compact*; firmware — running
   version against the latest release of its target, `fw_state`, failed versions, and the Mega's
   version and last reset cause (FA-12); key status (§6); network version and source (§8); caps.
+- **Boards, per board, hardware** (§12): the five `hw_*` overrides (club / a value) beside what the
+  Mega reports it is actually running with (`mega.lcd`, `mega.relay`, `mega.scan_baud`,
+  `mega.scan_end`, `mega.keys`), *no LCD answered* as an attention state, and the bench procedure's
+  steps as a checklist; health (§13): last reset reason in plain words, free heap and largest block
+  against the planning floor, stack low-water mark, OTA space, the `!DIAG` counters' rises, and a
+  *could not read part of the server's answer* notice while `drift` is reported.
+- **Member codes › Rollout** (FA-3, MCV1-03, MCV1-09): the phase, the boards blocking cut-over —
+  including every enabled court box that is unacknowledged — with *Acknowledge* and *Disable*
+  beside each, the manual hold, and the keys each acknowledged board was last sent and how many
+  were trimmed ([`member-code.md`](member-code.md) §8).
 - **Boards › Device key**: *Rotate key* (replacing *Regenerate*), per-board status, *Retire old key*
   (blocked or typed-confirmed as §6 says), *Restore a key* (owner only).
 - **Boards › Club network**: the two WiFi profiles (passwords write-only) and the server base URL,
@@ -414,7 +489,219 @@ wording, and reads back after a save.
 
 ---
 
-## 11. Decided against, and deferred
+## 11. Forward compatibility for the life of the frozen firmware
+
+The Mega 3.0.0 image is the last that chip will ever get. Each ESP image can be replaced over the
+air — but only for as long as its heartbeat parser, its key ring and its OTA download keep working
+against whatever server it meets next. A server change that breaks any of those three strands the
+fleet on its current image for good, with no cable flash left to fix it. So the contract binds
+**both** sides for the life of the firmware, and the late analysis found every place it did not
+(FC-1…FC-13).
+
+### 11.1 The lifeline
+
+The **lifeline** is the bearer key and `key_next` (§6), `net` (§8), the `ota` offer and the
+firmware download (§7), and the bare heartbeat that carries them. Its rules are **append-only
+forever**: no field is renamed, retyped or removed; the offer grammar, the manifest text, the
+download path and the bearer header stay exactly v3's; a later server may add fields to these
+objects, and a v3 board ignores them.
+
+- **The lifeline is read independently of everything else.** A board adopts `ota`, `key_next` and
+  `net` from any complete object, even when its `config`, `courts`, `roster` or member-code keys
+  are in a grammar the board no longer understands (`compat/` `cb-lifeline-with-drifted-rest`).
+- **The server never starves it.** Budget pressure sheds member-code keys first and never a
+  lifeline object; if the rest of a body could ever not fit with every key shed, the server
+  alternates a **lifeline-only** body — `server_time`, `tenant_slug`, `device_code`,
+  `heartbeat_seconds` and the lifeline objects — with the full one (`http/`
+  `v3-heartbeat-response-lifeline-only`). Absent is "no opinion", so the board keeps everything
+  else.
+- **Probation commits on an accepted beat, not a readable one**: a new image is committed by a 2xx
+  complete object (§7 step 5), so an image whose roster reader is broken can still be replaced by
+  the next.
+
+### 11.2 How a v3 board reads a server body
+
+Every rule here is code in `compat/gen_cases.py` and a vector in `compat/cases.json`.
+
+1. **One complete object.** A UTF-8 BOM and leading whitespace are skipped and whitespace between
+   tokens is tolerated; anything that is not one complete object — cut, HTML, a top-level array,
+   empty, nested past 32 levels, or as long as the board's buffer — adopts **nothing** and spends
+   nothing (no restore, no probation, no clock). The server sends compact JSON with no BOM, no
+   newline and nesting at most three deep (body → object → array).
+2. **Known keys are read only where they live.** Top-level keys at the top level; `config` keys
+   one level inside `config` (`button_map` included — never by a flat search of the whole body,
+   FC-7); the gate's settings as scalars at the top level of `gate` (a nested object there is never
+   a setting, FC-12); a lifeline object's fields inside that object. An unknown key, of any JSON
+   kind, at any position, is skipped whole. Duplicate keys resolve first-wins; the server never
+   emits one.
+3. **Kinds are exact.** An integer setting is a JSON integer literal: a fraction, an exponent, a
+   quoted number, a negative (for an unsigned field) or a bool reads as **absent** — the previous
+   value is kept and the key is reported in `drift` — never truncated (FC-11: 2.3.0 read 45.9 as
+   45 and 4.5e1 as 4). A bool is `true` or `false` only. An out-of-range integer clamps.
+4. **Enumerations fall to safe.** An unknown `lcd_layout` is compact; an unknown value of any other
+   enumerated setting keeps the current value — in particular a relay drive level is never flipped
+   by a value the board does not know.
+5. **Element grammars only grow at the end** (FC-1). Each `|`-separated element is read by its
+   first *N* fields — roster 4, `courts` 5, `relays` 3, `code_days` 2 — and anything after them is
+   ignored; a `code_keys` element is its first 21 characters, followed by nothing or by `|`.
+   Unreadable elements are skipped one by one. **A non-empty array of which nothing was readable
+   keeps the previous value** and is reported in `drift`: a grammar the board does not know is
+   never committed as "no bookings" or "no keys". An explicit `[]` is committed (empty roster,
+   empty key ring — the withdrawal rule of [`member-code.md`](member-code.md) §5.2), except
+   `courts`, where an empty snapshot changes nothing (§4). `court_numbers` is positional, so one
+   unreadable element keeps the whole previous map.
+6. **Every 2xx is a success** (FC-4). 2.3.0 read any success but exactly 200 as a decided refusal
+   at walk-up and extend — the member was charged and the court stayed dark. For each endpoint:
+
+   | Endpoint | 2xx, readable | 2xx, unreadable | 401 | 408, 429, 5xx, no answer | other 4xx |
+   |---|---|---|---|---|---|
+   | heartbeat | adopted | nothing adopted; the link is up | retry once with the previous key (§6) | backoff | backoff |
+   | activate | decided by the body | **undecided**: the roster decides | undecided | undecided | undecided |
+   | walkup · extend | decided by the body | **undecided**: `BUSY` / `PRESS AGAIN`, scan **and nonce kept**, so the retry is the same purchase | undecided | undecided | decided refusal (the body's `error`, or unknown) |
+   | events | `accepted_through` released | nothing released, retried with backoff | — | backoff | backoff |
+   | gate | decided by the body | **undecided**: decided offline | undecided | undecided | undecided |
+
+   "Readable" means the fields the decision needs are present with the right kinds: `activated`
+   (and `granted_seconds` when true), `granted_minutes`, `extended_minutes`, `accepted_through`,
+   `opened` (and `unlock_seconds` when true). The server answers every device success with
+   exactly **200**; the table is what keeps a proxy or a later framework's 201 from charging a
+   member for a dark court.
+
+### 11.3 What the server must never do, and the tests that hold it
+
+The backend pins each of these with a test against its **real** serialisers, not the corpus:
+
+- every device success is status 200 exactly (`/heartbeat`, `/activate`, `/walkup`, `/extend`,
+  `/events`, `/gate`, `/pay-for`), and the firmware download is 200 with `Content-Length`;
+- device bodies are compact, ASCII (non-ASCII as `\uXXXX`), with no BOM, no newline, no duplicate
+  key and nesting at most three;
+- every numeric field of every device body is an integer kind and every flag a bool;
+- every element's arity: roster 4, `courts` 5, `relays` 3, `code_days` 2, `code_keys` 21
+  characters; `button_map` appears only inside `config`; the `gate` object holds scalars only;
+- the events reply has exactly its two keys;
+- each endpoint's widest real body stays inside its `compat/` `budgets` row, built at the **true**
+  widest (false bools, every number at its widest width, the 64-character slug, maximum court
+  digits — FC-3's complaint was a widest test that under-modelled all of these);
+- the server's shedding is **counted and surfaced**: every heartbeat whose `code_keys` were trimmed
+  records how many, shown per board, and raises a device notice the first time (FC-3: 2.x shed
+  keys silently with 20–50 bytes of headroom).
+
+### 11.4 Budgets
+
+`compat/cases.json` `budgets` is the single table: for each device, firmware generation and
+endpoint, the buffer the board reads into (or renders into, for a request) and the most the server
+may send (or the least it must accept). For every v3 response **the server's maximum is at most
+80% of the board's buffer**, so a field added later cannot reach the edge unnoticed. v3 court box:
+heartbeat 4096 of 5120, activate/walk-up/extend 300 of 512 (2.3.0: 384), events 96 of 192;
+heartbeat request 1536. v3 gate: heartbeat 6144 of 8192, scan decision 110 of 256 (1.x: 128),
+events 96 of 192. The C# suite asserts its widest bodies against `server_max`; each firmware suite
+asserts its compiled buffer constants equal `firmware_buffer`.
+
+**Key priority.** A v3 court box's key ring holds **64** keys (2.x: 24; MCV1-07 found booked
+members refused offline because the 24-key cap trimmed them). The server writes `code_keys` in
+priority order — slot-0 keys of entries whose window is already open, then by window start, slot-1
+keys last — so shedding last-first drops the least-needed. At the true widest body 42 fit; a
+realistic body fits all 64.
+
+### 11.5 The server's real replies, through the board's real parsers
+
+The corpus pins bytes somebody wrote down; it cannot notice that the server has started sending
+something else (FC-9). `make device-replay-check` closes that gap:
+
+1. The backend's `DeviceReplyEmitterTests` (Postgres-backed) drive the real endpoints through a
+   scenario matrix — a fresh box and an acknowledged one, every caps combination a 2.x and a v3
+   board send, empty and full rosters, a snapshot with a chained extension, an OTA offer, a key
+   rotation, a network change, the widest body, and each scan endpoint's grant and refusals — and
+   write each reply, when `DEVICE_REPLAY_DIR` is set, as `<endpoint>/<scenario>.json`:
+   `{"device": "court_box"|"door_gate", "caps": [...], "endpoint": "...", "status": 200,
+   "body_hex": "...", "expect": {...}}`, where `expect` is what the server knows it sent (court
+   numbers, snapshot elements, roster and key counts, the config values, the lifeline objects'
+   ids). It also writes `index.json`: `{"count": n, "files": [...]}`. Without the variable the
+   same test still runs and asserts every reply against its budget.
+2. The court box's `test_server_replies` and the gate's `test_gate_server_replies` (native) read
+   every file the index names, feed each body through the board's own adoption or classification
+   code exactly as the device would, and assert: the body is complete and inside the buffer,
+   `drift` is empty, and every `expect` value was adopted. They fail if they read fewer files than
+   the index declares, and if `DEVICE_REPLAY_DIR` is set and the index is missing.
+
+CI runs it on every push that touches `src/backend/**/Device*`, `src/iot/**` or
+`src/contracts/**`.
+
+## 12. Hardware facts, delivered at runtime
+
+Every fact the Mega fixed at build time was evidenced by somebody's sentence, an old sketch or a
+photo that is no longer on disk (HW-1…HW-11). On the last image each becomes a setting (§5's five
+`hw_*` keys, per board, sent in `config` and passed to the Mega as `!CFG`), with a default that is
+safe when it is wrong, and each effective value is reported back (`mega` in the heartbeat, from the
+Mega's `!HW`). The Mega's half is
+[`device-serial-protocol.md`](device-serial-protocol.md), *Hardware facts*.
+
+| Fact | Default | Wrong default means | Remote fix | Reported |
+|---|---|---|---|---|
+| Relay drive level | `high` (the 2.1.0 build) | courts stay **dark** when lit — never lit when off, because a released relay is an input | `hw_relay_active_level` | `mega.relay` |
+| LCD backpack address | probe 0x27, 0x3F, 0x20–0x26, 0x38–0x3E | nothing — the probe finds it | `hw_lcd_i2c_address` | `mega.lcd` (`00` = none answered) |
+| LCD geometry | compact (16×2) | nothing — compact is whole on either panel | `lcd_layout` | `lcd_layout` |
+| Scanner baud | auto from 9600 | nothing — auto-detect while idle | `hw_scanner_baud` | `mega.scan_baud` |
+| Scanner line end | CR, LF or a 150 ms gap | nothing — a suffix-less scanner works | `hw_scanner_line_end`, `hw_scanner_gap_ms` | `mega.scan_end` |
+| Which keys are court keys | from `button_map` | — | `button_map` (per board) | `mega.keys` |
+| Mega firmware and reset cause | — | — | — | `mega_version`, `mega.reset` |
+
+**What is still physical, and is a bench step, not a setting** — the button wiring order (remapped
+by `button_map` once observed), the relay module's part number, rating and output type and whether
+it switches a contactor coil or the load ([`../../memory/safety-relays.md`](../../memory/safety-relays.md)),
+the panel's real geometry, the bootloader surviving a watchdog reset (FWM-11), and the ESP8266's
+flash size. The procedure, step by step, is
+[`lights-controller.md`](lights-controller.md) *Commissioning the hardware facts*.
+
+## 13. What every board reports about itself
+
+After the last cable flash the club's only window into a board is its heartbeat. A field crash, a
+brown-out, a wedged LCD or a heap running out must be visible from the office, or it shows up as
+"the box is unreliable" (HW-3, HW-6, ESPR-2).
+
+**`mega`** (court box), absent until the Mega has been heard this Mega boot:
+
+| Key | From | Meaning |
+|---|---|---|
+| `reset` | `!BOOT` | `MCUSR`, two uppercase hex digits: bit0 power-on, bit1 external, bit2 brown-out, bit3 watchdog |
+| `lcd` | `!HW` | the backpack address that answered, two uppercase hex digits; `00` none |
+| `relay` | `!HW` | `high` or `low`, the level the Mega drives "on" at |
+| `scan_baud` | `!HW` | the rate in use; 0 while auto has not locked |
+| `scan_end` | `!HW` | `auto` or `crlf` |
+| `keys` | `!HW` | the unarmed-forward mask, two uppercase hex digits |
+| `diag` | `!DIAG` | `[lcd_errors, lcd_reinits, rx_overruns, ceilings, cap_offs]` since that Mega boot |
+
+**`diag`** (both boards), every beat:
+
+| Key | Meaning |
+|---|---|
+| `reset` | why this boot began: `power_on`, `external`, `software`, `exception`, `hw_wdt`, `soft_wdt` (ESP8266), `task_wdt`, `int_wdt`, `panic`, `brownout` (ESP32), `deep_sleep`, `unknown` |
+| `exc`, `epc1` | the exception cause and faulting address after an `exception`/watchdog reset on the ESP8266 (`ESP.getResetInfoPtr()`); 0 otherwise and on the ESP32 |
+| `heap`, `heap_min` | free heap now, and the lowest the loop has seen since boot |
+| `block` | the largest free heap block now |
+| `stack_min` | the lowest free stack since boot: the ESP8266's continuation stack (`ESP.getFreeContStack()`, never reset), the ESP32's loop task high-water mark, in bytes |
+| `sketch_free` | the space an OTA image can be staged into (the 4m2m OTA area; the ESP32's other app slot) |
+| `flash_mb` | the real flash size, in MB |
+
+Every value is a JSON integer except the named strings. The server stores the latest per board,
+shows them (§10), and raises a device notice when a board restarted for a reason other than
+`power_on`/`software`, when `block` falls below **4096** or `stack_min` below **512** (the planning
+floors: ESPR-6 measured the bridge's whole heap at 33,440 bytes with about 20–23 KB free in steady
+state, and its worst static stack path within about 300 bytes of the 4 KB continuation stack), and
+while `drift` is reported. The floors are contract constants for the same reason as the
+supervisor's.
+
+**A CI budget gate holds the margins** that this telemetry can only report after the fact
+(ESPR-4): the `court_bridge`, `door_gate` and `court_mega` CI builds compile with `-fstack-usage`,
+and `src/iot/tools/stack_budget.py` fails the build when — bridge — `loop()`'s own frame exceeds
+256 bytes, any project frame exceeds 512, or the computed worst path from `loop()` exceeds 3000 of
+the 4096-byte continuation stack (leaving room for the 256–624 bytes an interrupt adds on the
+same stack); gate — the worst path from `loopTask` exceeds 6000 of 8192; Mega — static RAM exceeds
+4096 of 8192 bytes. It also fails the bridge when static RAM leaves less than 24 KB of heap. The
+worst-path analysis resolves `-mlongcalls` literals, tail calls and vtable slots, and covers the
+SDK, lwIP and libc objects, as the analysis's `stackan.py` did.
+
+## 14. Decided against, and deferred
 
 - **No remote "switch a court off" in v3.** The Mega already obeys `!OFF`, so the capability can be
   added later by a server change and a bridge OTA alone, with no Mega flash; it is not on the

@@ -28,9 +28,10 @@ USB flash the Mega will ever get. The wire is
 [`device-serial-protocol.md`](device-serial-protocol.md) (v3) and the heartbeat
 [`device-api.md`](device-api.md).
 
-- **The panel size is not known, so the layout is a setting.** The code drives
+- **The panel size is not known, so the layout is a setting.** 2.1.0 drove
   the HD44780 at I2C 0x27 with 20×4 row offsets; the documents disagree between
-  a 1602 and a 2004A. `lcd_layout` (club default, per-board override) chooses
+  a 1602 and a 2004A. 3.0.0 probes the backpack's address (0x27, then 0x3F, then
+  the rest of both ranges) and reports which one answered. `lcd_layout` (club default, per-board override) chooses
   **compact** (rows 0–1, sixteen columns — whole on either panel) or
   **expanded** (20×4). The Mega boots compact, falls back to compact whenever
   the bridge is silent or sends a value it does not know, and the admin can
@@ -39,15 +40,17 @@ USB flash the Mega will ever get. The wire is
   software marquee on that one row (`lcd_marquee_enabled`), never the
   controller's display shift.
 
-- **Relays are ACTIVE HIGH.** The club fitted normally-open solid-state relays;
-  `court_mega` is built with `RELAY_ACTIVE_LOW=0`. The pin is still driven to
-  its released level (LOW) before it becomes an output, so a reset never
-  flashes a court on. Fit a pull-down on each SSR input so the bootloader's
-  high-Z second is a guaranteed off. The level mapping is one shared function,
-  `hal::relayLevelFor(on, polarity)`, host-tested for both polarities; the
-  native simulator is built with the Mega's own `RELAY_ACTIVE_LOW=0`, so its
-  transcript reads `(pin level HIGH)` for a lit court and the device e2e
-  asserts it.
+- **A released relay is an input, and the drive level is a setting.** The
+  club's relay modules are recorded only as "normally-open solid-state relays"
+  — no part number, trigger level or measurement — and a 4-channel SSR board is
+  sold in both high- and low-trigger versions ("normally open" describes the
+  output contact, not the input). So 3.0.0 releases a relay by making its pin an
+  input, which is off for **either** module type, and drives only "on", at
+  `hw_relay_active_level` (default `high`, the 2.1.0 build's). A wrong level
+  therefore fails **dark**, never lit, and is corrected from the console in one
+  heartbeat. **No pull-down is fitted**: none is needed, and the wiring is not
+  ours to change. The level mapping stays one shared function,
+  `hal::relayLevelFor(on, polarity)`, host-tested for both polarities.
 - **Landing screen (Mega-owned, composed from its own relay deadlines and the
   server's snapshot):** `SCAN YOUR QR CODE` (compact: `SCAN YOUR QR`) and every
   mapped court's state and minutes of light left — paid chained extensions
@@ -105,7 +108,49 @@ USB flash the Mega will ever get. The wire is
 - **No reflash for an operator change.** WiFi, server address and device key
   change from the console or at the setup portal (hold court A and court D for
   five seconds within a minute of power-on); the bridge updates itself from
-  signed releases the club uploads.
+  signed releases the club uploads. Every hardware fact the Mega used to have
+  compiled in — relay level, LCD address, scanner baud and line end, which
+  buttons are court buttons — is a per-board setting
+  ([`device-api.md`](device-api.md) §12).
+
+### Commissioning the hardware facts (bench, then at the club)
+
+Each step is a person looking at something; the console shows what the box says
+it is running with (`mega` in the heartbeat) beside the setting. Do them in
+order, after Mega 3.0.0 and bridge 3.0.0 are flashed and the box is heartbeating.
+
+1. **Record the relay module before power is applied.** Photograph its markings
+   and write down the part number, trigger level, rating, output type (triac/AC
+   or MOSFET/DC) and **whether it switches a contactor coil (and that coil's
+   supply) or the lighting load** — the open electrical question in
+   `memory/safety-relays.md`. A triac SSR cannot switch a DC coil off; if that is
+   what is fitted, stop: it is an electrician's question, not a setting.
+2. **Prove that off is off.** With the box powered and nothing booked, every
+   court must be dark: every relay pin is an input, which is off for either
+   module type. A court that is lit now means a module that is neither, or a
+   wiring fault — stop. Power-cycle the box twice and watch the courts through
+   the bootloader's second: none may flash. (Whether a high-Z input near mains
+   wiring picks up enough to half-drive an SSR is a scope check on this step.)
+3. **Find the drive level.** Light court A the normal way (a test member's
+   walk-up). Lit: the level is right. Dark while the glass says the court is on:
+   set the board's *Relay drive level* to `low`, wait one heartbeat — the Mega
+   re-drives every closed relay at the new level — and court A lights. Then
+   switch it off and confirm dark. Repeat for B, C and D; a crossed channel is
+   fixed by the court map, never by a wire.
+4. **The glass.** *LCD address* reads the backpack that answered (`00` means
+   none did: check the four wires and the backpack's contrast pot before
+   anything else). Look at the panel: two rows of sixteen is `compact`, four of
+   twenty is `expanded`; set the club's `lcd_layout` to match.
+5. **The scanner.** Scan a member code; *Scanner* reads the baud the Mega
+   locked on and whether lines end on CR/LF or on the gap. Nothing arrives:
+   set the baud explicitly (9600, then 115200) before suspecting the scanner.
+6. **The buttons.** Press each of the eight unscanned and note which court or
+   time the glass names; if the order is not the assumed 22–28 courts / 30–36
+   times, set this board's button map to what you saw.
+7. **Write down what you found** (part numbers, the level, the address, the
+   panel size, the scanner model and suffix, the button order) in the go-live
+   checklist's commissioning entries, and the relay facts in
+   `memory/safety-relays.md`, so the next person does not re-derive them.
 
 [Superseded design] The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
 

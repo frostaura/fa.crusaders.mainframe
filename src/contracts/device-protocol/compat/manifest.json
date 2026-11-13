@@ -1,6 +1,6 @@
 {
   "description": "Forward compatibility for the frozen firmware: budgets both sides hold every device body to, and what a v3 court box and a v3 door gate adopt from bodies a later server might send.",
-  "authority": "docs/specs/device-api.md section 12; gen_cases.py beside this file is the reference implementation.",
+  "authority": "docs/specs/device-api.md section 11; gen_cases.py beside this file is the reference implementation.",
   "generator": "src/contracts/device-protocol/compat/gen_cases.py",
   "read_by": {
     "budgets": [

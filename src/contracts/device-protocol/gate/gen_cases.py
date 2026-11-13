@@ -478,7 +478,7 @@ NET = {"ver": 4, "base": "http://192.168.1.20:8088", "wifi0_ssid": "CRUSADERS", 
 V3_CAPS = ["codes:m1", "ota:1", "key:1", "net:1"]
 V3_GATE = {"unlock_seconds": 15, "power_restore_trust_minutes": 20, "net_fallback_minutes": 10,
            "ota_probation_minutes": 10, "device_fault_reporting": True, "device_fault_max_per_hour": 60}
-# The gate's telemetry (docs/specs/device-api.md section 14): the same `diag` object as the court
+# The gate's telemetry (docs/specs/device-api.md section 13): the same `diag` object as the court
 # box's, sent on every beat after the v3 fields and before caps.
 V3_DIAG = {"reset": "task_wdt", "exc": 0, "epc1": 0, "heap": 151552, "heap_min": 139264, "block": 110592,
            "stack_min": 4416, "sketch_free": 1310720, "flash_mb": 4}
