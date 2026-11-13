@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { CheckCircle, Info, Warning, WarningCircle, X, type Icon } from "./ui/icons";
 import { toastReadingMs } from "./toastTiming";
@@ -73,8 +73,12 @@ export function ToastProvider({ children, routeKey }: { children: React.ReactNod
   }, []);
 
 
+  // One value for the life of the provider: it re-renders on every change of page now (BM-14),
+  // and a fresh object each time would re-render every `useToast` caller — the whole grid.
+  const value = useMemo(() => ({ push }), [push]);
+
   return (
-    <ToastContext.Provider value={{ push }}>
+    <ToastContext.Provider value={value}>
       {children}
       <ToastViewport toasts={toasts} onDismiss={remove} />
     </ToastContext.Provider>
