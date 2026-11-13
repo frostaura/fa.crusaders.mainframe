@@ -46,6 +46,9 @@ BP-01, browser BM-01/03/20/21, all reproduced before the fix.
   recipient is `recipient_inactive`. The two durations are delivery mechanics, so constants.
 - **The organiser is mailed a decline or withdrawal** (`players.response`, not urgent); a part
   payment mails only the shortfall, whose subject says "paid 6 minutes of their 10 minutes share".
+- **Trap met on the way:** a new mail template needs an `EmailCatalogue` entry named exactly as the
+  method, a new mirror event needs the picker, `feature-spec.md` §9 and the blueprint (pinned by
+  `RepositoryPostureTests`), and "credit" in an identifier fails `MinutesSourceScanTests`.
 - **Not done here:** BM-9 (mixed wire case) needs the frontend lanes to switch reads first; the
   binding founder decisions of this pass (last physical flash, OTA, snapshot) live in the device-v3
   decisions topic, not in this lane.
