@@ -746,10 +746,10 @@ Set those, then **power-cycle the box**.
 
 | When | Glass |
 |---|---|
-| After the Mega upload, run DIPs | `CRUSADERS COURTS / SCAN TO START` — the Mega is alive |
+| After the Mega upload, run DIPs | `SCAN YOUR QR` / `STARTING UP` — Mega 3.0.0 is alive. `CRUSADERS COURTS / SCAN YOUR CODE` means the Mega upload did NOT land (that is the 2.1.0 image) |
 | During the bridge upload and monitor | **Nothing new.** DIP 1 and 2 are off, so the Mega is not on the other end of that UART. Watch the monitor, not the glass. |
-| Run DIPs restored, box on the WiFi | `CONNECTED / SCAN TO START` — and the box appears on the admin **Devices** page by itself within one heartbeat, with its court numbers against it |
-| Run DIPs restored, box **not** on the WiFi | `CRUSADERS COURTS / SCAN TO START` — the two halves are talking and the radio is not. Check the SSID and password in `secrets.h`. |
+| Run DIPs restored, box on the WiFi | `SCAN YOUR QR` / `READY` — and the box appears on the admin **Devices** page by itself within one heartbeat, with its court numbers and `mega_version` 3.0.0 against it |
+| Run DIPs restored, box **not** on the WiFi | `SCAN YOUR QR` / `NO WIFI` — the two halves are talking and the radio is not. Check the SSID and password in `secrets.h`. `OUT OF SERVICE` means they are not talking: check DIP 1 and 2. |
 
 If nothing ever appears, the two halves are not talking: check DIP 1 and 2.
 
