@@ -799,6 +799,7 @@ app.MapPlayEndpoints();
 app.MapAdminPlayEndpoints();
 app.MapMemberNotificationEndpoints();
 app.MapAdminConfigEndpoints();
+app.MapAdminPaymentEndpoints();
 app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();
 app.MapAdminLedgerEndpoints();
