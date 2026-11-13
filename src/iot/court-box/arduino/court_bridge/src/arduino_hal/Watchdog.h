@@ -46,6 +46,8 @@
 
 #ifdef TARGET_COURT_MEGA
 
+#include <stdint.h>
+
 namespace arduino_hal {
 
 /// Enable the watchdog with an EIGHT-second period, at the TOP of setup().
@@ -69,6 +71,9 @@ void watchdogBegin();
 /// to end. Also called between the init steps in setup(), which are sequential
 /// and bounded and so cannot hide anything.
 void watchdogKick();
+
+/// MCUSR as saved in `.init3` before anything cleared it (`!BOOT`'s cause).
+uint8_t resetCause();
 
 #ifdef WDT_BENCH_STALL
 /// Spins forever, so the bench can prove the watchdog and the bootloader.

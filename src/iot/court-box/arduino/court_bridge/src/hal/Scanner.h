@@ -49,6 +49,10 @@ public:
   ///
   /// Not const: taking a byte consumes it.
   virtual bool read(uint8_t& out) = 0;
+
+  /// Re-open the port at `baud` (Mega 3.0.0's scanner auto-detect, HW-5).
+  /// A port with a fixed rate — a console, a fake — ignores it.
+  virtual void setBaud(uint32_t baud) { static_cast<void>(baud); }
 };
 
 } // namespace hal

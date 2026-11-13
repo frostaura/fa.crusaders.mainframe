@@ -76,7 +76,18 @@ public:
   /// logical state. Out-of-range channels report the released level.
   hal::PinLevel level(uint8_t channel) const { return hal::relayLevelFor(isOn(channel), polarity_); }
 
-  hal::RelayPolarity polarity() const { return polarity_; }
+  hal::RelayPolarity polarity() const override { return polarity_; }
+
+  void setPolarity(hal::RelayPolarity polarity) override {
+    ++polarityCalls_;
+    polarity_ = polarity;
+  }
+
+  /// What a correct 3.0.0 driver does with the pin: an open channel is an
+  /// input, a closed one an output at the drive level now in force (HW-1).
+  hal::PinDrive drive(uint8_t channel) const { return hal::relayDriveFor(isOn(channel), polarity_); }
+
+  uint16_t polarityCalls() const { return polarityCalls_; }
 
   /// The same thing as the 0/1 a digitalWrite() would receive, for tests that
   /// want to assert the raw number rather than the enum.
@@ -148,6 +159,7 @@ private:
   bool overflowed_ = false;
   uint16_t badChannelCalls_ = 0U;
   uint16_t allOffCalls_ = 0U;
+  uint16_t polarityCalls_ = 0U;
 };
 
 } // namespace fakes

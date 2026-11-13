@@ -153,6 +153,91 @@ bool overlayFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
   return true;
 }
 
+/// "-" or a number, for the v3 opinion slots of `!WANT` and `!LAND`.
+int32_t opinionOf(const char* s) {
+  return eq(s, "-") ? proto::kNoOpinion : static_cast<int32_t>(toU32(s));
+}
+
+uint16_t hexOf(const char* s) {
+  uint16_t v = 0;
+  for (size_t i = 0; s[i] != '\0'; ++i) {
+    const char c = s[i];
+    v = static_cast<uint16_t>((v << 4) | static_cast<uint16_t>(c <= '9' ? c - '0' : c - 'A' + 10));
+  }
+  return v;
+}
+
+/// The v3 downlink verbs, from their named constructors.
+bool v3DownFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
+  const char* v = s.verb;
+  if (eq(v, "RW")) {
+    out = Frame::rw(static_cast<uint8_t>(toU32(s.args[0])), static_cast<uint8_t>(toU32(s.args[1])),
+                    static_cast<uint8_t>(toU32(s.args[2])), s.args[3]);
+  } else if (eq(v, "CMT")) {
+    out = Frame::cmt(static_cast<uint8_t>(toU32(s.args[0])), static_cast<uint8_t>(toU32(s.args[1])),
+                     toU32(s.args[2]), static_cast<uint8_t>(toU32(s.args[3])), hexOf(s.args[4]));
+  } else if (eq(v, "WANT")) {
+    const int32_t secs[4] = {opinionOf(s.args[1]), opinionOf(s.args[2]), opinionOf(s.args[3]), opinionOf(s.args[4])};
+    out = Frame::want(static_cast<uint8_t>(toU32(s.args[0])), secs);
+  } else if (eq(v, "CFG")) {
+    out = Frame::cfg(static_cast<uint8_t>(toU32(s.args[0])), s.args[1], toU16(s.args[2]));
+  } else if (eq(v, "LAND")) {
+    const int32_t secs[4] = {opinionOf(s.args[0]), opinionOf(s.args[1]), opinionOf(s.args[2]), opinionOf(s.args[3])};
+    out = Frame::land(secs);
+  } else if (eq(v, "NOTE")) {
+    out = Frame::note(toU32(s.args[0]), s.args[1]);
+  } else if (eq(v, "LIVE")) {
+    out = Frame::live(toU32(s.args[0]));
+  } else {
+    return false;
+  }
+  return true;
+}
+
+/// The v3 uplink verbs, from their named constructors.
+bool v3UpFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
+  const char* v = s.verb;
+  if (eq(v, "ACK")) {
+    const proto::AckCode code = static_cast<proto::AckCode>(toU32(s.args[1]));
+    out = s.args[0][0] == 'S' ? Frame::ackScreen(static_cast<uint8_t>(toU32(s.args[0] + 1)), code)
+                              : Frame::ack(static_cast<uint8_t>(toU32(s.args[0])), code);
+  } else if (eq(v, "BOOT")) {
+    out = Frame::boot(s.args[0], static_cast<uint8_t>(hexOf(s.args[1])), static_cast<uint8_t>(hexOf(s.args[2])));
+  } else if (eq(v, "HELD")) {
+    out = Frame::held(static_cast<uint8_t>(hexOf(s.args[0])), toU32(s.args[1]));
+  } else if (eq(v, "DIAG")) {
+    const uint16_t c[5] = {toU16(s.args[0]), toU16(s.args[1]), toU16(s.args[2]), toU16(s.args[3]),
+                           toU16(s.args[4])};
+    out = Frame::diag(c);
+  } else if (eq(v, "HW")) {
+    out = Frame::hw(static_cast<uint8_t>(hexOf(s.args[0])), static_cast<uint8_t>(toU32(s.args[1])),
+                    static_cast<uint8_t>(toU32(s.args[2])), static_cast<uint8_t>(toU32(s.args[3])),
+                    static_cast<uint8_t>(hexOf(s.args[4])));
+  } else {
+    return v3DownFrameFromSpec(s, out);
+  }
+  return true;
+}
+
+/// The four v2 relay/auth verbs, with v3's optional tag.
+bool taggedFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
+  const char* v = s.verb;
+  if (eq(v, "ON")) {
+    out = Frame::on(courtOf(s.args[0]), toU32(s.args[1]),
+                    s.argCount > 2U ? static_cast<uint8_t>(toU32(s.args[2])) : proto::kNoTag);
+  } else if (eq(v, "OFF")) {
+    out = Frame::off(courtOf(s.args[0]), s.argCount > 1U ? static_cast<uint8_t>(toU32(s.args[1])) : proto::kNoTag);
+  } else if (eq(v, "EXT")) {
+    out = Frame::ext(courtOf(s.args[0]), toU32(s.args[1]),
+                     s.argCount > 2U ? static_cast<uint8_t>(toU32(s.args[2])) : proto::kNoTag);
+  } else if (eq(v, "AUTH")) {
+    out = Frame::auth(toU16(s.args[0]), s.argCount > 1U ? static_cast<uint8_t>(toU32(s.args[1])) : proto::kNoTag);
+  } else {
+    return v3UpFrameFromSpec(s, out);
+  }
+  return true;
+}
+
 /// Build a Frame from a corpus FrameSpec using ONLY the named constructors.
 ///
 /// This is what proves the safety rule is not decorative: there is no generic
@@ -160,16 +245,8 @@ bool overlayFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
 /// for an ON frame without a duration even if a case tried to.
 bool frameFromSpec(const corpus::FrameSpec& s, Frame& out) {
   const char* v = s.verb;
-  if (eq(v, "ON")) {
-    out = Frame::on(courtOf(s.args[0]), toU16(s.args[1]));
-  } else if (eq(v, "OFF")) {
-    out = Frame::off(courtOf(s.args[0]));
-  } else if (eq(v, "EXT")) {
-    out = Frame::ext(courtOf(s.args[0]), toU16(s.args[1]));
-  } else if (eq(v, "LCD")) {
+  if (eq(v, "LCD")) {
     out = Frame::lcd(s.args[0], s.args[1]);
-  } else if (eq(v, "AUTH")) {
-    out = Frame::auth(toU16(s.args[0]));
   } else if (eq(v, "RST")) {
     out = Frame::rst();
   } else if (eq(v, "PING")) {
@@ -189,8 +266,8 @@ bool frameFromSpec(const corpus::FrameSpec& s, Frame& out) {
     out = Frame::evt(s.args[0], s.args[1]);
   } else if (eq(v, "ERR")) {
     out = Frame::err(errorOf(s.args[0]));
-  } else {
-    return overlayFrameFromSpec(s, out);
+  } else if (!overlayFrameFromSpec(s, out)) {
+    return taggedFrameFromSpec(s, out);
   }
   return true;
 }
@@ -539,7 +616,10 @@ void test_every_encoded_frame_round_trips(void) {
     const size_t n = proto::encode(original, wire, sizeof(wire));
     TEST_ASSERT_TRUE_MESSAGE(n > 0, c.id);
 
-    proto::Decoder d(Link::Downlink);
+    // Decoded on the link the verb travels: v3 made direction part of the
+    // grammar, so an uplink-only verb is refused on the downlink.
+    const proto::Dir dir = proto::specOf(original.verb()).dir;
+    proto::Decoder d(dir == proto::Dir::Up ? Link::Uplink : Link::Downlink);
     proto::Decoder::Result r;
     size_t results = 0;
     for (size_t k = 0; k < n; ++k) {

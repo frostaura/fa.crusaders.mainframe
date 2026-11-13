@@ -1,0 +1,286 @@
+// The court box's glass composition. See include/courtlogic/Glass.h; the
+// reference is src/contracts/device-protocol/display/gen_cases.py, and every
+// branch below names the Python it mirrors.
+
+#include "courtlogic/Glass.h"
+
+namespace courtlogic {
+
+namespace {
+
+constexpr char kCtaCompact[] = "SCAN YOUR QR";
+constexpr char kCtaExpanded[] = "SCAN YOUR QR CODE";
+constexpr char kOutOfService[] = "OUT OF SERVICE";
+
+/// A bounded string builder: appends until `cap - 1`, always NUL-terminated.
+class Text {
+public:
+  Text(char* buf, size_t cap) : buf_(buf), cap_(cap), len_(0U) {
+    if (cap_ > 0U) {
+      buf_[0] = '\0';
+    }
+  }
+  void put(char c) {
+    if (len_ + 1U < cap_) {
+      buf_[len_] = c;
+      ++len_;
+      buf_[len_] = '\0';
+    }
+  }
+  void put(const char* s) {
+    for (size_t i = 0U; s != nullptr && s[i] != '\0'; ++i) {
+      put(s[i]);
+    }
+  }
+  void putU32(uint32_t v) {
+    char digits[10];
+    uint8_t n = 0U;
+    do {
+      digits[n] = static_cast<char>('0' + static_cast<int>(v % 10U));
+      ++n;
+      v /= 10U;
+    } while (v != 0U && n < sizeof(digits));
+    while (n > 0U) {
+      --n;
+      put(digits[n]);
+    }
+  }
+  size_t size() const { return len_; }
+
+private:
+  char* buf_;
+  size_t cap_;
+  size_t len_;
+};
+
+size_t textLen(const char* s) {
+  size_t n = 0U;
+  while (s != nullptr && s[n] != '\0') {
+    ++n;
+  }
+  return n;
+}
+
+/// `text[:width].ljust(width)` into `row`.
+void padInto(char* row, const char* text, uint8_t width) {
+  uint8_t i = 0U;
+  for (; i < width && text != nullptr && text[i] != '\0'; ++i) {
+    row[i] = text[i];
+  }
+  for (; i < width; ++i) {
+    row[i] = ' ';
+  }
+  row[width] = '\0';
+}
+
+/// `center(text, width)`: cut to the width, left pad (width - len) / 2.
+void centerInto(char* row, const char* text, uint8_t width) {
+  size_t n = textLen(text);
+  if (n > width) {
+    n = width;
+  }
+  const uint8_t left = static_cast<uint8_t>((width - n) / 2U);
+  uint8_t c = 0U;
+  for (; c < left; ++c) {
+    row[c] = ' ';
+  }
+  for (size_t i = 0U; i < n; ++i, ++c) {
+    row[c] = text[i];
+  }
+  for (; c < width; ++c) {
+    row[c] = ' ';
+  }
+  row[width] = '\0';
+}
+
+/// `court_cell`: label left, state right, justified to the width; the label
+/// shortens (COURT 12 -> CT 12 -> 12) only when the two would not fit.
+void courtCellInto(char* row, const LandCourt& court, Layout layout) {
+  const uint8_t width = layoutWidth(layout);
+  char right[16];
+  Text r(right, sizeof(right));
+  if (court.lit) {
+    if (layout == Layout::Expanded) {
+      r.put("ON ");
+    }
+    r.putU32(minutesShown(court.seconds));
+    r.put(" MIN");
+  } else {
+    r.put("OFF");
+  }
+  for (uint8_t form = 0U; form < 3U; ++form) {
+    char label[16];
+    Text l(label, sizeof(label));
+    l.put(form == 0U ? "COURT " : (form == 1U ? "CT " : ""));
+    l.putU32(court.number);
+    if (l.size() + 1U + r.size() <= width) {
+      uint8_t c = 0U;
+      for (size_t i = 0U; i < l.size(); ++i, ++c) {
+        row[c] = label[i];
+      }
+      const uint8_t rightAt = static_cast<uint8_t>(width - r.size());
+      for (; c < rightAt; ++c) {
+        row[c] = ' ';
+      }
+      for (size_t i = 0U; i < r.size(); ++i, ++c) {
+        row[c] = right[i];
+      }
+      row[width] = '\0';
+      return;
+    }
+  }
+  char both[32];
+  Text b(both, sizeof(both));
+  b.putU32(court.number);
+  b.put(' ');
+  b.put(right);
+  padInto(row, both, width);
+}
+
+/// `court_item`: a court as a marquee item, compact wording, no padding.
+void courtItemInto(Text& out, const LandCourt& court) {
+  out.put("COURT ");
+  out.putU32(court.number);
+  if (court.lit) {
+    out.put(' ');
+    out.putU32(minutesShown(court.seconds));
+    out.put(" MIN");
+  } else {
+    out.put(" OFF");
+  }
+}
+
+/// `status_item`.
+void statusInto(Text& out, const LandingInput& in) {
+  if (in.status == LandStatus::Offline) {
+    out.put("SEE THE DESK");
+    return;
+  }
+  if (in.note != nullptr && in.note[0] != '\0') {
+    out.put(in.note);
+    return;
+  }
+  switch (in.status) {
+  case LandStatus::Ready:
+    out.put("READY");
+    if (in.clock != nullptr && in.clock[0] != '\0') {
+      out.put(' ');
+      out.put(in.clock[0]);
+      out.put(in.clock[1]);
+      out.put(':');
+      out.put(in.clock[2]);
+      out.put(in.clock[3]);
+    }
+    return;
+  case LandStatus::Starting:
+    out.put("STARTING UP");
+    return;
+  case LandStatus::NoWifi:
+    out.put("NO WIFI");
+    return;
+  case LandStatus::NoServer:
+    out.put("NO SERVER");
+    return;
+  case LandStatus::Offline:
+    return;
+  }
+}
+
+/// The paged items (courts then status) for the expanded layout and for the
+/// compact layout with the marquee off: item `index` of `count` into `row`.
+uint8_t pagedItemCount(const LandingInput& in) {
+  uint8_t n = 1U; // the status
+  for (uint8_t i = 0U; i < in.courtCount; ++i) {
+    if (in.courts[i].number > 0U) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+void pagedItemInto(char* row, const LandingInput& in, uint8_t index) {
+  uint8_t seen = 0U;
+  for (uint8_t i = 0U; i < in.courtCount; ++i) {
+    if (in.courts[i].number == 0U) {
+      continue;
+    }
+    if (seen == index) {
+      courtCellInto(row, in.courts[i], in.layout);
+      return;
+    }
+    ++seen;
+  }
+  char status[32];
+  Text s(status, sizeof(status));
+  statusInto(s, in);
+  padInto(row, status, layoutWidth(in.layout));
+}
+
+} // namespace
+
+uint32_t minutesShown(uint32_t seconds) {
+  const uint32_t m = seconds / 60UL + ((seconds % 60UL) != 0UL ? 1UL : 0UL);
+  return m > kMaxMinutesShown ? kMaxMinutesShown : m;
+}
+
+void marqueeWindow(const char* text, uint8_t width, uint32_t offset, char* out) {
+  const size_t n = textLen(text);
+  if (n <= width) {
+    padInto(out, text, width);
+    return;
+  }
+  const size_t loop = n + kMarqueeGapLen;
+  size_t at = static_cast<size_t>(offset % loop);
+  for (uint8_t c = 0U; c < width; ++c) {
+    out[c] = at < n ? text[at] : ' ';
+    at = (at + 1U) % loop;
+  }
+  out[width] = '\0';
+}
+
+uint8_t landingMarqueeText(const LandingInput& in, char* out, size_t cap) {
+  Text t(out, cap);
+  for (uint8_t i = 0U; i < in.courtCount; ++i) {
+    if (in.courts[i].number == 0U) {
+      continue;
+    }
+    courtItemInto(t, in.courts[i]);
+    t.put(kMarqueeGap);
+  }
+  statusInto(t, in);
+  return static_cast<uint8_t>(t.size());
+}
+
+void composeLanding(const LandingInput& in, GlassRows rows) {
+  const uint8_t width = layoutWidth(in.layout);
+  for (uint8_t r = 0U; r < kGlassRows; ++r) {
+    rows[r][0] = '\0';
+  }
+  centerInto(rows[0], in.status == LandStatus::Offline
+                          ? kOutOfService
+                          : (in.layout == Layout::Expanded ? kCtaExpanded : kCtaCompact),
+             width);
+  const uint8_t items = pagedItemCount(in);
+  if (in.layout == Layout::Expanded) {
+    const uint8_t pages = static_cast<uint8_t>((items + 2U) / 3U);
+    const uint8_t first = static_cast<uint8_t>((in.page % pages) * 3U);
+    for (uint8_t r = 1U; r < 4U; ++r) {
+      const uint8_t index = static_cast<uint8_t>(first + r - 1U);
+      if (index < items) {
+        pagedItemInto(rows[r], in, index);
+      } else {
+        padInto(rows[r], "", width);
+      }
+    }
+    return;
+  }
+  if (in.marquee) {
+    char text[kLandingTextMax + 1U];
+    static_cast<void>(landingMarqueeText(in, text, sizeof(text)));
+    marqueeWindow(text, width, in.offset, rows[1]);
+    return;
+  }
+  pagedItemInto(rows[1], in, static_cast<uint8_t>(in.page % items));
+}
+
+} // namespace courtlogic

@@ -9,10 +9,12 @@ namespace courtlogic {
 namespace {
 
 /// The scanner is configured for printable ASCII terminated by \r or \n.
-/// Everything below 0x20 that is not a terminator, and 0x7F, is line noise from
-/// the relay coils rather than part of a member's code.
+/// Everything outside 0x20-0x7E that is not a terminator is line noise from
+/// the relay coils, or a scanner at a different baud — never part of a
+/// member's code (v3: bytes above 0x7E too, which is what lets the Mega's
+/// auto-detect recognise a wrong rate, HW-5).
 bool isPayloadByte(uint8_t byte) {
-  return byte >= 0x20U && byte != 0x7FU;
+  return byte >= 0x20U && byte <= 0x7EU;
 }
 
 bool isTerminator(uint8_t byte) {
@@ -22,8 +24,8 @@ bool isTerminator(uint8_t byte) {
 } // namespace
 
 ScanAssembler::ScanAssembler()
-    : buf_(), len_(0U), poisoned_(false), lastWasCr_(false), holding_(false), lastReject_(ScanReject::None),
-      rejected_(0U) {
+    : buf_(), len_(0U), poisoned_(false), lastWasCr_(false), holding_(false), garbage_(false),
+      lastReject_(ScanReject::None), rejected_(0U) {
   buf_[0] = '\0';
 }
 
@@ -32,6 +34,7 @@ void ScanAssembler::reset() {
   poisoned_ = false;
   lastWasCr_ = false;
   holding_ = false;
+  garbage_ = false;
   buf_[0] = '\0';
 }
 
@@ -89,6 +92,9 @@ bool ScanAssembler::endLine() {
     return false;
   }
   const bool ok = len_ > 0U && !poisoned_;
+  if (poisoned_ && lastReject_ == ScanReject::Corrupt) {
+    garbage_ = true;
+  }
   poisoned_ = false;
   if (!ok) {
     len_ = 0U;
@@ -98,6 +104,23 @@ bool ScanAssembler::endLine() {
   buf_[len_] = '\0';
   holding_ = true;
   return true;
+}
+
+bool ScanAssembler::gap(bool suffixOnly) {
+  if (!partial()) {
+    return false;
+  }
+  lastWasCr_ = false;
+  if (!suffixOnly && !poisoned_ && len_ >= kGapScanMinLen) {
+    return endLine();
+  }
+  if (poisoned_ && lastReject_ == ScanReject::Corrupt) {
+    garbage_ = true;
+  }
+  len_ = 0U;
+  poisoned_ = false;
+  buf_[0] = '\0';
+  return false;
 }
 
 } // namespace courtlogic

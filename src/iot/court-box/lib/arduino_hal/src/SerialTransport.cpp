@@ -8,7 +8,7 @@
 
 namespace arduino_hal {
 
-SerialTransport::SerialTransport(HardwareSerial& port) : port_(port), open_(false) {
+SerialTransport::SerialTransport(HardwareSerial& port) : port_(port), open_(false), rxOverruns_(0U) {
 }
 
 void SerialTransport::begin(size_t rxBufferBytes) {
@@ -54,6 +54,13 @@ bool SerialTransport::read(uint8_t& out) {
   if (!open_) {
     return false;
   }
+#if defined(SERIAL_RX_BUFFER_SIZE)
+  // A ring found full is a ring that has been dropping bytes. Counted once per
+  // fill, not per read: the read below takes a byte and makes room.
+  if (port_.available() >= static_cast<int>(SERIAL_RX_BUFFER_SIZE - 1) && rxOverruns_ < UINT16_MAX) {
+    ++rxOverruns_;
+  }
+#endif
   const int value = port_.read();
   if (value < 0) {
     return false;

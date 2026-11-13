@@ -82,14 +82,22 @@ size_t renderEventBody(char* out, size_t cap, const char* mac, uint32_t bootId, 
     return 0U;
   }
 
+  // v3: a release says why the relay opened (device-api.md §9), after
+  // duration_ms; absent (every 2.x box, and cause None) reads as `member`.
+  char causeJson[32] = {};
+  const char* cause = eventq::causeName(event.cause);
+  if (event.kind == eventq::Kind::Release && cause[0] != '\0') {
+    snprintf(causeJson, sizeof(causeJson), ",\"cause\":\"%s\"", cause);
+  }
+
   const int written =
       snprintf(out, cap,
                "{\"mac\":\"%s\"%s,\"uptime_ms\":%s,\"events\":[{\"seq\":%lu,\"uptime_ms\":%s,"
-               "\"kind\":\"%s\",\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
+               "\"kind\":\"%s\",\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu%s}]}",
                mac, bootJson, batchUptime, static_cast<unsigned long>(event.seq), eventUptime,
                eventq::kindName(event.kind),
                event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson,
-               subject, static_cast<unsigned long>(event.durationMs));
+               subject, static_cast<unsigned long>(event.durationMs), causeJson);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     // snprintf truncated. A half-rendered body is a request the server refuses
     // as malformed, and the drain path treats a 4xx as "the box caused this"

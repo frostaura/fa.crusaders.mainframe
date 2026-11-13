@@ -63,6 +63,10 @@ public:
 
   /// Pop one received byte. False when nothing is waiting; never blocks.
   virtual bool read(uint8_t& out) = 0;
+
+  /// Times the receive ring was found full since boot — bytes the peer sent
+  /// that this side may have lost (Mega 3.0.0 `!DIAG`). 0 where unknowable.
+  virtual uint16_t rxOverruns() const { return 0U; }
 };
 
 /// Write `text` plus the '\n' terminator, all of it or none of it.

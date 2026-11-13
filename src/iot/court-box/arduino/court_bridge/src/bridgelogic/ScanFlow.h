@@ -103,6 +103,9 @@ struct ActivationResult {
   bool invitesWalkUp = false;
   /// What to paint and, on a grant, which relay to drive for how long.
   court::Outcome outcome;
+  /// On a grant: seconds to the end of the chained run, uncapped
+  /// (`play_remaining_seconds`, or granted_seconds on a pre-v3 server).
+  uint32_t playRemainingSeconds = 0U;
 };
 
 /// The relay cap in minutes, for display.

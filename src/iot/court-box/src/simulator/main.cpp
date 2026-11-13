@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
   // place a legacy-dialect bridge is still met. The production Mega refuses it.
   courtlogic::CourtBox box(courtlogic::CourtPorts{relay, display, scanner, buttons, bridge, clock},
                            proto::LegacyDialect::Accept);
-  box.begin();
+  box.boot(0x01U); // a power-on reset, as the Mega reports it in !BOOT
 
   while (gStopRequested == 0) {
     bridge.acceptPending();

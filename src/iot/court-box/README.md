@@ -17,10 +17,24 @@ adapts to the hardware, never the reverse.
 
 ## Flashing — the whole procedure
 
-Both halves are flashed over USB. There is no over-the-air path, no discovery,
-no claim code and no provisioning call: one club, one box, and the person
-holding the screwdriver is the person who knows the WiFi password and holds the
-API key. Changing any of them is a reflash.
+Both halves are flashed over USB **one last time, at 3.0.0 — the Mega first,
+then the bridge** (founder, 2026-11-13). The Mega can never be updated over
+WiFi (its ESP sits on Serial3, not the bootloader port), so Mega 3.0.0 is its
+last image: every timeout is bounded on the Mega itself and every hardware fact
+it used to compile in is a runtime `!CFG` setting
+([`device-serial-protocol.md`](../../../docs/specs/device-serial-protocol.md)
+v3). The bridge's signed over-the-air update, key rotation, runtime WiFi and
+server URL and the setup portal arrive with the over-the-air libraries
+([`device-api.md`](../../../docs/specs/device-api.md) §6–§8) — **until that
+bridge image is flashed, changing the WiFi password, the API key or the base
+URL is still a bridge reflash.** The values in `secrets.h` are the first-boot
+defaults.
+
+**The bridge needs the 4M2M flash layout** (`eagle.flash.4m2m.ld`, "4MB
+(FS:2MB OTA:~1019KB)" in the IDE): it is what leaves the update its staging
+area. Read esptool's **"Auto-detected Flash size"** line in the upload log — it
+must say 4MB — and keep **"Erase Flash: Only Sketch"**, so the LittleFS records
+(the event sequence mark) survive the flash (HW-10).
 
 **The route is the Arduino IDE 2: open the sketch, pick the board and the port,
 press Upload.** No terminal, no `make`, and nothing to install from the Library
@@ -126,15 +140,15 @@ exist for development and CI.
 
 | When | Glass |
 |---|---|
-| After the `court_mega` upload, run DIPs | `CRUSADERS COURTS` / `SCAN YOUR CODE` — the Mega's **own** landing screen, painted from `courtlogic::ScreenBuffer` with no frame involved, and proof the Mega is alive. On a 2004A row 2 shows the live court state and row 3 the action row |
+| After the `court_mega` upload, run DIPs | `SCAN YOUR QR` / `STARTING UP` — the Mega 3.0.0's **own** landing, composed on the Mega with no frame involved, in the **compact** layout it always boots in. **If the glass reads `CRUSADERS COURTS / SCAN YOUR CODE` the Mega upload did NOT land** — that is the 2.1.0 image (HW-3). A blank glass is a backpack at an address the probe did not find, or no LCD: the bridge reports it (`mega.lcd` `00`) |
 | During the `court_bridge` upload and the monitor | **Nothing new.** DIP 1 and 2 are off, so the ESP's UART is on the USB socket and the Mega is not on the other end of it. Watch the monitor, not the glass. |
-| Run DIPs restored, box on the WiFi | `CONNECTED / SCAN TO START` — and the box appears on the admin Devices page by itself within one heartbeat, with its court numbers against it |
-| Run DIPs restored, box **not** on the WiFi | `CRUSADERS COURTS / SCAN TO START` — the two halves are talking and the radio is not. Check the SSID and password. |
+| Run DIPs restored, box on the WiFi | `SCAN YOUR QR` / `READY 18:05` (or every court's state, scrolling) — and the box appears on the admin Devices page by itself within one heartbeat, with its court numbers, `mega_version` 3.0.0 and what the Mega is running with |
+| Run DIPs restored, box **not** on the WiFi | `SCAN YOUR QR` / `NO WIFI` — the two halves are talking and the radio is not. Check the SSID and password. |
+| Bridge not talking to the Mega | `OUT OF SERVICE` / `SEE THE DESK` within ~16 s (330 s before any bridge has said `!LIVE`): check DIP 1 and 2. |
 
-The identity screen is painted at the end of `setup()` and again on the first
-`!PONG` the bridge gets from the Mega, which is the first moment the glass is
-reachable after a DIP change. If it never appears, the two halves are not
-talking: check DIP 1 and 2.
+There is no identity overlay any more (bridge 3.0.0, BR-10): the landing's
+status item says READY / NO WIFI / NO SERVER / STARTING UP without leaving
+landing.
 
 **Rotating the WiFi password, the API key or the base URL** — change
 `secrets.h`, upload `court_bridge` again, restore the run DIPs. That is the
@@ -263,7 +277,7 @@ Two things stand behind that timer on the Mega itself:
 
 | Function | Connection |
 |---|---|
-| Court relays A–D | Mega pins **2, 3, 4, 5** — **ACTIVE HIGH** (normally-open solid-state relays, `RELAY_ACTIVE_LOW=0`, Mega 2.1.0); fit a pull-down on each SSR input so the bootloader's high-Z second is a guaranteed off |
+| Court relays A–D | Mega pins **2, 3, 4, 5**. The module's part number and trigger level are unrecorded (HW-1, HW-4): the drive level is the runtime `RPOL` (`hw_relay_active_level`, boot default active-high), and a **released relay is an input** (high-Z), which is off for a low- and a high-trigger module alike — so a wrong level fails dark. **No pull-down is fitted or needed** (the wiring cannot change); whether a high-Z SSR input near mains half-drives during the bootloader second is a bench check |
 | Court buttons A–D (green) | Mega pins **22, 24, 26, 28**, `INPUT_PULLUP` |
 | Duration buttons 15/30/45/60m (black) | Mega pins **30, 32, 34, 36**, `INPUT_PULLUP` |
 | Status LED | Mega pin **13** |
@@ -274,16 +288,27 @@ Two things stand behind that timer on the Mega itself:
 
 ### About the display
 
-The physical panel is a **2004A (20×4)** and the firmware now drives it as
-**20×4**. **Nothing about the wiring changed** — it is the same PCF8574 backpack
-at the same I²C address on the same two pins. What changed is two build flags,
-`-DLCD_COLS=20 -DLCD_ROWS=4` in `platformio.ini`'s `[lcd]` block, which
-`hal::kDisplayCols` / `kDisplayRows` read and from which `court::kLineLen` is
-**derived**. That derivation is the fix: the width used to be hardcoded at 16 in
-`court/Session.h` while the flags said something else, so the panel's geometry
-lived in two places that could disagree — and on the 2004A that is actually
-fitted, the hardcoded number won and four columns of every line were
-unreachable.
+**Which panel is fitted — a 1602 or a 2004 — and its backpack's address are
+unrecorded**, so Mega 3.0.0 compiles neither in (FWM-17, HW-2, HW-11). The
+driver addresses the 20×4 DDRAM grid either controller has; the runtime
+`LAYOUT` setting (`lcd_layout`, per board, delivered in the heartbeat) decides
+how much is drawn — **compact 16×2 on any doubt**: at boot, while the bridge is
+dead, for any unknown value — and the console's *Back to compact* is one
+heartbeat away. The backpack's address is probed (0x27, 0x3F, 0x20–0x26,
+0x38–0x3E) at boot and after every bus error, or forced by `LCDA`; the Mega
+drives the PCF8574 itself (no LCD library) at 400 kHz with an automatic
+100 kHz fallback. Rows wider than the layout scroll as a software marquee on
+one row (never the HD44780 display shift). The glass heals itself: the Mega
+keeps a shadow of what it believes is on it, diff-paints toward what should be
+there inside an 8 ms per-pass budget, repaints everything after any bus error,
+and re-runs the controller's initialisation every `REINIT` seconds on landing.
+
+The landing: `SCAN YOUR QR` (compact) / `SCAN YOUR QR CODE` (expanded) and
+every mapped court's state and minutes of light left (compact: one marquee row;
+expanded: one court per row), then READY / NO WIFI / NO SERVER / STARTING UP.
+
+The safe-subset contract below still governs the bridge's verdict screens: rows
+0 and 1, cut at 16 columns, are a whole message.
 
 #### The safe-subset contract — what makes widening it safe
 
@@ -349,10 +374,9 @@ says, `!MAP` gives each relay its club court number.
 
 ### Relays — an open safety question
 
-The relay module is rated **10A at 250VAC**. That is plausible for one modern
-LED court bank and inadequate for older metal-halide. Standard practice is for
-relays like these to switch a **contactor coil**, with the contactor carrying
-the lighting load.
+The relay module's rating, output type and trigger level are **unrecorded**
+(HW-4, `memory/safety-relays.md`). Standard practice is for relays like these to
+switch a **contactor coil**, with the contactor carrying the lighting load.
 
 **This has not been confirmed on the installed hardware.** If the relays switch
 court lighting directly, that needs a qualified electrician before anything
@@ -645,11 +669,17 @@ what the API's deduplication rests on, and reusing one loses a real event.
 
 ## What the box keeps in flash
 
-**One record: the event queue's sequence high-water mark.** Everything else that
-used to live there — the device id, the device key, the tenant slug, the API
-base URL, the WiFi credential — is compiled into the image from `secrets.h`, so
-a change to any of them is a reflash and there is nothing on the box that can go
-stale, be left holding a credential nobody can see, or disagree with the image.
+**The Mega keeps nothing** — no relay state, no settings: a Mega-only reset is
+recovered by the bridge re-applying its snapshot (`!WANT`) within seconds of
+`!BOOT`, and the bridge re-sends every setting.
+
+**The bridge 3.0.0 keeps one record: the event queue's sequence high-water
+mark.** The device v3 contract also calls for the last snapshot, the roster and
+code sync, every undelivered event, the network set, the keys and the OTA state
+in LittleFS (device-api.md §4); those records are not in this image yet, so a
+power cut with the server down still restores nothing and loses queued
+attendance until a later bridge adds them (recorded in
+`memory/decisions-court-box-v3-firmware.md`).
 
 The sequence mark earns its place because the API deduplicates events on
 `(tenant, device, seq)` with a **permanent** unique index. A box that restarted

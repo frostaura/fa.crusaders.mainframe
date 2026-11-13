@@ -154,9 +154,53 @@ enum class Verb : uint8_t {
   Show, ///< Downlink. Commit the staged rows atomically and arm their deadline.
   Idle, ///< Downlink. What the Mega-rendered landing screen's status row says.
   Map,  ///< Downlink. The club court number behind each relay index.
+  // v3 (Mega 3.0.0 / bridge 3.0.0), appended in the order the spec fixes:
+  // RW CMT WANT CFG LAND NOTE LIVE ACK BOOT HELD DIAG HW. 3.0.0 is the last Mega
+  // image, so these are every frame a future bridge can steer it with.
+  Rw,   ///< Downlink. Stage a 24-character segment of one row of screen <seq>.
+  Cmt,  ///< Downlink. Commit screen <seq>: row mask, hold, flags, CRC-16.
+  Want, ///< Downlink. Relay reconcile: ensure each relay lit for at least N s.
+  Cfg,  ///< Downlink. Set one bounded Mega setting.
+  Land, ///< Downlink. Paid seconds per relay for the landing.
+  Note, ///< Downlink. A landing note in the status slot, with a TTL.
+  Live, ///< Downlink. Bridge liveness: the next frame within <period> s.
+  Ack,  ///< Uplink. Tagged frame or screen commit acknowledged, with a code.
+  Boot, ///< Uplink. First frame after every Mega reset.
+  Held, ///< Uplink. A key chord held inside the boot window.
+  Diag, ///< Uplink. Since-boot counters, after every !PONG.
+  // The 2026-11-13 addendum (hardware facts), appended after DIAG.
+  Hw, ///< Uplink. The hardware facts the Mega is actually running with.
 };
 
-inline constexpr size_t kVerbCount = 18;
+inline constexpr size_t kVerbCount = 30;
+
+/// Which decoder may produce a verb. v2's verbs are Any — the Mega application
+/// already answers a v2 uplink verb on its downlink with `!ERR,BADVERB`, and
+/// the corpus pins a v2 `!SCAN` decoding on the downlink — so the direction
+/// check the v3 chapter adds is enforced at the decoder for the verbs v3
+/// added, where nothing older depends on the looser rule.
+enum class Dir : uint8_t { Any = 0, Down, Up };
+
+/// The tag on a v3 relay frame and the id in `!ACK`: 1..255, 0 = untagged.
+inline constexpr uint8_t kNoTag = 0U;
+
+/// v3 bounds the decoder clamps into (the per-key `!CFG` clamp is the Mega
+/// application's, not the codec's).
+inline constexpr uint32_t kLandMaxSeconds = 86400UL;
+inline constexpr uint16_t kNoteMaxSeconds = 3600U;
+inline constexpr uint16_t kLiveMinSeconds = 1U;
+inline constexpr uint16_t kLiveMaxSeconds = 120U;
+inline constexpr uint16_t kHeldMinSeconds = 5U;
+inline constexpr uint16_t kHeldMaxSeconds = 60U;
+inline constexpr uint8_t kRwSegment = 24U; ///< A row is up to two segments, offset 0 and 24.
+inline constexpr uint8_t kRowTextMax = 48U;
+inline constexpr uint8_t kAckMaxCode = 4U;
+
+/// `!ACK` codes.
+enum class AckCode : uint8_t { Applied = 0, Duplicate = 1, Refused = 2, Incomplete = 3, Busy = 4 };
+
+/// The "no opinion" spelling of a `!WANT` or `!LAND` slot, as a number.
+inline constexpr int32_t kNoOpinion = -1;
 
 /// Courts are A-D. Making this an enum rather than a char means a Frame cannot
 /// carry a court that does not exist; NOCOURT is a decode-time verdict about
@@ -204,30 +248,50 @@ struct VerbSpec {
   /// `!SHOW,5400` stand on the glass for an hour and a half.
   uint16_t maxSeconds;
   bool legacy; ///< Has a spelling in Carl's dialect. Everything v2 ADDS does not.
+  /// v3: the last argument may be a tag (`!ON`, `!OFF`, `!EXT`, `!AUTH`). The
+  /// tagged form is maxArgs; the v2 form one fewer.
+  bool optionalTag;
+  Dir dir;
+  /// v3 verbs only: one letter per argument naming its grammar (nullptr for a
+  /// v2 verb, whose rules are the court/seconds fields above). Letters are
+  /// documented at Codec.cpp's validateV3Arg.
+  const char* grammar;
 };
 
 inline constexpr VerbSpec kVerbSpecs[kVerbCount] = {
-    {Verb::Unknown, "", 0, 0, -1, -1, 0, 0, false},
-    {Verb::On, "ON", 2, 2, 0, 1, kRelayMinSeconds, kRelayHardCapSeconds, true},
-    {Verb::Off, "OFF", 1, 1, 0, -1, 0, 0, true},
-    {Verb::Ext, "EXT", 2, 2, 0, 1, kRelayMinSeconds, kRelayHardCapSeconds, false},
-    {Verb::Lcd, "LCD", 2, 2, -1, -1, 0, 0, true},
-    {Verb::Auth, "AUTH", 1, 1, -1, 0, 0, kRelayHardCapSeconds, false},
-    {Verb::Rst, "RST", 0, 0, -1, -1, 0, 0, true},
-    {Verb::Ping, "PING", 0, 0, -1, -1, 0, 0, false},
-    {Verb::Btn, "BTN", 1, 1, -1, -1, 0, 0, true},
-    {Verb::Scan, "SCAN", 1, 1, -1, -1, 0, 0, true},
-    {Verb::State, "STATE", 5, 5, -1, -1, 0, 0, false},
+    {Verb::Unknown, "", 0, 0, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
+    {Verb::On, "ON", 2, 3, 0, 1, kRelayMinSeconds, kRelayHardCapSeconds, true, true, Dir::Any, nullptr},
+    {Verb::Off, "OFF", 1, 2, 0, -1, 0, 0, true, true, Dir::Any, nullptr},
+    {Verb::Ext, "EXT", 2, 3, 0, 1, kRelayMinSeconds, kRelayHardCapSeconds, false, true, Dir::Any, nullptr},
+    {Verb::Lcd, "LCD", 2, 2, -1, -1, 0, 0, true, false, Dir::Any, nullptr},
+    {Verb::Auth, "AUTH", 1, 2, -1, 0, 0, kRelayHardCapSeconds, false, true, Dir::Any, nullptr},
+    {Verb::Rst, "RST", 0, 0, -1, -1, 0, 0, true, false, Dir::Any, nullptr},
+    {Verb::Ping, "PING", 0, 0, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
+    {Verb::Btn, "BTN", 1, 1, -1, -1, 0, 0, true, false, Dir::Any, nullptr},
+    {Verb::Scan, "SCAN", 1, 1, -1, -1, 0, 0, true, false, Dir::Any, nullptr},
+    {Verb::State, "STATE", 5, 5, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
     // PONG takes two arguments or five. The three counters are ADDITIVE: a
     // bridge flashed ahead of the Mega it is wired to must still read the
     // answer, and the Mega is the half that cannot be reflashed over the air.
-    {Verb::Pong, "PONG", 2, 5, -1, -1, 0, 0, false},
-    {Verb::Evt, "EVT", 2, 2, -1, -1, 0, 0, false},
-    {Verb::Err, "ERR", 1, 1, -1, -1, 0, 0, false},
-    {Verb::Row, "ROW", 2, 2, -1, -1, 0, 0, false},
-    {Verb::Show, "SHOW", 2, 2, -1, 0, kShowHoldMinSeconds, kShowHoldMaxSeconds, false},
-    {Verb::Idle, "IDLE", 2, 2, -1, -1, 0, 0, false},
-    {Verb::Map, "MAP", 4, 4, -1, -1, 0, 0, false},
+    {Verb::Pong, "PONG", 2, 5, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
+    {Verb::Evt, "EVT", 2, 2, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
+    {Verb::Err, "ERR", 1, 1, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
+    {Verb::Row, "ROW", 2, 2, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
+    {Verb::Show, "SHOW", 2, 2, -1, 0, kShowHoldMinSeconds, kShowHoldMaxSeconds, false, false, Dir::Any, nullptr},
+    {Verb::Idle, "IDLE", 2, 2, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
+    {Verb::Map, "MAP", 4, 4, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
+    {Verb::Rw, "RW", 4, 4, -1, -1, 0, 0, false, false, Dir::Down, "sroX"},
+    {Verb::Cmt, "CMT", 5, 5, -1, -1, 0, 0, false, false, Dir::Down, "smHfh"},
+    {Verb::Want, "WANT", 5, 5, -1, -1, 0, 0, false, false, Dir::Down, "twwww"},
+    {Verb::Cfg, "CFG", 3, 3, -1, -1, 0, 0, false, false, Dir::Down, "tkv"},
+    {Verb::Land, "LAND", 4, 4, -1, -1, 0, 0, false, false, Dir::Down, "llll"},
+    {Verb::Note, "NOTE", 2, 2, -1, -1, 0, 0, false, false, Dir::Down, "TX"},
+    {Verb::Live, "LIVE", 1, 1, -1, -1, 0, 0, false, false, Dir::Down, "P"},
+    {Verb::Ack, "ACK", 2, 2, -1, -1, 0, 0, false, false, Dir::Up, "ae"},
+    {Verb::Boot, "BOOT", 3, 3, -1, -1, 0, 0, false, false, Dir::Up, "Xbb"},
+    {Verb::Held, "HELD", 2, 2, -1, -1, 0, 0, false, false, Dir::Up, "bG"},
+    {Verb::Diag, "DIAG", 5, 5, -1, -1, 0, 0, false, false, Dir::Up, "nnnnn"},
+    {Verb::Hw, "HW", 5, 5, -1, -1, 0, 0, false, false, Dir::Up, "bpdpb"},
 };
 
 /// kVerbSpecs is indexed by the Verb value, so a row in the wrong place would
@@ -249,6 +313,8 @@ static_assert(verbSpecsAreInEnumOrder(), "kVerbSpecs must be indexed by Verb");
 // The safety rule, enforced at compile time on the wire path. If someone edits
 // ON's row to make the duration optional, the build stops here rather than the
 // court burning until somebody walks past it.
+static_assert(kVerbSpecs[static_cast<size_t>(Verb::Cmt)].grammar[2] == 'H',
+              "CMT's hold must be clamped like SHOW's: no commit can outlive two minutes");
 static_assert(kVerbSpecs[static_cast<size_t>(Verb::On)].minArgs == 2,
               "ON must require a duration argument on the wire");
 static_assert(kVerbSpecs[static_cast<size_t>(Verb::On)].secondsArg == 1,
@@ -357,12 +423,16 @@ public:
   /// 1093 minutes lit the court for 44 seconds while the display promised
   /// "1093 MIN". Taking the wide type is what makes the clamp mean what it says.
   static Frame on(Court court, uint32_t seconds);
+  /// v3: the same, tagged (1..255; kNoTag gives the v2 form).
+  static Frame on(Court court, uint32_t seconds, uint8_t tag);
 
   static Frame off(Court court);
+  static Frame off(Court court, uint8_t tag);
 
   /// Extend an already-open relay's deadline to now + `seconds`. Clamped like on(),
   /// and wide for the same reason.
   static Frame ext(Court court, uint32_t seconds);
+  static Frame ext(Court court, uint32_t seconds, uint8_t tag);
 
   /// Two display lines. Text longer than kMaxArgLen is truncated — the panel is
   /// driven as 16 columns, so this loses nothing a player would have seen.
@@ -409,6 +479,30 @@ public:
 
   /// Accept button input for `seconds`. 0 disarms, so there is no lower clamp.
   static Frame auth(uint16_t seconds);
+  static Frame auth(uint16_t seconds, uint8_t tag);
+
+  // --- v3 downlink -----------------------------------------------------------
+
+  /// Stage `text` (at most one 24-character segment) into `row` of screen
+  /// `seq`, at column `offset` 0 or 24. Empty on a bad row or offset.
+  static Frame rw(uint8_t seq, uint8_t row, uint8_t offset, const char* text);
+
+  /// Commit screen `seq`. `mask` 1..15 (empty otherwise); the hold clamps
+  /// into [1, 120] exactly as `!SHOW`'s.
+  static Frame cmt(uint8_t seq, uint8_t mask, uint32_t holdSeconds, uint8_t flags, uint16_t crc);
+
+  /// Per relay: kNoOpinion, or seconds clamped into [1, 5400].
+  static Frame want(uint8_t tag, const int32_t seconds[4]);
+
+  /// One Mega setting. `key` is 1-6 uppercase letters (empty Frame otherwise).
+  static Frame cfg(uint8_t tag, const char* key, uint16_t value);
+
+  /// Per relay: kNoOpinion, or paid seconds clamped into [0, 86400].
+  static Frame land(const int32_t seconds[4]);
+
+  static Frame note(uint32_t ttlSeconds, const char* text);
+
+  static Frame live(uint32_t periodSeconds);
 
   static Frame rst();
   static Frame ping();
@@ -438,6 +532,19 @@ public:
   static Frame evt(const char* name, const char* detail);
   static Frame err(DecodeError code);
 
+  // --- v3 uplink -------------------------------------------------------------
+
+  static Frame ack(uint8_t tag, AckCode code);
+  static Frame ackScreen(uint8_t seq, AckCode code);
+  /// `cause` is MCUSR, `held` the keys down at reset; both two uppercase hex.
+  static Frame boot(const char* version, uint8_t cause, uint8_t held);
+  static Frame held(uint8_t mask, uint32_t seconds);
+  static Frame diag(const uint16_t counters[5]);
+  /// `!HW,<lcd>,<rpol>,<sbaud>,<ssuf>,<keys>`: the LCD address that answered
+  /// (0 = none, two uppercase hex), relay level 0|1, scanner baud code 0-5,
+  /// line end 0|1, unarmed-forward key mask (two uppercase hex).
+  static Frame hw(uint8_t lcdAddress, uint8_t relayLevel, uint8_t baudCode, uint8_t lineEnd, uint8_t keys);
+
   // --- Accessors -----------------------------------------------------------
 
   Verb verb() const { return verb_; }
@@ -466,6 +573,8 @@ private:
   bool pushArg(const char* s);
   bool pushArgChar(char c);
   bool pushArgU32(uint32_t v);
+  bool pushArgHex(uint32_t v, uint8_t digits);
+  bool pushArgOpinion(int32_t v, uint32_t lowest, uint32_t highest);
 
   Verb verb_;
   uint8_t argc_;

@@ -61,9 +61,14 @@ public:
 
   bool read(uint8_t& out) override;
 
+  /// Reads that found the receive ring full (64 bytes on the AVR core): the
+  /// peer's bytes may have been lost (Mega 3.0.0 `!DIAG` arg 2).
+  uint16_t rxOverruns() const override { return rxOverruns_; }
+
 private:
   HardwareSerial& port_;
   bool open_;
+  uint16_t rxOverruns_;
 };
 
 } // namespace arduino_hal

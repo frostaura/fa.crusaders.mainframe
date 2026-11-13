@@ -34,6 +34,25 @@ bool Event::subjectEquals(const char* text) const {
   return text[i] == '\0';
 }
 
+const char* causeName(Cause cause) {
+  switch (cause) {
+  case Cause::None:
+    return "";
+  case Cause::Member:
+    return "member";
+  case Cause::AutoOff:
+    return "autooff";
+  case Cause::Cap:
+    return "cap";
+  case Cause::MegaReset:
+    return "mega_reset";
+  case Cause::Reconcile:
+    return "reconcile";
+  }
+  // A byte from flash written by a newer firmware: no cause rather than a lie.
+  return "";
+}
+
 const char* kindName(Kind kind) {
   switch (kind) {
   case Kind::Activation:

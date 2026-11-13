@@ -1662,8 +1662,10 @@ def online_activation(w: World, sim: Optional[Simulator]) -> None:
         state = sim.expect_frame(lambda f: f.verb == "STATE" and int(f.args[0]) & 0b0100 == 0, 12, "!STATE with C clear")
         REPORT.check("M-serial", "!OFF,C opens the relay: !EVT,OFF,C is reported and the next !STATE mask has C clear", bool(evt) and bool(state), f"{evt} / {state}")
         off_line = sim.expect_stdout(lambda l: "[relay] court C OFF" in l, 5)
-        REPORT.check("RELAY-POL", "...and released is pin level LOW — the AVR's reset state, so a reset never "
-                                  "flashes a court on", "(pin level LOW)" in off_line, off_line)
+        # Mega 3.0.0 (HW-1): a released relay is an INPUT, never a driven level, so a
+        # wrong drive level fails dark for either module type.
+        REPORT.check("RELAY-POL", "...and released is an input (high-Z) — off for either relay module, so a "
+                                  "wrong drive level fails dark, never lit", "(pin input)" in off_line, off_line)
 
 
 def offline_attendance(w: World) -> None:

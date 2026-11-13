@@ -32,8 +32,11 @@ public:
 
   bool read(uint8_t& out) override;
 
+  void setBaud(uint32_t baud) override;
+
 private:
   HardwareSerial& port_;
+  uint32_t baud_;
 };
 
 } // namespace arduino_hal

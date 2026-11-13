@@ -53,7 +53,10 @@
 
 namespace corpus {
 
-constexpr size_t kMaxFileSize = 65536;
+// 262144: the v3 contract grew `http/cases.json` past 64 KB (78 KB at the
+// v3 head) and a file that does not fit is a suite that silently loses its
+// corpus. File objects are static in every suite, never on a Unity frame.
+constexpr size_t kMaxFileSize = 262144;
 // 16384: the widest door heartbeat the member-code contract allows is ~3.9 KB,
 // which is ~7.8 KB of hex in `body_hex`. Static buffers only; nothing here is
 // on a Unity stack frame.

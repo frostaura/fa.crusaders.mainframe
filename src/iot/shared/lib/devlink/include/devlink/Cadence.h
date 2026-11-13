@@ -52,6 +52,70 @@ struct RelayState {
 /// the caller says how long it is.
 inline constexpr uint8_t kMaxRelayStateElements = 4U;
 
+// --- v3 request fields (device-api.md §2, §13) -------------------------------
+
+/// The capabilities a board names in `caps`, rendered in this order.
+inline constexpr uint8_t kCapCodes = 0x01U; ///< codes:m1
+inline constexpr uint8_t kCapHb3 = 0x02U;   ///< hb:3
+inline constexpr uint8_t kCapOta = 0x04U;   ///< ota:1
+inline constexpr uint8_t kCapKey = 0x08U;   ///< key:1
+inline constexpr uint8_t kCapNet = 0x10U;   ///< net:1
+inline constexpr uint8_t kCapLcd2 = 0x20U;  ///< lcd:2
+
+/// `relight`: a relay re-lit from the snapshot, and the booking ref behind it.
+struct RelightEntry {
+  uint8_t relay = 0U;
+  char ref[9] = {};
+};
+
+inline constexpr uint8_t kMaxRelightElements = 4U;
+
+/// `mega`: what the Mega said about itself this Mega boot (§13).
+struct MegaReport {
+  uint8_t reset = 0U;     ///< MCUSR from !BOOT
+  uint8_t lcd = 0U;       ///< !HW arg 0, 0 = none answered
+  bool relayLow = false;  ///< !HW arg 1
+  uint32_t scanBaud = 0U; ///< 0 while auto has not locked
+  bool scanCrlf = false;  ///< !HW arg 3
+  uint8_t keys = 0U;      ///< !HW arg 4
+  uint16_t counters[5] = {0U, 0U, 0U, 0U, 0U}; ///< the !DIAG counters
+};
+
+/// `diag`: the board's own health (§13). `reset` is a reason word.
+struct DiagReport {
+  const char* reset = "";
+  uint32_t exc = 0U;
+  uint32_t epc1 = 0U;
+  uint32_t heap = 0U;
+  uint32_t heapMin = 0U;
+  uint32_t block = 0U;
+  uint32_t stackMin = 0U;
+  uint32_t sketchFree = 0U;
+  uint32_t flashMb = 0U;
+};
+
+inline constexpr uint8_t kMaxDriftNames = 8U;
+
+/// The v3 fields after `relay_state`, each absent at its nothing value.
+struct HeartbeatV3 {
+  const char* megaVersion = nullptr;
+  const char* fwState = nullptr;
+  const char* fwFailed = nullptr;
+  const char* fwError = nullptr;
+  bool netReported = false;
+  uint32_t netVer = 0U;
+  const char* netSrc = "compiled";
+  const char* lcdLayout = nullptr;
+  const char* restore = nullptr;
+  const RelightEntry* relight = nullptr;
+  uint8_t relightCount = 0U;
+  const MegaReport* mega = nullptr;
+  const DiagReport* diag = nullptr;
+  const char* const* drift = nullptr;
+  uint8_t driftCount = 0U;
+  uint8_t caps = 0U;
+};
+
 /// What the box has to say about itself on this heartbeat. Bundled rather than
 /// passed as three more arguments, the same way the gate's `GateDiagnostics`
 /// is: past six parameters the complexity gate refuses the function, and a
@@ -90,26 +154,20 @@ struct HeartbeatReport {
   /// latest heartbeat it saw. Absent at false, so a board that says nothing
   /// renders the body it always rendered.
   bool codesCapability = false;
+
+  /// The v3 fields, or nullptr for a 2.x body.
+  const HeartbeatV3* v3 = nullptr;
 };
 
 /// The rendered capability suffix, exactly as the corpus pins it.
 inline constexpr char kCodesCapsSuffix[] = ",\"caps\":[\"codes:m1\"]";
 
-/// The smallest buffer renderHeartbeatBody is ever given.
-///
-/// THE WORST CASE, exactly: `{"mac":"` (8) + a 12-hex MAC +
-/// `","firmware_version":"` (22) + a 16-character version + `","uptime_ms":`
-/// (14) + 20 digits of uint64 + `,"restored_relays":` (19) + 3 digits +
-/// `,"relay_state":[` (16) + four elements of `"0|4294967295"` (14 each) and
-/// three commas (59) + `]` (1) + `,"caps":["codes:m1"]` (20) + `}` (1) =
-/// 211 bytes, plus the NUL = 212.
-///
-/// 256 rather than 212 because a refusal here is not a truncated field, it is
-/// NO HEARTBEAT AT ALL — and a box that cannot heartbeat has no court list and
-/// refuses every scan. The margin is what a longer version string or one more
-/// diagnostic would otherwise eat silently. It was 128 before the two report
-/// fields existed and 224 before the capability.
-inline constexpr size_t kHeartbeatBodyCap = 256U;
+/// The heartbeat request buffer of a v3 board (device-api.md §2): the widest
+/// vector, `v3-heartbeat-request-widest`, is 1023 bytes. Static on the bridge,
+/// never a stack local (ESPR-1). A 2.x body (212 bytes at its widest) fits it
+/// many times over. A refusal here is not a truncated field, it is NO
+/// HEARTBEAT AT ALL — a box that cannot heartbeat has no court list.
+inline constexpr size_t kHeartbeatBodyCap = 1536U;
 
 /// Renders the `/api/v1/device/heartbeat` body. Returns the length written, or
 /// 0 — with `out` empty — when it would not fit or `mac` is missing. Never a
