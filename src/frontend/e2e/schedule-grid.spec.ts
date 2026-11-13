@@ -1,4 +1,4 @@
-import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, singleTap } from "./fixtures";
 
 /**
  * The booking grid, in a real browser — what no jsdom assertion can reach: layout in pixels,
@@ -71,6 +71,7 @@ async function openGrid(page: import("@playwright/test").Page, isAdmin = true) {
     { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
   ]);
   await page.goto(`/bookings?date=${tomorrow()}`);
+  await singleTap(page);
   await page.waitForSelector('[role="grid"]');
 }
 
@@ -231,16 +232,21 @@ test("scrolled to the end of the page, the court names still show and the bar co
       { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     ]);
     await page.goto(`/bookings?date=${tomorrow()}`);
+    await singleTap(page);
     await page.waitForSelector('[role="grid"]');
     for (const selecting of [false, true]) {
       if (selecting) await page.getByRole("button", { name: "Select several slots" }).click();
       const m = await page.evaluate(() => {
         const main = document.getElementById("main-content")!;
-        main.scrollTop = main.scrollHeight;
-        const grid = document.querySelector("[data-grid-scroller]")!.getBoundingClientRect();
+        const scroller = document.querySelector("[data-grid-scroller]")!;
         const bar = document.querySelector("[data-action-bar] [role=toolbar]")?.getBoundingClientRect();
         const tabs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height")) || 0;
-        return { top: grid.top, bottom: grid.bottom, mainTop: main.getBoundingClientRect().top, floor: bar ? bar.top : innerHeight - tabs };
+        const floor = bar ? bar.top : innerHeight - tabs;
+        // Scrolled to the grid's foot — the end of the page was the grid's end until the games
+        // detail came back under it; the rule is about the grid, so the grid's own end is what counts.
+        main.scrollTop += scroller.getBoundingClientRect().bottom - floor;
+        const grid = scroller.getBoundingClientRect();
+        return { top: grid.top, bottom: grid.bottom, mainTop: main.getBoundingClientRect().top, floor };
       });
       expect(m.top, `${viewport.width}px, selecting=${selecting}: header row above the scroll edge`).toBeGreaterThanOrEqual(m.mainTop - 1);
       expect(m.bottom, `${viewport.width}px, selecting=${selecting}: last row under the chrome`).toBeLessThanOrEqual(m.floor + 1);

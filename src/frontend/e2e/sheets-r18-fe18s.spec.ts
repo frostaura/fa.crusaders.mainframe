@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { BOOKING, CLUB_ZONE, ME, PEOPLE, PROFILE_ME, detailFixture, memberShellRoutes, seat, tomorrowAt } from "./playersKit";
 import { BOOK_SHEET, CANCEL_SHEET } from "../src/lib/bookingsCopy";
 import { CONFLICT_UNSURE_TEXT, UNSURE_TEXT } from "../src/lib/bookingErrors";
@@ -106,6 +106,7 @@ async function openBookings(page: Page, extra: ApiRoute[], width = 320, height =
   await serveApi(page, bookingsRoutes(extra));
   await bigText(page);
   await page.goto(`/bookings?date=${tomorrowAt(10).slice(0, 10)}`);
+  await singleTap(page);
 }
 
 async function openCancel(page: Page, extra: ApiRoute[] = []) {

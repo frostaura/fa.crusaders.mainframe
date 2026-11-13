@@ -97,6 +97,8 @@
 
 @layer base {
   html, body, #root { height: 100%; }
+  /* No double-tap zoom (the accidental zoom on a grid tapped quickly), while pinch zoom stays. */
+  html { touch-action: manipulation; }
   body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
   /*

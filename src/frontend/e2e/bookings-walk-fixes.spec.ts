@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, singleTap } from "./fixtures";
 
 /**
  * The P4 headed walk's grid findings, in a real browser — what jsdom cannot measure.
@@ -54,6 +54,7 @@ async function openGrid(page: Page, isAdmin: boolean) {
     { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
   ]);
   await page.goto(`/bookings?date=${tomorrow()}`);
+  await singleTap(page);
   await page.waitForSelector('[role="grid"]');
 }
 

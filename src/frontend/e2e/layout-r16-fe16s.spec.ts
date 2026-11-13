@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { BOOKING, CLUB_ZONE, ME, detailFixture, inviteFixture, memberShellRoutes, tomorrowAt } from "./playersKit";
 
 // A cold dev server compiles the admin frame on first ask, and the machine is shared.
@@ -267,6 +267,7 @@ test.describe("L16-1 measured (FE16s2) — boxes that give the ring room", () =>
     ]));
     await page.addInitScript(() => document.addEventListener("DOMContentLoaded", () => { document.documentElement.style.fontSize = "32px"; }));
     await page.goto(`/bookings?date=${tomorrowAt(10).slice(0, 10)}`);
+    await singleTap(page);
     const cell = page.locator("[role=grid]").getByRole("button", { name: /Court 2 at 18:00/ }).first();
     await expect(cell).toBeVisible(ARRIVES);
     await cell.click();
@@ -382,6 +383,7 @@ test.describe("L16-4 — the cancel sheet's slot row stays inside its list at 32
       await serveApi(page, admin ? adminRoutes(extra) : routes(extra));
       await page.addInitScript(() => document.addEventListener("DOMContentLoaded", () => { document.documentElement.style.fontSize = "32px"; }));
       await page.goto(`/bookings?date=${tomorrowAt(10).slice(0, 10)}`);
+      await singleTap(page);
       const cell = page.locator("[role=grid]").getByRole("button", { name: /Court 2 at 18:00/ }).first();
       await expect(cell).toBeVisible(ARRIVES);
       await cell.click();
@@ -397,19 +399,20 @@ test.describe("L16-4 — the cancel sheet's slot row stays inside its list at 32
   }
 });
 
-test.describe("L16-5 — a card in the Bookings rail's strip is never wider than the rail", () => {
+// The rail and its sideways strip went (the ticker carries the games beside the grid); the cards
+// now lie in the games lists under the grid. The rule is the same: no card is wider than its room.
+test.describe("L16-5 — a card in the Bookings games lists is never wider than the page", () => {
   for (const [width, root] of [[320, 32], [390, 16], [390, 32]] as const) {
     test(`${width} / ${root * 100 / 16} %`, async ({ page }) => {
       await open(page, "/bookings", { width, root });
-      const strip = page.locator("[data-rail-strip]");
-      await expect(strip.locator("li").first()).toBeVisible(ARRIVES);
-      const m = await strip.evaluate((s) => {
-        const aside = s.closest("[data-slot='with-aside-aside'], aside") ?? s.parentElement!;
-        const room = Math.min(aside.getBoundingClientRect().width, document.documentElement.clientWidth);
-        const items = [...s.querySelectorAll(":scope li, :scope > a, :scope > [data-slot='button']")].map((el) => Math.round(el.getBoundingClientRect().width));
+      const list = page.locator("[data-upcoming]");
+      await expect(list.locator("li").first()).toBeVisible(ARRIVES);
+      const m = await list.evaluate((s) => {
+        const room = Math.min(s.getBoundingClientRect().width, document.documentElement.clientWidth);
+        const items = [...s.querySelectorAll("li")].map((el) => Math.round(el.getBoundingClientRect().right - s.getBoundingClientRect().left));
         return { room: Math.round(room), widest: Math.max(...items) };
       });
-      expect(m.widest, `widest strip item vs the rail's ${m.room}px`).toBeLessThanOrEqual(m.room);
+      expect(m.widest, `widest card's reach vs the list's ${m.room}px`).toBeLessThanOrEqual(m.room);
     });
   }
 });

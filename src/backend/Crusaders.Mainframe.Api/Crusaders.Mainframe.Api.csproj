@@ -16,6 +16,11 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <!-- Lifts a transitive pin, not a dependency of ours: EF Core Design pulls MSBuild
+         (Microsoft.Build.Tasks.Core), which asks for System.Security.Cryptography.Pkcs 9.0.0 —
+         flagged high (GHSA-846f-f764-76mx) and failing the Security Scan. Drop this once the
+         EF Design / MSBuild chain itself asks for a patched Pkcs. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
   </ItemGroup>
 
   <ItemGroup>

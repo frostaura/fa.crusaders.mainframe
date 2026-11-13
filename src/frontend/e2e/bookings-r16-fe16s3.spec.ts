@@ -1,4 +1,4 @@
-import { expect, serveApi, signIn, test, type ApiRoute } from "./fixtures";
+import { expect, serveApi, signIn, test, type ApiRoute, singleTap } from "./fixtures";
 import { BOOKING, PEOPLE, SAM, detailFixture, memberShellRoutes, seat } from "./playersKit";
 import { ADMIN_CANCEL } from "../src/lib/adminCancelCopy";
 import { BOOK_SHEET, CANCEL_SHEET } from "../src/lib/bookingsCopy";
@@ -117,6 +117,7 @@ test("J16-3 — the desk tells two Pia van Partners apart and books the one it p
   const posts: unknown[] = [];
   await serveApi(page, bookRoutes(quoted, posts));
   await page.goto("/bookings", { timeout: 90_000 });
+  await singleTap(page);
   await page.getByRole("button", { name: /^Book Court 1 at / }).first().click();
   const sheet = page.getByRole("dialog", { name: BOOK_SHEET.title(1) });
   await sheet.getByRole("radio", { name: BOOK_SHEET.asMember }).click();

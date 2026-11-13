@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { PEOPLE, SAM, memberShellRoutes } from "./playersKit";
 import { BOOK_SEATS, BOOK_SHEET, BOOKINGS_COPY } from "../src/lib/bookingsCopy";
 import {
@@ -91,6 +91,7 @@ async function shot(page: Page, name: string) {
 
 async function openSheet(page: Page) {
   await page.goto("/bookings");
+  await singleTap(page);
   await page.getByRole("button", { name: /^Book Court 1 at 07:00/ }).first().click();
   await expect(page.getByRole("dialog", { name: BOOK_SHEET.title(1) })).toBeVisible();
 }
@@ -227,6 +228,7 @@ test.describe("booking with players", () => {
       { method: "POST", path: "/api/v1/bookings/bulk", status: 404, respond: () => { bulkCalls += 1; return { error: "member_not_found", user_id: SAM }; } },
     ], { balance_minutes: 500, held_minutes: 0, spendable_minutes: 500, held_until: null }));
     await page.goto("/bookings");
+    await singleTap(page);
     await page.getByRole("button", { name: BOOKINGS_COPY.selectOn }).click();
     await page.getByRole("button", { name: /^Book Court 1 at 07:00/ }).click();
     await page.getByRole("button", { name: /^Book Court 2 at 07:00/ }).click();

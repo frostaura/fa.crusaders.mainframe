@@ -199,7 +199,9 @@ export default function BookingsPage() {
             <InvitesBadgeLink className={INVITES_LINK} />
           </div>
         )}
-        <div className="flex min-w-0 flex-col gap-4">
+        {/* R5 F5-6 — from 3xl the courts are capped, so this column hugs the grid and the week strip
+            and picker end where the grid does (the rail's grid template used to do this). */}
+        <div className="flex min-w-0 flex-col gap-4 3xl:w-max 3xl:max-w-full">
           <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} drawn={ctx !== null} keepInView={bookAsUserId ? BOOKING_FOR_BAR : null} />
           {expanded ? null : <ScheduleNotices
             notices={explainer.notices(bookAsUserId ? null : balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}
@@ -232,6 +234,9 @@ export default function BookingsPage() {
             </StateBlock>
           )}
         </div>
+        {/* The floating bar comes next in reading order, before the detail below the grid: Tab out
+            of the grid lands on its actions. It is `fixed`, so where it sits here moves nothing. */}
+        <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
         {/* The detail behind the ticker, under the grid so it never costs the grid its width:
             what the member can spend, then the games in full and the finished ones. */}
         {expanded ? null : (
@@ -250,7 +255,6 @@ export default function BookingsPage() {
           </div>
         )}
       </div>
-      <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
       <BookSheet
         open={sheets.bookOpen} onOpenChange={sheets.setBookOpen} slots={sheets.bookSlots}
         timezone={day?.timezone ?? "UTC"} sliceMinutes={day?.sliceMinutes ?? 15}

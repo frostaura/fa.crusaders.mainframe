@@ -186,8 +186,7 @@ export default function MyCodePage() {
         "My Code"; D8: the code first). It is still the page's one h1 — the route announcer
         focuses it and a screen reader lands on it.
       */}
-      <PageHeader title={MY_CODE.title} actions={<CodeHelp doors={facts.doorsClub} signedOut={view.signedOut} />} />
-      {view.signedOut ? null : <UpcomingTicker refreshKey={null} fallbackZone={facts.door?.timezone} />}
+      <PageHeader title={MY_CODE.title} />
 
       <div ref={attachLayout} data-my-code-layout="" className={LAYOUT}>
         <div data-my-code-pass="" className={PASS_COLUMN}>
@@ -207,6 +206,13 @@ export default function MyCodePage() {
 
         <div data-my-code-rest="" className={cn(REST, placed.columns)}>
           <div className={COLUMN}>
+            {/* After the pass, never above it (D8: the code first). In the header, the help icon
+                gave a header the nav otherwise hides a row of its own, and the ticker took another:
+                together they pushed the QR under the fold of a 320x568 phone. */}
+            <div className="flex items-center gap-2">
+              {view.signedOut ? <div className="flex-1" /> : <UpcomingTicker refreshKey={null} fallbackZone={facts.door?.timezone} className="flex-1" />}
+              <CodeHelp doors={facts.doorsClub} signedOut={view.signedOut} />
+            </div>
             {placed.inRest}
             <DoorBlocks facts={facts} code={code} codeSecondsLeft={codeSecondsLeft} onRefreshCode={view.resync} />
           </div>

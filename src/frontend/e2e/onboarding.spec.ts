@@ -1,5 +1,5 @@
 import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute, memberCodeRoutes } from "./fixtures";
-import { ADMIN_TOUR, CHECKLIST, GET_STARTED, REPLAY_ADMIN_TOUR, REPLAY_WELCOME } from "../src/lib/onboardingCopy";
+import { ADMIN_TOUR, CHECKLIST, CODE_HELP, GET_STARTED, REPLAY_ADMIN_TOUR, REPLAY_WELCOME } from "../src/lib/onboardingCopy";
 import { tourStops } from "../src/components/onboarding/adminTourMarks";
 import { LOGIN } from "../src/lib/authCopy";
 
@@ -120,10 +120,14 @@ test.describe("the always-reachable guide", () => {
       { path: "/api/v1/me/webauthn/credentials", body: [] },
     ]);
 
+    // Home is My Code for a member, and its guide sits behind the help icon there too.
     await page.goto("/");
+    await page.getByRole("button", { name: CODE_HELP.label }).click();
     await expect(page.getByRole("link", { name: /How it works/ })).toBeVisible();
 
+    // On My Code the guide sits behind the help icon (0c8fdc0): the page stays the code.
     await page.goto("/my-code");
+    await page.getByRole("button", { name: CODE_HELP.label }).click();
     await expect(page.getByRole("link", { name: /How it works, step by step/ })).toBeVisible();
 
     await page.goto("/profile?tab=account");
@@ -363,7 +367,9 @@ test.describe("P8: the setup checklist on My Code", () => {
         { path: "/api/v1/me/webauthn/credentials", body: [{ id: "p", label: "iPhone", transports: null, created_at: "2026-09-01T10:00:00Z", last_used_at: null }] },
       ],
     }));
+    // The checklist sits behind My Code's help icon (0c8fdc0), not down the page by default.
     await page.goto("/my-code");
+    await page.getByRole("button", { name: CODE_HELP.label }).click();
 
     const card = page.getByRole("region", { name: CHECKLIST.title });
     await expect(card).toBeVisible();
@@ -375,9 +381,11 @@ test.describe("P8: the setup checklist on My Code", () => {
     await expect(card).toHaveCount(0);
     await page.reload();
     // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
-    // asserted present, and the pass itself visible.
+    // asserted present, and the pass itself visible. Hidden stays hidden, help opened or not.
     await expect(page.getByRole("heading", { level: 1, name: "My Code" })).toBeAttached();
     await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
+    await page.getByRole("button", { name: CODE_HELP.label }).click();
+    await expect(page.getByRole("link", { name: /How it works, step by step/ })).toBeVisible();
     await expect(page.getByRole("region", { name: CHECKLIST.title })).toHaveCount(0);
   });
 });

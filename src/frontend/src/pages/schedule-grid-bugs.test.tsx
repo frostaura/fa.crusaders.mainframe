@@ -185,7 +185,11 @@ describe("the grid's cells", () => {
 
     const closed = await screen.findByRole("button", { name: /Court 1 at 07:00–08:00 — the club is closed/ });
     await act(async () => { closed.click(); });
-    expect(await screen.findByRole("status")).toHaveTextContent(/The club is open/i);
+    // Selection mode (on by default) keeps its own polite status line, so the answer is the
+    // status that carries the club's hours, not the only one on the page.
+    await waitFor(() => {
+      expect(screen.getAllByRole("status").some((s) => /The club is open/i.test(s.textContent ?? ""))).toBe(true);
+    });
   });
 });
 

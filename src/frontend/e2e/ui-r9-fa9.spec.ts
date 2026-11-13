@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { SESSION_ANON, MEMBER_CODE, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ANON, MEMBER_CODE, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { bigText, fontsReady } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./playersKit";
 
@@ -115,6 +115,7 @@ async function openBookSheet(page: Page, width: number, height: number, big: boo
   ];
   await serveApi(page, routes);
   await page.goto(`/bookings?date=${DAY}`);
+  await singleTap(page);
   await page.waitForSelector(FIRST_BOOK);
   await page.waitForTimeout(300);
   if (big) await bigText(page);

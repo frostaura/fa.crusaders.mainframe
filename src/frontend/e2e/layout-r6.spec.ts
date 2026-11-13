@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { MEMBER_CODE, SESSION_ADMIN, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { MEMBER_CODE, SESSION_ADMIN, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { bigText, fontsReady, sideways } from "./layoutKit";
 import { inviteFixture, memberShellRoutes } from "./playersKit";
 import { myPlayFixture, resultFixture } from "./playKit";
@@ -108,6 +108,7 @@ async function openBookings(page: Page, width: number, height: number, options: 
     ...memberShellRoutes({ invites }),
   ]);
   await page.goto(`/bookings?date=${DAY}`);
+  await singleTap(page);
   await page.waitForSelector('[role="grid"] button[aria-label^="Book "]', ARRIVES);
 }
 

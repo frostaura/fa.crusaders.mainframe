@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { bigText, firstBookInView, fontsReady, sideways } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes, seat } from "./playersKit";
 import { celebrationFixture, myPlayFixture } from "./playKit";
@@ -114,6 +114,7 @@ test.describe("J8-3 — booking FOR a member on a phone", () => {
     await signIn(page);
     await serveApi(page, bookingRoutes({ admin: true }));
     await page.goto(`/bookings?as=${MEMBER}&date=${DAY}`);
+    await singleTap(page);
     await page.waitForSelector(FIRST_BOOK);
     await expect(page.locator("[data-booking-for]")).toContainText("Naledi");
     await page.waitForTimeout(600);
@@ -136,6 +137,7 @@ test.describe("L8-5 — the Book sheet's next step opens at its top", () => {
       await signIn(page);
       await serveApi(page, bookingRoutes());
       await page.goto(`/bookings?date=${DAY}`);
+      await singleTap(page);
       await page.waitForSelector(FIRST_BOOK);
       await page.waitForTimeout(300);
       if (big) await bigText(page);
@@ -166,6 +168,7 @@ test.describe("L7-4 — the Book sheet's money figures keep number and unit toge
       await signIn(page);
       await serveApi(page, bookingRoutes({ wallet: { balance_minutes: 545, held_minutes: 5, spendable_minutes: 540 } }));
       await page.goto(`/bookings?date=${DAY}`);
+      await singleTap(page);
       await page.waitForSelector(FIRST_BOOK);
       await page.waitForTimeout(300);
       await bigText(page);

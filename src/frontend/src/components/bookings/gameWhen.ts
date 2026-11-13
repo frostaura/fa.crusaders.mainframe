@@ -15,28 +15,20 @@ export function when(game: UpcomingGame, zone: string | undefined): string {
 }
 
 /**
- * How a list of games lays out (R4 form factor, SPEC 3.1), one class for Upcoming and Recent. Every
- * step is a query on the Bookings rail's own box (`@container/aside`) — a viewport `md:` would
- * lose to them in the cascade and, beside the grid, lie about the room the list has:
+ * The games lists' layout, which sits UNDER the grid since the rail went (the ticker carries the
+ * games beside it). The `aside` container is that full-width block below the grid:
  *
  * <ul>
- *   <li><b>Phone:</b> a row of 16rem cards lying flat in the rail's ONE sideways strip (R5 §4.2 —
- *   `Schedule`'s rail strip scrolls and snaps; a list scrolling inside it would nest scrollers), so
- *   upcoming, recent and the invites cost one row and the grid's first slot is on the first screen.</li>
- *   <li><b>40rem:</b> two cards a row; <b>56rem:</b> three.</li>
- *   <li><b>72rem</b> (the rail stands beside the grid): a vertical list in the rail.</li>
+ *   <li><b>Phone:</b> one card a row, stacked. The cards used to lie flat in the rail's sideways
+ *   strip, which scrolled; with no strip around them a flat row ran 650px off a 390 phone.</li>
+ *   <li><b>40rem:</b> two cards a row; <b>56rem</b> and up: three.</li>
  * </ul>
  * Written whole, so Tailwind's scanner sees every class.
  */
 export const GAMES_LIST = [
-  "flex gap-2",
+  "flex flex-col gap-2",
   "@[40rem]/aside:grid @[40rem]/aside:grid-cols-2",
   "@[56rem]/aside:grid-cols-3",
-  "@[72rem]/aside:flex @[72rem]/aside:flex-col",
 ].join(" ");
-/**
- * R16 L16-5 — a 16rem card, capped at the rail's own width (`100cqw`: the WithAside root is the
- * container). `max-w-full` capped nothing: the strip is as wide as its content, so its 100 % was the
- * card's own 16rem — 512px on a 320 phone at 200 %.
- */
-export const GAMES_ITEM = "w-rail-card shrink-0 snap-start @[40rem]/aside:w-auto";
+/** A card takes its cell: the column's width on a phone, the grid track from 40rem. */
+export const GAMES_ITEM = "min-w-0";

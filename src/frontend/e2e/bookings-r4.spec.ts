@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { BOOK_SHEET, BOOKINGS_COPY, selectionCapShort } from "../src/lib/bookingsCopy";
 
 /**
@@ -34,6 +34,7 @@ async function open(page: Page, routes: ApiRoute[] = [], bigText = false) {
     { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
   ].filter((r, i, all) => all.findIndex((o) => o.path === r.path && (o.method ?? "GET") === (r.method ?? "GET")) === i));
   await page.goto(`/bookings?date=${DAY}`);
+  await singleTap(page);
   if (bigText) await page.addStyleTag({ content: "html { font-size: 32px; }" });
   await page.waitForSelector('[role="grid"]');
 }
