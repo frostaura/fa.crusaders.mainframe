@@ -281,11 +281,18 @@ public sealed class AdminNotificationDispatcher
         if (verdict.Dropped) return await DropAsync(db, row, now, verdict.DropReason!, ct);
         row.PayloadJson = verdict.PayloadJson!;
 
-        var to = await db.Users.AsNoTracking()
-            .Where(u => u.Id == row.RecipientUserId && u.Status == "active" && u.EmailVerified)
-            .Select(u => u.Email)
+        // Browser lane BM-01: an approved member whose address is not confirmed yet used to have the
+        // row finished "sent" to nobody — a game invite lost for good, even after they verified a
+        // minute later. The row now WAITS for the address (MemberNoticeHold) and is released the
+        // moment it is confirmed; an account that is no longer active is suppressed, said so.
+        var recipient = await db.Users.AsNoTracking()
+            .Where(u => u.Id == row.RecipientUserId)
+            .Select(u => new { u.Email, u.Status, u.EmailVerified })
             .FirstOrDefaultAsync(ct);
-        if (to is null) return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
+        if (recipient is null || recipient.Status != "active")
+            return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, MemberNoticeHold.RecipientInactive, ct);
+        if (!recipient.EmailVerified) return await HoldForAddressAsync(db, row, now, ct);
+        var to = recipient.Email;
 
         try
         {
@@ -303,6 +310,24 @@ public sealed class AdminNotificationDispatcher
         row.DeliveredToJson = JsonSerializer.Serialize(new[] { row.RecipientUserId });
         row.RecipientCount = 1;
         return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
+    }
+
+    /// <summary>
+    /// A member notice whose recipient has not confirmed their address yet (BM-01): left Pending and
+    /// looked at again after <see cref="MemberNoticeHold.Recheck"/> — or at once when they verify, which
+    /// pulls its due time forward — and suppressed with its reason once it has waited
+    /// <see cref="MemberNoticeHold.MaxHold"/>, when whatever it said is long past. Not an attempt.
+    /// </summary>
+    private static async Task<bool> HoldForAddressAsync(MainframeDbContext db, AdminNotification row, DateTimeOffset now, CancellationToken ct)
+    {
+        if (now - row.CreatedAt > MemberNoticeHold.MaxHold)
+            return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, MemberNoticeHold.RecipientUnverified, ct);
+        row.DueAt = now.Add(MemberNoticeHold.Recheck).Storable();
+        row.LockedUntil = null;
+        row.Attempts = Math.Max(0, row.Attempts - 1);
+        row.LastError = MemberNoticeHold.AwaitingAddress;
+        await db.SaveChangesAsync(ct);
+        return false;
     }
 
     /// <summary>
