@@ -209,6 +209,10 @@ bool v3UpFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
     const uint16_t c[5] = {toU16(s.args[0]), toU16(s.args[1]), toU16(s.args[2]), toU16(s.args[3]),
                            toU16(s.args[4])};
     out = Frame::diag(c);
+  } else if (eq(v, "HW")) {
+    out = Frame::hw(static_cast<uint8_t>(hexOf(s.args[0])), static_cast<uint8_t>(toU32(s.args[1])),
+                    static_cast<uint8_t>(toU32(s.args[2])), static_cast<uint8_t>(toU32(s.args[3])),
+                    static_cast<uint8_t>(hexOf(s.args[4])));
   } else {
     return v3DownFrameFromSpec(s, out);
   }

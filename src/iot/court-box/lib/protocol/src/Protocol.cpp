@@ -525,6 +525,16 @@ Frame Frame::diag(const uint16_t counters[5]) {
   return f;
 }
 
+Frame Frame::hw(uint8_t lcdAddress, uint8_t relayLevel, uint8_t baudCode, uint8_t lineEnd, uint8_t keys) {
+  Frame f = ofVerb(Verb::Hw);
+  static_cast<void>(f.pushArgHex(lcdAddress, 2U));
+  static_cast<void>(f.pushArgU32(relayLevel > 1U ? 1U : relayLevel));
+  static_cast<void>(f.pushArgU32(baudCode > 5U ? 5U : baudCode));
+  static_cast<void>(f.pushArgU32(lineEnd > 1U ? 1U : lineEnd));
+  static_cast<void>(f.pushArgHex(keys, 2U));
+  return f;
+}
+
 const char* Frame::arg(uint8_t i) const {
   return i < argc_ ? args_[i].c_str() : kEmpty;
 }

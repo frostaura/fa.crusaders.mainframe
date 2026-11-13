@@ -562,7 +562,7 @@ bool tagArg(const Arg& a) {
 ///   k CFG key, 1-6 uppercase letters · v value 0-65535 ·
 ///   l '-' or seconds 0-86400 (clamped) · T note TTL [0,3600] · P live [1,120] ·
 ///   a ack id (tag or S<seq>) · e ack code 0-4 · b two uppercase hex ·
-///   G held seconds [5,60] · n any decimal.
+///   G held seconds [5,60] · n any decimal · p 0|1 · d 0-5.
 bool v3Arg(char letter, Arg& a) {
   uint32_t value = 0;
   switch (letter) {
@@ -586,6 +586,8 @@ bool v3Arg(char letter, Arg& a) {
   case 'b': return isUpperHex(a, 2U);
   case 'G': return clampArg(a, kHeldMinSeconds, kHeldMaxSeconds);
   case 'n': return parseU32(a, value);
+  case 'p': return parseBounded(a, 1U, value);
+  case 'd': return parseBounded(a, 5U, value);
   default: return false;
   }
 }

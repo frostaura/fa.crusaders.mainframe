@@ -153,7 +153,7 @@ enum class Verb : uint8_t {
   Idle, ///< Downlink. What the Mega-rendered landing screen's status row says.
   Map,  ///< Downlink. The club court number behind each relay index.
   // v3 (Mega 3.0.0 / bridge 3.0.0), appended in the order the spec fixes:
-  // RW CMT WANT CFG LAND NOTE LIVE ACK BOOT HELD DIAG. 3.0.0 is the last Mega
+  // RW CMT WANT CFG LAND NOTE LIVE ACK BOOT HELD DIAG HW. 3.0.0 is the last Mega
   // image, so these are every frame a future bridge can steer it with.
   Rw,   ///< Downlink. Stage a 24-character segment of one row of screen <seq>.
   Cmt,  ///< Downlink. Commit screen <seq>: row mask, hold, flags, CRC-16.
@@ -166,9 +166,11 @@ enum class Verb : uint8_t {
   Boot, ///< Uplink. First frame after every Mega reset.
   Held, ///< Uplink. A key chord held inside the boot window.
   Diag, ///< Uplink. Since-boot counters, after every !PONG.
+  // The 2026-11-13 addendum (hardware facts), appended after DIAG.
+  Hw, ///< Uplink. The hardware facts the Mega is actually running with.
 };
 
-inline constexpr size_t kVerbCount = 29;
+inline constexpr size_t kVerbCount = 30;
 
 /// Which decoder may produce a verb. v2's verbs are Any — the Mega application
 /// already answers a v2 uplink verb on its downlink with `!ERR,BADVERB`, and
@@ -287,6 +289,7 @@ inline constexpr VerbSpec kVerbSpecs[kVerbCount] = {
     {Verb::Boot, "BOOT", 3, 3, -1, -1, 0, 0, false, false, Dir::Up, "Xbb"},
     {Verb::Held, "HELD", 2, 2, -1, -1, 0, 0, false, false, Dir::Up, "bG"},
     {Verb::Diag, "DIAG", 5, 5, -1, -1, 0, 0, false, false, Dir::Up, "nnnnn"},
+    {Verb::Hw, "HW", 5, 5, -1, -1, 0, 0, false, false, Dir::Up, "bpdpb"},
 };
 
 /// kVerbSpecs is indexed by the Verb value, so a row in the wrong place would
@@ -535,6 +538,10 @@ public:
   static Frame boot(const char* version, uint8_t cause, uint8_t held);
   static Frame held(uint8_t mask, uint32_t seconds);
   static Frame diag(const uint16_t counters[5]);
+  /// `!HW,<lcd>,<rpol>,<sbaud>,<ssuf>,<keys>`: the LCD address that answered
+  /// (0 = none, two uppercase hex), relay level 0|1, scanner baud code 0-5,
+  /// line end 0|1, unarmed-forward key mask (two uppercase hex).
+  static Frame hw(uint8_t lcdAddress, uint8_t relayLevel, uint8_t baudCode, uint8_t lineEnd, uint8_t keys);
 
   // --- Accessors -----------------------------------------------------------
 
