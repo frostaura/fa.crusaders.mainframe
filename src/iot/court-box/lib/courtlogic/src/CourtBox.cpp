@@ -95,10 +95,10 @@ CourtBox::CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy)
       relayPort_(ports.relay), display_(ports.display), settings_(), relays_(ports.relay),
       screens_(ports.display, settings_), panel_(ports.buttons), scan_(), baud_(), auth_(),
       rx_(proto::Link::Downlink, legacy), uptime_(), stateDue_(), lastMask_(0U), stateNow_(false), txBuf_(),
-      txQueue_(), txHead_(0U), txCount_(0U), txDropped_(0U), rxErrors_(0U), unauthorised_(0U), oversizeScans_(0U),
-      corruptScans_(0U), lastScanRejects_(0U), lastScanByteMs_(0U), lastRxMs_(0U), livePeriodS_(0U),
-      liveSeen_(false), bridgeAlive_(true), lastTag_(), lastTagAtMs_(), bootMs_(0U), heldSinceMs_(0U),
-      heldMask_(0U), heldSent_(false), hwSent_(), hwDue_(true) {
+      txQueue_(), txHead_(0U), txCount_(0U), txDropped_(0U), rxErrors_(0U), unauthorised_(0U),
+      oversizeScans_(0U), corruptScans_(0U), lastScanRejects_(0U), lastScanByteMs_(0U), lastRxMs_(0U),
+      livePeriodS_(0U), liveSeen_(false), bridgeAlive_(true), lastTag_(), lastTagAtMs_(), bootMs_(0U),
+      heldSinceMs_(0U), heldMask_(0U), heldSent_(false), hwSent_(), hwDue_(true) {
 }
 
 void CourtBox::begin() {
@@ -356,7 +356,8 @@ void CourtBox::watchBridge(uint32_t nowMs) {
   if (!bridgeAlive_) {
     return;
   }
-  const uint32_t limit = liveSeen_ ? static_cast<uint32_t>(livePeriodS_) * 3000UL + 1000UL : kLegacyLivenessMs;
+  const uint32_t limit =
+      liveSeen_ ? static_cast<uint32_t>(livePeriodS_) * 3000UL + 1000UL : kLegacyLivenessMs;
   if (tb::since(nowMs, lastRxMs_) > limit) {
     bridgeAlive_ = false;
     screens_.setBridgeAlive(false, nowMs);
@@ -372,8 +373,8 @@ void CourtBox::noteAuthLapse(uint32_t nowMs) {
 /// `!HW` once the LCD is up (the first poll after boot()), after every
 /// `!DIAG`, and whenever one of the facts changes.
 void CourtBox::reportHardware() {
-  const uint8_t now[5] = {display_.address(), static_cast<uint8_t>(settings_.get(Cfg::Rpol)), baud_.reported(),
-                          static_cast<uint8_t>(settings_.get(Cfg::Ssuf)), settings_.keys()};
+  const uint8_t now[5] = {display_.address(), static_cast<uint8_t>(settings_.get(Cfg::Rpol)),
+                          baud_.reported(), static_cast<uint8_t>(settings_.get(Cfg::Ssuf)), settings_.keys()};
   bool changed = hwDue_;
   for (uint8_t i = 0U; i < 5U; ++i) {
     changed = changed || now[i] != hwSent_[i];
@@ -489,8 +490,8 @@ void CourtBox::handleV3Frame(const proto::Frame& frame, uint32_t nowMs) {
 }
 
 void CourtBox::answerPing() {
-  static_cast<void>(sendFrame(proto::Frame::pong(fw::kFirmwareVersion, uptimeSeconds(), txDropped_, rxErrors_,
-                                                 unauthorised_)));
+  static_cast<void>(sendFrame(
+      proto::Frame::pong(fw::kFirmwareVersion, uptimeSeconds(), txDropped_, rxErrors_, unauthorised_)));
   const uint16_t counters[5] = {display_.timeouts(),
                                 static_cast<uint16_t>(screens_.reinits() + display_.recoveries()),
                                 bridge_.rxOverruns(), screens_.ceilings(), relays_.capOffCount()};
@@ -519,7 +520,8 @@ bool CourtBox::courtOf(const proto::Frame& frame, uint8_t& channel) {
 }
 
 bool CourtBox::duplicate(uint8_t slot, uint8_t tag, uint32_t nowMs) {
-  if (tag == proto::kNoTag || lastTag_[slot] != tag || tb::since(nowMs, lastTagAtMs_[slot]) > kDuplicateWindowMs) {
+  if (tag == proto::kNoTag || lastTag_[slot] != tag ||
+      tb::since(nowMs, lastTagAtMs_[slot]) > kDuplicateWindowMs) {
     return false;
   }
   ack(tag, proto::AckCode::Duplicate);
@@ -689,7 +691,8 @@ void CourtBox::applyScreen(const proto::Frame& frame, uint32_t nowMs) {
 void CourtBox::applyV3Screen(const proto::Frame& frame, uint32_t nowMs) {
   const proto::Verb verb = frame.verb();
   if (verb == proto::Verb::Rw) {
-    screens_.stageSegment(static_cast<uint8_t>(parseU32(frame.arg(0))), static_cast<uint8_t>(parseU32(frame.arg(1))),
+    screens_.stageSegment(static_cast<uint8_t>(parseU32(frame.arg(0))),
+                          static_cast<uint8_t>(parseU32(frame.arg(1))),
                           static_cast<uint8_t>(parseU32(frame.arg(2))), frame.arg(3));
   } else if (verb == proto::Verb::Cmt) {
     const uint8_t seq = static_cast<uint8_t>(parseU32(frame.arg(0)));

@@ -77,21 +77,29 @@ public:
   // --- v3 self-healing glass -------------------------------------------------
 
   bool writable() override { return !holding_; }
+
   bool takeGlassLost() override {
     const bool lost = lost_;
     lost_ = false;
     return lost;
   }
+
   void reinit() override { ++reinitCalls_; }
+
   uint8_t cellsPerPass() const override { return cellsPerPass_; }
+
   uint16_t timeouts() const override { return timeouts_; }
+
   uint8_t address() const override { return address_; }
+
   void setAddress(uint8_t address) override {
     requestedAddress_ = address;
     ++addressCalls_;
   }
+
   /// What the fake answers as: 0 models a panel nobody fitted (HW-2).
   void setAnsweringAddress(uint8_t address) { address_ = address; }
+
   uint8_t requestedAddress() const { return requestedAddress_; }
 
   /// One I2C timeout as the real driver suffers it: the controller is
@@ -105,6 +113,7 @@ public:
     lost_ = true;
     ++timeouts_;
   }
+
   /// A nibble desync no timeout reports: garbage on the glass, nobody told.
   void scramble(uint8_t rowIndex) {
     if (rowIndex < hal::kDisplayRows) {
@@ -113,8 +122,11 @@ public:
       }
     }
   }
+
   void setHolding(bool holding) { holding_ = holding; }
+
   void setCellsPerPass(uint8_t cells) { cellsPerPass_ = cells; }
+
   uint16_t reinitCalls() const { return reinitCalls_; }
 
   const char* row(uint8_t index) const { return index < hal::kDisplayRows ? grid_[index] : ""; }

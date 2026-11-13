@@ -14,13 +14,13 @@
 #include <unity.h>
 
 #include "courtlogic/CourtBox.h"
-#include "fwversion/Version.h"
 #include "fakes/FakeButtons.h"
 #include "fakes/FakeClock.h"
 #include "fakes/FakeDisplay.h"
 #include "fakes/FakeRelay.h"
 #include "fakes/FakeScanner.h"
 #include "fakes/FakeTransport.h"
+#include "fwversion/Version.h"
 #include "protocol/Codec.h"
 #include "protocol/ScreenCrc.h"
 
@@ -164,6 +164,7 @@ struct Box {
   }
 
   bool glass(uint8_t row, const char* text) const { return strstr(display.row(row), text) != nullptr; }
+
   bool onLanding() const { return glass(0U, "SCAN YOUR QR") || glass(0U, "OUT OF SERVICE"); }
 };
 
@@ -464,7 +465,8 @@ void test_a_lost_rw_paints_nothing_and_is_answered_incomplete(void) {
   TEST_ASSERT_TRUE(sent(b.bridge, "!ACK,S2,3"));
   TEST_ASSERT_TRUE(b.onLanding());
   // Staging was cleared: a commit of row 0 alone under seq 2 fails too.
-  feedFrame(b.bridge, proto::Frame::cmt(2U, 0x01U, 10U, 0U, proto::screenCrcRow(proto::kCrc16Init, 0U, kVerdict[0])));
+  feedFrame(b.bridge,
+            proto::Frame::cmt(2U, 0x01U, 10U, 0U, proto::screenCrcRow(proto::kCrc16Init, 0U, kVerdict[0])));
   b.pass();
   TEST_ASSERT_EQUAL_UINT16(2U, countLines(b.bridge, "!ACK,S2,3"));
   // The re-send under a new seq paints.

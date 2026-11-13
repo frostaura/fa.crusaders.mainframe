@@ -150,10 +150,13 @@ public:
   uint16_t unauthorisedPresses() const { return unauthorised_; }
 
   uint16_t oversizeScans() const { return oversizeScans_; }
+
   uint16_t corruptScans() const { return corruptScans_; }
 
   const ScreenBuffer& screens() const { return screens_; }
+
   const MegaSettings& settings() const { return settings_; }
+
   const ScannerBaud& scannerBaud() const { return baud_; }
 
   /// The Mega's verdict on the bridge (v3 liveness).
@@ -162,6 +165,7 @@ public:
   uint32_t uptimeSeconds() const { return static_cast<uint32_t>(uptime_.value() / 1000ULL); }
 
   const RelayGuard& relays() const { return relays_; }
+
   const AuthWindow& auth() const { return auth_; }
 
   /// Bytes waiting in the uplink queue.

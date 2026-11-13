@@ -55,12 +55,12 @@ uint32_t ceilSeconds(uint32_t ms) {
 
 ScreenBuffer::ScreenBuffer(hal::IDisplayPort& display, const MegaSettings& settings)
     : display_(display), settings_(settings), staged_(), stageSeq_(kV2Seq), stagedMask_(0U), rows_(),
-      overlayUp_(false), overlayMask_(0U), overlayFlags_(0U), hold_(), chainWait_(), overlayAtMs_(0U), ceiling_(),
-      dwell_(), afton_(), memberSinceCeiling_(false), ceilingEvent_(false), hint_(Hint::None), hintUntil_(),
-      hintAllowedAt_(), hintFallback_(), courtNumbers_(), land_(), landAtMs_(0U), note_(), noteUntil_(),
-      idleSeen_(false), linkFlags_(0U), clockMinute_(kNoClockMinute), clockStampMs_(0U), bridgeAlive_(true),
-      landingSinceMs_(0U), desired_(), shadow_(), composeDue_(), reinitDue_(), reinitNow_(false), composeNow_(true),
-      ceilings_(0U), reinits_(0U), suppressedHints_(0U) {
+      overlayUp_(false), overlayMask_(0U), overlayFlags_(0U), hold_(), chainWait_(), overlayAtMs_(0U),
+      ceiling_(), dwell_(), afton_(), memberSinceCeiling_(false), ceilingEvent_(false), hint_(Hint::None),
+      hintUntil_(), hintAllowedAt_(), hintFallback_(), courtNumbers_(), land_(), landAtMs_(0U), note_(),
+      noteUntil_(), idleSeen_(false), linkFlags_(0U), clockMinute_(kNoClockMinute), clockStampMs_(0U),
+      bridgeAlive_(true), landingSinceMs_(0U), desired_(), shadow_(), composeDue_(), reinitDue_(),
+      reinitNow_(false), composeNow_(true), ceilings_(0U), reinits_(0U), suppressedHints_(0U) {
   for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
     land_[i] = proto::kNoOpinion;
   }
@@ -135,8 +135,8 @@ void ScreenBuffer::stageSegment(uint8_t seq, uint8_t row, uint8_t offset, const 
   stagedMask_ = static_cast<uint8_t>(stagedMask_ | (1U << row));
 }
 
-proto::AckCode ScreenBuffer::commit(uint8_t seq, uint8_t mask, uint32_t holdSeconds, uint8_t flags, uint16_t crc,
-                                    uint32_t nowMs) {
+proto::AckCode ScreenBuffer::commit(uint8_t seq, uint8_t mask, uint32_t holdSeconds, uint8_t flags,
+                                    uint16_t crc, uint32_t nowMs) {
   if (inDwell(nowMs) && !memberSinceCeiling_) {
     clearStaging();
     return proto::AckCode::Busy;
@@ -590,8 +590,9 @@ void ScreenBuffer::overlayHint() {
   if (hint_ == Hint::None) {
     return;
   }
-  const char* text = hint_ == Hint::ScanFirst ? kHintScanFirst
-                                              : (hint_ == Hint::OneMoment ? kHintOneMoment : kHintNoConnection);
+  const char* text = hint_ == Hint::ScanFirst
+                         ? kHintScanFirst
+                         : (hint_ == Hint::OneMoment ? kHintOneMoment : kHintNoConnection);
   const Layout layout = effectiveLayout();
   fitInto(desired_[layoutRows(layout) - 1U], text, layoutWidth(layout));
 }

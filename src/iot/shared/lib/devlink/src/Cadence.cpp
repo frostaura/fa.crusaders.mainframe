@@ -97,11 +97,13 @@ public:
       buf_[0] = '\0';
     }
   }
+
   void put(const char* s) {
     for (size_t i = 0U; ok_ && s != nullptr && s[i] != '\0'; ++i) {
       putc(s[i]);
     }
   }
+
   void putc(char c) {
     if (!ok_ || at_ + 1U >= cap_) {
       ok_ = false;
@@ -111,16 +113,19 @@ public:
     ++at_;
     buf_[at_] = '\0';
   }
+
   void u32(uint32_t v) {
     char digits[11];
     snprintf(digits, sizeof(digits), "%lu", static_cast<unsigned long>(v));
     put(digits);
   }
+
   void hex2(uint8_t v) {
     char digits[3];
     snprintf(digits, sizeof(digits), "%02X", static_cast<unsigned>(v));
     put(digits);
   }
+
   /// `,"key":"value"`
   void str(const char* key, const char* value) {
     put(",\"");
@@ -129,13 +134,16 @@ public:
     put(value);
     putc('"');
   }
+
   void num(const char* key, uint32_t value) {
     put(",\"");
     put(key);
     put("\":");
     u32(value);
   }
+
   bool ok() const { return ok_; }
+
   size_t size() const { return at_; }
 
 private:

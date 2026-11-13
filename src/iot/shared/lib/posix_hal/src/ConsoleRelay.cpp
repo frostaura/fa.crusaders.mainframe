@@ -29,7 +29,9 @@ void ConsoleRelay::print(uint8_t channel) const {
   // A released relay is an input (Mega 3.0.0, HW-1), never a driven level.
   const hal::PinDrive drive = hal::relayDriveFor(state_[channel], polarity_);
   printf("[relay] court %c %s (%s)\n", static_cast<char>('A' + channel), state_[channel] ? "ON " : "OFF",
-         drive == hal::PinDrive::kInput ? "pin input" : (drive == hal::PinDrive::kLow ? "pin level LOW" : "pin level HIGH"));
+         drive == hal::PinDrive::kInput
+             ? "pin input"
+             : (drive == hal::PinDrive::kLow ? "pin level LOW" : "pin level HIGH"));
   static_cast<void>(fflush(stdout));
 }
 

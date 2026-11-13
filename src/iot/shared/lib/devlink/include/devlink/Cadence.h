@@ -72,12 +72,12 @@ inline constexpr uint8_t kMaxRelightElements = 4U;
 
 /// `mega`: what the Mega said about itself this Mega boot (§13).
 struct MegaReport {
-  uint8_t reset = 0U;     ///< MCUSR from !BOOT
-  uint8_t lcd = 0U;       ///< !HW arg 0, 0 = none answered
-  bool relayLow = false;  ///< !HW arg 1
-  uint32_t scanBaud = 0U; ///< 0 while auto has not locked
-  bool scanCrlf = false;  ///< !HW arg 3
-  uint8_t keys = 0U;      ///< !HW arg 4
+  uint8_t reset = 0U;                          ///< MCUSR from !BOOT
+  uint8_t lcd = 0U;                            ///< !HW arg 0, 0 = none answered
+  bool relayLow = false;                       ///< !HW arg 1
+  uint32_t scanBaud = 0U;                      ///< 0 while auto has not locked
+  bool scanCrlf = false;                       ///< !HW arg 3
+  uint8_t keys = 0U;                           ///< !HW arg 4
   uint16_t counters[5] = {0U, 0U, 0U, 0U, 0U}; ///< the !DIAG counters
 };
 

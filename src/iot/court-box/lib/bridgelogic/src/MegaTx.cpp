@@ -74,8 +74,8 @@ proto::Frame tagged(const proto::Frame& f, uint8_t tag) {
 }
 
 bool isV3Only(proto::Verb v) {
-  return v == proto::Verb::Want || v == proto::Verb::Cfg || v == proto::Verb::Land || v == proto::Verb::Note ||
-         v == proto::Verb::Live || v == proto::Verb::Rw || v == proto::Verb::Cmt;
+  return v == proto::Verb::Want || v == proto::Verb::Cfg || v == proto::Verb::Land ||
+         v == proto::Verb::Note || v == proto::Verb::Live || v == proto::Verb::Rw || v == proto::Verb::Cmt;
 }
 
 /// A v2 Mega refuses every escape but %2C and %25: `!` never reaches it.
@@ -113,16 +113,17 @@ size_t encodeV3Screen(const Screen& screen, uint8_t seq, char* out, size_t cap) 
     at += n;
     crc = proto::screenCrcRow(crc, r, screen.rows[r]);
   }
-  const size_t n = proto::encode(proto::Frame::cmt(seq, mask, screen.holdSeconds, flags, crc), out + at, cap - at);
+  const size_t n =
+      proto::encode(proto::Frame::cmt(seq, mask, screen.holdSeconds, flags, crc), out + at, cap - at);
   return n == 0U ? 0U : at + n;
 }
 
 MegaTx::MegaTx()
     : dialect_(MegaDialect::Unknown), tag_(0U), seq_(0U), ackedLayout_(-1), queue_(), count_(0U),
-      priorityBytes_(0U), current_(), currentLen_(0U), currentAt_(0U), pending_(), unacked_(), unackedCount_(0U),
-      screens_(), screenHead_(0U), screenCount_(0U), screenInFlight_(false), screenSeq_(0U), screenResends_(0U),
-      screenSentAtMs_(0U), inFlight_(), screenBusy_(false), screensDropped_(0U), pendingLayout_(-1),
-      layoutTag_(0U) {
+      priorityBytes_(0U), current_(), currentLen_(0U), currentAt_(0U), pending_(), unacked_(),
+      unackedCount_(0U), screens_(), screenHead_(0U), screenCount_(0U), screenInFlight_(false),
+      screenSeq_(0U), screenResends_(0U), screenSentAtMs_(0U), inFlight_(), screenBusy_(false),
+      screensDropped_(0U), pendingLayout_(-1), layoutTag_(0U) {
 }
 
 void MegaTx::setMegaVersion(const char* version) {
@@ -220,9 +221,10 @@ bool MegaTx::command(const proto::Frame& frame, uint32_t nowMs) {
   p.sentAtMs = nowMs;
   p.verb = t.verb();
   proto::Court c = proto::Court::A;
-  p.court = (p.verb == proto::Verb::On || p.verb == proto::Verb::Off || p.verb == proto::Verb::Ext) && courtOf(t, c)
-                ? static_cast<uint8_t>(c)
-                : 0xFFU;
+  p.court =
+      (p.verb == proto::Verb::On || p.verb == proto::Verb::Off || p.verb == proto::Verb::Ext) && courtOf(t, c)
+          ? static_cast<uint8_t>(c)
+          : 0xFFU;
   p.len = static_cast<uint8_t>(len);
   memcpy(p.line, line, len);
   if (frame.verb() == proto::Verb::Cfg && strcmp(frame.arg(1U), "LAYOUT") == 0) {

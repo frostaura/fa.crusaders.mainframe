@@ -60,7 +60,9 @@ public:
   /// The rate the modelled scanner really transmits at; 0 = whatever the port
   /// is set to (every byte arrives clean).
   void setActualBaud(uint32_t baud) { actualBaud_ = baud; }
+
   uint32_t baud() const { return baud_; }
+
   uint16_t baudChanges() const { return baudChanges_; }
 
   // --- stimulus ------------------------------------------------------------

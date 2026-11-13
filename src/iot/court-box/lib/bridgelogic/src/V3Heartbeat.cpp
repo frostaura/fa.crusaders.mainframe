@@ -103,11 +103,12 @@ struct CfgSpec {
 // Hardware first (in force before any relay frame after a !BOOT), then KEYS,
 // then the display keys.
 const CfgSpec kSpecs[kMegaCfgKeys] = {
-    {"RPOL", 0U, 1U, 0U},       {"LCDA", 0U, 63U, 0U},     {"SBAUD", 0U, 5U, 0U},     {"SSUF", 0U, 1U, 0U},
-    {"SGAP", 50U, 500U, 150U},  {"KEYS", 0U, 255U, 15U},   {"LAYOUT", 0U, 1U, 0U},    {"MARQ", 0U, 1U, 1U},
-    {"STEP", 250U, 1000U, 400U}, {"PAGE", 2U, 15U, 4U},     {"CEIL", 15U, 120U, 60U},  {"DWELL", 0U, 10U, 3U},
-    {"AFTON", 5U, 60U, 15U},    {"REINIT", 30U, 600U, 60U}, {"HINT", 1U, 10U, 3U},     {"SCANH", 3U, 60U, 10U},
-    {"CAP", 90U, 720U, 240U},
+    {"RPOL", 0U, 1U, 0U},    {"LCDA", 0U, 63U, 0U},      {"SBAUD", 0U, 5U, 0U},
+    {"SSUF", 0U, 1U, 0U},    {"SGAP", 50U, 500U, 150U},  {"KEYS", 0U, 255U, 15U},
+    {"LAYOUT", 0U, 1U, 0U},  {"MARQ", 0U, 1U, 1U},       {"STEP", 250U, 1000U, 400U},
+    {"PAGE", 2U, 15U, 4U},   {"CEIL", 15U, 120U, 60U},   {"DWELL", 0U, 10U, 3U},
+    {"AFTON", 5U, 60U, 15U}, {"REINIT", 30U, 600U, 60U}, {"HINT", 1U, 10U, 3U},
+    {"SCANH", 3U, 60U, 10U}, {"CAP", 90U, 720U, 240U},
 };
 
 uint16_t clampTo(uint32_t v, uint16_t lo, uint16_t hi) {
@@ -116,7 +117,8 @@ uint16_t clampTo(uint32_t v, uint16_t lo, uint16_t hi) {
 
 /// A numeric config key into the Mega key `mega`, clamped by the Mega's
 /// bounds. Absent: unchanged. Present and not a bare integer: drift.
-void readNumber(const char* obj, size_t len, const char* key, const char* mega, MegaConfig& out, Drift& drift) {
+void readNumber(const char* obj, size_t len, const char* key, const char* mega, MegaConfig& out,
+                Drift& drift) {
   if (json::findTopLevelKey(obj, len, key) == json::kNotFound) {
     return;
   }
@@ -256,7 +258,7 @@ ReadResult readSnapshot(const char* body, size_t len, Snapshot& out, uint32_t no
   size_t at = json::findTopLevelArray(body, len, "courts");
   if (at == json::kNotFound) {
     return json::findTopLevelKey(body, len, "courts") == json::kNotFound ? ReadResult::Absent
-                                                                          : ReadResult::Unreadable;
+                                                                         : ReadResult::Unreadable;
   }
   Snapshot next;
   size_t start = 0U;
@@ -347,7 +349,8 @@ uint8_t keysFromButtonMap(const court::ButtonMap& map) {
 // --- the reconcile ------------------------------------------------------------
 
 Reconciler::Reconciler()
-    : lastAtMs_(), tried_(), attempts_(), failed_(), suppressed_(), suppressRef_(), suppressAtMs_(), sawLit_() {
+    : lastAtMs_(), tried_(), attempts_(), failed_(), suppressed_(), suppressRef_(), suppressAtMs_(),
+      sawLit_() {
 }
 
 int32_t Reconciler::paidSeconds(const Snapshot& snap, uint8_t relay, uint32_t nowMs) {
@@ -386,8 +389,9 @@ void Reconciler::memberReleased(uint8_t relay, const Snapshot& snap, uint32_t no
   }
 }
 
-bool Reconciler::plan(const Snapshot& snap, const RelayView view[kSnapshotRelays], const ReconcileSettings& settings,
-                      uint32_t nowMs, bool force, int32_t out[kSnapshotRelays]) {
+bool Reconciler::plan(const Snapshot& snap, const RelayView view[kSnapshotRelays],
+                      const ReconcileSettings& settings, uint32_t nowMs, bool force,
+                      int32_t out[kSnapshotRelays]) {
   bool any = false;
   for (uint8_t r = 0U; r < kSnapshotRelays; ++r) {
     out[r] = proto::kNoOpinion;

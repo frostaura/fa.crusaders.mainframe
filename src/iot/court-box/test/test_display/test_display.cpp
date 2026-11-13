@@ -155,7 +155,8 @@ void runCrc(const char* c) {
     crc = proto::screenCrcRow(crc, row, text);
     mask = static_cast<uint8_t>(mask | (1U << row));
   }
-  TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(corpus::unsignedValue(corpus::member(c, "mask"))), mask, id);
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(corpus::unsignedValue(corpus::member(c, "mask"))),
+                                  mask, id);
   char hex[8];
   snprintf(hex, sizeof(hex), "%04X", crc);
   TEST_ASSERT_NOT_NULL(str(c, "crc"));

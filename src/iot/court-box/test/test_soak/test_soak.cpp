@@ -17,12 +17,13 @@
 //
 // SOAK_SEQUENCES (default 1000) and SOAK_SEED override the run.
 
-#include <new>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unity.h>
+
+#include <new>
 
 #include "bridgelogic/MegaTx.h"
 #include "bridgelogic/V3Heartbeat.h"
@@ -39,14 +40,18 @@ namespace {
 /// xorshift32: reproducible from the seed alone.
 struct Rng {
   uint32_t s;
+
   uint32_t next() {
     s ^= s << 13;
     s ^= s >> 17;
     s ^= s << 5;
     return s;
   }
+
   uint32_t below(uint32_t n) { return n == 0U ? 0U : next() % n; }
+
   bool chance(uint32_t perMille) { return below(1000U) < perMille; }
+
   bool rare(uint32_t perHundredThousand) { return below(100000U) < perHundredThousand; }
 };
 
@@ -59,7 +64,9 @@ public:
   static constexpr uint16_t kFifo = 128U;
 
   bool connected() override { return true; }
+
   size_t writable() override { return kFifo - fifoLen_; }
+
   size_t write(const uint8_t* data, size_t len) override {
     size_t n = 0U;
     for (; n < len && fifoLen_ < kFifo; ++n) {
@@ -68,6 +75,7 @@ public:
     }
     return n;
   }
+
   bool read(uint8_t& out) override {
     if (ringLen_ == 0U) {
       return false;
@@ -77,6 +85,7 @@ public:
     --ringLen_;
     return true;
   }
+
   /// `ms` of line time: bytes move FIFO -> ring, one a millisecond; a full
   /// ring overflows (counted) exactly as the AVR's does.
   void tick(uint32_t ms, bool cut, Rng& rng, uint32_t garblePerMille) {
@@ -98,10 +107,12 @@ public:
       ++ringLen_;
     }
   }
+
   void reset() {
     fifoLen_ = 0U;
     ringLen_ = 0U;
   }
+
   uint32_t overflows() const { return overflows_; }
 
 private:
@@ -118,8 +129,11 @@ private:
 class MegaPort final : public hal::ITransport {
 public:
   MegaPort(Wire& down, Wire& up) : down_(down), up_(up) {}
+
   bool connected() override { return true; }
+
   size_t writable() override { return up_.writable() < 64U ? up_.writable() : 64U; }
+
   size_t write(const uint8_t* d, size_t n) override {
     const size_t wrote = up_.write(d, n);
     // A tap on what the Mega put on its TX line: every "!SCAN," it wrote.
@@ -134,7 +148,9 @@ public:
     }
     return wrote;
   }
+
   bool read(uint8_t& out) override { return down_.read(out); }
+
   uint32_t scansWritten = 0U;
 
 private:
@@ -189,11 +205,13 @@ struct Sim {
   char failure[160];
 
   explicit Sim(uint32_t seed)
-      : seed0(seed), start(1000U + (seed % 100000U)), trace(getenv("SOAK_TRACE") != nullptr), rng{seed == 0U ? 1U : seed}, now(1000U + (seed % 100000U)), clock(now), relay(hal::RelayPolarity::kActiveHigh),
-        display(), scanner(), buttons(), down(), up(), port(down, up), mega(nullptr), megaStore(), tx(),
-        reconciler(), snapshot(), uplink(proto::Link::Uplink), server(), serverUp(true), linkCut(false),
-        bridgeDead(false), nextBeatMs(now), nextLiveMs(now), stateMask(0U), lastInputMs(now), rebootAtMs(0U),
-        rebootPending(false), healthySinceReboot(false), scansSent(0U), scansSeen(0U), violations(0U), failure() {
+      : seed0(seed), start(1000U + (seed % 100000U)), trace(getenv("SOAK_TRACE") != nullptr),
+        rng{seed == 0U ? 1U : seed}, now(1000U + (seed % 100000U)), clock(now),
+        relay(hal::RelayPolarity::kActiveHigh), display(), scanner(), buttons(), down(), up(), port(down, up),
+        mega(nullptr), megaStore(), tx(), reconciler(), snapshot(), uplink(proto::Link::Uplink), server(),
+        serverUp(true), linkCut(false), bridgeDead(false), nextBeatMs(now), nextLiveMs(now), stateMask(0U),
+        lastInputMs(now), rebootAtMs(0U), rebootPending(false), healthySinceReboot(false), scansSent(0U),
+        scansSeen(0U), violations(0U), failure() {
     bootMega();
   }
 
@@ -209,15 +227,16 @@ struct Sim {
     }
     relay.allOff();
     down.reset();
-    mega = new (megaStore) courtlogic::CourtBox(courtlogic::CourtPorts{relay, display, scanner, buttons, port, clock});
+    mega = new (megaStore)
+        courtlogic::CourtBox(courtlogic::CourtPorts{relay, display, scanner, buttons, port, clock});
     mega->boot(0x01U);
   }
 
   void fail(const char* what) {
     if (violations == 0U) {
       snprintf(failure, sizeof(failure), "SOAK_SEED=%lu SOAK_SEQUENCES=1, t+%lu: %s [%s|%s] last input %lu",
-               static_cast<unsigned long>(seed0), static_cast<unsigned long>(now - start), what, display.row(0),
-               display.row(1), static_cast<unsigned long>(now - lastInputMs));
+               static_cast<unsigned long>(seed0), static_cast<unsigned long>(now - start), what,
+               display.row(0), display.row(1), static_cast<unsigned long>(now - lastInputMs));
     }
     ++violations;
   }
@@ -284,9 +303,10 @@ struct Sim {
           continue;
         }
         const proto::Verb v = r.frame.verb();
-        if (trace && (v == proto::Verb::Ack || v == proto::Verb::Evt || v == proto::Verb::Scan || v == proto::Verb::Boot)) {
-          printf("t+%lu up %s %s %s\n", static_cast<unsigned long>(now - start), proto::verbName(v), r.frame.arg(0),
-                 r.frame.arg(1));
+        if (trace && (v == proto::Verb::Ack || v == proto::Verb::Evt || v == proto::Verb::Scan ||
+                      v == proto::Verb::Boot)) {
+          printf("t+%lu up %s %s %s\n", static_cast<unsigned long>(now - start), proto::verbName(v),
+                 r.frame.arg(0), r.frame.arg(1));
         }
         if (v == proto::Verb::Ack) {
           tx.onAck(r.frame, now);

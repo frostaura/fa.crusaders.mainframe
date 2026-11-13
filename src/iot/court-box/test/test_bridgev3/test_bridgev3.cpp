@@ -405,10 +405,12 @@ void test_ages_never_go_negative(void) {
 void test_a_cut_or_unreadable_courts_array_is_never_applied(void) {
   bridgelogic::Snapshot snap = snapshotOf(true, 2700U, "3fa85f64", 0U);
   const char cut[] = "{\"courts\":[\"0|1|2700|b|3fa85f64\",\"1|0|0|-\"]}";
-  TEST_ASSERT_TRUE(bridgelogic::readSnapshot(cut, strlen(cut), snap, 1U) == bridgelogic::ReadResult::Unreadable);
+  TEST_ASSERT_TRUE(bridgelogic::readSnapshot(cut, strlen(cut), snap, 1U) ==
+                   bridgelogic::ReadResult::Unreadable);
   TEST_ASSERT_EQUAL_UINT32(0U, snap.atMs);
   const char extra[] = "{\"courts\":[\"0|1|60|w|deadbeef|future|fields\"]}";
-  TEST_ASSERT_TRUE(bridgelogic::readSnapshot(extra, strlen(extra), snap, 2U) == bridgelogic::ReadResult::Adopted);
+  TEST_ASSERT_TRUE(bridgelogic::readSnapshot(extra, strlen(extra), snap, 2U) ==
+                   bridgelogic::ReadResult::Adopted);
   TEST_ASSERT_EQUAL_UINT32(60U, snap.courts[0].seconds);
   const char wrongKind[] = "{\"courts\":[0]}";
   TEST_ASSERT_TRUE(bridgelogic::readSnapshot(wrongKind, strlen(wrongKind), snap, 3U) ==

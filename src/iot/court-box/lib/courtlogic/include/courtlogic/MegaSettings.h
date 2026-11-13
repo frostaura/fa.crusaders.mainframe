@@ -63,12 +63,14 @@ inline constexpr uint16_t kRpolBootDefault = 0U;
 inline constexpr uint8_t kCfgCount = static_cast<uint8_t>(Cfg::Count);
 
 inline constexpr CfgKey kCfgKeys[kCfgCount] = {
-    {"LAYOUT", 0U, 1U, 0U, true},  {"MARQ", 0U, 1U, 1U, true},    {"STEP", 250U, 1000U, 400U, false},
-    {"PAGE", 2U, 15U, 4U, false},  {"CEIL", 15U, 120U, 60U, false}, {"DWELL", 0U, 10U, 3U, false},
-    {"AFTON", 5U, 60U, 15U, false}, {"REINIT", 30U, 600U, 60U, false}, {"HINT", 1U, 10U, 3U, false},
-    {"SCANH", 3U, 60U, 10U, false}, {"CAP", 90U, 720U, 240U, false},
-    {"RPOL", 0U, 1U, kRpolBootDefault, true}, {"LCDA", 0U, 63U, 0U, true},
-    {"SBAUD", 0U, 5U, 0U, true},    {"SSUF", 0U, 1U, 0U, true},     {"SGAP", 50U, 500U, 150U, false},
+    {"LAYOUT", 0U, 1U, 0U, true},       {"MARQ", 0U, 1U, 1U, true},
+    {"STEP", 250U, 1000U, 400U, false}, {"PAGE", 2U, 15U, 4U, false},
+    {"CEIL", 15U, 120U, 60U, false},    {"DWELL", 0U, 10U, 3U, false},
+    {"AFTON", 5U, 60U, 15U, false},     {"REINIT", 30U, 600U, 60U, false},
+    {"HINT", 1U, 10U, 3U, false},       {"SCANH", 3U, 60U, 10U, false},
+    {"CAP", 90U, 720U, 240U, false},    {"RPOL", 0U, 1U, kRpolBootDefault, true},
+    {"LCDA", 0U, 63U, 0U, true},        {"SBAUD", 0U, 5U, 0U, true},
+    {"SSUF", 0U, 1U, 0U, true},         {"SGAP", 50U, 500U, 150U, false},
     {"KEYS", 0U, 255U, 15U, false},
 };
 
@@ -98,10 +100,15 @@ public:
   proto::AckCode apply(const char* key, uint32_t value);
 
   uint16_t get(Cfg key) const { return values_[static_cast<uint8_t>(key)]; }
+
   uint32_t ms(Cfg key) const { return static_cast<uint32_t>(get(key)) * 1000UL; }
+
   Layout layout() const { return get(Cfg::Layout) == 1U ? Layout::Expanded : Layout::Compact; }
+
   bool marquee() const { return get(Cfg::Marq) == 1U; }
+
   bool relayActiveLow() const { return get(Cfg::Rpol) == 1U; }
+
   uint8_t keys() const { return static_cast<uint8_t>(get(Cfg::Keys)); }
 
   /// Which key the last successful apply() set (Cfg::Count when none).

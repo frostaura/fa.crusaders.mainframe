@@ -177,12 +177,14 @@ bool v3DownFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
     out = Frame::cmt(static_cast<uint8_t>(toU32(s.args[0])), static_cast<uint8_t>(toU32(s.args[1])),
                      toU32(s.args[2]), static_cast<uint8_t>(toU32(s.args[3])), hexOf(s.args[4]));
   } else if (eq(v, "WANT")) {
-    const int32_t secs[4] = {opinionOf(s.args[1]), opinionOf(s.args[2]), opinionOf(s.args[3]), opinionOf(s.args[4])};
+    const int32_t secs[4] = {opinionOf(s.args[1]), opinionOf(s.args[2]), opinionOf(s.args[3]),
+                             opinionOf(s.args[4])};
     out = Frame::want(static_cast<uint8_t>(toU32(s.args[0])), secs);
   } else if (eq(v, "CFG")) {
     out = Frame::cfg(static_cast<uint8_t>(toU32(s.args[0])), s.args[1], toU16(s.args[2]));
   } else if (eq(v, "LAND")) {
-    const int32_t secs[4] = {opinionOf(s.args[0]), opinionOf(s.args[1]), opinionOf(s.args[2]), opinionOf(s.args[3])};
+    const int32_t secs[4] = {opinionOf(s.args[0]), opinionOf(s.args[1]), opinionOf(s.args[2]),
+                             opinionOf(s.args[3])};
     out = Frame::land(secs);
   } else if (eq(v, "NOTE")) {
     out = Frame::note(toU32(s.args[0]), s.args[1]);
@@ -202,7 +204,8 @@ bool v3UpFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
     out = s.args[0][0] == 'S' ? Frame::ackScreen(static_cast<uint8_t>(toU32(s.args[0] + 1)), code)
                               : Frame::ack(static_cast<uint8_t>(toU32(s.args[0])), code);
   } else if (eq(v, "BOOT")) {
-    out = Frame::boot(s.args[0], static_cast<uint8_t>(hexOf(s.args[1])), static_cast<uint8_t>(hexOf(s.args[2])));
+    out = Frame::boot(s.args[0], static_cast<uint8_t>(hexOf(s.args[1])),
+                      static_cast<uint8_t>(hexOf(s.args[2])));
   } else if (eq(v, "HELD")) {
     out = Frame::held(static_cast<uint8_t>(hexOf(s.args[0])), toU32(s.args[1]));
   } else if (eq(v, "DIAG")) {
@@ -226,12 +229,14 @@ bool taggedFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
     out = Frame::on(courtOf(s.args[0]), toU32(s.args[1]),
                     s.argCount > 2U ? static_cast<uint8_t>(toU32(s.args[2])) : proto::kNoTag);
   } else if (eq(v, "OFF")) {
-    out = Frame::off(courtOf(s.args[0]), s.argCount > 1U ? static_cast<uint8_t>(toU32(s.args[1])) : proto::kNoTag);
+    out = Frame::off(courtOf(s.args[0]),
+                     s.argCount > 1U ? static_cast<uint8_t>(toU32(s.args[1])) : proto::kNoTag);
   } else if (eq(v, "EXT")) {
     out = Frame::ext(courtOf(s.args[0]), toU32(s.args[1]),
                      s.argCount > 2U ? static_cast<uint8_t>(toU32(s.args[2])) : proto::kNoTag);
   } else if (eq(v, "AUTH")) {
-    out = Frame::auth(toU16(s.args[0]), s.argCount > 1U ? static_cast<uint8_t>(toU32(s.args[1])) : proto::kNoTag);
+    out = Frame::auth(toU16(s.args[0]),
+                      s.argCount > 1U ? static_cast<uint8_t>(toU32(s.args[1])) : proto::kNoTag);
   } else {
     return v3UpFrameFromSpec(s, out);
   }

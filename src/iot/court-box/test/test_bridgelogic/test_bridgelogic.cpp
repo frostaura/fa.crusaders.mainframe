@@ -33,14 +33,13 @@
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/PayFor.h"
-#include "bridgelogic/V3Heartbeat.h"
-#include "devlink/EventUpload.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterTokenFits.h"
 #include "bridgelogic/ScanFlow.h"
 #include "bridgelogic/ScanMemory.h"
 #include "bridgelogic/ScreenScript.h"
 #include "bridgelogic/StateReconcile.h"
+#include "bridgelogic/V3Heartbeat.h"
 #include "bridgelogic/WalkUp.h"
 #include "bridgelogic/WallClock.h"
 #include "court/Session.h"
@@ -4404,7 +4403,6 @@ void test_a_known_member_with_nothing_booked_is_invited_to_walk_up() {
   TEST_ASSERT_FALSE(r.invitesWalkUp);
 }
 
-
 // --- v3 (device-api.md §2-§9, §12): every v3 http vector, by id --------------
 
 devlink::HeartbeatV3 v3Base() {
@@ -4423,7 +4421,8 @@ void expectHeartbeat(const char* id, const char* version, uint64_t uptime, const
   report.relayStateCount = stateCount;
   report.v3 = &v3;
   static char rendered[devlink::kHeartbeatBodyCap] = {};
-  const size_t len = devlink::renderHeartbeatBody(rendered, sizeof(rendered), corpusMac(), version, uptime, report);
+  const size_t len =
+      devlink::renderHeartbeatBody(rendered, sizeof(rendered), corpusMac(), version, uptime, report);
   TEST_ASSERT_EQUAL_STRING_MESSAGE(expected, rendered, id);
   TEST_ASSERT_EQUAL_size_t_MESSAGE(n, len, id);
 }
@@ -4575,13 +4574,15 @@ void test_corpus_v3_a_release_says_why_the_relay_opened() {
   e.durationMs = 1260000UL;
   e.cause = eventq::Cause::MegaReset;
   char rendered[devlink::kEventBodyCap] = {};
-  const size_t len = devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 2596069104UL, 86500000ULL, e);
+  const size_t len =
+      devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 2596069104UL, 86500000ULL, e);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
   TEST_ASSERT_EQUAL_size_t(n, len);
   // A 2.x-shaped release (no cause) is byte-for-byte what it was.
   e.cause = eventq::Cause::None;
   TEST_ASSERT_NULL(strstr(rendered + 0, "\"cause\":\"member\""));
-  const size_t plain = devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 2596069104UL, 86500000ULL, e);
+  const size_t plain =
+      devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 2596069104UL, 86500000ULL, e);
   TEST_ASSERT_NULL(strstr(rendered, "cause"));
   TEST_ASSERT_TRUE(plain < len);
 }
@@ -4698,13 +4699,12 @@ void test_corpus_v3_lifeline_answers_still_carry_the_snapshot() {
   for (uint8_t i = 0U; i < 3U; ++i) {
     const size_t n = v3Response(ids[i]);
     bridgelogic::Snapshot snap;
-    TEST_ASSERT_TRUE_MESSAGE(bridgelogic::readSnapshot(g_v3Body, n, snap, 0U) == bridgelogic::ReadResult::Adopted,
-                             ids[i]);
+    TEST_ASSERT_TRUE_MESSAGE(
+        bridgelogic::readSnapshot(g_v3Body, n, snap, 0U) == bridgelogic::ReadResult::Adopted, ids[i]);
     expectSnapshotOfTheFourCourts(snap);
     size_t objLen = 0U;
-    TEST_ASSERT_TRUE_MESSAGE(devapi::json::findTopLevelObject(g_v3Body, n, objects[i], objLen) !=
-                                 devapi::json::kNotFound,
-                             ids[i]);
+    TEST_ASSERT_TRUE_MESSAGE(
+        devapi::json::findTopLevelObject(g_v3Body, n, objects[i], objLen) != devapi::json::kNotFound, ids[i]);
   }
   // A lifeline-only body is "no opinion" on the snapshot and the roster.
   const size_t n = v3Response("v3-heartbeat-response-lifeline-only");
@@ -4746,7 +4746,8 @@ void test_corpus_v3_activate_arms_relighting_from_the_uncapped_remainder() {
 void test_v3_keys_mask_follows_the_button_map() {
   court::ButtonMap map;
   TEST_ASSERT_EQUAL_UINT8(0x0FU, bridgelogic::keysFromButtonMap(map));
-  const char* const wires[8] = {"court:A", "court:B", "minutes:15", "court:D", "minutes:15", "off", "minutes:45", "court:C"};
+  const char* const wires[8] = {"court:A",    "court:B", "minutes:15", "court:D",
+                                "minutes:15", "off",     "minutes:45", "court:C"};
   for (uint8_t i = 0U; i < 8U; ++i) {
     TEST_ASSERT_TRUE(map.setFromWire(i, wires[i]));
   }

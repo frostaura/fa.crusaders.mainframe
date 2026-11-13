@@ -327,7 +327,8 @@ Outcome Session<RosterT, QueueT>::applyDecision(const roster::Decision& decision
 }
 
 template <typename RosterT, typename QueueT>
-Outcome Session<RosterT, QueueT>::onRelease(uint8_t court, uint32_t heldMs, uint32_t nowMs, eventq::Cause cause) {
+Outcome Session<RosterT, QueueT>::onRelease(uint8_t court, uint32_t heldMs, uint32_t nowMs,
+                                            eventq::Cause cause) {
   Outcome outcome;
   outcome.action = Action::Refuse; // nothing to switch on; the lights are already out
   outcome.court = court;

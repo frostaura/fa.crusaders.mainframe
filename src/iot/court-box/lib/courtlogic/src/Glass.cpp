@@ -20,6 +20,7 @@ public:
       buf_[0] = '\0';
     }
   }
+
   void put(char c) {
     if (len_ + 1U < cap_) {
       buf_[len_] = c;
@@ -27,11 +28,13 @@ public:
       buf_[len_] = '\0';
     }
   }
+
   void put(const char* s) {
     for (size_t i = 0U; s != nullptr && s[i] != '\0'; ++i) {
       put(s[i]);
     }
   }
+
   void putU32(uint32_t v) {
     char digits[10];
     uint8_t n = 0U;
@@ -45,6 +48,7 @@ public:
       put(digits[n]);
     }
   }
+
   size_t size() const { return len_; }
 
 private:
@@ -256,9 +260,9 @@ void composeLanding(const LandingInput& in, GlassRows rows) {
   for (uint8_t r = 0U; r < kGlassRows; ++r) {
     rows[r][0] = '\0';
   }
-  centerInto(rows[0], in.status == LandStatus::Offline
-                          ? kOutOfService
-                          : (in.layout == Layout::Expanded ? kCtaExpanded : kCtaCompact),
+  centerInto(rows[0],
+             in.status == LandStatus::Offline ? kOutOfService
+                                              : (in.layout == Layout::Expanded ? kCtaExpanded : kCtaCompact),
              width);
   const uint8_t items = pagedItemCount(in);
   if (in.layout == Layout::Expanded) {

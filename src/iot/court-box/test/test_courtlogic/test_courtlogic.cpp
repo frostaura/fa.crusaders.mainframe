@@ -693,7 +693,6 @@ void test_auth_saturates_an_absurd_window(void) {
   TEST_ASSERT_FALSE(auth.allows(kBaseMid + courtlogic::kAuthMaxMs));
 }
 
-
 // --- v3: RelayGuard never shortens, and the authorisation cap (FSF-12, FWM-20)
 
 void test_relay_guard_v3_on_and_extend_never_shorten_a_lit_court(void) {
@@ -780,15 +779,15 @@ void test_relay_guard_v3_a_member_grant_restarts_the_cap(void) {
 
 void test_relay_drive_a_released_relay_is_an_input_for_either_module(void) {
   for (uint8_t p = 0U; p < 2U; ++p) {
-    const hal::RelayPolarity polarity = p == 0U ? hal::RelayPolarity::kActiveLow : hal::RelayPolarity::kActiveHigh;
+    const hal::RelayPolarity polarity =
+        p == 0U ? hal::RelayPolarity::kActiveLow : hal::RelayPolarity::kActiveHigh;
     fakes::FakeRelay relay(polarity);
     courtlogic::RelayGuard guard(relay);
     for (uint8_t c = 0U; c < hal::kRelayChannelCount; ++c) {
       TEST_ASSERT_TRUE(relay.drive(c) == hal::PinDrive::kInput);
     }
     TEST_ASSERT_TRUE(guard.on(kCourtA, 60U, kBaseMid));
-    TEST_ASSERT_TRUE(relay.drive(kCourtA) ==
-                     (p == 0U ? hal::PinDrive::kLow : hal::PinDrive::kHigh));
+    TEST_ASSERT_TRUE(relay.drive(kCourtA) == (p == 0U ? hal::PinDrive::kLow : hal::PinDrive::kHigh));
     TEST_ASSERT_TRUE(relay.drive(kCourtB) == hal::PinDrive::kInput);
     TEST_ASSERT_TRUE(guard.off(kCourtA));
     TEST_ASSERT_TRUE(relay.drive(kCourtA) == hal::PinDrive::kInput);
@@ -805,7 +804,8 @@ void test_relay_drive_a_wrong_level_fails_dark_never_lit(void) {
   courtlogic::RelayGuard guard(relay);
   TEST_ASSERT_TRUE(guard.on(3U, 600U, kBaseMid));
   const hal::PinLevel moduleIdle = hal::relayLevelFor(false, hal::RelayPolarity::kActiveLow);
-  TEST_ASSERT_TRUE(relay.drive(3U) == (moduleIdle == hal::PinLevel::kHigh ? hal::PinDrive::kHigh : hal::PinDrive::kLow));
+  TEST_ASSERT_TRUE(relay.drive(3U) ==
+                   (moduleIdle == hal::PinLevel::kHigh ? hal::PinDrive::kHigh : hal::PinDrive::kLow));
   for (uint8_t c = 0U; c < 3U; ++c) {
     TEST_ASSERT_TRUE(relay.drive(c) == hal::PinDrive::kInput);
   }

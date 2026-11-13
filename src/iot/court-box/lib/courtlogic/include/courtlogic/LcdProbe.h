@@ -20,8 +20,9 @@ namespace courtlogic {
 
 inline constexpr uint8_t kLcdProbeCount = 16U;
 
-inline constexpr uint8_t kLcdProbeOrder[kLcdProbeCount] = {0x27U, 0x3FU, 0x20U, 0x21U, 0x22U, 0x23U, 0x24U, 0x25U,
-                                                           0x26U, 0x38U, 0x39U, 0x3AU, 0x3BU, 0x3CU, 0x3DU, 0x3EU};
+inline constexpr uint8_t kLcdProbeOrder[kLcdProbeCount] = {0x27U, 0x3FU, 0x20U, 0x21U, 0x22U, 0x23U,
+                                                           0x24U, 0x25U, 0x26U, 0x38U, 0x39U, 0x3AU,
+                                                           0x3BU, 0x3CU, 0x3DU, 0x3EU};
 
 /// Does a device ACK at `address`? The driver's bus transaction, bounded by
 /// the bus timeout.

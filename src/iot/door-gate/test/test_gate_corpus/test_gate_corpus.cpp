@@ -288,8 +288,8 @@ void executeScanRequest(const char* expected, size_t expectedLen, const char* ma
 /// An open the gate decided from its own roster while offline, as the events
 /// endpoint's body — rendered by the SAME device-agnostic renderer the court
 /// box uses, which is the point of it being device-agnostic.
-void executeGateOpenEventRequest(const char* expected, size_t expectedLen, const char* mac,
-                                 eventq::Kind kind, bool replayedOnline = false) {
+void executeGateOpenEventRequest(const char* expected, size_t expectedLen, const char* mac, eventq::Kind kind,
+                                 bool replayedOnline = false) {
   uint32_t batchUptime = 0U;
   TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(expected, expectedLen, "uptime_ms", batchUptime));
 

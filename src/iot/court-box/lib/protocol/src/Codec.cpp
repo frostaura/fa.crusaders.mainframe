@@ -566,29 +566,52 @@ bool tagArg(const Arg& a) {
 bool v3Arg(char letter, Arg& a) {
   uint32_t value = 0;
   switch (letter) {
-  case 's': return parseBounded(a, 255U, value);
-  case 'r': return parseBounded(a, kMaxRows - 1U, value);
-  case 'o': return parseBounded(a, kRwSegment, value) && (value == 0U || value == kRwSegment);
-  case 'X': return true;
-  case 'm': return parseBounded(a, 15U, value) && value != 0U;
-  case 'H': return clampArg(a, kShowHoldMinSeconds, kShowHoldMaxSeconds);
-  case 'f': return parseBounded(a, 255U, value);
-  case 'h': return isUpperHex(a, 4U);
-  case 't': return tagArg(a);
-  case 'w': return opinionArg(a, kRelayMinSeconds, kRelayHardCapSeconds, true);
-  case 'k': return cfgKeyArg(a);
-  case 'v': return parseBounded(a, 65535U, value);
-  case 'l': return opinionArg(a, 0U, kLandMaxSeconds, false);
-  case 'T': return clampArg(a, 0U, kNoteMaxSeconds);
-  case 'P': return clampArg(a, kLiveMinSeconds, kLiveMaxSeconds);
-  case 'a': return ackIdArg(a);
-  case 'e': return parseBounded(a, kAckMaxCode, value);
-  case 'b': return isUpperHex(a, 2U);
-  case 'G': return clampArg(a, kHeldMinSeconds, kHeldMaxSeconds);
-  case 'n': return parseU32(a, value);
-  case 'p': return parseBounded(a, 1U, value);
-  case 'd': return parseBounded(a, 5U, value);
-  default: return false;
+  case 's':
+    return parseBounded(a, 255U, value);
+  case 'r':
+    return parseBounded(a, kMaxRows - 1U, value);
+  case 'o':
+    return parseBounded(a, kRwSegment, value) && (value == 0U || value == kRwSegment);
+  case 'X':
+    return true;
+  case 'm':
+    return parseBounded(a, 15U, value) && value != 0U;
+  case 'H':
+    return clampArg(a, kShowHoldMinSeconds, kShowHoldMaxSeconds);
+  case 'f':
+    return parseBounded(a, 255U, value);
+  case 'h':
+    return isUpperHex(a, 4U);
+  case 't':
+    return tagArg(a);
+  case 'w':
+    return opinionArg(a, kRelayMinSeconds, kRelayHardCapSeconds, true);
+  case 'k':
+    return cfgKeyArg(a);
+  case 'v':
+    return parseBounded(a, 65535U, value);
+  case 'l':
+    return opinionArg(a, 0U, kLandMaxSeconds, false);
+  case 'T':
+    return clampArg(a, 0U, kNoteMaxSeconds);
+  case 'P':
+    return clampArg(a, kLiveMinSeconds, kLiveMaxSeconds);
+  case 'a':
+    return ackIdArg(a);
+  case 'e':
+    return parseBounded(a, kAckMaxCode, value);
+  case 'b':
+    return isUpperHex(a, 2U);
+  case 'G':
+    return clampArg(a, kHeldMinSeconds, kHeldMaxSeconds);
+  case 'n':
+    return parseU32(a, value);
+  case 'p':
+    return parseBounded(a, 1U, value);
+  case 'd':
+    return parseBounded(a, 5U, value);
+  default:
+    return false;
   }
 }
 
@@ -662,7 +685,8 @@ DecodeError Decoder::buildFrame(Link link, Arg* fields, uint8_t count, Frame& ou
   // ON goes through its own constructor rather than the generic path, so the
   // "no ON without a duration" rule is enforced by the same code on the wire
   // side as on the API side.
-  out = (v == Verb::On && argc == spec.minArgs) ? Frame::on(court, seconds) : Frame::fromValidated(spec, args, argc);
+  out = (v == Verb::On && argc == spec.minArgs) ? Frame::on(court, seconds)
+                                                : Frame::fromValidated(spec, args, argc);
   return DecodeError::None;
 }
 
