@@ -159,14 +159,15 @@ export const GRID_MIN_PX = 280;
  * that room was the 280px floor. Where the screen can afford it the grid is at least this tall
  * (about seven rows and the court header), never taller than the screen between the app bar and
  * the docked bars, so its whole height can be brought into view at once and then scrolls itself.
+ * Pixels, like the rest of this ceiling (D3-B10): a rem here would grow with large text.
  */
-export const GRID_COMFORT_REM = 26;
+export const GRID_COMFORT_PX = 416;
 const GRID_COMFORT_GAP_PX = 16;
 
 function scrollerMaxHeight(): string {
   const estimate = `calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - var(--day-strip-height, 0px) - ${PAGE_BOTTOM_PX}px)`;
   const screen = `calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - ${GRID_COMFORT_GAP_PX}px)`;
-  return `max(${GRID_MIN_PX}px, min(${screen}, ${GRID_COMFORT_REM}rem), var(${FILL_ROOM_VAR}, ${estimate}))`;
+  return `max(${GRID_MIN_PX}px, min(${screen}, ${GRID_COMFORT_PX}px), var(${FILL_ROOM_VAR}, ${estimate}))`;
 }
 
 /**
