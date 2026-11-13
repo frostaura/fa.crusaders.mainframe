@@ -109,6 +109,43 @@ function assertionToRaw(c: PublicKeyCredential) {
   };
 }
 
+/* ---------- the browser's own sheet ---------- */
+
+/**
+ * FM-2 — what the browser's passkey sheet threw, as one of our own words. A dismissed sheet (and a
+ * timed-out one — the spec cannot tell them apart, by design) rejects with `NotAllowedError`; a
+ * sheet torn down by a navigation or an abort with `AbortError`. Neither is a failure: the member
+ * said no. Enrolment's `InvalidStateError` is the authenticator already holding a passkey for this
+ * account (`excludeCredentials`), which has its own sentence. Anything else is passed on untouched.
+ */
+export const PASSKEY_CANCELLED = "passkey_cancelled";
+export const PASSKEY_EXISTS = "passkey_exists";
+
+function sheetError(err: unknown): unknown {
+  const name = err instanceof DOMException || err instanceof Error ? err.name : "";
+  if (name === "NotAllowedError" || name === "AbortError") return new Error(PASSKEY_CANCELLED);
+  if (name === "InvalidStateError") return new Error(PASSKEY_EXISTS);
+  return err;
+}
+
+/** True when the member closed (or let lapse) the browser's sheet — never said as a failure. */
+export function isPasskeyCancel(err: unknown): boolean {
+  return err instanceof Error && err.message === PASSKEY_CANCELLED;
+}
+
+/** True when enrolment found a passkey for this account already on this device. */
+export function isPasskeyAlreadyHere(err: unknown): boolean {
+  return err instanceof Error && err.message === PASSKEY_EXISTS;
+}
+
+async function askSheet<T>(ask: () => Promise<T>): Promise<T> {
+  try {
+    return await ask();
+  } catch (err) {
+    throw sheetError(err);
+  }
+}
+
 /* ---------- public flows ---------- */
 
 /** End-to-end passkey login. Returns the same shape as `endpoints.login`. */
@@ -116,8 +153,8 @@ export async function loginWithPasskey(): Promise<LoginResponse> {
   if (!isPasskeySupported()) throw new Error("passkey_unsupported");
   const { flowId, options } = await endpoints.webauthnLoginOptions();
   const credentialOptions = coerceRequestOptions(options as AnyOpts);
-  const credential = (await navigator.credentials.get({ publicKey: credentialOptions })) as PublicKeyCredential | null;
-  if (!credential) throw new Error("passkey_cancelled");
+  const credential = (await askSheet(() => navigator.credentials.get({ publicKey: credentialOptions }))) as PublicKeyCredential | null;
+  if (!credential) throw new Error(PASSKEY_CANCELLED);
   return endpoints.webauthnLogin(flowId, assertionToRaw(credential));
 }
 
@@ -126,8 +163,8 @@ export async function registerPasskey(label: string): Promise<{ id: string; labe
   if (!isPasskeySupported()) throw new Error("passkey_unsupported");
   const { flowId, options } = await endpoints.webauthnRegisterOptions(label);
   const credentialOptions = coerceCreateOptions(options as AnyOpts);
-  const credential = (await navigator.credentials.create({ publicKey: credentialOptions })) as PublicKeyCredential | null;
-  if (!credential) throw new Error("passkey_cancelled");
+  const credential = (await askSheet(() => navigator.credentials.create({ publicKey: credentialOptions }))) as PublicKeyCredential | null;
+  if (!credential) throw new Error(PASSKEY_CANCELLED);
   const att = credential.response as AuthenticatorAttestationResponse;
   const transports = typeof att.getTransports === "function" ? att.getTransports() : null;
   return endpoints.webauthnRegister(flowId, attestationToRaw(credential), transports);

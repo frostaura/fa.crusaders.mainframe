@@ -79,6 +79,17 @@ export const REGISTER_MESSAGES: Record<string, string> = {
 };
 
 /**
+ * FM-4 — the application's reply went missing (a timeout, a dropped connection, the gateway saying
+ * the club's system did not answer): it may have arrived. Said beside the failure, and — when the
+ * next try is told the address is taken — instead of "an account with that email already exists".
+ */
+export const REGISTER_UNSURE = {
+  mayHaveArrived: "It may have arrived anyway — check your email for a confirmation link before sending it again.",
+  probablyArrived:
+    "Your first try probably arrived: an application with this email is already in. Check your email for the confirmation link — if nothing came, use Forgot password on the sign-in page.",
+} as const;
+
+/**
  * <b>The sentence that could not be reached, and the bug it is the other half of.</b>
  *
  * <p>

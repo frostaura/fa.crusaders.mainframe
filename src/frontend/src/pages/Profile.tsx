@@ -18,7 +18,7 @@ import { Spinner } from "../components/ui/spinner";
 import { StateBlock } from "../components/ui/state-block";
 import { TextLink } from "../components/ui/text-link";
 import { BookOpen, Camera, Fingerprint, Plus, WarningCircle } from "../components/ui/icons";
-import { isPasskeySupported, registerPasskey } from "../lib/webauthn";
+import { isPasskeyAlreadyHere, isPasskeyCancel, isPasskeySupported, registerPasskey } from "../lib/webauthn";
 import { ChangePasswordForm } from "./ChangePassword";
 import { cn } from "../lib/utils";
 // doors: member — W1.8, the member's own door history, on the page they already think of
@@ -46,7 +46,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { GUIDE_LINK_LABEL, GUIDE_PATH, GUIDE_TILE_HINT } from "../lib/onboardingCopy";
 import {
   DETAILS_TITLE, NAME_HINT, NAME_INVALID, NAME_LABEL, NAME_MAX, NAME_MIN, NAME_PLACEHOLDER, NAME_SAVE, NAME_SAVED,
-  PASSKEYS_TITLE, PASSKEY_ADD, PASSKEY_ADDED, PASSKEY_EMPTY_HINT, PASSKEY_EMPTY_TITLE, PASSKEY_INTRO,
+  PASSKEYS_TITLE, PASSKEY_ADD, PASSKEY_ADDED, PASSKEY_ALREADY_HERE, PASSKEY_EMPTY_HINT, PASSKEY_EMPTY_TITLE, PASSKEY_INTRO,
   PASSKEY_NAME_HINT, PASSKEY_NAME_LABEL, PASSKEY_NAME_MISSING, PASSKEY_NAME_PLACEHOLDER, PASSKEY_REMOVE,
   PASSKEY_REMOVED, PASSKEY_UNSUPPORTED, PASSWORD_DESCRIPTION, PASSWORD_OPEN, PASSWORD_TITLE,
   PHOTO_ACCEPT, PHOTO_BAD_TYPE, PHOTO_BUTTON, PHOTO_CHANGE_LABEL, PHOTO_HINT, PHOTO_MAX_BYTES, PHOTO_TOO_BIG,
@@ -623,7 +623,7 @@ function AddPasskey({ onAdded }: { onAdded: () => Promise<void> }) {
       await registerPasskey(name);
     } catch (err) {
       // The member closed the browser's own sheet: not a failure, and nothing to say.
-      if (err instanceof Error && err.message === "passkey_cancelled") return false;
+      if (isPasskeyCancel(err)) return false;
       throw err;
     }
     await onAdded();
@@ -634,7 +634,7 @@ function AddPasskey({ onAdded }: { onAdded: () => Promise<void> }) {
       setLabel("");
       toast.push({ tone: "success", text: PASSKEY_ADDED });
     },
-    toast: { failure: "Couldn't add that passkey. Nothing was saved — try again." },
+    toast: { failure: (err) => (isPasskeyAlreadyHere(err) ? PASSKEY_ALREADY_HERE : "Couldn't add that passkey. Nothing was saved — try again.") },
   });
 
   const submit = () => {

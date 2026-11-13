@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ApiError, NetworkError } from "./api";
-import { describeFailure, isDeploymentFault } from "./errors";
+import { describeFailure, isConfigurationFault } from "./errors";
 
 /**
  * The invariant these exist to hold: ONLY a NetworkError may be described to a member as a
@@ -119,12 +119,15 @@ describe("describeFailure", () => {
   });
 });
 
-describe("isDeploymentFault", () => {
+describe("isConfigurationFault", () => {
   it.each([
     ["a missing tenant", api(404, { error: "tenant_not_found" }), true],
     ["an unresolved tenant", api(400, { error: "tenant_unresolved" }), true],
-    ["a server crash", api(500), true],
-    ["a bad gateway", api(502), true],
+    // Go-live FM-1: a 5xx is transient, never a reason to hide the retry.
+    ["a server crash", api(500), false],
+    ["a bad gateway", api(502), false],
+    ["a restart", api(503), false],
+    ["a gateway timeout", api(504), false],
     ["a wrong password", api(401), false],
     ["a rate limit", api(429), false],
     ["a validation refusal", api(400, { error: "missing_fields" }), false],
@@ -132,6 +135,6 @@ describe("isDeploymentFault", () => {
     // the retry affordance must stay on screen for it.
     ["a dropped connection", new NetworkError("unreachable"), false],
   ])("%s", (_label, err, expected) => {
-    expect(isDeploymentFault(err)).toBe(expected);
+    expect(isConfigurationFault(err)).toBe(expected);
   });
 });

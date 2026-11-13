@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ApiError } from "./api";
 import { UnsureOutcome } from "./bookingOutcome";
-import { SERVICE_BUSY_CAUSE, describeFailure, isDeploymentFault } from "./errors";
+import { SERVICE_BUSY_CAUSE, describeFailure, isConfigurationFault } from "./errors";
 import {
   SERVICE_BUSY_BOOK_TEXT, SERVICE_BUSY_UNSURE_TEXT, describeBookingError, worthRetrying,
 } from "./bookingErrors";
@@ -27,9 +27,9 @@ describe("service_busy", () => {
     expect(describeFailure(busy())).toBe(SERVICE_BUSY_CAUSE.charAt(0).toUpperCase() + SERVICE_BUSY_CAUSE.slice(1));
   });
 
-  it("is not a deployment fault, so the Try again button stays", () => {
-    expect(isDeploymentFault(busy())).toBe(false);
-    expect(isDeploymentFault(new ApiError(503, {}))).toBe(true);
+  it("is not a configuration fault, so the Try again button stays", () => {
+    expect(isConfigurationFault(busy())).toBe(false);
+    expect(isConfigurationFault(new ApiError(503, {}))).toBe(false);
   });
 
   it("a plain 503 keeps its own words", () => {

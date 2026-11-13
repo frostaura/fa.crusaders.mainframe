@@ -174,14 +174,18 @@ export function describeFailure(err: unknown, opts: DescribeOptions = {}): strin
 }
 
 /**
- * True when the failure is a deployment or configuration fault rather than anything the person
- * reading it can act on. Screens use it to drop the retry affordance — offering "Try again" for
- * a missing tenant row is an invitation to press a button forever.
+ * True only for the failures a retry can never fix: the club's address resolves to no club
+ * (`tenant_not_found`, `tenant_unresolved`). Screens use it to drop the retry affordance.
+ *
+ * <p>
+ * Go-live (FM-1): this replaced `isDeploymentFault`, which also counted every status ≥ 500. A
+ * 500, 502, 503 or 504 is transient — a restart, a gateway blip — and its own sentence says to
+ * try again, so a screen that dropped its button on one (Register did) told the applicant to do
+ * something it would not let them do. A busy moment and a lost race were already exempt; now
+ * every 5xx is.
+ * </p>
  */
-export function isDeploymentFault(err: unknown): boolean {
+export function isConfigurationFault(err: unknown): boolean {
   const code = errorCode(err);
-  if (code === "tenant_not_found" || code === "tenant_unresolved") return true;
-  // A lost race (R16 BE16c) and a busy moment (R18 BE18s) are the 5xx a retry is MADE for.
-  if (code && code in PASSING_CAUSES) return false;
-  return err instanceof ApiError && err.status >= 500;
+  return code === "tenant_not_found" || code === "tenant_unresolved";
 }
