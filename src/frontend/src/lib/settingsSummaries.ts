@@ -93,11 +93,15 @@ function boxes(settings: AdminSettings): string {
 }
 
 function screens(settings: AdminSettings): string {
+  const layout = settings.lcd_layout === "expanded" ? "expanded 20×4" : settings.lcd_layout === "compact" ? "compact 16×2" : null;
   const revert = num(settings, "lcd_revert_seconds");
-  const rapid = num(settings, "rapid_scan_window_seconds");
+  const choice = num(settings, "lcd_choice_seconds");
+  const ceiling = num(settings, "lcd_screen_ceiling_seconds");
   return join([
+    layout,
     revert !== null && `results show ${plural(revert, "second")}`,
-    rapid !== null && (rapid > 0 ? `next scan within ${plural(rapid, "second")}` : "one person at a time"),
+    choice !== null && `a choice waits ${plural(choice, "second")}`,
+    ceiling !== null && `no screen past ${plural(ceiling, "second")}`,
   ]);
 }
 

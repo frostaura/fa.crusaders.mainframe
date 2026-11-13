@@ -1122,12 +1122,59 @@ export type AdminSettings = {
   // live in `lib/ecoSettings.ts`, which is where a test walks them against D2's table.
   // ---------------------------------------------------------------------------------------
 
-  /** 5–120, default 10. GOAL item 1: how long the box's screen holds a result before it
-   *  goes back to "Scan code to get started". Reaches the box on its next heartbeat. */
+  // ---------------------------------------------------------------------------------------
+  // Court box and device settings the heartbeat delivers (device-api §5, §6, §10). Bounds are
+  // NEVER stated here: the GET serves them in `bounds` and the console reads them from there.
+  // ---------------------------------------------------------------------------------------
+  /** How long a decided scan's result holds before the start screen. Binds both spellings. */
   lcd_revert_seconds?: number;
-  /** 0–60, default 10. GOAL item 18: how long the box stays ready for the next person to
-   *  scan, with the time left shown. 0 turns rapid scanning off. */
-  rapid_scan_window_seconds?: number;
+  /** How long a court/time choice waits for a button. */
+  lcd_choice_seconds?: number;
+  /** How long the member's name card shows. */
+  lcd_card_seconds?: number;
+  /** How long a one-off hint holds the bottom row. */
+  lcd_hint_seconds?: number;
+  /** How long the box remembers a scan; the server never sends less than the choice hold. */
+  scan_memory_seconds?: number;
+  /** How long a box trusts its adopted clock. */
+  clock_trust_minutes?: number;
+  /** Whether a box may re-light from the snapshot. */
+  relay_restore_enabled?: boolean;
+  /** Whether boards report faults at all. */
+  device_fault_reporting?: boolean;
+  /** Distinct fault reports one board may send per hour. */
+  device_fault_max_per_hour?: number;
+  /** v3: `compact` (16×2) or `expanded` (20×4). The club's default; a board may override. */
+  lcd_layout?: string;
+  /** v3: long rows scroll. The club's default; a board may override. */
+  lcd_marquee_enabled?: boolean;
+  lcd_marquee_step_ms?: number;
+  lcd_landing_page_seconds?: number;
+  lcd_screen_ceiling_seconds?: number;
+  lcd_landing_dwell_seconds?: number;
+  lcd_after_lights_on_seconds?: number;
+  lcd_reinit_seconds?: number;
+  relay_authorisation_cap_minutes?: number;
+  relay_reconcile_min_seconds?: number;
+  device_power_restore_trust_minutes?: number;
+  device_net_fallback_minutes?: number;
+  device_ota_probation_minutes?: number;
+  /** v3 §6: hours the old key keeps working after every board has the new one. */
+  device_key_grace_hours?: number;
+  /** The member-code rollout (member-code §8): `legacy` · `v1` · `v1_only`. */
+  member_code_phase?: string;
+  member_code_cutover_at?: string | null;
+  member_code_cutoff_at?: string | null;
+  member_code_cutoff_days?: number;
+  member_code_manual_hold?: boolean;
+  member_code_manual_hold_by?: string | null;
+  member_code_manual_hold_at?: string | null;
+  /**
+   * The range the API applies to each box and device setting (device-api §10):
+   * `{"<key>": {"min": n, "max": n}}` or `{"<key>": {"values": [...]}}`. The console's only
+   * source of those ranges — see `settingsSchema.settingsFor`.
+   */
+  bounds?: Record<string, { min: number; max: number } | { values: string[] }>;
   /** 0–96, default 4. GOAL item 19, in SLOTS (ruling 3). 0 = no limit; admins are exempt.
    *  Composes with {@link AdminSettings.member_per_day_max_minutes} — most restrictive wins. */
   member_max_slots_per_day?: number;
@@ -2606,7 +2653,6 @@ export const endpoints = {
     // bound ONLY under that spelling (AdminConfigEndpoints' snake-only block): sent camelCase they
     // were a silent no-op answered `{"saved": true}`.
     ...(req.lcd_revert_seconds !== undefined ? { lcd_revert_seconds: req.lcd_revert_seconds } : {}),
-    ...(req.rapid_scan_window_seconds !== undefined ? { rapidScanWindowSeconds: req.rapid_scan_window_seconds } : {}),
     ...(req.member_max_slots_per_day !== undefined ? { memberMaxSlotsPerDay: req.member_max_slots_per_day } : {}),
     ...(req.admin_bulk_max_items !== undefined ? { adminBulkMaxItems: req.admin_bulk_max_items } : {}),
     ...(req.schedule_materialisation_days !== undefined ? { scheduleMaterialisationDays: req.schedule_materialisation_days } : {}),

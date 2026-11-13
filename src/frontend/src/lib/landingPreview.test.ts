@@ -76,3 +76,42 @@ afterAll(() => {
   expect(manifest.case_count.landing).toBeGreaterThanOrEqual(19);
   expect(manifest.case_count.marquee).toBeGreaterThanOrEqual(8);
 });
+
+describe("from the control board to the glass", () => {
+  const NOW = Date.parse("2026-11-13T18:05:00Z");
+
+  it("counts the lights' own time, re-based on when the server read it (FA-8)", async () => {
+    const { lightsSecondsLeft } = await import("./landingPreview");
+    // Read 40 s ago with 2700 left: 2660 now. A booking end is not consulted at all.
+    expect(lightsSecondsLeft({ state: "on", seconds_remaining: 2700, as_of: "2026-11-13T18:04:20Z" }, NOW)).toBe(2660);
+    // No as_of: the figure as served.
+    expect(lightsSecondsLeft({ state: "on", seconds_remaining: 600 }, NOW)).toBe(600);
+    // No figure: until minus now.
+    expect(lightsSecondsLeft({ state: "on", until: "2026-11-13T18:15:00Z" }, NOW)).toBe(600);
+    // Off, unknown or run out: nothing.
+    expect(lightsSecondsLeft({ state: "off", seconds_remaining: 600 }, NOW)).toBeNull();
+    expect(lightsSecondsLeft({ state: "unknown" }, NOW)).toBeNull();
+    expect(lightsSecondsLeft({ state: "on", seconds_remaining: 10, as_of: "2026-11-13T18:00:00Z" }, NOW)).toBeNull();
+  });
+
+  it("lays a box's relays out in relay order, dark where the board says nothing", async () => {
+    const { landingCourtsFor } = await import("./landingPreview");
+    const courts = [
+      { court_number: 2, lights: { state: "on", seconds_remaining: 7140 } },
+      { court_number: 1, lights: { state: "off" } },
+    ];
+    expect(landingCourtsFor([1, 2, 3], courts, NOW)).toEqual([
+      { number: 1, lit: false, seconds: 0 },
+      { number: 2, lit: true, seconds: 7140 },
+      { number: 3, lit: false, seconds: 0 },
+    ]);
+  });
+
+  it("reads the club's wall clock as HHMM, and anything but expanded as compact", async () => {
+    const { asLayout, landingClock } = await import("./landingPreview");
+    expect(landingClock(NOW, "Africa/Johannesburg")).toBe("2005");
+    expect(asLayout("expanded")).toBe("expanded");
+    expect(asLayout("EXPANDED")).toBe("compact");
+    expect(asLayout(undefined)).toBe("compact");
+  });
+});

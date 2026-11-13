@@ -143,3 +143,74 @@ export function landingPageCount(layout: LcdLayout, marquee: boolean, mappedCour
   if (marquee) return 1;
   return mappedCourts + 1;
 }
+
+// ---------------------------------------------------------------------------------------
+// From the control board to the glass
+// ---------------------------------------------------------------------------------------
+
+/** What the console knows about one court's lights — the control board's `lights` block. */
+export type LightsReading = {
+  state?: string | null;
+  until?: string | null;
+  seconds_remaining?: number | null;
+  as_of?: string | null;
+} | null | undefined;
+
+/**
+ * Seconds of LIGHT left on a court, from the lights' own grant — never the booking's end (FA-8).
+ *
+ * <p>
+ * `seconds_remaining` is relative to `as_of` (the instant the server read it), so it is re-based
+ * on the clock: a figure read 40 s ago has 40 s less now. Without one, `until` minus now. Null
+ * when the lights are not on, or nothing says how long they have.
+ * </p>
+ */
+export function lightsSecondsLeft(lights: LightsReading, now: number): number | null {
+  if (!lights || lights.state !== "on") return null;
+  if (typeof lights.seconds_remaining === "number" && Number.isFinite(lights.seconds_remaining)) {
+    const asOf = lights.as_of ? Date.parse(lights.as_of) : Number.NaN;
+    const aged = Number.isFinite(asOf) ? Math.max(0, (now - asOf) / 1000) : 0;
+    const left = Math.round(lights.seconds_remaining - aged);
+    return left > 0 ? left : null;
+  }
+  if (lights.until) {
+    const left = Math.round((Date.parse(lights.until) - now) / 1000);
+    return Number.isFinite(left) && left > 0 ? left : null;
+  }
+  return null;
+}
+
+/**
+ * One box's relays as its landing shows them, in relay order, from the control board's courts.
+ * A court the board does not list reads dark: the glass shows OFF for an open relay whatever any
+ * other source said, and the preview must not promise light the console cannot see.
+ */
+export function landingCourtsFor(
+  courtNumbers: readonly number[],
+  courts: readonly { court_number: number; lights?: LightsReading }[],
+  now: number,
+): LandingCourt[] {
+  return courtNumbers.map((number) => {
+    const court = courts.find((c) => c.court_number === number);
+    const seconds = lightsSecondsLeft(court?.lights, now);
+    return { number, lit: seconds !== null, seconds: seconds ?? 0 };
+  });
+}
+
+/** `HHMM` of a wall-clock instant in the club's zone, as the bridge gives the Mega its clock. */
+export function landingClock(now: number, timeZone: string | undefined): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone })
+      .formatToParts(new Date(now));
+    const hour = parts.find((p) => p.type === "hour")?.value ?? "00";
+    const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
+    return `${hour}${minute}`;
+  } catch {
+    return "0000";
+  }
+}
+
+/** A layout value from the wire: anything but `expanded` is compact, as on the box. */
+export function asLayout(value: unknown): LcdLayout {
+  return value === "expanded" ? "expanded" : "compact";
+}
