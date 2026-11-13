@@ -172,11 +172,7 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
 
         using var anonymous = app.CreateClient();
         anonymous.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
-        var response = await anonymous.PostAsJsonAsync("/api/v1/auth/register", new
-        {
-            email = applicant, password = "Pass1234!", fullName = "Nomsa Newcomer",
-            membershipNumber = $"NN-{Guid.NewGuid():N}"[..14], photoUrl = (string?)null,
-        });
+        var response = await TestPhotos.RegisterAsync(anonymous, applicant, $"NN-{Guid.NewGuid():N}"[..14], "Nomsa Newcomer");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var notice = Assert.Single(await NoticesAsync(app, club.TenantId, AdminEventCatalogue.MemberRegistered));
@@ -212,14 +208,13 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         {
             using var client = factory.CreateClient();
             client.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
-            return await client.PostAsJsonAsync("/api/v1/auth/register", new
-            {
-                email = $"racer-{i}-{Guid.NewGuid():N}@applicant.review.test", password = "Pass1234!",
-                fullName = $"Racer {i}", membershipNumber = contested, photoUrl = (string?)null,
-            });
+            return await TestPhotos.RegisterAsync(client, $"racer-{i}-{Guid.NewGuid():N}@applicant.review.test", contested, $"Racer {i}");
         }));
 
-        Assert.Single(responses, r => r.StatusCode == HttpStatusCode.OK);
+        // Every applicant is answered alike since BP-14; one of them became a membership.
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        Assert.Equal(1, await PeopleClub.ReadAsync(factory, db => db.Memberships.IgnoreQueryFilters()
+            .CountAsync(m => m.TenantId == club.TenantId && m.MembershipNumber == contested)));
         Assert.Single(await NoticesAsync(factory, club.TenantId, AdminEventCatalogue.MemberRegistered));
     }
 

@@ -909,6 +909,8 @@ jobs:
           file: ./src/backend/Dockerfile
           push: true
           platforms: linux/amd64
+          # IO-05: /healthz and /readyz report this commit as `revision`.
+          build-args: BUILD_SHA=${{ github.sha }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-amd64
 
   build-backend-arm64:
@@ -937,6 +939,8 @@ jobs:
           file: ./src/backend/Dockerfile
           push: true
           platforms: linux/arm64
+          # IO-05: /healthz and /readyz report this commit as `revision`.
+          build-args: BUILD_SHA=${{ github.sha }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-arm64
 
   merge-backend-manifests:

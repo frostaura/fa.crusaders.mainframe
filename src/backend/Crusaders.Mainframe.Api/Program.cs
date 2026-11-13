@@ -120,7 +120,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     // — and is re-sent on every reconnect, so what travels here has to be worth
                     // roughly nothing: one minute, one read-only stream. See TokenPurposes.
                     var qToken = ctx.Request.Query["ticket"].ToString();
-                    if (!string.IsNullOrEmpty(qToken)) ctx.Token = qToken;
+                    if (!string.IsNullOrEmpty(qToken))
+                    {
+                        ctx.Token = qToken;
+                        ctx.HttpContext.Items[TokenPurposes.FromQueryItem] = true;
+                    }
                 }
                 return Task.CompletedTask;
             },
@@ -144,6 +148,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 if (!TokenPurposes.IsValidFor(purpose, ctx.HttpContext.Request.Path))
                 {
                     ctx.Fail($"Token purpose '{purpose ?? "(none)"}' is not valid for API access.");
+                    return;
+                }
+
+                // BP-18: the query string is logged by every hop in front of this, so only a
+                // one-minute stream ticket may ride there — never a session token, which the
+                // purpose check above accepts everywhere.
+                if (ctx.HttpContext.Items.ContainsKey(TokenPurposes.FromQueryItem)
+                    && string.Equals(purpose, TokenPurposes.Access, StringComparison.Ordinal))
+                {
+                    ctx.Fail("A session token is not a stream ticket.");
                     return;
                 }
 
@@ -549,6 +563,8 @@ builder.Services.AddScoped<AdminRoleService>();
 builder.Services.AddScoped<MemberDeletionService>();
 builder.Services.AddScoped<MemberDeletionService.AccessEnders>();
 builder.Services.AddSingleton<MemberPhotoFiles>();
+// BP-04: removes photo files no membership references, once they are older than an upload in flight.
+builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.PhotoOrphanSweepWorker>();
 
 // Demo mode: each club's demo club, the switch into and out of it, and what fills it.
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.Demo.DemoModeService>();
@@ -599,7 +615,10 @@ builder.Services.AddSingleton<AdminNotificationSweep>();
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.AdminNotificationWorker>();
 
 // Phase 5 — biometric abstraction
-builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
+// BP-09: the simulator (which matches the first candidate) only in Development and Testing, and
+// only when Biometric:Driver asks for it; every other deployment gets a device that matches nobody.
+builder.Services.AddSingleton<IBiometricDevice>(sp => BiometricDrivers.For(
+    builder.Configuration[BiometricDrivers.Key], sp.GetRequiredService<IHostEnvironment>()));
 
 // IRelayClient is deliberately NOT registered. The court box is pull-only — it decides
 // scans against its cached roster and drives its own relays — so nothing in the container
@@ -611,6 +630,8 @@ builder.Services.AddScoped<BiometricService>();
 
 // WebAuthn / passkeys
 builder.Services.AddMemoryCache();
+// BP-10: the ceremonies' challenge state, in a bounded store of its own (WebAuthnFlows).
+builder.Services.AddSingleton<WebAuthnFlows>();
 builder.Services.AddSingleton<IFido2>(sp =>
 {
     var cfg = sp.GetRequiredService<IConfiguration>();
@@ -649,6 +670,15 @@ if (builder.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup"))
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
     await db.Database.MigrateAsync();
+}
+
+// ---- Operator commands (BP-07) ----
+// `dotnet Crusaders.Mainframe.Api.dll tenant <command>` runs one command against this database and
+// exits without serving: creating, suspending and addressing clubs. See TenantCli.
+if (TenantCli.IsCommand(args))
+{
+    Environment.ExitCode = await TenantCli.RunAsync(app.Services, args, Console.Out);
+    return;
 }
 
 // ---- First-run bootstrap ----
@@ -777,23 +807,27 @@ app.UseAuthorization();
 app.UseMiddleware<PasswordChangeGate>();
 
 // ---- Anonymous endpoints ----
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "crusaders.mainframe", time = DateTimeOffset.UtcNow }))
-   .AllowAnonymous();
+// Liveness (/healthz) and readiness (/readyz, which touches the database), each naming its build.
+app.MapHealthEndpoints();
 
 // The session-bootstrap probe. `must_change_password` is here and not only on the login response
 // because the browser reloads: without it a member who refreshes mid-forced-change renders the app
 // and then meets PasswordChangeGate's 403 on every screen instead of the one screen they need.
-app.MapGet("/api/v1/whoami", async (HttpContext ctx, ITenantContext tenant, MainframeDbContext db) =>
+app.MapGet("/api/v1/whoami", async (HttpContext ctx, MainframeDbContext db) =>
 {
     var userId = ctx.User.Id();
     var account = userId is { } id
         ? await db.Users.IgnoreQueryFilters().Where(u => u.Id == id)
             .Select(u => new { u.MustChangePassword, u.DemoMemberView }).FirstOrDefaultAsync(ctx.RequestAborted)
         : null;
+    // BP-17: the route is tenantless, so the resolved context is always empty here; a signed-in
+    // caller's club is the one its token names, and an anonymous caller has none (null, not a
+    // zero id that reads like a club).
+    var tokenTenant = Guid.TryParse(ctx.User.FindFirst("tenant_id")?.Value, out var tid) ? tid : (Guid?)null;
     return Results.Ok(new
     {
-        tenant_slug = tenant.TenantSlug,
-        tenant_id = tenant.TenantId,
+        tenant_slug = ctx.User.FindFirst("tenant_slug")?.Value,
+        tenant_id = tokenTenant,
         user_id = userId,
         is_authenticated = ctx.User.Identity?.IsAuthenticated ?? false,
         is_admin = ctx.User.IsInRole("admin"),

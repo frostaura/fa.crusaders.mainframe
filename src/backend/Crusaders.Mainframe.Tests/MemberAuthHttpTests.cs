@@ -112,69 +112,72 @@ public sealed class MemberAuthHttpTests : IClassFixture<PostgresFixture>
 
     /// <summary>
     /// The 500 a browser found: a membership number already in use reached the unique index, and
-    /// the applicant was shown "Registration failed. Try again."
+    /// the applicant was shown "Registration failed. Try again." Since BP-14 the screen is told
+    /// nothing a stranger could use — every well-formed application answers the same 200 — and
+    /// the applicant's own mailbox is told the number is taken. Still no 500, and still no second
+    /// membership on the number.
     /// </summary>
     [Fact]
-    public async Task A_duplicate_membership_number_is_a_named_conflict_not_a_500()
+    public async Task A_duplicate_membership_number_is_answered_like_any_application_and_told_by_mail()
     {
         if (!_pg.Available) return;
-        await using var factory = CreateFactory();
-        var club = await SeedAsync(factory);
-        using var client = AnonymousClientFor(factory, club);
+        var mail = new CapturingMail();
+        await using var factory = CapturingMail.On(CreateFactory(), mail);
+        var club = await SeedAsync(_pg.SharedHost);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+        var applicant = $"clash-{Guid.NewGuid():N}@test.local";
 
-        var response = await client.PostAsJsonAsync("/api/v1/auth/register", new
-        {
-            email = $"clash-{Guid.NewGuid():N}@test.local",
-            password = "Pass1234!",
-            fullName = "Number Clash",
-            membershipNumber = $"M-{club.Slug}",   // already the seeded member's
-            photoUrl = (string?)null,
-        });
+        var response = await TestPhotos.RegisterAsync(client, applicant, $"M-{club.Slug}", "Number Clash"); // already the seeded member's
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Equal("membership_number_in_use", await ErrorCodeAsync(response));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("pending_email_verification", JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.GetProperty("status").GetString());
+        var told = Assert.Single(mail.Sent, m => m.To == applicant);
+        Assert.Contains("membership number", told.Subject + told.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/verify-email/", told.HtmlBody, StringComparison.Ordinal);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(1, await db.Memberships.IgnoreQueryFilters().CountAsync(m => m.TenantId == club.TenantId && m.MembershipNumber == $"M-{club.Slug}"));
+        Assert.False(await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == applicant));
     }
 
     /// <summary>
-    /// Eight applicants claim the same membership number at once: one gets it, seven are told so,
-    /// and nobody sees a 500.
+    /// Eight applicants claim the same membership number at once: one gets it, and nobody sees a
+    /// 500 — nor, since BP-14, a different answer from the winner's.
     ///
     /// <para>
     /// The pre-check cannot decide this on its own — none of the eight has committed when the
-    /// others look — so this is the branch that catches the unique violation and answers it with
-    /// the same conflict the ordinary path returns. Without that branch the losers get the
-    /// <c>DbUpdateException</c> back as an unhandled 500, which is the original defect with a
-    /// narrower window.
+    /// others look — so this is the branch that catches the unique violation and answers it like
+    /// the ordinary path. Without that branch the losers get the <c>DbUpdateException</c> back as
+    /// an unhandled 500, which is the original defect with a narrower window.
     /// </para>
     /// </summary>
     [Fact]
     public async Task Eight_applicants_racing_for_one_membership_number_produce_one_winner_and_no_500s()
     {
         if (!_pg.Available) return;
-        await using var factory = CreateFactory();
-        var club = await SeedAsync(factory);
+        var mail = new CapturingMail();
+        await using var factory = CapturingMail.On(CreateFactory(), mail);
+        var club = await SeedAsync(_pg.SharedHost);
         var contested = $"RACE-{Guid.NewGuid():N}"[..16];
 
         var attempts = Enumerable.Range(0, 8).Select(async i =>
         {
-            using var client = AnonymousClientFor(factory, club);
-            return await client.PostAsJsonAsync("/api/v1/auth/register", new
-            {
-                email = $"racer-{i}-{Guid.NewGuid():N}@test.local",
-                password = "Pass1234!",
-                fullName = $"Racer {i}",
-                membershipNumber = contested,
-                photoUrl = (string?)null,
-            });
+            using var client = factory.CreateClient();
+            client.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+            return await TestPhotos.RegisterAsync(client, $"racer-{i}-{Guid.NewGuid():N}@test.local", contested, $"Racer {i}");
         });
 
         var responses = await Task.WhenAll(attempts);
         try
         {
-            Assert.DoesNotContain(responses, r => (int)r.StatusCode >= 500);
-            Assert.Single(responses, r => r.StatusCode == HttpStatusCode.OK);
-            Assert.All(responses.Where(r => r.StatusCode != HttpStatusCode.OK),
-                r => Assert.Equal(HttpStatusCode.Conflict, r.StatusCode));
+            Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            Assert.Equal(1, await db.Memberships.IgnoreQueryFilters().CountAsync(m => m.TenantId == club.TenantId && m.MembershipNumber == contested));
+            Assert.Single(mail.Sent, m => m.HtmlBody.Contains("/verify-email/", StringComparison.Ordinal));
+            Assert.Equal(7, mail.Sent.Count(m => m.Subject == "We couldn't take your application"));
         }
         finally
         {

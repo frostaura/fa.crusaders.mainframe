@@ -318,10 +318,8 @@ public sealed class R16StorableInputHttpTests(PostgresFixture pg) : IClassFixtur
     [SkippableTheory]
     [InlineData("/api/v1/admin/webhooks", "description", "x\\u0000y", "invalid_body")]
     [InlineData("/api/v1/admin/webhooks", "eventFilter", "booking.*\\u0000", "invalid_body")]
-    [InlineData("/api/v1/webhooks", "description", "x\\u0000y", "invalid_body")]
     [InlineData("/api/v1/admin/webhooks", "description", "LONG256", "description_too_long")]
     [InlineData("/api/v1/admin/webhooks", "eventFilter", "LONG1025", "event_filter_too_long")]
-    [InlineData("/api/v1/webhooks", "eventFilter", "LONG1025", "event_filter_too_long")]
     public async Task A_webhook_field_that_cannot_be_stored_is_400_with_a_code(string path, string field, string value, string code)
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);

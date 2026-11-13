@@ -137,6 +137,14 @@ public static class AdminChangeActions
     public const string MemberAdminRevoked = "member.admin_revoked";
 
     /// <summary>
+    /// An admin set a member's court PIN (BP-11). A PIN identifies the member at the court and
+    /// spends their minutes there, so a desk that sets one is changing a credential: it was only
+    /// in <c>audit_log</c> (which has a delete path) and the member was never told. Carries no
+    /// PIN, ever — only that one was set.
+    /// </summary>
+    public const string MemberPinSet = "member.pin_set";
+
+    /// <summary>
     /// An admin looked at one member's night.
     ///
     /// <para>
@@ -250,6 +258,7 @@ public static class AdminChangeActions
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberApproved, MemberRejected, MemberSuspended, MemberReactivated, MemberDeleted,
         MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
+        MemberPinSet,
         SettingsUpdated, PaymentsConfigured, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported, WebhookCreated, WebhookDeleted,
         DemoEntered, DemoLeft, DemoReset, DemoMemberViewEntered, DemoMemberViewLeft,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DeviceApiKeyRotated, DeviceApiKeyRetired, DeviceApiKeyRestored,
@@ -295,7 +304,8 @@ public static class AdminChangeActions
                 or GroupDeleted => AdminChangeAreas.Group,
             MemberApproved or MemberRejected or MemberSuspended or MemberDeleted
                 or MemberReactivated or MemberPasswordReset or MemberCodeReset or MemberTraceViewed
-                or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
+                or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked
+                or MemberPinSet => AdminChangeAreas.Member,
             SettingsUpdated or PaymentsConfigured or CourtCreated or CourtUpdated or CourtDeactivated
                 or ChangesExported or WebhookCreated or WebhookDeleted
                 or DemoEntered or DemoLeft or DemoReset or DemoMemberViewEntered or DemoMemberViewLeft => AdminChangeAreas.Setting,
@@ -367,6 +377,7 @@ public static class AdminChangeActions
             MemberDoorHistoryViewed => $"Looked at one member's door history{of}",
             MemberAdminGranted => $"Made a member an administrator{of}",
             MemberAdminRevoked => $"Removed a member's administrator rights{of}",
+            MemberPinSet => $"Set a member's court PIN{of}",
 
             SettingsUpdated => "Changed the club's settings",
             PaymentsConfigured => "Changed the club's PayFast payment settings",

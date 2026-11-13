@@ -35,8 +35,8 @@ public sealed class TenantResolutionMiddleware
     private static readonly string[] TenantlessPathPrefixes =
     {
         "/healthz",
+        "/readyz",
         "/api/v1/whoami",
-        "/api/v1/platform/",              // platform-admin endpoints scoped above tenant
         "/api/v1/credit/topup/callback",  // PayFast ITN — resolves tenant from query
         "/uploads/",                      // static-served media
         "/api/v1/device/",                // device surface — DeviceAuthenticationHandler sets the tenant from the device row
@@ -82,14 +82,16 @@ public sealed class TenantResolutionMiddleware
 
     /// <summary>
     /// How long a slug's club is remembered (perf round, 2026-09-30). The lookup ran on every
-    /// tenant-scoped request — one of the two to six reads every GET paid before its handler. A
-    /// club row is only ever ADDED (the bootstrap and the seeder; nothing renames a slug or deletes
-    /// a club), so a remembered hit cannot go stale; a miss is never remembered, so a club being
-    /// bootstrapped is found the moment it exists. Per host (<see cref="IMemoryCache"/>), never static.
+    /// tenant-scoped request — one of the two to six reads every GET paid before its handler.
+    /// Nothing renames a slug or deletes a club, and a miss is never remembered, so a club being
+    /// created is found the moment it exists. The one field that can change is
+    /// <see cref="Domain.Tenant.Status"/>, from the operator CLI in another process: a suspension
+    /// or a reactivation therefore takes effect within this window, which the CLI says when it
+    /// runs. Per host (<see cref="IMemoryCache"/>), never static.
     /// </summary>
     internal static readonly TimeSpan SlugCacheFor = TimeSpan.FromMinutes(5);
 
-    private sealed record KnownTenant(Guid Id, string Slug, Guid? DemoOf);
+    private sealed record KnownTenant(Guid Id, string Slug, Guid? DemoOf, string Status);
 
     /// <summary>
     /// The token names one club and the host another. The one agreement that is not a mismatch:
@@ -151,6 +153,15 @@ public sealed class TenantResolutionMiddleware
             return;
         }
 
+        // BP-07: a suspended club is closed to everybody, members and admins alike, on every
+        // tenant-scoped route. An unknown status is closed too (TenantStatus.IsOpen).
+        if (!Domain.TenantStatus.IsOpen(tenant.Status))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { error = "club_suspended", message = "This club is not currently available." });
+            return;
+        }
+
         tenantContext.Set(tenant.Id, tenant.Slug);
         await _next(context);
     }
@@ -202,7 +213,7 @@ public sealed class TenantResolutionMiddleware
 
         known = await db.Tenants.AsNoTracking()
             .Where(t => t.Slug == slug)
-            .Select(t => new KnownTenant(t.Id, t.Slug, t.DemoOfTenantId))
+            .Select(t => new KnownTenant(t.Id, t.Slug, t.DemoOfTenantId, t.Status))
             .FirstOrDefaultAsync();
         if (known is not null) cache.Set(key, known, SlugCacheFor);
         return known;

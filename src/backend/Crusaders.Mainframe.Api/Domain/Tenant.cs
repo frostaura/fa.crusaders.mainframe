@@ -8,8 +8,26 @@ public sealed class Tenant
     public Guid Id { get; set; } = Guid.NewGuid();
     public required string Slug { get; set; }
     public required string DisplayName { get; set; }
-    public string Status { get; set; } = "active"; // active | suspended | onboarding
+    /// <summary>
+    /// <see cref="TenantStatus.Active"/>, <see cref="TenantStatus.Onboarding"/> or
+    /// <see cref="TenantStatus.Suspended"/>. Read by <c>TenantResolutionMiddleware</c>: a
+    /// suspended club answers <c>403 club_suspended</c> to every tenant-scoped request, and any
+    /// value this build does not know is treated as suspended (fail closed). Changed by the
+    /// operator CLI (<c>tenant suspend</c> / <c>tenant activate</c>), never by a club admin.
+    /// </summary>
+    public string Status { get; set; } = TenantStatus.Active;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// The address this club's members use — <c>https://kestrel.frostaura.net</c> — when it is
+    /// not the one derived from <c>App:PublicBaseUrl</c> (BP-03). Null for almost every club:
+    /// <see cref="Services.TenantLinks"/> derives the address by putting the club's slug in the
+    /// first label of the deployment's own host, which is exactly the rule
+    /// <c>TenantResolutionMiddleware</c> reads a request's club by. Every verify, reset, welcome,
+    /// admin-notice and PayFast-return link is built from it, so a second club's links land on
+    /// the second club rather than on the first, where its one-time tokens do not exist.
+    /// </summary>
+    public string? PublicBaseUrl { get; set; }
 
     /// <summary>
     /// The single API key every court box at this club carries, as
@@ -77,6 +95,21 @@ public sealed class Tenant
 
     /// <summary>True for a demo club (<see cref="DemoOfTenantId"/> set).</summary>
     public bool IsDemo => DemoOfTenantId is not null;
+}
+
+/// <summary>The closed vocabulary of <see cref="Tenant.Status"/>.</summary>
+public static class TenantStatus
+{
+    public const string Active = "active";
+
+    /// <summary>Set up but not yet launched to members. Served exactly like an active club.</summary>
+    public const string Onboarding = "onboarding";
+
+    /// <summary>Every tenant-scoped request answers 403 <c>club_suspended</c>.</summary>
+    public const string Suspended = "suspended";
+
+    /// <summary>Whether the club's members and admins may use it. Unknown values are closed.</summary>
+    public static bool IsOpen(string? status) => status is Active or Onboarding;
 }
 
 /// <summary>

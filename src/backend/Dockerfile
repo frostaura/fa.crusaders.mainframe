@@ -2,7 +2,12 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /workspace/src/backend
 COPY src/backend/ /workspace/src/backend/
 RUN dotnet restore Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj
-RUN dotnet publish Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj -c Release -o /app/publish --no-restore
+# IO-05: the commit this image is built from, stamped into the assembly's informational version
+# (1.0.0+<sha>) and reported by /healthz and /readyz as `revision`. CI passes github.sha; a local
+# build without it reports "unknown" rather than a guess.
+ARG BUILD_SHA=
+RUN dotnet publish Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj -c Release -o /app/publish --no-restore \
+    ${BUILD_SHA:+-p:SourceRevisionId=$BUILD_SHA}
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

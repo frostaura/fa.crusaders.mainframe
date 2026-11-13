@@ -104,7 +104,8 @@ public static class PackageEndpoints
 
         var club = await services.Club.GetAsync(ct);
         var register = await services.Provider.RegisterCheckoutAsync(
-            CheckoutRequest(new CheckoutParts(creds, user, pending, club.Name), services), ct);
+            CheckoutRequest(new CheckoutParts(creds, user, pending, club.Name), services,
+                await TenantLinks.ForTenantAsync(db, services.Config, services.Tenant.TenantId, ct)), ct);
 
         if (!register.Ok)
         {
@@ -154,10 +155,12 @@ public static class PackageEndpoints
         };
     }
 
-    private static RegisterCheckoutRequest CheckoutRequest(CheckoutParts parts, PurchaseServices services)
+    /// <param name="publicBase">The club's own address (BP-03): PayFast returns the member to
+    /// THIS club's site, where their session's club matches the host. The deployment-wide
+    /// address sent a second club's members to the first club's site and a 403 tenant_mismatch.</param>
+    private static RegisterCheckoutRequest CheckoutRequest(CheckoutParts parts, PurchaseServices services, string publicBase)
     {
         var (creds, user, pending, clubName) = parts;
-        var publicBase = services.Config["App:PublicBaseUrl"] ?? "http://localhost:8089";
         return new RegisterCheckoutRequest(
             creds, services.Tenant.TenantId, user.Id, user.Email, pending.AmountZar,
             pending.IdempotencyKey,

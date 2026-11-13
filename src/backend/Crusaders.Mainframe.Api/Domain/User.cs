@@ -2,7 +2,9 @@ namespace Crusaders.Mainframe.Api.Domain;
 
 /// <summary>
 /// A user — a person within a tenant. The same human at two clubs has two User rows.
-/// Platform admins have <see cref="IsPlatformAdmin"/> true and are not tenant-scoped.
+/// There is no platform-wide account: operating the deployment (creating a club, suspending
+/// one) is the operator CLI's job (<c>Persistence/TenantCli.cs</c>), run inside the backend
+/// container, and has no HTTP surface at all.
 /// </summary>
 public sealed class User : ITenantScoped
 {
@@ -36,7 +38,6 @@ public sealed class User : ITenantScoped
     public bool MustChangePassword { get; set; }
 
     public bool IsAdmin { get; set; }
-    public bool IsPlatformAdmin { get; set; }
     public string Status { get; set; } = "active"; // active | suspended | deleted — see Services.UserStatuses
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

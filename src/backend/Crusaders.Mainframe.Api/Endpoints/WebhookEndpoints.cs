@@ -14,53 +14,10 @@ public static class WebhookEndpoints
 {
     public static IEndpointRouteBuilder MapWebhookEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/v1/webhooks").RequireAuthorization().RefuseUnstorableText();
-
-        g.MapGet("/", async (HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
-        {
-            var userId = ctx.User.Id() ?? Guid.Empty;
-            var rows = await db.WebhookEndpoints
-                .Where(w => w.OwnerKind == WebhookOwnerKind.User && w.OwnerUserId == userId)
-                .Select(w => Project(w)).ToListAsync(ct);
-            return Results.Ok(rows);
-        });
-
-        g.MapPost("/", async (CreateWebhookRequest req, HttpContext ctx, MainframeDbContext db, ITenantContext tenant, IOutboundAddressGuard guard, CancellationToken ct) =>
-        {
-            var userId = ctx.User.Id() ?? Guid.Empty;
-
-            // honourAllowList: false — a member does not get the lights-controller carve-out.
-            // This is the fast, legible refusal; the boundary is at the socket, in
-            // WebhookSender.PostAsync, because a name that resolves publicly today can
-            // resolve to the relay controller tomorrow.
-            if (TooLong(req) is { } tooLong) return tooLong;
-            var validation = ValidateUrl(req.UrlTemplate, guard, honourAllowList: false);
-            if (validation is not null) return Results.BadRequest(new { error = validation });
-
-            var endpoint = new WebhookEndpoint
-            {
-                TenantId = tenant.TenantId,
-                OwnerKind = WebhookOwnerKind.User,
-                OwnerUserId = userId,
-                UrlTemplate = req.UrlTemplate,
-                EventFilter = req.EventFilter ?? "*",
-                Secret = TokenHashing.Generate(),
-                Description = req.Description,
-            };
-            db.WebhookEndpoints.Add(endpoint);
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(Project(endpoint, includeSecret: true));
-        });
-
-        g.MapDelete("/{id:guid}", async (Guid id, HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
-        {
-            var userId = ctx.User.Id() ?? Guid.Empty;
-            var w = await db.WebhookEndpoints.FirstOrDefaultAsync(x => x.Id == id && x.OwnerUserId == userId, ct);
-            if (w is null) return Results.NotFound();
-            db.WebhookEndpoints.Remove(w);
-            await db.SaveChangesAsync(ct);
-            return Results.NoContent();
-        });
+        // BP-08: there is no member-owned webhook route. POST /api/v1/webhooks let any member
+        // register unlimited endpoints, had no caller in the app, and shared the club's delivery
+        // queue; it is gone and migration PlatformTenantOnboarding removed the rows it made.
+        // Webhooks are the club's integration surface, configured by its admins.
 
         // Admin: tenant-wide endpoints
         var admin = app.MapGroup("/api/v1/admin/webhooks").RequireAuthorization(p => p.RequireRole("admin")).RefuseUnstorableText();
