@@ -400,6 +400,46 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
         Assert.False(legacy.TryGetProperty("hw_relay_active_level", out _));
     }
 
+    public static TheoryData<string> EveryBoundedSetting() =>
+        [.. DeviceSettings.LegacyInts.Concat(DeviceSettings.V3Ints).Select(s => s.Key)];
+
+    /// <summary>
+    /// FA-2 / BA-05: the bounds the GET serves are the bounds the PUT enforces, for EVERY box and
+    /// device setting — one past the maximum is refused with that key's code and the served bounds,
+    /// the maximum itself is saved. A client range that drifted from the server's is how an admin
+    /// was offered a value and then refused it.
+    /// </summary>
+    [SkippableTheory]
+    [MemberData(nameof(EveryBoundedSetting))]
+    public async Task A_settings_served_bounds_are_the_bounds_the_put_enforces(string key)
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var app = App();
+        var club = await MemberCodeClub.SeedAsync(app, "v3bnd");
+        var admin = club.Member(app, club.AdminId, "admin");
+        var served = JsonDocument.Parse(await admin.GetStringAsync("/api/v1/admin/settings")).RootElement.GetProperty("bounds").GetProperty(key);
+        var max = served.GetProperty("max").GetInt32();
+        // Both spellings carrying the same value: some 2.x keys bind snake_case only, some camelCase
+        // only, and the v3 keys either — the one the record does not bind is ignored.
+        Dictionary<string, int> Body(int value)
+        {
+            var body = new Dictionary<string, int> { [key] = value, [DeviceSettings.CamelOf(key)] = value };
+            // The cue window must also fit inside the forward window (a cross-field rule, not a bound).
+            if (key == "activation_cue_window_minutes") body["activationForwardWindowMinutes"] = TenantSettingsView.MaxActivationForwardWindowMinutes;
+            return body;
+        }
+
+        var over = await admin.PutAsync("/api/v1/admin/settings", JsonContent.Create(Body(max + 1)));
+        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
+        var refusal = JsonDocument.Parse(await over.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal($"{key}_out_of_range", refusal.GetProperty("error").GetString());
+        Assert.Equal(max, refusal.GetProperty("max").GetInt32());
+        Assert.Equal(served.GetProperty("min").GetInt32(), refusal.GetProperty("min").GetInt32());
+
+        var at = await admin.PutAsync("/api/v1/admin/settings", JsonContent.Create(Body(max)));
+        Assert.True(at.StatusCode == HttpStatusCode.OK, $"{key} = {max}: {(int)at.StatusCode} {await at.Content.ReadAsStringAsync()}");
+    }
+
     /// <summary>Cross-tenant: one club's admin cannot set another club's board's overrides, nor read them.</summary>
     [SkippableFact]
     public async Task Another_clubs_admin_cannot_patch_a_boards_overrides()
