@@ -775,6 +775,562 @@
       },
       "cap": 4096,
       "bytes": ""
+    },
+    {
+      "id": "v3-enc-on-tagged",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). An optional third argument tags the frame; the Mega answers !ACK,<tag>,<code>. Sent only to a Mega that announced 3.x.",
+      "frame": {
+        "verb": "ON",
+        "args": [
+          "A",
+          "1800",
+          "7"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ON,A,1800,7*52\n"
+    },
+    {
+      "id": "v3-enc-off-tagged",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "OFF",
+        "args": [
+          "C",
+          "12"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!OFF,C,12*0F\n"
+    },
+    {
+      "id": "v3-enc-ext-tagged",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "EXT",
+        "args": [
+          "B",
+          "900",
+          "200"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!EXT,B,900,200*2C\n"
+    },
+    {
+      "id": "v3-enc-auth-tagged",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "AUTH",
+        "args": [
+          "30",
+          "9"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!AUTH,30,9*32\n"
+    },
+    {
+      "id": "v3-enc-on-tagged-clamp",
+      "kind": "encode_v2",
+      "note": "the duration still clamps to the hard cap; the tag is carried through untouched",
+      "frame": {
+        "verb": "ON",
+        "args": [
+          "D",
+          "60000",
+          "255"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ON,D,5400,255*5A\n"
+    },
+    {
+      "id": "v3-enc-rw",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Stage text into row 0 of screen 12 at column offset 0.",
+      "frame": {
+        "verb": "RW",
+        "args": [
+          "12",
+          "0",
+          "0",
+          "COURT 3"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!RW,12,0,0,COURT 3*4A\n"
+    },
+    {
+      "id": "v3-enc-rw-second-segment",
+      "kind": "encode_v2",
+      "note": "the second 24-character segment of a 48-character row (offset 24)",
+      "frame": {
+        "verb": "RW",
+        "args": [
+          "12",
+          "1",
+          "24",
+          "BBBBBBBBBBBBBBBBBBBBBBBB"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!RW,12,1,24,BBBBBBBBBBBBBBBBBBBBBBBB*31\n"
+    },
+    {
+      "id": "v3-enc-rw-escape-bang",
+      "kind": "encode_v2",
+      "note": "v3 reserves '!' as the frame sentinel on BOTH links, so a literal '!' in text is %21 — the Mega restarts a line on a bare '!'. A 2.1.0 Mega refuses %21, so the bridge never sends it one (it replaces '!' before encoding for a v2 Mega).",
+      "frame": {
+        "verb": "RW",
+        "args": [
+          "3",
+          "1",
+          "0",
+          "50% OFF!"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!RW,3,1,0,50%25 OFF%21*59\n"
+    },
+    {
+      "id": "v3-enc-row-escape-bang",
+      "kind": "encode_v2",
+      "note": "the same escaping applies to the v2 text verbs when a v3 encoder renders them",
+      "frame": {
+        "verb": "ROW",
+        "args": [
+          "0",
+          "GO!"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ROW,0,GO%21*54\n"
+    },
+    {
+      "id": "v3-enc-cmt",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Commit screen 12: rows 0-3 (mask 15), hold 10 s, countdown flag, CRC-16/CCITT-FALSE of the staged rows (display/cases.json screen_crc).",
+      "frame": {
+        "verb": "CMT",
+        "args": [
+          "12",
+          "15",
+          "10",
+          "1",
+          "602E"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!CMT,12,15,10,1,602E*30\n"
+    },
+    {
+      "id": "v3-enc-cmt-clamp",
+      "kind": "encode_v2",
+      "note": "the hold clamps into [1, 120] exactly as !SHOW",
+      "frame": {
+        "verb": "CMT",
+        "args": [
+          "12",
+          "3",
+          "9999",
+          "0",
+          "23F4"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!CMT,12,3,120,0,23F4*36\n"
+    },
+    {
+      "id": "v3-enc-want",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Relay reconcile: ensure A lit for at least 1800 s and D for 600 s; no opinion on B and C. Never opens a relay.",
+      "frame": {
+        "verb": "WANT",
+        "args": [
+          "5",
+          "1800",
+          "-",
+          "-",
+          "600"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!WANT,5,1800,-,-,600*2A\n"
+    },
+    {
+      "id": "v3-enc-want-clamp",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "WANT",
+        "args": [
+          "6",
+          "9000",
+          "-",
+          "-",
+          "-"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!WANT,6,5400,-,-,-*3A\n"
+    },
+    {
+      "id": "v3-enc-cfg",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). One Mega setting: LAYOUT 1 = expanded. Held in RAM only; a Mega boots compact.",
+      "frame": {
+        "verb": "CFG",
+        "args": [
+          "4",
+          "LAYOUT",
+          "1"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!CFG,4,LAYOUT,1*71\n"
+    },
+    {
+      "id": "v3-enc-land",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Seconds of PAID light left per relay as the server's snapshot has it (chained extensions included); '-' = no figure, use the Mega's own deadline.",
+      "frame": {
+        "verb": "LAND",
+        "args": [
+          "2700",
+          "-",
+          "20",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LAND,2700,-,20,0*1D\n"
+    },
+    {
+      "id": "v3-enc-land-clamp",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "LAND",
+        "args": [
+          "99999",
+          "-",
+          "-",
+          "-"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LAND,86400,-,-,-*10\n"
+    },
+    {
+      "id": "v3-enc-note",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). A landing note for 600 s, shown in the status slot.",
+      "frame": {
+        "verb": "NOTE",
+        "args": [
+          "600",
+          "SETUP AP 1A2B"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!NOTE,600,SETUP AP 1A2B*70\n"
+    },
+    {
+      "id": "v3-enc-note-clear",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "NOTE",
+        "args": [
+          "0",
+          ""
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!NOTE,0,*20\n"
+    },
+    {
+      "id": "v3-enc-live",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Bridge liveness: expect the next frame within 5 s; the Mega declares the bridge dead after three periods of silence.",
+      "frame": {
+        "verb": "LIVE",
+        "args": [
+          "5"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LIVE,5*0F\n"
+    },
+    {
+      "id": "v3-enc-live-clamp-high",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "LIVE",
+        "args": [
+          "600"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LIVE,120*09\n"
+    },
+    {
+      "id": "v3-enc-live-clamp-low",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "LIVE",
+        "args": [
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LIVE,1*0B\n"
+    },
+    {
+      "id": "v3-enc-ack",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Uplink: tagged frame 7 applied.",
+      "frame": {
+        "verb": "ACK",
+        "args": [
+          "7",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ACK,7,0*4E\n"
+    },
+    {
+      "id": "v3-enc-ack-screen",
+      "kind": "encode_v2",
+      "note": "uplink: screen 12 refused as incomplete (a row was missing or the CRC did not match); nothing was painted",
+      "frame": {
+        "verb": "ACK",
+        "args": [
+          "S12",
+          "3"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ACK,S12,3*2A\n"
+    },
+    {
+      "id": "v3-enc-boot",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Uplink, first frame after reset: version, MCUSR (08 = watchdog), keys held at boot (09 = A and D).",
+      "frame": {
+        "verb": "BOOT",
+        "args": [
+          "3.0.0",
+          "08",
+          "09"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!BOOT,3.0.0,08,09*08\n"
+    },
+    {
+      "id": "v3-enc-held",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Uplink: keys A and D held together for 5 s inside the boot window — the setup-portal gesture.",
+      "frame": {
+        "verb": "HELD",
+        "args": [
+          "09",
+          "5"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!HELD,09,5*39\n"
+    },
+    {
+      "id": "v3-enc-diag",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Uplink after every !PONG: LCD timeouts, LCD re-inits, RX overruns, screen ceilings hit, authorisation-cap offs.",
+      "frame": {
+        "verb": "DIAG",
+        "args": [
+          "3",
+          "1",
+          "0",
+          "2",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!DIAG,3,1,0,2,0*17\n"
+    },
+    {
+      "id": "v3-enc-pong",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "PONG",
+        "args": [
+          "3.0.0",
+          "3600",
+          "0",
+          "0",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!PONG,3.0.0,3600,0,0,0*3C\n"
+    },
+    {
+      "id": "v3-encl-rw-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "RW",
+        "args": [
+          "1",
+          "0",
+          "0",
+          "X"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-cmt-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "CMT",
+        "args": [
+          "1",
+          "1",
+          "10",
+          "0",
+          "0000"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-want-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "WANT",
+        "args": [
+          "1",
+          "-",
+          "-",
+          "-",
+          "-"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-cfg-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "CFG",
+        "args": [
+          "1",
+          "LAYOUT",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-land-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "LAND",
+        "args": [
+          "-",
+          "-",
+          "-",
+          "-"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-note-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "NOTE",
+        "args": [
+          "0",
+          ""
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-live-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "LIVE",
+        "args": [
+          "5"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-ack-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "ACK",
+        "args": [
+          "1",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-boot-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "BOOT",
+        "args": [
+          "3.0.0",
+          "01",
+          "00"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-held-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "HELD",
+        "args": [
+          "01",
+          "5"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
+    },
+    {
+      "id": "v3-encl-diag-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "DIAG",
+        "args": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": null
     }
   ],
   "decode": [
@@ -2203,6 +2759,886 @@
               "3600"
             ]
           }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-on-tagged",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800,7*52\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "A",
+              "1800",
+              "7"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-on-untagged-still-decodes",
+      "kind": "decode",
+      "note": "a 2.3.0 bridge never tags: the v3 Mega still takes the two-argument form",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800*49\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "A",
+              "1800"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-on-tag-zero",
+      "kind": "decode",
+      "note": "tags are 1-255; 0 would collide with \"untagged\"",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800,0*55\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-on-tag-256",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800,256*54\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-on-tag-leading-zero",
+      "kind": "decode",
+      "note": "one spelling per number",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800,07*62\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-off-tagged",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!OFF,C,12*0F\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "OFF",
+            "args": [
+              "C",
+              "12"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-ext-tagged",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!EXT,B,900,200*2C\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "EXT",
+            "args": [
+              "B",
+              "900",
+              "200"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-auth-tagged",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!AUTH,30,9*32\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "AUTH",
+            "args": [
+              "30",
+              "9"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-rw",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "downlink",
+      "chunks": [
+        "!RW,12,0,0,COURT 3*4A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RW",
+            "args": [
+              "12",
+              "0",
+              "0",
+              "COURT 3"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-rw-second-segment",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!RW,12,1,24,BBBBBBBBBBBBBBBBBBBBBBBB*31\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RW",
+            "args": [
+              "12",
+              "1",
+              "24",
+              "BBBBBBBBBBBBBBBBBBBBBBBB"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-rw-bad-offset",
+      "kind": "decode",
+      "note": "offsets are 0 or 24 only",
+      "link": "downlink",
+      "chunks": [
+        "!RW,12,0,12,X*6D\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-rw-bad-row",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!RW,12,4,0,X*5A\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-rw-seq-256",
+      "kind": "decode",
+      "note": "screen sequence numbers are 0-255",
+      "link": "downlink",
+      "chunks": [
+        "!RW,256,0,0,X*6C\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-rw-escaped-bang",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!RW,3,1,0,50%25 OFF%21*59\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RW",
+            "args": [
+              "3",
+              "1",
+              "0",
+              "50% OFF!"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-rw-escaped-star",
+      "kind": "decode",
+      "note": "%2A is accepted (never required: the checksum is the LAST '*')",
+      "link": "downlink",
+      "chunks": [
+        "!RW,3,1,0,A%2AB*62\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RW",
+            "args": [
+              "3",
+              "1",
+              "0",
+              "A*B"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cmt",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "downlink",
+      "chunks": [
+        "!CMT,12,15,10,1,602E*30\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "CMT",
+            "args": [
+              "12",
+              "15",
+              "10",
+              "1",
+              "602E"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cmt-clamp-hold",
+      "kind": "decode",
+      "note": "a zero hold clamps up to 1, as !SHOW",
+      "link": "downlink",
+      "chunks": [
+        "!CMT,12,3,0,0,23F4*35\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "CMT",
+            "args": [
+              "12",
+              "3",
+              "1",
+              "0",
+              "23F4"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cmt-mask-zero",
+      "kind": "decode",
+      "note": "a commit of no rows is not a screen",
+      "link": "downlink",
+      "chunks": [
+        "!CMT,12,0,10,0,0000*74\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cmt-mask-16",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!CMT,12,16,10,0,0000*43\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cmt-crc-lowercase",
+      "kind": "decode",
+      "note": "four UPPERCASE hex digits, like the frame checksum",
+      "link": "downlink",
+      "chunks": [
+        "!CMT,12,3,10,0,23f4*24\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cmt-flags-256",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!CMT,12,3,10,256,23F4*05\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-want",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "downlink",
+      "chunks": [
+        "!WANT,5,1800,-,-,600*2A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "WANT",
+            "args": [
+              "5",
+              "1800",
+              "-",
+              "-",
+              "600"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-want-clamp",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!WANT,6,9000,-,-,-*32\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "WANT",
+            "args": [
+              "6",
+              "5400",
+              "-",
+              "-",
+              "-"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-want-zero",
+      "kind": "decode",
+      "note": "no opinion is spelled '-'; a zero would read as a one-second light once clamped",
+      "link": "downlink",
+      "chunks": [
+        "!WANT,6,0,-,-,-*0B\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-want-argc",
+      "kind": "decode",
+      "note": "all four relays, always: a reconcile is a whole snapshot",
+      "link": "downlink",
+      "chunks": [
+        "!WANT,6,1800,-,-*33\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cfg",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "downlink",
+      "chunks": [
+        "!CFG,4,LAYOUT,1*71\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "CFG",
+            "args": [
+              "4",
+              "LAYOUT",
+              "1"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cfg-unknown-key-decodes",
+      "kind": "decode",
+      "note": "an unknown key is well-formed: the Mega answers !ACK,4,2 (refused) and changes nothing",
+      "link": "downlink",
+      "chunks": [
+        "!CFG,4,ZOOM,2*7F\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "CFG",
+            "args": [
+              "4",
+              "ZOOM",
+              "2"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cfg-key-lowercase",
+      "kind": "decode",
+      "note": "keys are 1-6 uppercase letters",
+      "link": "downlink",
+      "chunks": [
+        "!CFG,4,layout,1*71\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cfg-value-overflow",
+      "kind": "decode",
+      "note": "values are 0-65535; the per-key clamp is the Mega application, not the decoder",
+      "link": "downlink",
+      "chunks": [
+        "!CFG,4,CEIL,65536*6A\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-land",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "downlink",
+      "chunks": [
+        "!LAND,2700,-,20,0*1D\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LAND",
+            "args": [
+              "2700",
+              "-",
+              "20",
+              "0"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-land-clamp",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!LAND,99999,-,-,-*13\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LAND",
+            "args": [
+              "86400",
+              "-",
+              "-",
+              "-"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-note",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "downlink",
+      "chunks": [
+        "!NOTE,600,SETUP AP 1A2B*70\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "NOTE",
+            "args": [
+              "600",
+              "SETUP AP 1A2B"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-note-ttl-clamp",
+      "kind": "decode",
+      "note": "a note lives at most an hour; the bridge re-sends one that should stay",
+      "link": "downlink",
+      "chunks": [
+        "!NOTE,99999,X*71\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "NOTE",
+            "args": [
+              "3600",
+              "X"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-live",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "downlink",
+      "chunks": [
+        "!LIVE,5*0F\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LIVE",
+            "args": [
+              "5"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-live-clamp-low",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!LIVE,0*0A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LIVE",
+            "args": [
+              "1"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-live-clamp-high",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!LIVE,600*0C\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LIVE",
+            "args": [
+              "120"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-resync-on-bang",
+      "kind": "decode",
+      "note": "a line cut short by a lost byte is abandoned at the next bare '!': under v2 the decoder waited for '\\n' and the torn line swallowed the intact !ON behind it (DL-02)",
+      "link": "downlink",
+      "chunks": [
+        "!ROW,0,TORN TE",
+        "!ON,A,1800*49\n"
+      ],
+      "expect": [
+        {
+          "error": "BADFRAME"
+        },
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "A",
+              "1800"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-resync-not-on-escaped-bang",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ROW,0,GO%21*54\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ROW",
+            "args": [
+              "0",
+              "GO!"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-ack",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "uplink",
+      "chunks": [
+        "!ACK,7,0*4E\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ACK",
+            "args": [
+              "7",
+              "0"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-ack-screen",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!ACK,S12,3*2A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ACK",
+            "args": [
+              "S12",
+              "3"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-ack-bad-code",
+      "kind": "decode",
+      "note": "codes are 0-4",
+      "link": "uplink",
+      "chunks": [
+        "!ACK,7,5*4B\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-ack-bad-id",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!ACK,X12,0*22\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-boot",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "uplink",
+      "chunks": [
+        "!BOOT,3.0.0,08,09*08\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "BOOT",
+            "args": [
+              "3.0.0",
+              "08",
+              "09"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-boot-lowercase-hex",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!BOOT,3.0.0,0a,00*58\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-held",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "uplink",
+      "chunks": [
+        "!HELD,09,5*39\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "HELD",
+            "args": [
+              "09",
+              "5"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-held-clamp",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!HELD,09,99*0C\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "HELD",
+            "args": [
+              "09",
+              "60"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-diag",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "uplink",
+      "chunks": [
+        "!DIAG,3,1,0,2,0*17\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "DIAG",
+            "args": [
+              "3",
+              "1",
+              "0",
+              "2",
+              "0"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-uplink-refuses-downlink-verb",
+      "kind": "decode",
+      "note": "direction is part of the grammar: a bridge never acts on a relay verb arriving from the Mega",
+      "link": "uplink",
+      "chunks": [
+        "!WANT,5,1800,-,-,-*31\n"
+      ],
+      "expect": [
+        {
+          "error": "BADVERB"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-downlink-refuses-uplink-verb",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ACK,7,0*4E\n"
+      ],
+      "expect": [
+        {
+          "error": "BADVERB"
         }
       ]
     }
