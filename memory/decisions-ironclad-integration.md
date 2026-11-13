@@ -1,0 +1,52 @@
+---
+name: crusaders-mainframe-decisions-ironclad-integration
+description: "Ironclad pass integration (2026-11-14, fix/ironclad): nine lanes merged, a linear migration chain, the cross-lane wire mismatches found and pinned, a bridge stack overflow fixed, and bridge OTA still owed."
+type: decision
+last_verified: 2026-11-14
+---
+
+# The ironclad integration (`fix/ironclad`, not pushed)
+
+Nine lane branches merged in order (contract, backend-device, money, platform, court-box,
+door-gate, infra, member, admin). Conflicts were small (compose logging anchors, ci.yml image
+jobs, two spec files, one C# list). **Migrations:** four new ones in timestamp order
+(PlatformTenantOnboarding, AddLedgerPurchaseId, AddLedgerReversesEntryId, DeviceContractV3);
+a probe migration came out empty, so the merged snapshot is the model. A fresh database and a
+database seeded at `a77a1d72`'s last migration (with devices and a member-owned webhook) both
+migrate to schemas identical by `pg_dump --schema-only`.
+
+**Lanes that built against a spec rather than each other disagreed, every time.** Found and
+fixed, each with a test that reads the other side's source or real replies:
+- console vs API on v3 devices: `restore` vs `restore_report`, `device_id` vs
+  `rollout_device_id`, release board counts, the rollout's per-board `keys` (never served)
+  and `blocks` (unread), and the retire/restore dialogs typing a key id / `RESTORE` where the
+  API compares `retire the old key` / `restore this key` — `deviceV3Wire.contract.test.ts`.
+  **Why a source-reading test:** stubbed vitest suites were green on all five.
+- the door's replay refusal: `reason` (gate) vs `cause` (server). One wire, `cause`, pinned by
+  `gate/` vector `gate-events-request-replayed` on both sides.
+- `net_fallback` filed `unknown`; the emitter's `key_next`/`net`/`ota` objects vs the gate's
+  `*_id` vocabulary; court-box `test_server_replies` never written. `make device-replay-check`
+  now runs end to end and is a CI job every image build waits for.
+- platform's register/verify contract vs the member screens; money's PayFast admin route with
+  no console (Settings › Money now has the panel — without it payments are off after redeploy).
+
+**Bridge loop() overflowed its 4 KB stack** (4,144 B deepest path) through two 960-byte
+screen encode buffers the court-box lane added; sized from the frames now (3,136 B). RSA and
+the gate's whole-image temporaries moved off the stack. **Why it matters:** this would have
+crashed on the wall on the first chained screen, and no host test can see a stack.
+
+**29 functions over the lizard gate**, all from the v3 firmware lanes, split behaviour for
+behaviour. Codec's argument grammar stays a switch: a table would land in the Mega's RAM.
+
+**`ota_sign.py` did not exist** though everything named it; written, stdlib-only, held to the
+contract's reference verifier.
+
+**Decided:** a suspended club's boards hear `403 club_suspended`, which the firmware reads as
+out of service (door commits an empty roster). That is what suspending a club means, and it
+is declared the one other 403 source in `DeviceForbiddenMeansOutOfServiceTests`.
+
+**Still owed (blocks the court boxes' last flash): bridge phase B** — signed OTA, key_next,
+runtime network, setup portal, supervisor, stall watchdog and LittleFS persistence. Bridge
+3.0.0 announces `codes:m1 hb:3 lcd:2` only. The Mega 3.0.0 and gate 2.0.0 flashes are final;
+the bridge's is not (go-live checklist §2c, §5). Box halves of FC-11 (fractions report no
+drift), MCV1-07 (24-key ring, not 64) and `test_compat` are also owed.
