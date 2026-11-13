@@ -16,6 +16,7 @@ import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { StateBlock } from "../ui/state-block";
 import { useServedRead } from "./useServedRead";
+import { isReleases } from "../../lib/deviceV3Copy";
 
 /**
  * Boards › Firmware (device-api §7): signed releases for the court box's bridge and the door gate,
@@ -34,7 +35,7 @@ import { useServedRead } from "./useServedRead";
  * </p>
  */
 export function FirmwarePanel({ devices, onChanged }: { devices: AdminDevice[]; onChanged: () => void }) {
-  const read = useServedRead(endpoints.adminFirmwareList, Array.isArray);
+  const read = useServedRead(endpoints.adminFirmwareList, isReleases);
   if (read.absent) return null;
   return (
     <Card data-panel="firmware">

@@ -3,6 +3,7 @@ import { adminEndpoints, type ControlBoardView } from "../../lib/adminApi";
 import { endpoints, type AdminDevice, type AdminSettings, type DeviceApiKey, type FirmwareRelease } from "../../lib/api";
 import type { BoardsContext } from "../../lib/boardScreen";
 import { landingCourtsFor } from "../../lib/landingPreview";
+import { isReleases } from "../../lib/deviceV3Copy";
 import { diagRises, megaDiag, type MegaDiagName } from "../../lib/deviceHealth";
 
 /**
@@ -27,7 +28,7 @@ export function useBoardsContext(
 
   const reload = useCallback(() => {
     // Each answer is checked for its shape: a reply that is not what the route serves feeds no line.
-    void endpoints.adminFirmwareList().then((r) => setReleases(Array.isArray(r) ? r : null), () => setReleases(null));
+    void endpoints.adminFirmwareList().then((r) => setReleases(isReleases(r) ? r : null), () => setReleases(null));
     void endpoints.adminDeviceNetwork().then(
       (n) => setNetworkVer(typeof n?.ver === "number" ? n.ver : null), () => setNetworkVer(null));
     void endpoints.adminDeviceApiKey().then((k) => setKey(typeof k === "object" && k !== null ? k : null), () => setKey(null));

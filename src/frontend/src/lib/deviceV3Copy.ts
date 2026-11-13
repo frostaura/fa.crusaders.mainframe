@@ -212,6 +212,13 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/** Whether an answer is a list of releases — not, say, a list of boards from a route that is not this one. */
+export function isReleases(data: unknown): data is FirmwareRelease[] {
+  return Array.isArray(data) && data.every((r) => typeof r === "object" && r !== null
+    && typeof (r as FirmwareRelease).id === "string" && typeof (r as FirmwareRelease).target === "string"
+    && typeof (r as FirmwareRelease).version === "string");
+}
+
 /** The newest release of a target, or null. */
 export function latestRelease(releases: readonly FirmwareRelease[], target: string): FirmwareRelease | null {
   return releases.filter((r) => r.target === target).reduce<FirmwareRelease | null>(

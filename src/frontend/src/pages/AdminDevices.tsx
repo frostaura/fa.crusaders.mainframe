@@ -37,6 +37,7 @@ import { buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../lib/buttonMap"
 import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapCard";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
 import { BoardScreen, BoardScreenEditor, BoardStatusLines } from "../components/devices/BoardV3";
+import { servesStatusLines } from "../lib/boardScreen";
 import {
   BoardHardwareEditor, BoardHardwareSummary, BoardHealth, CommissioningChecklist, type HwPatch,
 } from "../components/devices/BoardHardware";
@@ -127,15 +128,18 @@ const REFRESH_MS = 15_000;
  * The second element is the whole difference between the two kinds: a box says which court
  * sits on which relay, a door says which door it is.
  */
-function identityLine(device: AdminDevice): string {
+function identityLine(device: AdminDevice, statusLines: boolean): string {
   const parts = [
     device.device_code,
     isGate(device) ? describeGate(device.gate_key) : describeCourts(device.court_numbers),
   ];
   if (device.mac_address) parts.push(device.mac_address);
   if (device.last_ip_address) parts.push(device.last_ip_address);
-  // Firmware, the Mega and the v3 state are their own lines (BoardStatusLines): one muted run
-  // of versions told nobody which board missed the last flash (FA-12).
+  // With anything v3 to say, firmware and the Mega are their own lines (BoardStatusLines, FA-12):
+  // a muted run of versions told nobody which board missed the last flash. Without it — a 2.x
+  // board on an API with no releases — the versions stay here, and a phone keeps its dense card.
+  if (!statusLines && device.running_version) parts.push(`firmware ${device.running_version}`);
+  if (!statusLines && device.mega_version) parts.push(`Mega ${device.mega_version}`);
   return parts.join(" · ");
 }
 
@@ -394,7 +398,7 @@ function DeviceRowHeader({ device, online, now, context }: {
           two version strings. The row used to push the page wider than the phone on a long
           device NAME alone (R2 I-F6); an unbreakable 64-character token is the same defect
           with a larger token. */}
-      <div className="mt-1 break-words text-xs text-text-muted">{identityLine(device)}</div>
+      <div className="mt-1 break-words text-xs text-text-muted">{identityLine(device, servesStatusLines(device, context))}</div>
       <BoardStatusLines device={device} context={context} />
     </>
   );

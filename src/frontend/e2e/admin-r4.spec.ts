@@ -182,7 +182,9 @@ test.describe("R4 V-14 — the members table at 1280", () => {
     const approve = page.getByRole("button", { name: /^Approve/ }).first();
     const reject = page.getByRole("button", { name: /^Reject/ }).first();
     const [a, r] = [await approve.boundingBox(), await reject.boundingBox()];
-    expect(Math.abs(a!.y - r!.y), "Approve and Reject side by side").toBeLessThan(2);
+    // Centres, not tops: Approve is an armed ConfirmButton (BA-02), a full 44px control, beside
+    // Reject's sm button with its extended hit area — side by side on one line either way.
+    expect(Math.abs(a!.y + a!.height / 2 - (r!.y + r!.height / 2)), "Approve and Reject side by side").toBeLessThan(2);
   });
 });
 

@@ -5,7 +5,7 @@ import {
 } from "../../lib/deviceV3Copy";
 import { asLayout, landingClock } from "../../lib/landingPreview";
 import {
-  effectiveLayout, effectiveMarquee, servesScreen, type BoardsContext, type ClubScreen,
+  effectiveLayout, effectiveMarquee, servesScreen, servesStatusLines, type BoardsContext, type ClubScreen,
 } from "../../lib/boardScreen";
 import { Button } from "../ui/button";
 import { RadioCard, RadioGroup } from "../ui/radio-group";
@@ -24,6 +24,7 @@ import { LandingPreview } from "./LandingPreview";
 
 /** The status lines under a board's name: firmware, Mega, network, key, capabilities. */
 export function BoardStatusLines({ device, context }: { device: AdminDevice; context: BoardsContext }) {
+  if (!servesStatusLines(device, context)) return null;
   const latest = context.releases ? latestRelease(context.releases, targetOf(device)) : null;
   const caps = [...deviceCaps(device)].sort();
   const lines = [

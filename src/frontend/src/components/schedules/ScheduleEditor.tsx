@@ -157,7 +157,7 @@ export function ScheduleEditor({
   const signature = JSON.stringify(body);
   // BA-26: a pristine form opened on "Give it a name of 2 to 128 characters" before the admin had
   // typed anything. The sentence's refusal is said once the admin has touched it (a change, a
-  // press — the pickers open in portals, whose events still reach this section through React).
+  // click, a key — the pickers open in portals, whose events still reach this section through React).
   // The Check button is disabled until then either way, so nothing can be sent before it.
   const [touched, setTouched] = useState(false);
 
@@ -268,7 +268,9 @@ export function ScheduleEditor({
   return (
     <section
       aria-labelledby="schedule-editor-heading" className="flex flex-col gap-5 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6"
-      onChangeCapture={() => setTouched(true)} onPointerDownCapture={() => setTouched(true)} onKeyDownCapture={() => setTouched(true)}
+      // A click, never a pointerdown: a refusal appearing on pointerdown pushed the buttons down
+      // under the pointer, so the click landed beside Cancel and the editor stayed open.
+      onChangeCapture={() => setTouched(true)} onClickCapture={() => setTouched(true)} onKeyDownCapture={() => setTouched(true)}
     >
       <h2
         id="schedule-editor-heading"

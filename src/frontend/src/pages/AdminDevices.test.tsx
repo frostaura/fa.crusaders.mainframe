@@ -354,8 +354,9 @@ describe("AdminDevices", () => {
     expect(await screen.findByText("Court 1 box")).toBeInTheDocument();
     // Relay order is the meaning: relay A drives court 1, relay B drives court 3.
     expect(screen.getByText(/A: court 1, B: court 3/)).toBeInTheDocument();
-    // FA-12: the firmware is its own line now, not a muted run of versions.
-    expect(screen.getByText(/^Firmware 1\.0\.0/)).toBeInTheDocument();
+    // A board with nothing v3 to say keeps its versions in the identity line (a dense card);
+    // with v3 state they are lines of their own (FA-12, AdminDevices.v3.test.tsx).
+    expect(screen.getByText(/firmware 1\.0\.0/)).toBeInTheDocument();
   });
 
   it("shows a board that has not called in as offline", async () => {

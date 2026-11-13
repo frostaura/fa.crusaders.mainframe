@@ -80,6 +80,15 @@ export async function serveApi(page: Page, routes: ApiRoute[]) {
       .filter((r) => (r.method ?? "GET").toUpperCase() === method && url.pathname.startsWith(r.path))
       .sort((a, b) => b.path.length - a.path.length)[0];
 
+    // The device contract v3 routes beside the board list (network, firmware, member codes) are
+    // answered 404 — what an API without them says — unless a spec declares one itself; the list's
+    // shorter prefix must not answer for them with an array of boards.
+    const v3 = /^\/api\/v1\/admin\/devices\/(network|firmware|member-codes)/.exec(url.pathname)?.[0];
+    if (v3 && (!match || !match.path.startsWith(v3))) {
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not_found" }) });
+      return;
+    }
+
     if (!match) {
       await route.fulfill({
         status: 501,
