@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { LOGIN, PASSWORD_TOGGLE } from "../src/lib/authCopy";
 import { bigText, fontsReady } from "./layoutKit";
 import { inviteFixture, memberShellRoutes } from "./playersKit";
@@ -37,6 +37,7 @@ async function openBookings(page: Page, width: number, height: number) {
   ];
   await serveApi(page, routes);
   await page.goto(`/bookings?date=${DAY}`);
+  await singleTap(page);
   await page.waitForSelector(FIRST_BOOK);
   await page.waitForTimeout(300);
 }

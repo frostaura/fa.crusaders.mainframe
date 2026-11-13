@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { bigText, firstBookInView, fontsReady, sideways } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./playersKit";
 import { myPlayFixture } from "./playKit";
@@ -46,6 +46,7 @@ async function openBookings(page: Page, width: number, height: number, query = `
   ];
   await serveApi(page, routes);
   await page.goto(`/bookings${query}`);
+  await singleTap(page);
   await page.waitForSelector('[role="grid"] button[aria-label^="Book "]');
   // The page settles: the opening scroll runs on the frame after the grid draws.
   await page.waitForTimeout(300);

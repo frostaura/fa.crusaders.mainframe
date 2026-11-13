@@ -199,7 +199,9 @@ export default function BookingsPage() {
             <InvitesBadgeLink className={INVITES_LINK} />
           </div>
         )}
-        <div className="flex min-w-0 flex-col gap-4">
+        {/* R5 F5-6 — from 3xl the courts are capped, so this column hugs the grid and the week strip
+            and picker end where the grid does (the rail's grid template used to do this). */}
+        <div className="flex min-w-0 flex-col gap-4 3xl:w-max 3xl:max-w-full">
           <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} drawn={ctx !== null} keepInView={bookAsUserId ? BOOKING_FOR_BAR : null} />
           {expanded ? null : <ScheduleNotices
             notices={explainer.notices(bookAsUserId ? null : balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}

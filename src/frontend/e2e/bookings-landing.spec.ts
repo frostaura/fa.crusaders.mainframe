@@ -71,7 +71,14 @@ for (const [name, width, height] of [["phone", 390, 844], ["desktop", 1280, 800]
     await land(page, width, height);
     const first = await firstBookInView(page);
     expect(first.inScroller && first.onScreen, `first Book cell at y=${Math.round(first.top)}`).toBe(true);
-    expect(first.pageScroll, "the page holds still; the grid scrolls itself").toBeLessThanOrEqual(2);
+    // The page moves no further than the week it opens at on a phone (useOpenAtWeek, R7) — which
+    // has room to act now that the games detail lies under the grid; the grid scrolls itself.
+    const opening = await page.evaluate(() => {
+      const main = document.querySelector("main")!;
+      const week = document.querySelector("[data-day-strip]");
+      return week && innerWidth <= 767 ? Math.max(0, week.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop) : 0;
+    });
+    expect(first.pageScroll, "the page holds still; the grid scrolls itself").toBeLessThanOrEqual(opening + 2);
     expect(first.gridScroll, "the grid opened scrolled past the morning").toBeGreaterThan(0);
     const at = await placement(page);
     expect(at.label).toContain("19:15");

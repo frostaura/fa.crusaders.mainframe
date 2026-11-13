@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { BOOKINGS_COPY } from "../src/lib/bookingsCopy";
 import { inviteFixture, memberShellRoutes } from "./playersKit";
 
@@ -43,6 +43,8 @@ async function open(page: Page, options: { invites?: number; games?: number; rec
   ];
   await serveApi(page, routes);
   await page.goto(`/bookings?date=${DAY}`);
+  // The specs here were written for the one-tap state; selection mode is on by default now.
+  await singleTap(page);
   if (options.bigText) await page.addStyleTag({ content: "html { font-size: 32px; }" });
   await page.waitForSelector('[role="grid"] button[aria-label^="Book "]');
 }
@@ -68,15 +70,14 @@ test.describe("one project sweeps the widths", () => {
     expect(Math.abs((bar.left + bar.right) / 2 - (frame.left + frame.right) / 2)).toBeLessThanOrEqual(2);
   });
 
-  test("F5-6 — at 1920 the strip spans the grid and the rail stands beside it", async ({ page }) => {
+  // The rail went (0c8fdc0): the grid owns the page's width. What F5-6 held still holds — the week
+  // strip runs to the grid's own edge.
+  test("F5-6 — at 1920 the strip spans the grid", async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await open(page, { invites: 3 });
     const frame = await box(page, FRAME);
     const strip = await box(page, "[data-week-strip]");
-    const rail = await box(page, "aside[data-aside]");
     expect(Math.abs(strip.right - frame.right), "the week strip ends where the grid does").toBeLessThanOrEqual(2);
-    // Was 1306 → 1484: ~180px of nothing between the grid and the rail.
-    expect(rail.left - frame.right, "no dead gutter").toBeLessThanOrEqual(40);
   });
 
   test("X5-12 / X5-11 — the invites link is a 44px target and 320/200 % scrolls nothing sideways", async ({ page }) => {
@@ -88,17 +89,20 @@ test.describe("one project sweeps the widths", () => {
     expect(overflow, "was 41px").toBeLessThanOrEqual(0);
   });
 
-  test("§4.2 — at 390 the games, recent games and invites are one sideways row above the week", async ({ page }) => {
+  // The games strip became the ticker (0c8fdc0): one line with the invites beside it, above the
+  // week, and the games in full under the grid — so the first slots still make the first screen.
+  test("§4.2 — at 390 the ticker and the invites are one row above the week", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await open(page, { invites: 3, games: 3, recent: 2 });
-    await expect(page.locator("[data-recent] li").first()).toBeVisible();
-    const upcoming = await box(page, "[data-upcoming]");
-    const recent = await box(page, "[data-recent]");
-    expect(Math.abs(recent.top - upcoming.top), "one row, not stacked sections").toBeLessThanOrEqual(1);
+    await expect(page.locator("[data-upcoming-ticker]")).toBeVisible();
+    const ticker = await box(page, "[data-upcoming-ticker]");
     const invites = await box(page, "[data-invites-badge]");
-    expect(invites.top).toBeLessThan(upcoming.bottom);
+    const week = await box(page, "[data-day-strip]");
+    expect(Math.max(ticker.bottom, invites.bottom), "above the week").toBeLessThanOrEqual(week.top + 1);
+    const upcoming = await box(page, "[data-upcoming]");
+    const frame = await box(page, FRAME);
+    expect(upcoming.top, "the games in full lie under the grid").toBeGreaterThanOrEqual(frame.bottom);
     const first = await box(page, '[role="grid"] button[aria-label^="Book "]');
-    // Was 722 with the sections stacked (SPEC 3.1's target is 360, which needs the sticky strip).
     expect(first.top).toBeLessThanOrEqual(560);
     const tabBar = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height")) || 0);
     expect(first.bottom + 3 * 52, "four slot rows on the first screen").toBeLessThanOrEqual(844 - tabBar);
@@ -116,10 +120,14 @@ test.describe("§4.2 — the phone's week strip sticks", () => {
     // 2026-10 (Dean): the grid scrolls ITSELF and the page holds still (bar the few px a 280px
     // grid floor can leave), so "while the grid is worked" is the grid's own scroller run to its
     // end, and the page to whatever end it has: the week stays on screen, under the app bar.
+    // The page runs on past the grid now (the games detail under it), so "the page to its end" is
+    // to the grid's foot: the end of what the grid is worked in.
     await page.evaluate(() => {
       const grid = document.querySelector<HTMLElement>("[data-grid-scroller]")!;
       grid.scrollTop = grid.scrollHeight;
-      const m = document.querySelector("main")!; m.scrollTop = m.scrollHeight;
+      const m = document.querySelector("main")!;
+      const tabs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height")) || 0;
+      m.scrollTop += grid.getBoundingClientRect().bottom - (innerHeight - tabs);
     });
     await page.waitForTimeout(100);
     const strip = await box(page, "[data-day-strip]");
