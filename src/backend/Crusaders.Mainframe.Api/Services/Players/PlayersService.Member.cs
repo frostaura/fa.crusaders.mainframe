@@ -163,7 +163,7 @@ public sealed partial class PlayersService
         var shortfall = 0;
         if (ask.PayMinutes is { } pay)
         {
-            var part = await PayWhatYouCanAsync(game, seat, pay, ct);
+            var part = await PayWhatYouCanAsync(game, seat, me, pay, ct);
             if (part.Refusal is { } invalid) return invalid;
             shortfall = part.Shortfall;
         }
@@ -186,7 +186,7 @@ public sealed partial class PlayersService
                 _db.ChangeTracker.Clear();
                 return PlayerOutcome.Refuse(402, PlayerErrors.InsufficientBalance, new { current_minutes = balance, required_minutes = delta });
             }
-            postings = await _p.Shares.StageCollectionAsync(game.Booking, seat, delta, me, ct);
+            postings = await _p.Shares.StageCollectionAsync(game.Booking, seat, delta, me, ct, partOfShare: shortfall > 0);
         }
         if (fresh)
         {
@@ -219,14 +219,24 @@ public sealed partial class PlayersService
     /// remainder, so it rises by exactly the shortfall), and the shortfall is recorded on the seat.
     /// Refused <c>400 pay_minutes_invalid</c> unless it is a whole part of the share — more than nothing,
     /// less than the share, and not below what the seat has already paid (nothing comes back this way).
+    /// It is open only to a partner who is SHORT — whose spendable minutes, with what the seat has
+    /// paid, do not cover the share (money lane BM-5): otherwise <c>409 share_affordable</c>, because a
+    /// partner who could pay used to be able to drop their share to one minute and leave the organiser
+    /// carrying the rest. Read under the accept's payer lock, so the balance cannot move underneath it.
     /// What it costs is checked against spendable minutes by the accept itself (<c>402</c>).
     /// </summary>
-    private async Task<(PlayerOutcome? Refusal, int Shortfall)> PayWhatYouCanAsync(Game game, BookingParticipant seat, int pay, CancellationToken ct)
+    private async Task<(PlayerOutcome? Refusal, int Shortfall)> PayWhatYouCanAsync(Game game, BookingParticipant seat, Guid me, int pay, CancellationToken ct)
     {
         var paid = await _p.Shares.PaidAsync(seat, ct);
         if (!PayWhatYouCan.IsValid(pay, seat.ShareMinutes, paid))
         {
             return (PlayerOutcome.Refuse(400, PlayerErrors.PayMinutesInvalid, new { share_minutes = seat.ShareMinutes, paid_minutes = paid }), 0);
+        }
+        var spendable = await _p.Ledger.GetSpendableAsync(me, ct);
+        if (!PayWhatYouCan.IsShort(seat.ShareMinutes, paid, spendable))
+        {
+            return (PlayerOutcome.Refuse(409, PlayerErrors.ShareAffordable,
+                new { share_minutes = seat.ShareMinutes, paid_minutes = paid, spendable_minutes = spendable }), 0);
         }
         var shortfall = seat.ShareMinutes - pay;
         var figures = new Dictionary<Guid, (int Weight, decimal Amount)> { [seat.Id] = (0, pay) };

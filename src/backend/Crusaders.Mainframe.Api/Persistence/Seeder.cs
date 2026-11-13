@@ -11,6 +11,27 @@ namespace Crusaders.Mainframe.Api.Persistence;
 /// </summary>
 public static class Seeder
 {
+    /// <summary>
+    /// PayFast's PUBLISHED sandbox merchant (its developer documentation's test account): real-shaped,
+    /// so a development club counts as configured (<c>PayFastCredentialRules</c>) and a checkout reaches
+    /// the sandbox or the mountebank imposter instead of PayFast's "merchant_id must be 8 digits" page
+    /// (browser lane BM-03). They were <c>REPLACE_WITH_…</c> placeholders, which passed the old
+    /// emptiness check and dead-ended every local purchase.
+    /// </summary>
+    public const string SandboxMerchantId = "10000100";
+
+    /// <summary>The sandbox merchant's published key; see <see cref="SandboxMerchantId"/>.</summary>
+    public const string SandboxMerchantKey = "46f0cd694581a";
+
+    /// <summary>
+    /// A passphrase drawn fresh for each development database (money lane BM-12). The seeded one was
+    /// a constant in this public-to-the-team repository, so anybody could sign an ITN that a dev or
+    /// demo stack credited as real revenue. A harness that needs to sign one sets its own through
+    /// <c>PUT /api/v1/admin/payments/payfast</c>.
+    /// </summary>
+    private static string DevelopmentPassphrase() =>
+        Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+
     public const string CrusadersSlug = "crusaders";
     public const string DefaultAdminEmail = "any@frostaura.net";
     public const string DefaultAdminPassword = "ChangeMeOnFirstLogin!";
@@ -45,7 +66,7 @@ public static class Seeder
             db.TenantSettings.Add(new TenantSettings
             {
                 TenantId = tenant.Id,
-                SettingsJson = """
+                SettingsJson = $$"""
                 {
                   "slice_minutes": 15,
                   "penalty_pct": 30.0,
@@ -65,9 +86,9 @@ public static class Seeder
                   "currency_symbol": "R",
                   "brand_accent_hex": "#00498D",
                   "payfast": {
-                    "merchant_id": "REPLACE_WITH_PAYFAST_MERCHANT_ID",
-                    "merchant_key": "REPLACE_WITH_PAYFAST_MERCHANT_KEY",
-                    "passphrase": "REPLACE_WITH_PAYFAST_PASSPHRASE",
+                    "merchant_id": "{{SandboxMerchantId}}",
+                    "merchant_key": "{{SandboxMerchantKey}}",
+                    "passphrase": "{{DevelopmentPassphrase()}}",
                     "environment": "test"
                   }
                 }

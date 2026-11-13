@@ -270,6 +270,40 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
+    /// Money lane BM-8: every key inside the documented limit cancels, refunds and records its penalty
+    /// — a 199- and a 200-character key used to overflow the reference column and be refused
+    /// <c>400 invalid_body</c> with the booking left booked. The key length is the fixture.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(20)]
+    [InlineData(199)]
+    [InlineData(200)]
+    public async Task A_key_of_any_allowed_length_cancels_and_its_retry_refunds_once(int keyLength)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, $"bulklen{keyLength}");
+        var id = await SeedBookingAsync(factory, club, DateTimeOffset.UtcNow.AddDays(3), charged: 45);
+        var client = club.AdminClient(factory);
+        var payload = new
+        {
+            idempotencyKey = new string('k', keyLength),
+            reason = "Power cut",
+            items = new[] { new { bookingId = id } },
+        };
+
+        var first = await client.PostAsJsonAsync(CancelPath, payload);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal("cancelled", Results(await first.Content.ReadFromJsonAsync<JsonElement>()).Single().GetProperty("status").GetString());
+        await client.PostAsJsonAsync(CancelPath, payload);
+
+        var refunds = (await LedgerAsync(factory, club.TenantId)).Where(l => l.Type == LedgerEntryType.CancellationRefund).ToList();
+        Assert.Equal(45, Assert.Single(refunds).AmountMinutes);
+        Assert.True(refunds[0].ExternalReference!.Length <= 255);
+    }
+
+    /// <summary>
     /// The totals on the envelope are the sum of the rows beneath them.
     ///
     /// <para>

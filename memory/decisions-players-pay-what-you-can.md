@@ -14,6 +14,8 @@ how to split what's left." Pinned in `PayWhatYouCanHttpTests` (backend) and
 
 - **The partner's side is an accept with `payMinutes`** — the share the seat will stand at, valid
   when `max(1, paid) ≤ payMinutes < share` (`PayWhatYouCan.IsValid`), else `400 pay_minutes_invalid`.
+  Only a partner who is SHORT may (2026-11-13, BM-5): paid + spendable covering the share is
+  `409 share_affordable`, read under the payer lock — *why:* any partner could drop to 1 minute.
   It is the ordinary accept under the same locks and one save: the booking is re-split to `amount`
   through `PlayersService.Resplit` (other partners keep their shares; the organiser's seat is the
   remainder), the seat's share and consent become `payMinutes`, and the reconcile's own collection

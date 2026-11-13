@@ -39,7 +39,14 @@ public static class MinutesEvents
     /// <summary>A penalty was given back — the POSITIVE penalty row of the same reversal (E6-11).</summary>
     public const string PenaltyReturned = "minutes.penalty_returned";
 
+    /// <summary>
+    /// Rand given back for a purchase — a refund the club made or a chargeback it recorded — as a
+    /// <c>PaymentReversal</c> row (money lane BM-6). Carries <c>zar_reversed</c> and
+    /// <c>reverses_entry_id</c> beside the minutes taken back (0 when the member keeps them).
+    /// </summary>
+    public const string PaymentReversed = "minutes.payment_reversed";
+
     /// <summary>Every name above, for the coverage test.</summary>
     public static readonly IReadOnlyList<string> All =
-        [Purchased, Refunded, PenaltyApplied, Adjusted, SoldAtDesk, RefundReversed, PenaltyReturned];
+        [Purchased, Refunded, PenaltyApplied, Adjusted, SoldAtDesk, RefundReversed, PenaltyReturned, PaymentReversed];
 }

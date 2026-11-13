@@ -170,5 +170,24 @@ public sealed class LedgerEntry : ITenantScoped
     public string? Reason { get; set; }
     public string? ExternalReference { get; set; } // unique on the gateway transaction id
 
+    /// <summary>
+    /// On a <see cref="LedgerEntryType.TopUp"/> posted by the PayFast ITN: the purchase
+    /// (<c>pending_topups.Id</c>) it credits. Unique per club where set
+    /// (<c>IX_ledger_entries_TenantId_PurchaseId</c>), so <b>one checkout is credited at most
+    /// once</b> whatever arrives — the database's answer to money lane BM-2, where eight
+    /// concurrent COMPLETEs carrying different <c>pf_payment_id</c>s credited one R120 purchase
+    /// three times because each built a different <see cref="ExternalReference"/>. Null on every
+    /// other row, and on purchases credited before the column existed.
+    /// </summary>
+    public Guid? PurchaseId { get; set; }
+
+    /// <summary>
+    /// On a <see cref="LedgerEntryType.PaymentReversal"/>: the funding row (<see cref="LedgerEntryType.TopUp"/>
+    /// or <see cref="LedgerEntryType.AdminTopUp"/>) whose rand it gives back — a refund the club made
+    /// or a chargeback it recorded (money lane BM-6). What lets the desk refuse to give back more
+    /// rand, or take back more minutes, than that purchase carried. Null on every other row.
+    /// </summary>
+    public Guid? ReversesEntryId { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

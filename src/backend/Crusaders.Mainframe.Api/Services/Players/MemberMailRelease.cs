@@ -92,6 +92,8 @@ public static class MemberMailRelease
                 return await ResultToConfirmAsync(c, ct);
             case MemberEventCatalogue.Shortfall:
                 return await ShortfallAsync(c, ct);
+            case MemberEventCatalogue.Response:
+                return await ResponseAsync(c, ct);
             default:
                 return ReleaseVerdict.Send(row.PayloadJson);
         }
@@ -237,6 +239,18 @@ public static class MemberMailRelease
         if (booking is null || seat is null || !seat.IsLive) return ReleaseVerdict.Drop(SeatGone);
         if (!GameOn(booking)) return ReleaseVerdict.Drop(GameOff);
         return seat.ShortfallMinutes > 0 ? ReleaseVerdict.Send(c.Row.PayloadJson) : ReleaseVerdict.Drop(ShortfallSplit);
+    }
+
+    /// <summary>
+    /// "Your partner is not coming" only while it is still true (BM-20): dropped when the game is off,
+    /// or the partner is back on it (accepted again after the organiser re-invited them).
+    /// </summary>
+    private static async Task<ReleaseVerdict> ResponseAsync(ReleaseContext c, CancellationToken ct)
+    {
+        var p = Read<ResponsePayload>(c.Row);
+        var (booking, seat) = await GameAndSeatAsync(c, p.BookingId, p.SeatId, ct);
+        if (booking is null || !GameOn(booking)) return ReleaseVerdict.Drop(GameOff);
+        return seat is { Status: ParticipantStatus.Accepted } ? ReleaseVerdict.Drop(BackOnGame) : ReleaseVerdict.Send(c.Row.PayloadJson);
     }
 
     private static async Task<ReleaseVerdict> ReturnWaitingAsync(ReleaseContext c, CancellationToken ct)

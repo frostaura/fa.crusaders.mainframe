@@ -137,6 +137,9 @@ public static partial class WalletEndpoints
         admin.MapPost("/{userId:guid}/adjust", AdjustAsync);
         admin.MapPost("/{userId:guid}/sell", SellAsync);
         admin.MapGet("/{userId:guid}/packages", DeskShelfAsync);
+        // BM-6: rand given back for a purchase — a refund or a recorded chargeback (WalletEndpoints.Reversal.cs).
+        admin.MapGet("/{userId:guid}/reversible", ReversibleAsync);
+        admin.MapPost("/{userId:guid}/reverse-payment", ReversePaymentAsync);
 
         return app;
     }

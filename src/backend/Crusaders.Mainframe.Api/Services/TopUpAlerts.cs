@@ -32,6 +32,31 @@ public static class TopUpAlerts
     public const string SignatureInvalid = "signature_invalid";
     public const string PaymentIdMissing = "payment_id_missing";
 
+    /// <summary>A signed ITN naming a merchant id that is not this club's. Daily, like a bad signature.</summary>
+    public const string MerchantMismatch = "merchant_mismatch";
+
+    /// <summary>An ITN from an address that is not PayFast's (the source check). Daily.</summary>
+    public const string SourceUnrecognised = "source_unrecognised";
+
+    /// <summary>PayFast's own validate call did not confirm a signed ITN: a leaked passphrase, or a forgery. Daily.</summary>
+    public const string ValidationFailed = "validation_failed";
+
+    /// <summary>A COMPLETE with no <c>amount_gross</c>: nothing to check the locked price against, so nothing is credited. Per purchase.</summary>
+    public const string AmountMissing = "amount_missing";
+
+    /// <summary>
+    /// A second genuine payment for a checkout already credited (money lane BM-3). The member has
+    /// paid twice; the second payment is NOT credited and must be refunded or credited at the desk.
+    /// Keyed on the second payment's PayFast id, so its retries raise it once.
+    /// </summary>
+    public const string PaidTwice = "paid_twice";
+
+    /// <summary>
+    /// A genuine COMPLETE for a checkout the gateway had already closed (cancelled or failed).
+    /// Money moved and nothing was credited; the desk settles it. Keyed on the PayFast id.
+    /// </summary>
+    public const string PaidAfterClose = "paid_after_close";
+
     /// <summary>The stored failure codes that are the club's to deal with. See the type's summary for why the others are not.</summary>
     private static readonly HashSet<string> ClubFacing = new(StringComparer.Ordinal)
     {
@@ -66,6 +91,20 @@ public static class TopUpAlerts
         await AdminNotices.RaiseAsync(db, tenantId, notice, DateTimeOffset.UtcNow, ct);
     }
 
+    /// <summary>
+    /// Raises the notice for a payment PayFast took that this club did not credit
+    /// (<see cref="PaidTwice"/>, <see cref="PaidAfterClose"/>): the notice names THAT payment —
+    /// its PayFast id and the rand it reports — not the purchase's first one, because it is the
+    /// money the desk has to find. Once per payment id.
+    /// </summary>
+    public static async Task RaiseNotAddedAsync(
+        MainframeDbContext db, Guid tenantId, NotAddedPayment payment, PendingTopup pending, CancellationToken ct)
+    {
+        var name = await NameOfAsync(db, pending.UserId, ct);
+        var notice = AdminNotices.TopUpNotAdded(payment.Reason, payment.PaymentId, payment.AmountGross, name, pending);
+        await AdminNotices.RaiseAsync(db, tenantId, notice, DateTimeOffset.UtcNow, ct);
+    }
+
     /// <summary>The UTC day an instant falls in, as a dedupe identity: one notice per club per day.</summary>
     public static string DayOf(DateTimeOffset at) =>
         at.ToUniversalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
@@ -73,3 +112,6 @@ public static class TopUpAlerts
     private static async Task<string?> NameOfAsync(MainframeDbContext db, Guid userId, CancellationToken ct) =>
         await db.Memberships.AsNoTracking().Where(m => m.UserId == userId).Select(m => m.FullName).FirstOrDefaultAsync(ct);
 }
+
+/// <summary>A PayFast payment that was received and not added as minutes: why, its PayFast id, and the rand it reports.</summary>
+public sealed record NotAddedPayment(string Reason, string PaymentId, decimal? AmountGross);

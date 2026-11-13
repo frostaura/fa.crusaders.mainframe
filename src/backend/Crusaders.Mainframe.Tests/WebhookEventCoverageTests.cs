@@ -135,7 +135,7 @@ public class WebhookEventCoverageTests
     {
         Assert.Equal(
             ["minutes.purchased", "minutes.refunded", "minutes.penalty_applied", "minutes.adjusted", "minutes.sold_at_desk",
-             "minutes.refund_reversed", "minutes.penalty_returned"],
+             "minutes.refund_reversed", "minutes.penalty_returned", "minutes.payment_reversed"],
             MinutesEvents.All);
     }
 

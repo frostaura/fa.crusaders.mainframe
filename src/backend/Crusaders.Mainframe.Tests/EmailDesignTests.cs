@@ -306,7 +306,8 @@ public class EmailDesignTests
         // the templates that state real money, so a renderer that simply stopped printing it
         // does not pass this test by rendering nothing.
         Assert.Equal(
-            ["AdminTopUpFailed", "PackageSoldAtDesk", "PurchaseCancelled", "PurchaseConfirmation",
+            ["AdminTopUpFailed", "PackageSoldAtDesk", "PaymentChargedBackKept", "PaymentNotAddedMail", "PaymentReversed",
+             "PurchaseCancelled", "PurchaseConfirmation",
              "PurchaseConfirmationNoDiscount", "PurchaseMismatched", "PurchaseNotCompleted"],
             carriesMoney.Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList());
 

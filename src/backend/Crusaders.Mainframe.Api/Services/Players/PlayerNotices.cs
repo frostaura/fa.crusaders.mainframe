@@ -252,18 +252,24 @@ public static class PlayerNotices
             $"/bookings/{booking.Id}", booking.Id);
     }
 
-    /// <summary>A partner's answer, told to the organiser on the inbox only.</summary>
+    /// <summary>
+    /// A partner's answer, told to the organiser on the inbox — and by mail when it leaves them
+    /// without that partner (declined or withdrew, BM-20). An accept stays inbox-only: its payment
+    /// receipt already says it.
+    /// </summary>
     public static async Task<MemberNotice> ResponseAsync(
         MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, string verb, CancellationToken ct)
     {
         var game = await GameText.ForAsync(db, booking, settings, ct);
         var partner = await NameAsync(db, seat.UserId, "A player", ct);
+        var notComing = verb is "declined" or "withdrew";
         return new MemberNotice(
             booking.UserId!.Value, MemberEventCatalogue.Response, $"response:{seat.Id:N}:{verb}:{DateTimeOffset.UtcNow.UtcTicks}",
-            new { booking_id = booking.Id }, $"{partner} {verb} — {game.CourtName}, {game.StartsLocal}",
+            new ResponsePayload(booking.Id, partner, game.CourtName, game.StartsLocal, verb == "withdrew", seat.Id),
+            $"{partner} {verb} — {game.CourtName}, {game.StartsLocal}",
             $"/bookings/{booking.Id}", booking.Id)
         {
-            Email = false,
+            Email = notComing,
         };
     }
 

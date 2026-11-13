@@ -51,13 +51,14 @@ API_DLL = API_PROJECT / "bin" / "Debug" / "net10.0" / "Crusaders.Mainframe.Api.d
 IMPOSTER = ROOT / "test" / "virtualization" / "payfast" / "imposter.json"
 SIMULATOR = ROOT / "src" / "iot" / "court-box" / ".pio" / "build" / "simulator" / "program"
 
-# What the Development seeder writes for the pilot tenant. The tenant's PayFast
-# credentials have no admin API yet (they live inside tenant_settings.payfast, and
-# the settings PUT does not write that key), so the ITN is signed with the seeded
-# passphrase. If Seeder.cs changes these, this is the one place to follow it.
+# The pilot tenant the Development seeder writes. Its PayFast passphrase is drawn fresh per
+# database (money lane BM-12), so the money leg sets the club's credentials itself through
+# PUT /api/v1/admin/payments/payfast and signs the ITN with what it set. The merchant is
+# PayFast's published sandbox merchant, which the seeder also writes.
 SEEDED_TENANT = "crusaders"
-SEEDED_PAYFAST_PASSPHRASE = "REPLACE_WITH_PAYFAST_PASSPHRASE"
-SEEDED_PAYFAST_MERCHANT_ID = "REPLACE_WITH_PAYFAST_MERCHANT_ID"
+SCENARIO_PAYFAST_PASSPHRASE = "scenario-passphrase-not-a-real-one"
+SEEDED_PAYFAST_MERCHANT_ID = "10000100"
+SEEDED_PAYFAST_MERCHANT_KEY = "46f0cd694581a"
 SEEDED_MEMBER_M = "MEM-1001"  # Naledi Khoza, Regular — the scanning member
 SEEDED_MEMBER_N = "MEM-1003"  # Aisha Patel, Regular — the no-show member
 # What M chooses when the temporary password forces a change. Long enough for the
@@ -773,6 +774,9 @@ class ApiProcess:
             "RateLimits__AuthPerMinute": "1000",  # the scenario makes more auth calls per minute than a club does
             "RateLimits__DevicePerMinute": "100000",
             "RateLimits__GlobalPerMinute": "100000",
+            # The ITN's server-side confirmation (payments-payfast.md) goes to the imposter, which
+            # answers VALID, instead of PayFast's sandbox, which knows nothing of these payments.
+            "PayFast__ValidateUrl": f"http://127.0.0.1:{self.cfg.mb_port}/eng/query/validate",
             "Smtp__Host": "127.0.0.1",
             "Smtp__Port": str(self.cfg.smtp_port or 1),  # port 1 refuses instantly; MailHog on E2E_SMTP_PORT if wanted
             "Logging__LogLevel__Default": "Information",
@@ -1954,6 +1958,12 @@ def early_scan(w: World) -> None:
 
 def money_leg(w: World, mb: Mountebank) -> None:
     step("Money  A PayFast package purchase through the mountebank imposter, ITN verified and replay refused")
+    creds = expect_status(w.http.put("/api/v1/admin/payments/payfast", {
+        "merchant_id": SEEDED_PAYFAST_MERCHANT_ID, "merchant_key": SEEDED_PAYFAST_MERCHANT_KEY,
+        "passphrase": SCENARIO_PAYFAST_PASSPHRASE, "environment": "test"}, token=w.admin_token), 200, "payfast credentials")
+    REPORT.check("money", "the admin sets the club's PayFast credentials and the club reads as configured",
+                 creds.get("configured") is True and creds.get("passphrase_set") is True and "passphrase" not in creds.json,
+                 f"resp={creds.json}")
     wallet_before = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
     # The member's own shelf (P13 §3.4, §4.2). The seeded club packages are 1 hour / 5 hours /
     # 10 hours; whatever discount M's groups set applies to the RAND, never the minutes.
@@ -1981,7 +1991,7 @@ def money_leg(w: World, mb: Mountebank) -> None:
     fields = [("m_payment_id", m_payment_id), ("pf_payment_id", pf_payment_id), ("payment_status", "COMPLETE"),
               ("item_name", "Minutes"), ("amount_gross", amount), ("amount_fee", "-2.30"), ("amount_net", f"{price - Decimal('2.30'):.2f}"),
               ("merchant_id", SEEDED_PAYFAST_MERCHANT_ID)]
-    signed = fields + [("signature", payfast_signature(fields, SEEDED_PAYFAST_PASSPHRASE))]
+    signed = fields + [("signature", payfast_signature(fields, SCENARIO_PAYFAST_PASSPHRASE))]
     itn = w.http.call("POST", f"/api/v1/credit/topup/callback?tenant={SEEDED_TENANT}", raw=form_encode(signed), content_type="application/x-www-form-urlencoded")
     REPORT.check("money", "a correctly signed COMPLETE ITN is accepted and adds the package's locked 60 minutes",
                  itn.status == 200 and itn.get("ok") is True and itn.get("minutes") == 60 and itn.get("package_id") == hour["id"], f"resp={itn.text[:160]}")

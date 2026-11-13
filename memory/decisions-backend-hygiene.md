@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-backend-hygiene
-description: "P10 backend hygiene rules: a retired settings key stays bound and ignored, the dev seeder skips any held slot, per-booking codes stay until no rollout phase reaches them, PayFast source check is spec'd but unbuilt."
+description: "P10 backend hygiene rules: a retired settings key stays bound and ignored, the dev seeder skips any held slot, per-booking codes stay until no rollout phase reaches them, PayFast source check now built (advisory)."
 type: decision
 last_verified: 2026-10-01
 ---
@@ -29,6 +29,6 @@ last_verified: 2026-10-01
   referenced nowhere in the API or the tests (comments stripped) is a candidate; extension-method
   classes and endpoint-registration classes are false positives. Test-only wrappers
   (`ChangePasswordAsync`, `IsCaughtUp`, `PendingCount`) are seams, kept.
-- **`PayFastProvider.KnownSourceHosts` is referenced by nothing**, yet
-  `docs/specs/payments-payfast.md` step 2 names it as the ITN source-address check. The check is
-  unbuilt, not dead; left in place for whoever builds it (advisory and configurable per the spec).
+- **The PayFast source check is built** (2026-11-13, money lane): `PayFastSourceCheck` reads
+  `PayFastProvider.KnownSourceHosts` and the published ranges, advisory by default and enforceable
+  by configuration — see [`decisions-money-golive.md`](decisions-money-golive.md).

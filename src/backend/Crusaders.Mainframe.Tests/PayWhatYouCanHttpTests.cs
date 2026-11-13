@@ -117,6 +117,55 @@ public sealed class PayWhatYouCanHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(SplitModes.Equal, (await club.SeatsAsync(app, bookingId)).Single(s => s.Seat == 1).SplitMode);
     }
 
+    /// <summary>
+    /// Money lane BM-5: pay what you can is for a partner who is short. Sam can cover the whole 10-minute
+    /// share (exactly 10, or plenty), so a part payment is refused and the organiser's seat does not move;
+    /// one minute fewer than the share and the same part is accepted. The boundary is the fixture.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(10, 1)]
+    [InlineData(10, 9)]
+    [InlineData(50, 1)]
+    public async Task A_partner_who_can_pay_the_whole_share_cannot_pay_part_of_it(int samMinutes, int pay)
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var app = pg.SharedHost;
+        var (club, bookingId, sam) = await GameAsync(app, $"pwyc-aff{samMinutes}-{pay}", samMinutes);
+
+        var response = await AcceptAsync(club, app, club.Sam, bookingId, sam.Id, expected: 10, pay: pay);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(PlayerErrors.ShareAffordable, body.GetProperty("error").GetString());
+        Assert.Equal(10, body.GetProperty("share_minutes").GetInt32());
+        Assert.Equal(0, body.GetProperty("paid_minutes").GetInt32());
+        Assert.Equal(samMinutes, body.GetProperty("spendable_minutes").GetInt32());
+
+        Assert.Empty(await club.SharesAsync(app, bookingId));
+        var seats = await club.SeatsAsync(app, bookingId);
+        Assert.Equal((ParticipantStatus.Invited, 10, 0), (seats.Single(s => s.Id == sam.Id).Status, seats.Single(s => s.Id == sam.Id).ShareMinutes, seats.Single(s => s.Id == sam.Id).ShortfallMinutes));
+        Assert.Equal(12, seats.Single(s => s.Seat == 1).ShareMinutes);
+        Assert.False(await PlayersClub.ReadAsync(app, db => db.MemberNotifications.IgnoreQueryFilters()
+            .AnyAsync(n => n.TenantId == club.TenantId && n.Kind == MemberEventCatalogue.Shortfall)));
+
+        // The same partner still accepts the whole share.
+        Assert.Equal(HttpStatusCode.OK, (await AcceptAsync(club, app, club.Sam, bookingId, sam.Id, expected: 10, pay: null)).StatusCode);
+        Assert.Equal(samMinutes - 10, await PlayersClub.BalanceAsync(app, club.Sam));
+    }
+
+    [SkippableFact]
+    public async Task A_partner_one_minute_short_may_pay_everything_they_have()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var app = pg.SharedHost;
+        var (club, bookingId, sam) = await GameAsync(app, "pwyc-short1", samMinutes: 9);
+
+        var response = await AcceptAsync(club, app, club.Sam, bookingId, sam.Id, expected: 10, pay: 9);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var seat = (await club.SeatsAsync(app, bookingId)).Single(s => s.Id == sam.Id);
+        Assert.Equal((9, 1), (seat.ShareMinutes, seat.ShortfallMinutes));
+        Assert.Equal(0, await PlayersClub.BalanceAsync(app, club.Sam));
+    }
+
     [SkippableFact]
     public async Task A_part_above_the_spendable_minutes_is_402_and_nothing_changes()
     {

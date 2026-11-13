@@ -51,6 +51,9 @@ public sealed record ShortfallPayload(
     Guid SeatId);
 
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
+/// <summary>A partner's answer that leaves the organiser without them: declined or withdrew (browser lane BM-20).</summary>
+public sealed record ResponsePayload(Guid BookingId, string PartnerName, string CourtName, string StartsAtLocal, bool Withdrew, Guid SeatId);
+
 public sealed record ClubSeatPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, int ShareMinutes, bool Accepted, string Path,
     Guid? SeatId = null);
@@ -158,9 +161,10 @@ public static class MemberEventCatalogue
     public const string Shortfall = "players.shortfall";
 
     /// <summary>
-    /// A partner's answer — accepted, declined, withdrew — told to the organiser on the INBOX only.
-    /// It moves no money (a payment has its own receipt), and a mail per answer is how an organiser
-    /// learns to ignore the club's mail.
+    /// A partner's answer — accepted, declined, withdrew — told to the organiser on the inbox. A
+    /// <b>decline or a withdrawal is mailed too</b> (browser lane BM-20, "every player-affecting event
+    /// sends an email"): an organiser who does not open the app turned up expecting an opponent. An
+    /// accept is not — it moves money, and the payment's own receipt already says it. Not urgent.
     /// </summary>
     public const string Response = "players.response";
 
@@ -182,9 +186,9 @@ public static class MemberEventCatalogue
     /// <summary>A badge earned while it was still news. Inbox only.</summary>
     public const string BadgeEarned = "play.badge_earned";
 
-    /// <summary>The kinds that are mailed. <see cref="Response"/> and the inbox-only play kinds never reach the outbox.</summary>
+    /// <summary>The kinds that are mailed. <see cref="Response"/> only for a decline or a withdrawal; the inbox-only play kinds never reach the outbox.</summary>
     public static readonly IReadOnlyList<string> All =
-        [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting, ResultToConfirm, ClubSeat, Shortfall];
+        [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting, ResultToConfirm, ClubSeat, Shortfall, Response];
 
     private static readonly HashSet<string> Urgent = new(StringComparer.Ordinal) { ShareMoved, GameCancelled };
 
@@ -216,6 +220,8 @@ public static class MemberEventCatalogue
                 return ComposeClubSeat(c);
             case Shortfall:
                 return ComposeShortfall(c);
+            case Response:
+                return ComposeResponse(c);
             default:
                 throw new InvalidOperationException($"no message for member notice kind '{c.Row.Kind}'");
         }
@@ -261,6 +267,13 @@ public static class MemberEventCatalogue
         var p = c.Payload<ShortfallPayload>();
         return EmailTemplates.ShareShortfall(c.Club, c.To, new ShareShortfallNotice(
             p.PartnerName, p.CourtName, p.StartsAtLocal, p.PaidMinutes, p.ShareMinutes, p.ShortfallMinutes, c.BookingUrl(p.BookingId)));
+    }
+
+    private static EmailMessage ComposeResponse(MemberMailContext c)
+    {
+        var p = c.Payload<ResponsePayload>();
+        return EmailTemplates.PartnerNotComing(c.Club, c.To, new PartnerNotComingNotice(
+            p.PartnerName, p.CourtName, p.StartsAtLocal, p.Withdrew, c.BookingUrl(p.BookingId)));
     }
 
     private static EmailMessage ComposeReminder(MemberMailContext c)

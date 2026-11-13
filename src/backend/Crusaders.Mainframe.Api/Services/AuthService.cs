@@ -366,6 +366,8 @@ public sealed class AuthService
         var user = await _db.Users.FirstAsync(u => u.Id == record.UserId, ct);
         user.EmailVerified = true;
         record.UsedAt = DateTimeOffset.UtcNow;
+        // BM-01: member notices that waited for this address go now, in this save.
+        await MemberNoticeHold.ReleaseAsync(_db, user.Id, DateTimeOffset.UtcNow, ct);
         await _db.SaveChangesAsync(ct);
         return true;
     }
@@ -497,6 +499,7 @@ public sealed class AuthService
         // straight in. One of the two had to give; refusing the ingress that carries the proof
         // would have been the wrong one.
         user.EmailVerified = true;
+        await MemberNoticeHold.ReleaseAsync(_db, user.Id, DateTimeOffset.UtcNow, ct);
         await _db.SaveChangesAsync(ct);
 
         var roles = new List<string>();

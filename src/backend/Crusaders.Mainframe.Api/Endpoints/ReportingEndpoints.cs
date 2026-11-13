@@ -49,12 +49,14 @@ public static class ReportingEndpoints
         admin.MapGet("/revenue", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
-            var rows = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
+            // Money lane BM-10: aggregated in the database. This loaded every ledger row in the
+            // window into memory to sum a handful of them, so a year's report cost a year of rows.
+            var groups = await RevenueGroupsAsync(db, f, t, ct);
             // R13 J13-2: minutes the club GAVE (a desk package_free, or one recorded at R0.00) were
             // never sold. Counted in, one free package beside one paid one halved the rand per
             // hour sold. They are their own figure; sold + given is every funding row's minutes.
-            var funding = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type) && !IsGiven(r)).ToList();
-            var reversed = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).ToList();
+            var funding = groups.Where(g => LedgerEntryTypes.Funding.Contains(g.Type) && !g.Given).ToList();
+            var reversed = groups.Where(g => LedgerEntryTypes.Reversal.Contains(g.Type)).ToList();
 
             // Rand comes from ZarPaid; minutes come from AmountMinutes. They are not
             // interchangeable and this endpoint once treated them as though they were — it
@@ -63,24 +65,26 @@ public static class ReportingEndpoints
             // downstream could unmix the two once summed. Both are reported side by side, each
             // under a name that says what unit it is in, and the one honest bridge between them
             // is a RATE over the window (contract §3.15) — never a conversion of either.
-            var netZar = funding.Sum(SignedZar) + reversed.Sum(SignedZar);
-            var netMinutes = funding.Sum(r => r.AmountMinutes) + reversed.Sum(r => r.AmountMinutes);
+            var grossZar = funding.Sum(g => g.SignedZar);
+            var reversalsZar = reversed.Sum(g => g.SignedZar);
+            var netZar = grossZar + reversalsZar;
+            var netMinutes = funding.Sum(g => g.Minutes) + reversed.Sum(g => g.Minutes);
             return Results.Ok(new
             {
                 from = f,
                 to = t,
-                gross_topups_zar = funding.Sum(SignedZar),
-                reversals_zar = reversed.Sum(SignedZar),
+                gross_topups_zar = grossZar,
+                reversals_zar = reversalsZar,
                 net_zar = netZar,
-                gross_topups_minutes = funding.Sum(r => r.AmountMinutes),
-                reversals_minutes = reversed.Sum(r => r.AmountMinutes),
+                gross_topups_minutes = funding.Sum(g => g.Minutes),
+                reversals_minutes = reversed.Sum(g => g.Minutes),
                 net_minutes = netMinutes,
-                given_minutes = GivenMinutes(rows),
+                given_minutes = groups.Where(g => g.Given).Sum(g => g.Minutes),
                 zar_per_minute_sold = ZarPerMinuteSold(netZar, netMinutes),
             });
         });
 
-        admin.MapGet("/utilisation", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
+        admin.MapGet("/utilisation", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, Multitenancy.ITenantContext tenant, CancellationToken ct) =>
         {
             var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
             // D2-B35 — a block is not a booking, and with item 14's schedules that stopped
@@ -99,7 +103,12 @@ public static class ReportingEndpoints
             var blockedByCourt = all.Where(b => b.Status == BookingStatus.AdminBlock)
                 .GroupBy(b => b.CourtId)
                 .ToDictionary(g => g.Key, g => g.Sum(b => b.SliceMinutes * b.SliceCount));
+            // BM-10: only this club's courts (soft-deleted ones included, so a retired court still
+            // has its name) — this read every club's courts and relied on the lookup below to
+            // touch only this one's, which the next edit could quietly stop doing.
+            var courtIds = all.Select(b => b.CourtId).Distinct().ToList();
             var courts = await db.Courts.IgnoreQueryFilters().AsNoTracking()
+                .Where(c => c.TenantId == tenant.TenantId && courtIds.Contains(c.Id))
                 .ToDictionaryAsync(c => c.Id, c => new { c.CourtNumber, c.Name }, ct);
 
             // Revenue is what the club KEPT, read off the ledger — not the price quoted at
@@ -372,21 +381,39 @@ public static class ReportingEndpoints
     }
 
     /// <summary>
-    /// The rand a ledger row moved, signed the way its minutes are.
-    ///
-    /// <para>
-    /// <c>ZarPaid</c> records what the member actually paid and is populated on funding and
-    /// reversal rows. Its stored sign cannot be relied on — <c>PaymentReversal</c> has no
-    /// producer yet, so no convention has been set by real data — while the minutes amount's
-    /// sign is load-bearing everywhere else in this file. Taking the direction from the
-    /// minutes keeps a reversal subtracting from revenue whichever way the rand figure is
-    /// eventually written.
-    /// </para>
+    /// One revenue bucket, summed in the database: a ledger type, whether its minutes went out,
+    /// whether it carried no rand, and its minutes and absolute rand.
     /// </summary>
-    private static decimal SignedZar(LedgerEntry e)
+    internal sealed record RevenueGroup(LedgerEntryType Type, bool Negative, bool NoRand, int Minutes, decimal AbsZar)
     {
-        var rand = Math.Abs(e.ZarPaid ?? 0m);
-        return e.AmountMinutes < 0 ? -rand : rand;
+        /// <summary>A desk top-up the club took no rand for — given, never sold (<see cref="Services.GivenMinutes"/>).</summary>
+        public bool Given => Type == LedgerEntryType.AdminTopUp && NoRand;
+
+        /// <summary>
+        /// The rand, signed: a <see cref="LedgerEntryType.PaymentReversal"/> is always rand given back
+        /// (money lane BM-6 — a refund may take back no minutes at all, so its minutes cannot sign it),
+        /// and anything else is signed the way its minutes are.
+        /// </summary>
+        public decimal SignedZar => LedgerEntryTypes.Reversal.Contains(Type) || Negative ? -AbsZar : AbsZar;
+    }
+
+    /// <summary>The funding and reversal rows in a window, grouped and summed by the database.</summary>
+    internal static async Task<List<RevenueGroup>> RevenueGroupsAsync(MainframeDbContext db, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        var rows = await db.LedgerEntries.AsNoTracking()
+            .Where(l => l.CreatedAt >= from && l.CreatedAt < to
+                && (l.Type == LedgerEntryType.TopUp || l.Type == LedgerEntryType.AdminTopUp || l.Type == LedgerEntryType.PaymentReversal))
+            .GroupBy(l => new { l.Type, Negative = l.AmountMinutes < 0, NoRand = l.ZarPaid == null || l.ZarPaid == 0m })
+            .Select(g => new
+            {
+                g.Key.Type,
+                g.Key.Negative,
+                g.Key.NoRand,
+                Minutes = g.Sum(x => x.AmountMinutes),
+                AbsZar = g.Sum(x => x.ZarPaid == null ? 0m : x.ZarPaid < 0m ? -x.ZarPaid.Value : x.ZarPaid.Value),
+            })
+            .ToListAsync(ct);
+        return rows.Select(r => new RevenueGroup(r.Type, r.Negative, r.NoRand, r.Minutes, r.AbsZar)).ToList();
     }
 
     /// <summary>The club-local calendar day an instant falls on, per <c>reporting.md</c>.</summary>

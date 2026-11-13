@@ -450,6 +450,14 @@ builder.Services.AddSingleton(DeviceOtaKey.Resolve(builder.Configuration, builde
 builder.Services.AddScoped<FirmwareService>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
+// The ITN's two checks beyond its signature (payments-payfast.md, Receiving an ITN): the source
+// address (advisory by default, PayFast:SourceCheck) and PayFast's own validate call
+// (PayFast:ServerValidation, PayFast:ValidateUrl). A singleton for the source check's host cache.
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Payments.PayFast.PayFastSourceCheck>();
+builder.Services.AddHttpClient(Crusaders.Mainframe.Api.Payments.PayFast.PayFastItnValidator.ClientName,
+    c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddScoped<Crusaders.Mainframe.Api.Payments.PayFast.IPayFastItnValidator,
+    Crusaders.Mainframe.Api.Payments.PayFast.PayFastItnValidator>();
 // The fan-out behind every SSE stream — the member's wallet, the admin control board and the
 // IoT monitoring feed. Singleton, so subscriptions survive across requests; in-process, which
 // is correct for the single backend container docker-compose.prod.yml runs and which
@@ -811,6 +819,7 @@ app.MapPlayEndpoints();
 app.MapAdminPlayEndpoints();
 app.MapMemberNotificationEndpoints();
 app.MapAdminConfigEndpoints();
+app.MapAdminPaymentEndpoints();
 app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();
 app.MapAdminLedgerEndpoints();
