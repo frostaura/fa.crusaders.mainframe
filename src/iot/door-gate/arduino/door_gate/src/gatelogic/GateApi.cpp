@@ -95,11 +95,9 @@ ScanDecision GateApi::scan(const char* mac, const char* token, uint32_t adoptedU
   return readScanReply(outcome.status, response, strlen(response), hardCapMs);
 }
 
-HttpOutcome GateApi::heartbeatV3(const char* mac, const char* firmwareVersion, uint64_t uptimeMs,
-                                 const GateDiagnostics& counters, const GateReport& report, char* out,
-                                 size_t outCap) {
+HttpOutcome GateApi::heartbeatV3(const GateBeat& beat, char* out, size_t outCap) {
   static char body[kGateHeartbeatRequestCap];
-  if (renderGateHeartbeatV3(body, sizeof(body), mac, firmwareVersion, uptimeMs, counters, report) == 0U) {
+  if (renderGateHeartbeatV3(body, sizeof(body), beat) == 0U) {
     return noCall();
   }
   return post(kPathHeartbeat, body, out, outCap);

@@ -565,23 +565,43 @@ bool tagArg(const Arg& a) {
 ///   l '-' or seconds 0-86400 (clamped) · T note TTL [0,3600] · P live [1,120] ·
 ///   a ack id (tag or S<seq>) · e ack code 0-4 · b two uppercase hex ·
 ///   G held seconds [5,60] · n any decimal · p 0|1 · d 0-5.
-bool v3Arg(char letter, Arg& a) {
+/// The plain bounded-integer letters. `handled` false for every other letter.
+bool numericArg(char letter, Arg& a, bool& handled) {
   uint32_t value = 0;
+  handled = true;
   switch (letter) {
   case 's':
+  case 'f':
     return parseBounded(a, 255U, value);
   case 'r':
     return parseBounded(a, kMaxRows - 1U, value);
   case 'o':
     return parseBounded(a, kRwSegment, value) && (value == 0U || value == kRwSegment);
-  case 'X':
-    return true;
   case 'm':
     return parseBounded(a, 15U, value) && value != 0U;
+  case 'v':
+    return parseBounded(a, 65535U, value);
+  case 'e':
+    return parseBounded(a, kAckMaxCode, value);
+  case 'n':
+    return parseU32(a, value);
+  case 'p':
+    return parseBounded(a, 1U, value);
+  case 'd':
+    return parseBounded(a, 5U, value);
+  default:
+    handled = false;
+    return false;
+  }
+}
+
+/// The letters with a grammar of their own: text, hex, tags, opinions, clamps.
+bool shapedArg(char letter, Arg& a) {
+  switch (letter) {
+  case 'X':
+    return true;
   case 'H':
     return clampArg(a, kShowHoldMinSeconds, kShowHoldMaxSeconds);
-  case 'f':
-    return parseBounded(a, 255U, value);
   case 'h':
     return isUpperHex(a, 4U);
   case 't':
@@ -590,8 +610,6 @@ bool v3Arg(char letter, Arg& a) {
     return opinionArg(a, kRelayMinSeconds, kRelayHardCapSeconds, true);
   case 'k':
     return cfgKeyArg(a);
-  case 'v':
-    return parseBounded(a, 65535U, value);
   case 'l':
     return opinionArg(a, 0U, kLandMaxSeconds, false);
   case 'T':
@@ -600,21 +618,29 @@ bool v3Arg(char letter, Arg& a) {
     return clampArg(a, kLiveMinSeconds, kLiveMaxSeconds);
   case 'a':
     return ackIdArg(a);
-  case 'e':
-    return parseBounded(a, kAckMaxCode, value);
   case 'b':
     return isUpperHex(a, 2U);
   case 'G':
     return clampArg(a, kHeldMinSeconds, kHeldMaxSeconds);
-  case 'n':
-    return parseU32(a, value);
-  case 'p':
-    return parseBounded(a, 1U, value);
-  case 'd':
-    return parseBounded(a, 5U, value);
   default:
     return false;
   }
+}
+
+/// One v3 argument by its grammar letter (kVerbSpecs' `grammar`):
+///   s seq 0-255 · r row 0-3 · o column offset 0|24 · X text · m mask 1-15 ·
+///   H hold, clamped [1,120] · f flags 0-255 · h four uppercase hex ·
+///   t tag 1-255 · w '-' or seconds 1-5400 (clamped, 0 refused) ·
+///   k CFG key, 1-6 uppercase letters · v value 0-65535 ·
+///   l '-' or seconds 0-86400 (clamped) · T note TTL [0,3600] · P live [1,120] ·
+///   a ack id (tag or S<seq>) · e ack code 0-4 · b two uppercase hex ·
+///   G held seconds [5,60] · n any decimal · p 0|1 · d 0-5.
+/// Two switches rather than a table: a table would sit in the Mega's 8 KB of
+/// RAM (AVR keeps constexpr data in .data), and the image is at its 4 KB budget.
+bool v3Arg(char letter, Arg& a) {
+  bool handled = false;
+  const bool ok = numericArg(letter, a, handled);
+  return handled ? ok : shapedArg(letter, a);
 }
 
 bool wrongDirection(Link link, Dir dir) {
@@ -622,6 +648,30 @@ bool wrongDirection(Link link, Dir dir) {
 }
 
 } // namespace
+
+DecodeError Decoder::buildV2Frame(Verb v, const VerbSpec& spec, Arg* args, uint8_t argc, Frame& out) {
+  Court court = Court::A;
+  if (spec.courtArg >= 0) {
+    const Arg& a = args[spec.courtArg];
+    if (a.size() != 1 || !courtFromChar(a.c_str()[0], court)) {
+      return DecodeError::NoCourt;
+    }
+  }
+
+  uint16_t seconds = 0;
+  if (spec.secondsArg >= 0) {
+    uint32_t raw = 0;
+    if (!parseU32(args[spec.secondsArg], raw)) {
+      return DecodeError::BadArg;
+    }
+    seconds = clampTo(raw, spec.minSeconds, spec.maxSeconds);
+    args[spec.secondsArg].setU32(seconds);
+  }
+
+  out = (v == Verb::On && argc == spec.minArgs) ? Frame::on(court, seconds)
+                                                : Frame::fromValidated(spec, args, argc);
+  return DecodeError::None;
+}
 
 DecodeError Decoder::buildFrame(Link link, Arg* fields, uint8_t count, Frame& out) {
   const Verb v = verbFromName(fields[0].c_str());
@@ -666,30 +716,7 @@ DecodeError Decoder::buildFrame(Link link, Arg* fields, uint8_t count, Frame& ou
     return DecodeError::None;
   }
 
-  Court court = Court::A;
-  if (spec.courtArg >= 0) {
-    const Arg& a = args[spec.courtArg];
-    if (a.size() != 1 || !courtFromChar(a.c_str()[0], court)) {
-      return DecodeError::NoCourt;
-    }
-  }
-
-  uint16_t seconds = 0;
-  if (spec.secondsArg >= 0) {
-    uint32_t raw = 0;
-    if (!parseU32(args[spec.secondsArg], raw)) {
-      return DecodeError::BadArg;
-    }
-    seconds = clampTo(raw, spec.minSeconds, spec.maxSeconds);
-    args[spec.secondsArg].setU32(seconds);
-  }
-
-  // ON goes through its own constructor rather than the generic path, so the
-  // "no ON without a duration" rule is enforced by the same code on the wire
-  // side as on the API side.
-  out = (v == Verb::On && argc == spec.minArgs) ? Frame::on(court, seconds)
-                                                : Frame::fromValidated(spec, args, argc);
-  return DecodeError::None;
+  return buildV2Frame(v, spec, args, argc, out);
 }
 
 bool Decoder::parseV2(const char* line, size_t n) {

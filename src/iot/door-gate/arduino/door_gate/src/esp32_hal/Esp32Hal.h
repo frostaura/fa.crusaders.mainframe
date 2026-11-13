@@ -32,6 +32,8 @@
 #include "../gatelogic/GateNet.h"
 #include "../gatelogic/GateOta.h"
 #include "../gatelogic/GatePorts.h"
+
+class WiFiClient; // Arduino-ESP32's; only Esp32Download::streamBody names it
 #include "../gatelogic/GateStore.h"
 #include "../gatelogic/HttpPort.h"
 #include "../gatelogic/PinOut.h"
@@ -302,6 +304,9 @@ public:
   uint16_t get(const char* path, uint32_t expectBytes, gatelogic::IChunkSink& sink) override;
 
 private:
+  /// The body, chunk by chunk into `sink`, until `expectBytes` or a stall past
+  /// the body budget. False when it stopped short.
+  bool streamBody(WiFiClient& client, uint32_t expectBytes, gatelogic::IChunkSink& sink);
   const char* baseUrl_;
   const char* authorization_;
   hal::IClock& clock_;

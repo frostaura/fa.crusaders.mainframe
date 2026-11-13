@@ -530,6 +530,12 @@ private:
   void updateDegraded(uint32_t nowMs);
   void restart();
 
+  /// The setup portal (door-gate.md §14.5): opened by the BOOT-button gesture,
+  /// closed after ten minutes, and the one form it takes.
+  void openSetup(uint32_t nowMs);
+  void closeSetup();
+  void takePortalForm(const PortalForm& form);
+
   /// A carried event from an earlier boot is uploaded first, one per call.
   bool pumpCarried(uint32_t nowMs);
   /// Whether this boot's event `seq` was a replay refusal, and the link then.

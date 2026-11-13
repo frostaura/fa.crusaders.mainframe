@@ -114,6 +114,10 @@ public:
   int8_t ackedLayout() const { return ackedLayout_; }
 
 private:
+  /// A whole v2 screen (!ROW x4 + !SHOW), queued at once or not at all.
+  bool screenV2(const Screen& s);
+  /// The first unused pending slot, or kPendingSlots when all are waiting for an !ACK.
+  uint8_t freeSlot() const;
   /// The widest tagged command (`!WANT,255,5400,5400,5400,5400*CC` and
   /// `!CFG,255,REINIT,65535*CC`) with its terminator.
   static constexpr uint8_t kPendingLineMax = 48U;

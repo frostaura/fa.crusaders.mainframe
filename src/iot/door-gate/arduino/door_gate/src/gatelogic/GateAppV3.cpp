@@ -109,7 +109,11 @@ bool GateApp::checkFirmwareAtBoot() {
 }
 
 void GateApp::restoreState(uint32_t nowMs) {
-  state_ = GateBoardState();
+  // From a static blank rather than `GateBoardState()`: the temporary is the
+  // whole roster, keys and settings image, and built on the stack it made this
+  // a 3.5 KB frame on the 8 KB loop task.
+  static const GateBoardState kBlank;
+  state_ = kBlank;
   restore_ = "none";
   restoreReported_ = false;
   if (!coldBoot_ && warmBytes_ != nullptr && warmClock_ != nullptr && warmBytesCap_ >= sizeof(WarmImage)) {
@@ -509,41 +513,51 @@ void GateApp::pumpSetup(uint32_t nowMs) {
     return;
   }
   if (!setupOpen_) {
-    if (!gesture_.tick(nowMs, setupButton_->pressed())) {
-      return;
+    if (gesture_.tick(nowMs, setupButton_->pressed())) {
+      openSetup(nowMs);
     }
-    char name[32] = {};
-    const size_t macLen = mac_ == nullptr ? 0U : strlen(mac_);
-    const char* last4 = macLen >= 4U ? mac_ + macLen - 4U : "0000";
-    static_cast<void>(
-        snprintf(name, sizeof(name), "CRUSADERS-SETUP-%c%c%c%c", last4[0], last4[1], last4[2], last4[3]));
-    for (size_t i = 16U; name[i] != '\0'; ++i) {
-      if (name[i] >= 'a' && name[i] <= 'f') {
-        name[i] = static_cast<char>(name[i] - 'a' + 'A');
-      }
-    }
-    portal_->open(name);
-    setupOpen_ = true;
-    setupCloseAt_.arm(nowMs, kSetupPortalMs);
-    led_.setSetup(true);
     return;
   }
   if (setupCloseAt_.remaining(nowMs) == 0U) {
-    // Ten minutes, whatever happened: back to the network it had.
-    portal_->close();
-    setupOpen_ = false;
-    setupCloseAt_.disarm();
-    led_.setSetup(false);
-    if (radio_ != nullptr && net_->profileCount() > 0U) {
-      const devnet::Profile& p = net_->profile(net_->activeProfile());
-      radio_->join(p.ssid, p.psk);
-    }
+    closeSetup();
     return;
   }
   PortalForm form;
-  if (!portal_->service(form)) {
-    return;
+  if (portal_->service(form)) {
+    takePortalForm(form);
   }
+}
+
+void GateApp::openSetup(uint32_t nowMs) {
+  char name[32] = {};
+  const size_t macLen = mac_ == nullptr ? 0U : strlen(mac_);
+  const char* last4 = macLen >= 4U ? mac_ + macLen - 4U : "0000";
+  static_cast<void>(
+      snprintf(name, sizeof(name), "CRUSADERS-SETUP-%c%c%c%c", last4[0], last4[1], last4[2], last4[3]));
+  for (size_t i = 16U; name[i] != '\0'; ++i) {
+    if (name[i] >= 'a' && name[i] <= 'f') {
+      name[i] = static_cast<char>(name[i] - 'a' + 'A');
+    }
+  }
+  portal_->open(name);
+  setupOpen_ = true;
+  setupCloseAt_.arm(nowMs, kSetupPortalMs);
+  led_.setSetup(true);
+}
+
+void GateApp::closeSetup() {
+  // Ten minutes, whatever happened: back to the network it had.
+  portal_->close();
+  setupOpen_ = false;
+  setupCloseAt_.disarm();
+  led_.setSetup(false);
+  if (radio_ != nullptr && net_->profileCount() > 0U) {
+    const devnet::Profile& p = net_->profile(net_->activeProfile());
+    radio_->join(p.ssid, p.psk);
+  }
+}
+
+void GateApp::takePortalForm(const PortalForm& form) {
   devnet::NetSet local;
   const devnet::Refusal why = validatePortalForm(form, local);
   if (why != devnet::Refusal::Ok) {

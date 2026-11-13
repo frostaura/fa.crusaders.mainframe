@@ -98,7 +98,8 @@ bool pathOk(const char* path, size_t n) {
 /// The identity checks — target and version.
 Refusal checkIdentity(const char* obj, size_t len, const char* ownTarget, Offer& out) {
   size_t n = 0U;
-  if (devnet::json::stringMember(obj, len, "target", out.target, sizeof(out.target), n) != Member::Ok ||
+  if (devnet::json::stringMember(obj, len, "target", devnet::json::Out{out.target, sizeof(out.target), n}) !=
+          Member::Ok ||
       targetMaxBytes(out.target) == 0U) {
     return Refusal::TargetUnknown;
   }
@@ -106,7 +107,8 @@ Refusal checkIdentity(const char* obj, size_t len, const char* ownTarget, Offer&
     return Refusal::TargetMismatch;
   }
   uint16_t parts[3] = {0U, 0U, 0U};
-  if (devnet::json::stringMember(obj, len, "version", out.version, sizeof(out.version), n) != Member::Ok ||
+  if (devnet::json::stringMember(obj, len, "version",
+                                 devnet::json::Out{out.version, sizeof(out.version), n}) != Member::Ok ||
       !parseVersion(out.version, parts)) {
     return Refusal::VersionFormat;
   }
@@ -120,15 +122,18 @@ Refusal checkContent(const char* obj, size_t len, Offer& out) {
     return Refusal::Size;
   }
   size_t n = 0U;
-  if (devnet::json::stringMember(obj, len, "sha256", out.sha256, sizeof(out.sha256), n) != Member::Ok ||
+  if (devnet::json::stringMember(obj, len, "sha256", devnet::json::Out{out.sha256, sizeof(out.sha256), n}) !=
+          Member::Ok ||
       n != 64U || !allOf(out.sha256, n, isLowerHex)) {
     return Refusal::Sha256Format;
   }
-  if (devnet::json::stringMember(obj, len, "sig", out.sig, sizeof(out.sig), n) != Member::Ok ||
+  if (devnet::json::stringMember(obj, len, "sig", devnet::json::Out{out.sig, sizeof(out.sig), n}) !=
+          Member::Ok ||
       n != kSigB64Len || !allOf(out.sig, n, isB64Url)) {
     return Refusal::SigEncoding;
   }
-  if (devnet::json::stringMember(obj, len, "path", out.path, sizeof(out.path), n) != Member::Ok ||
+  if (devnet::json::stringMember(obj, len, "path", devnet::json::Out{out.path, sizeof(out.path), n}) !=
+          Member::Ok ||
       !pathOk(out.path, n)) {
     return Refusal::Path;
   }
@@ -150,83 +155,53 @@ uint32_t targetMaxBytes(const char* target) {
   return 0U;
 }
 
+namespace {
+
+/// One row per Refusal, in enumeration order: its corpus spelling, and the
+/// `fw_error` it folds into. A table, not a switch — the same mapping with one
+/// place to read it, and an index check instead of 21 branches.
+struct RefusalWords {
+  const char* name;
+  const char* fwError;
+};
+
+constexpr RefusalWords kRefusalWords[] = {
+    {"ok", ""},
+    {"missing_target", "http"},
+    {"missing_version", "http"},
+    {"missing_size", "http"},
+    {"missing_sha256", "http"},
+    {"missing_sig", "http"},
+    {"missing_path", "http"},
+    {"target_unknown", "target"},
+    {"target_mismatch", "target"},
+    {"version_format", "version"},
+    {"running_unknown", "version"},
+    {"failed_before", "version"},
+    {"not_newer", "version"},
+    {"size", "size"},
+    {"sha256_format", "sha256"},
+    {"sig_encoding", "sig"},
+    {"sig_range", "sig"},
+    {"sig", "sig"},
+    {"path", "http"},
+    {"sha256", "sha256"},
+};
+
+constexpr size_t kRefusalCount = sizeof(kRefusalWords) / sizeof(kRefusalWords[0]);
+static_assert(kRefusalCount == static_cast<size_t>(Refusal::Sha256) + 1U,
+              "every Refusal needs its row in kRefusalWords, in enumeration order");
+
+} // namespace
+
 const char* refusalName(Refusal refusal) {
-  switch (refusal) {
-  case Refusal::Ok:
-    return "ok";
-  case Refusal::MissingTarget:
-    return "missing_target";
-  case Refusal::MissingVersion:
-    return "missing_version";
-  case Refusal::MissingSize:
-    return "missing_size";
-  case Refusal::MissingSha256:
-    return "missing_sha256";
-  case Refusal::MissingSig:
-    return "missing_sig";
-  case Refusal::MissingPath:
-    return "missing_path";
-  case Refusal::TargetUnknown:
-    return "target_unknown";
-  case Refusal::TargetMismatch:
-    return "target_mismatch";
-  case Refusal::VersionFormat:
-    return "version_format";
-  case Refusal::RunningUnknown:
-    return "running_unknown";
-  case Refusal::FailedBefore:
-    return "failed_before";
-  case Refusal::NotNewer:
-    return "not_newer";
-  case Refusal::Size:
-    return "size";
-  case Refusal::Sha256Format:
-    return "sha256_format";
-  case Refusal::SigEncoding:
-    return "sig_encoding";
-  case Refusal::SigRange:
-    return "sig_range";
-  case Refusal::Sig:
-    return "sig";
-  case Refusal::Path:
-    return "path";
-  case Refusal::Sha256:
-    return "sha256";
-  }
-  return "unknown";
+  const size_t i = static_cast<size_t>(refusal);
+  return i < kRefusalCount ? kRefusalWords[i].name : "unknown";
 }
 
 const char* fwErrorFor(Refusal refusal) {
-  switch (refusal) {
-  case Refusal::Ok:
-    return "";
-  case Refusal::TargetUnknown:
-  case Refusal::TargetMismatch:
-    return "target";
-  case Refusal::VersionFormat:
-  case Refusal::RunningUnknown:
-  case Refusal::FailedBefore:
-  case Refusal::NotNewer:
-    return "version";
-  case Refusal::Size:
-    return "size";
-  case Refusal::Sha256Format:
-  case Refusal::Sha256:
-    return "sha256";
-  case Refusal::SigEncoding:
-  case Refusal::SigRange:
-  case Refusal::Sig:
-    return "sig";
-  case Refusal::MissingTarget:
-  case Refusal::MissingVersion:
-  case Refusal::MissingSize:
-  case Refusal::MissingSha256:
-  case Refusal::MissingSig:
-  case Refusal::MissingPath:
-  case Refusal::Path:
-    return "http";
-  }
-  return "http";
+  const size_t i = static_cast<size_t>(refusal);
+  return i < kRefusalCount ? kRefusalWords[i].fwError : "http";
 }
 
 bool FailedList::contains(const char* version) const {

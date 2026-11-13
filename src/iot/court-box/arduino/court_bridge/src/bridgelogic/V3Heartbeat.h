@@ -166,6 +166,10 @@ public:
   static int32_t paidSeconds(const Snapshot& snap, uint8_t relay, uint32_t nowMs);
 
 private:
+  /// A member switched this relay off for this ref inside the suppression window.
+  bool stillSuppressed(const SnapshotCourt& c, uint32_t nowMs);
+  /// One more !WANT for relay `r`: counted, timed, and flagged relight_failed at the limit.
+  void recordAttempt(uint8_t r, uint32_t nowMs);
   uint32_t lastAtMs_[kSnapshotRelays];
   bool tried_[kSnapshotRelays];
   uint8_t attempts_[kSnapshotRelays];

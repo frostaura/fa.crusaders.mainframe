@@ -202,6 +202,27 @@ public:
   /// exactly how a cancelled booking survives in a cache.
   void beginReplace(uint32_t nowMs);
 
+  /// Back to exactly the state a fresh Roster(maxAgeMs) is in: nothing loaded,
+  /// never loaded, no replacement in progress. In place, because assigning a
+  /// fresh Roster builds a whole second table on the stack first (the gate's
+  /// cold-trust expiry was a 3.9 KB frame on an 8 KB task).
+  void forget() {
+    for (Entry& e : entries_) {
+      e = Entry();
+    }
+    for (Entry& e : staging_) {
+      e = Entry();
+    }
+    count_ = 0U;
+    stagingCount_ = 0U;
+    replacing_ = false;
+    acceptedAtMs_ = 0U;
+    stagingAtMs_ = 0U;
+    loaded_ = false;
+    agedOut_ = false;
+    dropped_ = 0U;
+  }
+
   /// Adds an entry to the replacement in progress. False when full — reported,
   /// not silently dropped, because a truncated roster refuses real members.
   bool add(const Entry& entry);

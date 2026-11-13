@@ -138,9 +138,57 @@ char simpleEscape(char c) {
 
 } // namespace
 
-Member stringMember(const char* object, size_t len, const char* key, char* out, size_t outCap,
-                    size_t& outLen) {
-  outLen = 0U;
+namespace {
+
+/// The escape at object[i] (just past the backslash), appended to out; `i` is
+/// left on its last character. False when it is malformed or does not fit.
+bool appendEscape(const char* object, size_t len, size_t& i, Out& out, size_t& n) {
+  if (object[i] == 'u') {
+    uint32_t cp = 0U;
+    return decodeUnicode(object, len, i, cp) && appendUtf8(cp, out.buf, out.cap, n);
+  }
+  const char decoded = simpleEscape(object[i]);
+  if (decoded == '\0' || n + 2U > out.cap) {
+    return false;
+  }
+  out.buf[n++] = decoded;
+  return true;
+}
+
+/// Decodes the string whose opening quote is at object[at]. Ok with the
+/// terminator written; Unreadable on a control byte, a bad escape or overflow.
+Member decodeString(const char* object, size_t len, size_t at, Out& out) {
+  size_t n = 0U;
+  for (size_t i = at + 1U; i < len; ++i) {
+    const char c = object[i];
+    if (c == '"') {
+      out.buf[n] = '\0';
+      out.len = n;
+      return Member::Ok;
+    }
+    if (static_cast<uint8_t>(c) < 0x20U) {
+      break; // a raw control byte is not legal inside a JSON string
+    }
+    if (c == '\\') {
+      ++i;
+      if (i >= len || !appendEscape(object, len, i, out, n)) {
+        break;
+      }
+      continue;
+    }
+    if (n + 2U > out.cap) {
+      break;
+    }
+    out.buf[n++] = c;
+  }
+  out.buf[0] = '\0';
+  return Member::Unreadable;
+}
+
+} // namespace
+
+Member stringMember(const char* object, size_t len, const char* key, Out out) {
+  out.len = 0U;
   const size_t at = valueAt(object, len, key);
   if (at == devapi::json::kNotFound) {
     return Member::Missing;
@@ -148,46 +196,10 @@ Member stringMember(const char* object, size_t len, const char* key, char* out, 
   if (object[at] != '"') {
     return Member::WrongType;
   }
-  if (out == nullptr || outCap == 0U) {
+  if (out.buf == nullptr || out.cap == 0U) {
     return Member::Unreadable;
   }
-  size_t n = 0U;
-  for (size_t i = at + 1U; i < len; ++i) {
-    const char c = object[i];
-    if (c == '"') {
-      out[n] = '\0';
-      outLen = n;
-      return Member::Ok;
-    }
-    if (static_cast<uint8_t>(c) < 0x20U) {
-      break; // a raw control byte is not legal inside a JSON string
-    }
-    if (c != '\\') {
-      if (n + 2U > outCap) {
-        break;
-      }
-      out[n++] = c;
-      continue;
-    }
-    if (i + 1U >= len) {
-      break;
-    }
-    ++i;
-    if (object[i] == 'u') {
-      uint32_t cp = 0U;
-      if (!decodeUnicode(object, len, i, cp) || !appendUtf8(cp, out, outCap, n)) {
-        break;
-      }
-      continue;
-    }
-    const char decoded = simpleEscape(object[i]);
-    if (decoded == '\0' || n + 2U > outCap) {
-      break;
-    }
-    out[n++] = decoded;
-  }
-  out[0] = '\0';
-  return Member::Unreadable;
+  return decodeString(object, len, at, out);
 }
 
 Member unsignedMember(const char* object, size_t len, const char* key, uint32_t& out) {

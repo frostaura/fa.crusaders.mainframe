@@ -174,11 +174,17 @@ private:
   void bridgeAnswered();
   bool inDwell(uint32_t nowMs) const;
   void runDeadlines(uint32_t nowMs);
+  /// The screen ceiling, the hold and the chain wait: each returns to landing.
+  void runOverlayDeadlines(uint32_t nowMs);
+  /// Dwell, after-lights-on, hints and the note: disarmed once acted on.
+  void runOneShots(uint32_t nowMs);
   void compose(const RelayGuard& relays, uint32_t nowMs);
   void composeOverlay(uint32_t nowMs);
   void composeLandingRows(const RelayGuard& relays, uint32_t nowMs);
   void overlayHint();
   void paint(uint32_t nowMs);
+  /// One row's changed runs, within the pass's cell budget.
+  void paintRow(uint8_t r, uint16_t& budget);
   void markAllDirty();
   LandStatus status() const;
   bool clockText(uint32_t nowMs, char* out) const;

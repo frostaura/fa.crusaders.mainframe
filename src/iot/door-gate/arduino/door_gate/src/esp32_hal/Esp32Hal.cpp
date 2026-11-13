@@ -581,6 +581,13 @@ uint16_t Esp32Download::get(const char* path, uint32_t expectBytes, gatelogic::I
     http.end();
     return 0U;
   }
+  const bool whole = streamBody(client, expectBytes, sink);
+  http.end();
+  static_cast<void>(whole); // the sink judged every byte; a short body fails its size check
+  return 200U;
+}
+
+bool Esp32Download::streamBody(WiFiClient& client, uint32_t expectBytes, gatelogic::IChunkSink& sink) {
   static uint8_t buf[1024];
   uint32_t got = 0U;
   uint32_t lastByteMs = clock_.nowMs();
@@ -588,7 +595,7 @@ uint16_t Esp32Download::get(const char* path, uint32_t expectBytes, gatelogic::I
     const int available = client.available();
     if (available <= 0) {
       if (!client.connected() || clock_.nowMs() - lastByteMs > gatelogic::kHttpBodyBudgetMs) {
-        break;
+        return false;
       }
       sink.chunk(buf, 0U);
       delay(1);
@@ -604,11 +611,10 @@ uint16_t Esp32Download::get(const char* path, uint32_t expectBytes, gatelogic::I
     lastByteMs = clock_.nowMs();
     got += static_cast<uint32_t>(n);
     if (!sink.chunk(buf, static_cast<size_t>(n))) {
-      break;
+      return false;
     }
   }
-  http.end();
-  return 200U;
+  return true;
 }
 
 void Esp32BootButton::begin() {

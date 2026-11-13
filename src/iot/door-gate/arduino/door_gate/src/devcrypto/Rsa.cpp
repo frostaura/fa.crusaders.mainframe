@@ -141,34 +141,37 @@ bool rsa2048PublicOp(const uint8_t modulus[kRsa2048Bytes], const uint8_t input[k
   if (modulus == nullptr || input == nullptr || out == nullptr || !isRsa2048Modulus(modulus)) {
     return false;
   }
-  Big n;
-  Big x;
-  load(n, modulus);
-  load(x, input);
-  if (compare(x, n) >= 0) {
+
+  // STATIC, NOT ON THE STACK: seven 256-byte numbers were a 1,840-byte frame,
+  // and the ESP8266 runs loop() on a 4 KB stack (ESPR-1, the stack budget). Only
+  // public values pass through here (a modulus, a signature), it is called from
+  // the one loop, never re-entered, and a board that never verifies an image
+  // links none of it (--gc-sections), so it costs RAM only where it is used.
+  static struct {
+    Big n, x, r2, xm, a, b, one;
+  } w;
+
+  load(w.n, modulus);
+  load(w.x, input);
+  if (compare(w.x, w.n) >= 0) {
     return false;
   }
-  const uint32_t n0 = montgomeryN0(n.limb[0]);
+  const uint32_t n0 = montgomeryN0(w.n.limb[0]);
 
-  Big r2;
-  montgomeryR2(r2, n);
-  Big xm;
-  montMul(xm, x, r2, n, n0); // x * R
-  Big a;
-  Big b;
-  memcpy(a.limb, xm.limb, sizeof(a.limb));
+  montgomeryR2(w.r2, w.n);
+  montMul(w.xm, w.x, w.r2, w.n, n0); // x * R
+  memcpy(w.a.limb, w.xm.limb, sizeof(w.a.limb));
   // 65537 = 2^16 + 1: sixteen squarings, then one multiply by x.
   for (int i = 0; i < 16; ++i) {
-    montMul(b, a, a, n, n0);
-    memcpy(a.limb, b.limb, sizeof(a.limb));
+    montMul(w.b, w.a, w.a, w.n, n0);
+    memcpy(w.a.limb, w.b.limb, sizeof(w.a.limb));
   }
-  montMul(b, a, xm, n, n0);
+  montMul(w.b, w.a, w.xm, w.n, n0);
   // Out of Montgomery form: multiply by plain one.
-  Big one;
-  memset(one.limb, 0, sizeof(one.limb));
-  one.limb[0] = 1U;
-  montMul(a, b, one, n, n0);
-  store(a, out);
+  memset(w.one.limb, 0, sizeof(w.one.limb));
+  w.one.limb[0] = 1U;
+  montMul(w.a, w.b, w.one, w.n, n0);
+  store(w.a, out);
   return true;
 }
 
