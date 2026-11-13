@@ -60,6 +60,12 @@ export default function MemberDetailLayout() {
     [patch, reload],
   );
   const topUp = useMemberTopUp(userId, detail ? displayName(detail) : "this member", onApplied);
+  // BA-07: whatever moved the record's balance, the list row beside it follows the same figure.
+  const split = useMembersSplit();
+  const shownBalance = detail?.balance_minutes;
+  useEffect(() => {
+    if (typeof shownBalance === "number") split?.onMemberBalance?.(userId, shownBalance);
+  }, [split, userId, shownBalance]);
   const [selling, setSelling] = useState(false);
   const openSell = useCallback(() => setSelling(true), []);
 

@@ -123,6 +123,20 @@ describe("AdminWebhooks", () => {
     expect(screen.queryByText("undefinedms")).not.toBeInTheDocument();
   });
 
+  /** BA-23: Escape meant for the {variable} suggestions closed the dialog and lost the URL. */
+  it("keeps a typed URL through Escape — the suggestions close, the dialog does not", async () => {
+    stubFetch(routes());
+    renderPage(<AdminWebhooksPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    const url = await screen.findByRole("combobox", { name: /URL template/ });
+    fireEvent.focus(url);
+    fireEvent.change(url, { target: { value: "https://hook.example/c/{c" } });
+    fireEvent.keyDown(url, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement ?? url, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /URL template/ })).toHaveValue("https://hook.example/c/{c");
+  });
+
   /**
    * D-F7. Seven of fifteen classes were offered, and the whole member lifecycle — the two
    * the spec names inside the registration flow by name — was missing.

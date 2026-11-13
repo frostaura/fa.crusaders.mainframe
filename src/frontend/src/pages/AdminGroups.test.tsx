@@ -662,6 +662,8 @@ describe("the package discount and peak hours (D2 + P13 §3.8)", () => {
     expect(await screen.findByText(DISCOUNT_COPY.problems.empty)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", SAVE("Juniors")));
     expect(stub.calls.some((c) => c.method === "PATCH")).toBe(false);
+    // BA-10: the refused press puts the admin ON the field, not on a Save that does nothing.
+    await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
   it("words the club's refusal of a discount in percentages, never as a code", async () => {

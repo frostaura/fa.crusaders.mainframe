@@ -78,7 +78,15 @@ export default function AdminMembersPage() {
   const counts = useMemo(() => statusCounts(countable), [countable]);
   const rows = useMemo(() => visibleRows(list.members ?? [], status, query, sort), [list.members, status, query, sort]);
   const reload = list.load;
-  const split = useMemo(() => ({ listHref: filters.listHref, onMemberDeleted: () => void reload() }), [filters.listHref, reload]);
+  const setMembers = list.setMembers;
+  const split = useMemo(() => ({
+    listHref: filters.listHref,
+    onMemberDeleted: () => void reload(),
+    onMemberBalance: (userId: string, balanceMinutes: number) => setMembers((rows) => {
+      if (!rows || !rows.some((r) => r.user_id === userId && r.balance_minutes !== balanceMinutes)) return rows;
+      return rows.map((r) => (r.user_id === userId ? { ...r, balance_minutes: balanceMinutes } : r));
+    }),
+  }), [filters.listHref, reload, setMembers]);
 
   const handlers: RowActionHandlers = {
     approve: lifecycle.approve,

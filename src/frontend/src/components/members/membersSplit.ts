@@ -20,6 +20,11 @@ export type MembersSplit = {
   listHref: string;
   /** A member deleted from their record: the list reads the club again, so they leave it too. */
   onMemberDeleted?: () => void;
+  /**
+   * BA-07: the record's balance moved (a sale, an adjustment, a cancel, a booking) — the list row
+   * beside it takes the same figure, so the two never show different balances for one member.
+   */
+  onMemberBalance?: (userId: string, balanceMinutes: number) => void;
 };
 
 export const MembersSplitContext = createContext<MembersSplit | null>(null);
