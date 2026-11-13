@@ -306,7 +306,13 @@ export const GUIDE_PATH = "/how-it-works";
 export const GUIDE_LINK_LABEL = "How it works";
 export const GUIDE_TILE_HINT = "Booking, the door, and the court box";
 /** The help icon beside the code: setup, how the code is used, and the guide, on demand. */
-export const CODE_HELP = { label: "Help with your code" } as const;
+/**
+ * Go-live BM-13 — the trigger was a lone "?" named "Help with your code" that opened "Finish setting
+ * up 0 of 4 done": the control said one thing and did another, and an unlabelled icon under the pass
+ * read as unfinished. It is a worded button now, and the popover leads with how the code is used;
+ * the setup list (while a member still has one) comes after it, under its own heading.
+ */
+export const CODE_HELP = { label: "Using your code", heading: "Using your code" } as const;
 
 export const GUIDE_FROM_CODE = "New here? How it works, step by step";
 
