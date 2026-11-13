@@ -35,3 +35,8 @@ Spec: `docs/specs/deployment.md` "Health, logs and knowing what runs", `webhooks
   the ceremony's own check, so its retry cannot loop.
 - **SSRF**: NAT64, 6to4 and IPv4-compatible IPv6 are judged as their embedded IPv4; Teredo and
   64:ff9b:1::/48 are refused outright.
+- **Founder decisions of 2026-11-13 bind this lane too** (the last physical flash; nothing an operator
+  does may force a reflash; the backend is the source of truth for hardware state — full text in
+  `decisions-device-v3.md`). Here that means: no CLI command touches a device key, network or base
+  URL — `tenant set-url` changes member-facing links only — and a suspended club's boxes are the
+  device lane's to close, over the heartbeat, never by a reflash.
