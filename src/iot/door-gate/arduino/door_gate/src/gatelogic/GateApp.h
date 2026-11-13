@@ -153,6 +153,11 @@ using GateQueue = eventq::EventQueue<kGateEventSlots>;
 
 class GateApp {
 public:
+  /// Adds `"cause":"replayed","online":<bool>` to a rendered one-event body: the v3
+  /// event field the server reads (door-gate.md §14.6, MCV1-10), never `reason`.
+  /// Public and pure so the corpus executes it against `gate-events-request-replayed`.
+  static bool tagReplay(char* body, size_t cap, bool online);
+
   /// Everything the loop needs, by name rather than by position.
   ///
   /// A sixteen-argument constructor is unreadable, unreviewable and over the
@@ -529,8 +534,6 @@ private:
   bool pumpCarried(uint32_t nowMs);
   /// Whether this boot's event `seq` was a replay refusal, and the link then.
   bool replayTagged(uint32_t seq, bool& online) const;
-  /// Adds `"reason":"replayed","online":<bool>` to a rendered one-event body.
-  static bool tagReplay(char* body, size_t cap, bool online);
 
   /// The club took this board out of service. A roster committed EMPTY rather
   /// than abandoned, so `everLoaded()` stays true and the refusal is

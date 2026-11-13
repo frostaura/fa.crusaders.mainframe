@@ -66,10 +66,15 @@ public:
   bool writable() override;
   bool takeGlassLost() override;
   void reinit() override;
+
   uint8_t cellsPerPass() const override { return cellsPerPass_; }
+
   uint16_t timeouts() const override { return holdoff_.timeouts(); }
+
   uint16_t recoveries() const override { return recoveries_; }
+
   uint8_t address() const override { return address_; }
+
   void setAddress(uint8_t address) override;
 
 private:

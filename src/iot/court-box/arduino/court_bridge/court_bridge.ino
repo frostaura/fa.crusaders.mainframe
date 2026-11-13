@@ -2453,8 +2453,9 @@ void pumpMegaV3(uint32_t nowMs) {
   }
   static uint16_t screensDropped = 0U;
   if (gTx.screensDropped() != screensDropped) {
-    gFaults.noteMany(bridgelogic::Fault::ScreenDropped, static_cast<uint16_t>(gTx.screensDropped() - screensDropped),
-                     eventq::Event::kNoCourt, nowMs);
+    gFaults.noteMany(bridgelogic::Fault::ScreenDropped,
+                     static_cast<uint16_t>(gTx.screensDropped() - screensDropped), eventq::Event::kNoCourt,
+                     nowMs);
     screensDropped = gTx.screensDropped();
   }
   uint8_t relay = 0U;

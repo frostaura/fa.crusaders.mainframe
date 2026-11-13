@@ -123,7 +123,9 @@ public:
 
   /// Relays the cap opened in the last tick(), and which are locked now.
   uint8_t lastCapReleased() const { return capReleased_; }
+
   bool locked(uint8_t channel) const { return channel < hal::kRelayChannelCount && locked_[channel]; }
+
   uint16_t capOffCount() const { return capOffs_; }
 
   /// Move `channel`'s deadline to the later of its current one and now +

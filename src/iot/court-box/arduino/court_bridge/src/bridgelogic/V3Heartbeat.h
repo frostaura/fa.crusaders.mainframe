@@ -63,9 +63,9 @@ struct Snapshot {
 };
 
 enum class ReadResult : uint8_t {
-  Absent = 0,  ///< no such key: no opinion, keep what you had
-  Adopted,     ///< read and adopted
-  Unreadable,  ///< present but unreadable: keep the previous value, report drift
+  Absent = 0, ///< no such key: no opinion, keep what you had
+  Adopted,    ///< read and adopted
+  Unreadable, ///< present but unreadable: keep the previous value, report drift
 };
 
 /// Reads `courts` from a complete heartbeat body into `out` (relay-indexed
@@ -97,6 +97,7 @@ struct Drift {
   char names[kMax][kNameLen];
   uint8_t count = 0U;
   void add(const char* name);
+
   void clear() { count = 0U; }
 };
 

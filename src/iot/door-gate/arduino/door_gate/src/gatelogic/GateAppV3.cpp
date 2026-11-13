@@ -380,7 +380,7 @@ bool GateApp::tagReplay(char* body, size_t cap, bool online) {
     return false;
   }
   const char* extra =
-      online ? ",\"reason\":\"replayed\",\"online\":true" : ",\"reason\":\"replayed\",\"online\":false";
+      online ? ",\"cause\":\"replayed\",\"online\":true" : ",\"cause\":\"replayed\",\"online\":false";
   const size_t add = strlen(extra);
   if (len + add + 1U > cap) {
     return false;

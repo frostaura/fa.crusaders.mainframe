@@ -146,14 +146,21 @@ public:
   // --- diagnostics and tests -------------------------------------------------
 
   bool onLanding() const { return !overlayUp_; }
+
   bool overlayActive() const { return overlayUp_; }
+
   /// True once after the ceiling forced landing (`!EVT,CEIL,`).
   bool takeCeilingEvent();
+
   uint16_t ceilings() const { return ceilings_; }
+
   uint16_t reinits() const { return reinits_; }
+
   uint16_t suppressedHints() const { return suppressedHints_; }
+
   /// The glass as the Mega wants it (tests; the shadow converges to it).
   const char* wanted(uint8_t row) const { return row < kGlassRows ? desired_[row] : ""; }
+
   Layout effectiveLayout() const;
 
 private:

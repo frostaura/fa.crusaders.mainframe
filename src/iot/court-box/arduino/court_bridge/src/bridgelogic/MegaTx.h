@@ -68,6 +68,7 @@ public:
   /// change abandons every pending acknowledgement (a new Mega boot owes
   /// nothing to the old one's tags).
   void setMegaVersion(const char* version);
+
   MegaDialect dialect() const { return dialect_; }
 
   /// The Mega restarted (`!BOOT`, or a `!PONG` uptime that went backwards):
@@ -102,8 +103,11 @@ public:
   bool takeScreenBusy();
 
   uint16_t screensDropped() const { return screensDropped_; }
+
   uint16_t queued() const { return count_; }
+
   bool idle() const { return count_ == 0U && pendingCount() == 0U && !screenInFlight_ && screenCount_ == 0U; }
+
   uint8_t pendingCount() const;
 
   /// The last `!CFG,LAYOUT` value the Mega acknowledged this boot, or -1.

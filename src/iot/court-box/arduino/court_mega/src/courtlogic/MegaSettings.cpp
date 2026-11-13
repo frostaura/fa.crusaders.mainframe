@@ -33,8 +33,8 @@ proto::AckCode MegaSettings::apply(const char* key, uint32_t value) {
     if (!sameName(k.name, key)) {
       continue;
     }
-    const bool inSet = i == static_cast<uint8_t>(Cfg::Lcda) ? lcdAddressAllowed(value)
-                                                             : (value >= k.min && value <= k.max);
+    const bool inSet =
+        i == static_cast<uint8_t>(Cfg::Lcda) ? lcdAddressAllowed(value) : (value >= k.min && value <= k.max);
     if (k.enumerated && !inSet) {
       if (i == static_cast<uint8_t>(Cfg::Layout)) {
         values_[i] = 0U;
