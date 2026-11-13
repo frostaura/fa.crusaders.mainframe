@@ -32,18 +32,21 @@
 // The cap is therefore stated once, here, and cross-checked at compile time
 // against both the court_mega build flag and proto::kRelayHardCapSeconds.
 //
-// WHAT THIS DELIBERATELY DOES NOT DO
-// ----------------------------------
-// It does not cap CUMULATIVE on-time. Each !EXT is capped at 90 minutes from
-// now, exactly as the protocol spec words it, so a bridge that sends !EXT in a
-// loop can hold a court on indefinitely. That is a known residual and it is the
-// honest boundary of this mechanism: the Mega's timer defends against a bridge
-// that has DIED, not against one that is lying. Defending against the second
-// needs the backend's ledger, which is where a booking's real length lives.
-// Rejected: a cumulative budget here. It would release a court mid-game on a
-// legitimate long booking, which is a visible failure traded for an attack
-// nobody can mount without already holding the device key.
+// WHAT IT ADDS IN v3: THE AUTHORISATION CAP
+// ------------------------------------------
+// v2 did not cap cumulative on-time: each !EXT was capped at 90 minutes from
+// now, so a bridge looping !EXT held a court on indefinitely. The per-frame cap
+// defends against a DEAD bridge; v3 adds the cap that defends against a
+// CONFUSED live one (FWM-20): a relay closed continuously for `CAP` minutes
+// (default 240, `relay_authorisation_cap_minutes`) since its last !ON opens and
+// refuses !WANT and !EXT until the next !ON. A member's grant or paid extension
+// at the panel IS an !ON, so real play is never capped — only the bridge's own
+// re-lighting (!WANT) and extending (!EXT) can be.
 //
+// And neither !ON nor !EXT nor !WANT ever SHORTENS a lit court (FSF-12): each
+// sets the deadline to the later of the current one and now + seconds. Only an
+// !OFF, the deadline or the cap opens a relay.
+
 // No Arduino headers, no heap, no String/std::string/std::vector.
 
 #ifndef CRUSADERS_COURTLOGIC_RELAYGUARD_H
@@ -65,6 +68,14 @@ inline constexpr uint32_t kRelayHardCapMs = 5400000UL;
 /// and a consumer that read it as "no limit" would be the legacy bug again.
 inline constexpr uint32_t kRelayMinMs = 1000UL;
 
+/// The authorisation cap's bounds and boot default, in minutes (`!CFG,CAP`).
+inline constexpr uint16_t kCapMinMinutes = 90U;
+inline constexpr uint16_t kCapMaxMinutes = 720U;
+inline constexpr uint16_t kCapDefaultMinutes = 240U;
+
+/// What a `!WANT` slot did.
+enum class WantResult : uint8_t { Satisfied = 0, Refused };
+
 #ifdef RELAY_HARD_CAP_MS
 static_assert(RELAY_HARD_CAP_MS == kRelayHardCapMs,
               "kRelayHardCapMs and the court_mega RELAY_HARD_CAP_MS build flag have drifted apart");
@@ -85,7 +96,9 @@ class RelayGuard {
 public:
   explicit RelayGuard(hal::IRelayPort& relay);
 
-  /// Close `channel` for at most `seconds`, clamped into
+  /// Close `channel` until the LATER of its current deadline and now +
+  /// `seconds` (an !ON never shortens a lit court), and restart its
+  /// authorisation clock and clear a cap lock. `seconds` is clamped into
   /// [kRelayMinMs, kRelayHardCapMs]. Clamped, never refused: a clamped light is
   /// a wrong-length game, a refused one is a dark court with a member in it.
   ///
@@ -96,7 +109,23 @@ public:
   /// Open `channel` now and disarm its deadline.
   bool off(uint8_t channel);
 
-  /// Move `channel`'s deadline to now + `seconds`, clamped the same way.
+  /// `!WANT` for one relay: ensure it is lit for at least `seconds` (clamped
+  /// like on()). A dark relay is closed, a sooner deadline is moved out,
+  /// nothing is ever opened, and the authorisation clock is NOT restarted. A
+  /// relay locked by the cap refuses. `closed` reports an open->closed edge.
+  WantResult want(uint8_t channel, uint32_t seconds, uint32_t nowMs, bool& closed);
+
+  /// Minutes a relay may stay closed since its last !ON; clamped into
+  /// [kCapMinMinutes, kCapMaxMinutes]. Returns the value applied.
+  uint16_t setCapMinutes(uint32_t minutes);
+
+  /// Relays the cap opened in the last tick(), and which are locked now.
+  uint8_t lastCapReleased() const { return capReleased_; }
+  bool locked(uint8_t channel) const { return channel < hal::kRelayChannelCount && locked_[channel]; }
+  uint16_t capOffCount() const { return capOffs_; }
+
+  /// Move `channel`'s deadline to the later of its current one and now +
+  /// `seconds`, clamped the same way. Refused for a relay the cap locked.
   ///
   /// Refused when the relay is already open: !EXT extends a session in
   /// progress, and treating it as an implicit !ON would let a dropped !OFF turn
@@ -129,9 +158,18 @@ private:
   /// Shared by on() and extend() so there is one clamp, not two that can drift.
   static uint32_t clampMs(uint32_t seconds);
 
+  void open(uint8_t channel);
+
   hal::IRelayPort& relay_;
   tb::Deadline until_[hal::kRelayChannelCount];
+  /// The authorisation clock: armed at !ON (or at a !WANT that closes a dark
+  /// relay), disarmed when the relay opens. Expiry while closed is the cap.
+  tb::Deadline cap_[hal::kRelayChannelCount];
+  bool locked_[hal::kRelayChannelCount];
+  uint32_t capMs_;
   uint16_t autoOffs_;
+  uint16_t capOffs_;
+  uint8_t capReleased_;
 };
 
 } // namespace courtlogic

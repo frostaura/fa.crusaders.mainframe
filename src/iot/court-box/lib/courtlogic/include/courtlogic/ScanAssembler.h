@@ -45,6 +45,12 @@ namespace courtlogic {
 /// class accepting codes the encoder will then refuse.
 inline constexpr uint8_t kMaxScanLen = static_cast<uint8_t>(proto::kMaxArgLen);
 
+/// At the idle gap (`!CFG,SGAP`, default 150 ms) a partial line this long or
+/// longer is a scan — a scanner configured with no suffix still works (HW-5) —
+/// and anything shorter is discarded, so one stray byte is never glued onto
+/// the next member's code (FWM-14). A member code is 19 characters.
+inline constexpr uint8_t kGapScanMinLen = 8U;
+
 /// Why a line was dropped. Reported so a court whose scanner cable is failing
 /// looks different from a court nobody is using.
 enum class ScanReject : uint8_t {
@@ -78,6 +84,24 @@ public:
   /// next member's scan is worse than losing both.
   void reset();
 
+  /// A line is part-way assembled.
+  bool partial() const { return !holding_ && (len_ > 0U || poisoned_); }
+
+  /// The scanner has been idle for the gap (v3 rule 6). With `suffixOnly`
+  /// false a clean partial line of at least kGapScanMinLen characters becomes
+  /// a scan (returns true, read code()); every other partial line is
+  /// discarded. With `suffixOnly` (`SSUF` 1) the gap only discards.
+  bool gap(bool suffixOnly);
+
+  /// True once after a line ended (by terminator or gap) that held a byte no
+  /// scanner sends at the right baud — the scanner's auto-detect counts these
+  /// (HW-5). A clean line clears the count it feeds.
+  bool takeGarbage() {
+    const bool g = garbage_;
+    garbage_ = false;
+    return g;
+  }
+
   /// Why the last dropped line was dropped, ScanReject::None if none has been.
   ScanReject lastReject() const { return lastReject_; }
 
@@ -96,6 +120,7 @@ private:
   /// actually starts. Without it the buffer would be one shared cell that the
   /// terminator of a CRLF, or a stray blank line, silently emptied.
   bool holding_;
+  bool garbage_;
   ScanReject lastReject_;
   uint16_t rejected_;
 };

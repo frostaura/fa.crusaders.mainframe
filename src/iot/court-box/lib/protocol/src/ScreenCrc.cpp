@@ -5,9 +5,9 @@
 namespace proto {
 
 uint16_t crc16Update(uint16_t crc, uint8_t byte) {
-  crc = static_cast<uint16_t>(crc ^ static_cast<uint16_t>(byte << 8));
+  crc = static_cast<uint16_t>(crc ^ static_cast<uint16_t>(static_cast<uint16_t>(byte) << 8U));
   for (uint8_t bit = 0U; bit < 8U; ++bit) {
-    crc = (crc & 0x8000U) != 0U ? static_cast<uint16_t>((crc << 1) ^ 0x1021U) : static_cast<uint16_t>(crc << 1);
+    crc = (crc & 0x8000U) != 0U ? static_cast<uint16_t>(static_cast<uint16_t>(crc << 1U) ^ 0x1021U) : static_cast<uint16_t>(crc << 1U);
   }
   return crc;
 }
