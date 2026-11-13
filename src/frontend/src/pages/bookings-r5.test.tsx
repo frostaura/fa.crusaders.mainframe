@@ -216,6 +216,12 @@ describe("§3.1 — the rail's day summary says how many more slots today", () =
     expect(wallet).toHaveTextContent(BOOKINGS_COPY.summaryMoreToday(3));
   });
 
+  it("says nothing with no minutes to spend — the slots left today are not bookable (go-live BM-18b)", async () => {
+    openBookings({ day: dayFixture({ date: today, rules: capped }), balance: 0 });
+    const wallet = await screen.findByRole("group", { name: BOOKINGS_COPY.summaryTitle });
+    expect(wallet.querySelector("[data-more-today]")).toBeNull();
+  });
+
   it("says nothing on another day, or with no cap", async () => {
     openBookings({ day: dayFixture({ rules: capped }), balance: 120 });
     const wallet = await screen.findByRole("group", { name: BOOKINGS_COPY.summaryTitle });
