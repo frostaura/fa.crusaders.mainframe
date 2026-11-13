@@ -120,6 +120,7 @@ void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t 
       TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(value) * 1000U, state.heartbeatMs, file);
     } else if (strcmp(name, "gate") == 0) {
       const gatelogic::GateSettings& s = state.settings;
+
       const struct {
         const char* key;
         uint32_t got;
@@ -128,6 +129,7 @@ void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t 
                      {"net_fallback_minutes", s.netFallbackMinutes},
                      {"ota_probation_minutes", s.otaProbationMinutes},
                      {"device_fault_max_per_hour", s.faultMaxPerHour}};
+
       for (size_t i = 0U; i < sizeof(numbers) / sizeof(numbers[0]); ++i) {
         const char* v = corpus::member(value, numbers[i].key);
         if (v != nullptr) {
@@ -144,8 +146,8 @@ void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t 
         continue;
       }
       devota::Offer offer;
-      TEST_ASSERT_TRUE_MESSAGE(devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate, offer) ==
-                                   devota::Refusal::Ok,
+      TEST_ASSERT_TRUE_MESSAGE(devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate,
+                                                  offer) == devota::Refusal::Ok,
                                file);
       char want[16] = {};
       TEST_ASSERT_TRUE(corpus::stringValue(value, want, sizeof(want), nullptr));
@@ -215,7 +217,8 @@ void checkEvents(const char* file, uint16_t status, const char* body, size_t len
 void test_every_server_reply_for_a_door_is_read_whole_by_the_gate() {
   const char* dir = getenv("DEVICE_REPLAY_DIR");
   if (dir == nullptr || dir[0] == '\0') {
-    TEST_PASS_MESSAGE("DEVICE_REPLAY_DIR is not set: run `make device-replay-check` to feed the server's replies");
+    TEST_PASS_MESSAGE(
+        "DEVICE_REPLAY_DIR is not set: run `make device-replay-check` to feed the server's replies");
     return;
   }
   char path[1024];
@@ -261,9 +264,11 @@ void test_every_server_reply_for_a_door_is_read_whole_by_the_gate() {
 
 } // namespace
 
-void setUp() {}
+void setUp() {
+}
 
-void tearDown() {}
+void tearDown() {
+}
 
 int main(int, char**) {
   UNITY_BEGIN();

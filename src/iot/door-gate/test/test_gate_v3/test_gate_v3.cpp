@@ -23,8 +23,6 @@
 #include "devapi/DeviceClient.h"
 #include "devcrypto/Base64Url.h"
 #include "devcrypto/Sha256.h"
-#include "memcode/Token.h"
-#include "memcode/Totp.h"
 #include "devlink/ApiBreaker.h"
 #include "devota/Ota.h"
 #include "fakes/FakeClock.h"
@@ -39,6 +37,8 @@
 #include "gatelogic/ScanAssembler.h"
 #include "gatelogic/ScanDebounce.h"
 #include "gatelogic/UnlockTimer.h"
+#include "memcode/Token.h"
+#include "memcode/Totp.h"
 #include "support/CorpusJson.h"
 
 namespace {
@@ -61,6 +61,7 @@ public:
     records[key] = std::string(static_cast<const char*>(data), len);
     return true;
   }
+
   size_t get(const char* key, void* out, size_t cap) override {
     auto it = records.find(key);
     if (it == records.end() || it->second.size() > cap) {
@@ -69,6 +70,7 @@ public:
     memcpy(out, it->second.data(), it->second.size());
     return it->second.size();
   }
+
   void erase(const char* key) override { records.erase(key); }
 
   std::map<std::string, std::string> records;
@@ -80,6 +82,7 @@ public:
 class Rtc final : public gatelogic::IWarmClock {
 public:
   uint64_t nowUs() override { return us; }
+
   uint64_t us = 1000000ULL;
 };
 
@@ -91,24 +94,30 @@ public:
     staging = true;
     return size <= capacity();
   }
+
   bool write(const uint8_t* data, size_t len) override {
     staged.insert(staged.end(), data, data + len);
     return true;
   }
+
   bool finish() override { return staging && staged.size() == expected; }
+
   void abort() override {
     staging = false;
     staged.clear();
     ++aborts;
   }
+
   bool activate() override {
     activated = true;
     return true;
   }
+
   bool rollBack() override {
     rolledBack = true;
     return true;
   }
+
   uint32_t capacity() override { return 1310720U; }
 
   std::vector<uint8_t> staged;
@@ -142,20 +151,25 @@ struct Board {
 class Pin final : public gatelogic::IPinOut {
 public:
   void write(hal::PinLevel l) override { level = l; }
+
   void driveOutput() override {}
+
   hal::PinLevel readBack() const override { return level; }
+
   hal::PinLevel level = hal::PinLevel::kLow;
 };
 
 class Dog final : public gatelogic::IWatchdog {
 public:
   void kick() override { ++kicks; }
+
   uint32_t kicks = 0U;
 };
 
 class Link final : public gatelogic::ILink {
 public:
   bool up() override { return isUp; }
+
   bool isUp = true;
 };
 
@@ -166,7 +180,9 @@ public:
       bytes.push_back(static_cast<uint8_t>(text[i]));
     }
   }
+
   void feedByte(uint8_t b) { bytes.push_back(b); }
+
   bool read(uint8_t& out) override {
     if (head >= bytes.size()) {
       return false;
@@ -174,7 +190,9 @@ public:
     out = bytes[head++];
     return true;
   }
+
   bool takeRxError() override { return false; }
+
   std::vector<uint8_t> bytes;
   size_t head = 0U;
 };
@@ -220,11 +238,13 @@ public:
     }
     auto it = answers.find(path);
     const uint16_t status = it == answers.end() ? 200U : it->second.first;
-    std::string reply = it == answers.end() ? std::string("{\"accepted_through\":0,\"recorded\":0}") : it->second.second;
+    std::string reply =
+        it == answers.end() ? std::string("{\"accepted_through\":0,\"recorded\":0}") : it->second.second;
     if (it == answers.end() && c.path == gatelogic::kPathEvents) {
       // The real server receipts exactly what it was sent.
       const size_t at = c.body.find("\"seq\":");
-      reply = "{\"accepted_through\":" + c.body.substr(at + 6U, c.body.find(',', at) - at - 6U) + ",\"recorded\":1}";
+      reply = "{\"accepted_through\":" + c.body.substr(at + 6U, c.body.find(',', at) - at - 6U) +
+              ",\"recorded\":1}";
     }
     if (out != nullptr && outCap > 0U) {
       if (reply.size() >= outCap) {
@@ -243,6 +263,7 @@ public:
     }
     return n;
   }
+
   const Call* last(const char* path) const {
     for (size_t i = calls.size(); i > 0U; --i) {
       if (calls[i - 1U].path == path) {
@@ -281,6 +302,7 @@ public:
     }
     return status;
   }
+
   std::vector<uint8_t> image;
   uint16_t status = 200U;
   uint32_t gets = 0U;
@@ -290,12 +312,14 @@ public:
 class Radio final : public gatelogic::IRadio {
 public:
   void join(const char* ssid, const char* psk) override { joins.push_back(std::string(ssid) + "/" + psk); }
+
   std::vector<std::string> joins;
 };
 
 class Chip final : public gatelogic::ISystem {
 public:
   void restart() override { ++restarts; }
+
   uint32_t restarts = 0U;
 };
 
@@ -315,6 +339,7 @@ public:
 class Button final : public gatelogic::IButton {
 public:
   bool pressed() override { return down; }
+
   bool down = false;
 };
 
@@ -324,6 +349,7 @@ public:
     name = apName;
     isOpen = true;
   }
+
   bool service(gatelogic::PortalForm& out) override {
     if (!submitted) {
       return false;
@@ -332,9 +358,13 @@ public:
     out = form;
     return true;
   }
+
   void refuse(const char* reason) override { refused = reason; }
+
   void accept() override { accepted = true; }
+
   void close() override { isOpen = false; }
+
   std::string name;
   bool isOpen = false;
   bool submitted = false;
@@ -345,13 +375,15 @@ public:
 
 class Log final : public gatelogic::IDecisionLog {
 public:
-  void decided(const gatelogic::ScanDecision& d, const char* token, uint32_t grantedMs, uint32_t nowMs) override {
+  void decided(const gatelogic::ScanDecision& d, const char* token, uint32_t grantedMs,
+               uint32_t nowMs) override {
     static_cast<void>(token);
     static_cast<void>(grantedMs);
     static_cast<void>(nowMs);
     reasons.push_back(d.reason);
     queued.push_back(d.queueEvent);
   }
+
   std::vector<std::string> reasons;
   std::vector<bool> queued;
 };
@@ -363,8 +395,8 @@ struct Boot {
   Boot(Board& b, bool cold, uint32_t bootId = 0xB0071D01U, const uint8_t* modulus = g_modulus,
        uint32_t watchdogRun = 0U)
       : board(b), server(&authHeader, &baseUrl, ledPin), api(server, breaker, b.clock, faults),
-        lock(relayPin, true, true), unlock(30000U, 400U, 3000U), roster(gatelogic::kGateConfig.rosterMaxAgeMs),
-        counted(&store, faults, b.clock), queue(&counted) {
+        lock(relayPin, true, true), unlock(30000U, 400U, 3000U),
+        roster(gatelogic::kGateConfig.rosterMaxAgeMs), counted(&store, faults, b.clock), queue(&counted) {
     gatelogic::GateApp::Ports p;
     p.clock = &b.clock;
     p.scanner = &scanner;
@@ -424,11 +456,13 @@ struct Boot {
     board.clock.advance(ms);
     board.rtc.us += static_cast<uint64_t>(ms) * 1000ULL;
   }
+
   void run(uint32_t ms, uint32_t step = 10U) {
     for (uint32_t t = 0U; t < ms; t += step) {
       tick(step);
     }
   }
+
   /// Past the heartbeat's floor and cadence, so the next pass beats.
   void beat() {
     run(gatelogic::kMinHeartbeatSpacingMs + 100U, 100U);
@@ -437,6 +471,7 @@ struct Boot {
     link.isUp = true;
     tick();
   }
+
   void scan(const char* token) {
     scanner.feed(token);
     scanner.feed("\r");
@@ -479,7 +514,8 @@ struct Boot {
 };
 
 const char* kRoster =
-    "{\"server_time\":\"2026-11-13T18:00:00\",\"kind\":\"gate\",\"gate_key\":\"front-door\",\"heartbeat_seconds\":60,"
+    "{\"server_time\":\"2026-11-13T18:00:00\",\"kind\":\"gate\",\"gate_key\":\"front-door\",\"heartbeat_"
+    "seconds\":60,"
     "\"gate\":{\"unlock_seconds\":5,\"power_restore_trust_minutes\":20,\"net_fallback_minutes\":10,"
     "\"ota_probation_minutes\":10,\"device_fault_reporting\":true,\"device_fault_max_per_hour\":60},"
     "\"roster\":[\"7Q3F9KM2XZ8B|0|-60|7200\"]}";
@@ -519,11 +555,11 @@ std::vector<uint8_t> g_gateImage;
 void loadOta() {
   TEST_ASSERT_TRUE(g_ota.load("ota", "cases.json"));
   char hex[(dc::kRsa2048Bytes * 2U) + 1U] = {};
-  TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(corpus::member(g_ota.root(), "public_key"), "n_hex"), hex,
-                                       sizeof(hex), nullptr));
-  TEST_ASSERT_TRUE(devota::parseModulusHex(hex, g_modulus));
-  TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(corpus::member(g_ota.root(), "other_public_key"), "n_hex"),
+  TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(corpus::member(g_ota.root(), "public_key"), "n_hex"),
                                        hex, sizeof(hex), nullptr));
+  TEST_ASSERT_TRUE(devota::parseModulusHex(hex, g_modulus));
+  TEST_ASSERT_TRUE(corpus::stringValue(
+      corpus::member(corpus::member(g_ota.root(), "other_public_key"), "n_hex"), hex, sizeof(hex), nullptr));
   TEST_ASSERT_TRUE(devota::parseModulusHex(hex, g_otherModulus));
   corpus::ArrayIter it(corpus::member(g_ota.root(), "images"));
   const char* c = nullptr;
@@ -603,7 +639,8 @@ void test_power_cut_with_the_server_down_admits_inside_the_trust_window_only() {
     TEST_ASSERT_EQUAL_UINT16(0U, b.app->carriedEvents());
     bool sawCold = false;
     for (const Call& c : b.server.calls) {
-      sawCold = sawCold || (c.path == gatelogic::kPathHeartbeat && c.body.find("\"restore\":\"cold\"") != std::string::npos);
+      sawCold = sawCold || (c.path == gatelogic::kPathHeartbeat &&
+                            c.body.find("\"restore\":\"cold\"") != std::string::npos);
     }
     TEST_ASSERT_TRUE(sawCold);
     TEST_ASSERT_NULL(b.app->restoreReport());
@@ -724,8 +761,9 @@ void test_a_new_base_url_that_never_answers_is_abandoned_for_the_old_one() {
   Board board;
   Boot b(board, true);
   b.server.on(gatelogic::kPathHeartbeat, 200U,
-              withKey(kRoster, "\"net\":{\"ver\":4,\"base\":\"http://10.0.0.99:8088\",\"wifi0_ssid\":\"CRUSADERS\","
-                               "\"wifi0_psk\":\"squash-court-4\"}"));
+              withKey(kRoster,
+                      "\"net\":{\"ver\":4,\"base\":\"http://10.0.0.99:8088\",\"wifi0_ssid\":\"CRUSADERS\","
+                      "\"wifi0_psk\":\"squash-court-4\"}"));
   b.run(200U);
   TEST_ASSERT_EQUAL_STRING("http://10.0.0.99:8088", b.net.baseUrl());
   TEST_ASSERT_EQUAL_UINT32(4U, b.net.version());
@@ -746,8 +784,10 @@ void test_a_new_base_url_that_never_answers_is_abandoned_for_the_old_one() {
 void test_the_link_supervisor_rejoins_and_finally_restarts() {
   Board board;
   Boot b(board, true);
-  b.server.on(gatelogic::kPathHeartbeat, 200U,
-              withKey(kRoster, "\"net\":{\"ver\":2,\"wifi0_ssid\":\"CRUSADERS-NEW\",\"wifi0_psk\":\"new-router-pass\"}"));
+  b.server.on(
+      gatelogic::kPathHeartbeat, 200U,
+      withKey(kRoster,
+              "\"net\":{\"ver\":2,\"wifi0_ssid\":\"CRUSADERS-NEW\",\"wifi0_psk\":\"new-router-pass\"}"));
   b.run(200U);
   const size_t joinsAtStart = b.radio.joins.size();
   b.link.isUp = false;
@@ -800,7 +840,8 @@ void test_the_setup_portal_saves_a_local_network() {
   TEST_ASSERT_EQUAL_STRING("CLUB-NEW/a-new-password", b.radio.joins.front().c_str());
   b.server.on(gatelogic::kPathHeartbeat, 200U, kRoster);
   b.run(100U);
-  TEST_ASSERT_NOT_NULL(strstr(b.server.last(gatelogic::kPathHeartbeat)->body.c_str(), "\"net_src\":\"local\""));
+  TEST_ASSERT_NOT_NULL(
+      strstr(b.server.last(gatelogic::kPathHeartbeat)->body.c_str(), "\"net_src\":\"local\""));
 }
 
 /// A hold that starts after the first minute never opens the portal.
@@ -857,12 +898,14 @@ void test_ota_a_good_image_is_verified_switched_and_committed() {
   TEST_ASSERT_TRUE(sawProbation);
   TEST_ASSERT_FALSE(b.app->ota().inProbation());
   b.beat();
-  TEST_ASSERT_NOT_NULL(strstr(b.server.last(gatelogic::kPathHeartbeat)->body.c_str(), "\"fw_state\":\"committed\""));
+  TEST_ASSERT_NOT_NULL(
+      strstr(b.server.last(gatelogic::kPathHeartbeat)->body.c_str(), "\"fw_state\":\"committed\""));
 }
 
 /// Each refusal names its corpus reason, and none switches the slot.
 void test_ota_a_tampered_unsigned_older_or_foreign_image_is_refused() {
   loadOta();
+
   struct Case {
     const char* why;
     std::string offer;
@@ -872,6 +915,7 @@ void test_ota_a_tampered_unsigned_older_or_foreign_image_is_refused() {
     const char* error;
     bool downloaded;
   };
+
   const Case cases[] = {
       {"tampered byte", g_gateOffer, true, g_modulus, "2.0.0", "sha256", true},
       {"wrong key", g_gateOffer, false, g_otherModulus, "2.0.0", "sig", false},
@@ -896,8 +940,8 @@ void test_ota_a_tampered_unsigned_older_or_foreign_image_is_refused() {
       c.beat();
       const std::string& sent = c.server.last(gatelogic::kPathHeartbeat)->body;
       TEST_ASSERT_TRUE_MESSAGE(sent.find("\"fw_state\":\"failed\"") != std::string::npos, k.why);
-      TEST_ASSERT_TRUE_MESSAGE(sent.find(std::string("\"fw_error\":\"") + k.error + "\"") != std::string::npos,
-                               k.why);
+      TEST_ASSERT_TRUE_MESSAGE(
+          sent.find(std::string("\"fw_error\":\"") + k.error + "\"") != std::string::npos, k.why);
     }
   }
 }
@@ -938,10 +982,12 @@ void test_ota_probation_rolls_back_on_timeout_and_on_the_fourth_boot() {
     b.server.on(gatelogic::kPathHeartbeat, 200U, offerBeat(g_gateOffer));
     b.run(100U);
     const std::string& sent = b.server.last(gatelogic::kPathHeartbeat)->body;
-    TEST_ASSERT_TRUE(sent.find("\"fw_state\":\"rolled_back\",\"fw_failed\":\"2.0.1\",\"fw_error\":\"probation\"") !=
-                     std::string::npos);
+    TEST_ASSERT_TRUE(
+        sent.find("\"fw_state\":\"rolled_back\",\"fw_failed\":\"2.0.1\",\"fw_error\":\"probation\"") !=
+        std::string::npos);
     b.run(70000U, 100U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, b.download.gets, "a version that failed probation is never taken again");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, b.download.gets,
+                                     "a version that failed probation is never taken again");
   }
 }
 
@@ -972,7 +1018,8 @@ void test_a_stray_byte_never_spoils_the_next_scan_and_a_suffixless_line_is_read(
   b.run(300U);
   b.scan("7Q3F9KM2XZ8B");
   TEST_ASSERT_NOT_NULL(b.server.last(gatelogic::kPathGate));
-  TEST_ASSERT_TRUE(b.server.last(gatelogic::kPathGate)->body.find("\"token\":\"7Q3F9KM2XZ8B\"") != std::string::npos);
+  TEST_ASSERT_TRUE(b.server.last(gatelogic::kPathGate)->body.find("\"token\":\"7Q3F9KM2XZ8B\"") !=
+                   std::string::npos);
   const size_t before = b.server.count(gatelogic::kPathGate);
   b.run(3000U);
   b.scanner.feed("K4TQ8N2ZV7BM");
@@ -1111,8 +1158,9 @@ void test_an_online_replay_is_uploaded_as_replayed() {
   b.run(180000U, 100U);
   bool tagged = false;
   for (const Call& c : b.server.calls) {
-    tagged = tagged || (c.path == gatelogic::kPathEvents && c.body.find("\"unknown_scan\"") != std::string::npos &&
-                        c.body.find("\"reason\":\"replayed\",\"online\":true}") != std::string::npos);
+    tagged =
+        tagged || (c.path == gatelogic::kPathEvents && c.body.find("\"unknown_scan\"") != std::string::npos &&
+                   c.body.find("\"reason\":\"replayed\",\"online\":true}") != std::string::npos);
   }
   TEST_ASSERT_TRUE_MESSAGE(tagged, "1.1.2 uploaded this as an untagged offline unknown_scan");
 }
@@ -1128,7 +1176,8 @@ void test_the_heartbeat_reports_telemetry_and_drift() {
   b.run(200U);
   b.beat();
   const std::string& sent = b.server.last(gatelogic::kPathHeartbeat)->body;
-  TEST_ASSERT_TRUE(sent.find("\"fw_state\":\"committed\",\"net_ver\":0,\"net_src\":\"compiled\"") != std::string::npos);
+  TEST_ASSERT_TRUE(sent.find("\"fw_state\":\"committed\",\"net_ver\":0,\"net_src\":\"compiled\"") !=
+                   std::string::npos);
   TEST_ASSERT_TRUE(sent.find("\"diag\":{\"reset\":\"task_wdt\",\"exc\":0,\"epc1\":0,\"heap\":151552") !=
                    std::string::npos);
   TEST_ASSERT_TRUE(sent.find("\"drift\":[\"gate.unlock_seconds\"]") != std::string::npos);
@@ -1138,9 +1187,11 @@ void test_the_heartbeat_reports_telemetry_and_drift() {
 
 } // namespace
 
-void setUp() {}
+void setUp() {
+}
 
-void tearDown() {}
+void tearDown() {
+}
 
 int main(int, char**) {
   UNITY_BEGIN();

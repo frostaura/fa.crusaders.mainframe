@@ -110,6 +110,7 @@ struct NetSet {
 /// lane and this one can add a field without changing every call site.
 struct NetResult {
   Refusal reason = Refusal::Ok;
+
   bool adopted() const { return reason == Refusal::Ok; }
 };
 

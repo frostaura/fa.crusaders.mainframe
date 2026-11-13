@@ -97,7 +97,8 @@ Lifeline lifelineOf(const gatelogic::HeartbeatRead& read) {
   Lifeline out;
   if (read.ota.present()) {
     devota::Offer offer;
-    if (devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate, offer) == devota::Refusal::Ok) {
+    if (devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate, offer) ==
+        devota::Refusal::Ok) {
       memcpy(out.otaVersion, offer.version, strlen(offer.version) + 1U);
     }
   }
@@ -130,8 +131,8 @@ void assertGate(const char* id, const char* expected, const gatelogic::GateSetti
   TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(expected, "ota_probation_minutes")),
                                    s.otaProbationMinutes, id);
   TEST_ASSERT_EQUAL_MESSAGE(flag(expected, "device_fault_reporting"), s.faultReporting, id);
-  TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(expected, "device_fault_max_per_hour")),
-                                   s.faultMaxPerHour, id);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+      corpus::unsignedValue(corpus::member(expected, "device_fault_max_per_hour")), s.faultMaxPerHour, id);
 }
 
 /// Each expected element, parsed by the board's own grammar, against the image.
@@ -304,9 +305,9 @@ void test_every_gate_scan_case_is_classified_as_the_reference_classifies_it() {
     const bool decided = strcmp(cls, "decided") == 0;
 
     if (strcmp(endpoint, "gate") == 0) {
-      const gatelogic::ScanDecision d = gatelogic::readScanReply(
-          statusAfterRead(status, len, gatelogic::kGateScanResponseCap), body, len,
-          gatelogic::kGateConfig.unlockHardCapMs);
+      const gatelogic::ScanDecision d =
+          gatelogic::readScanReply(statusAfterRead(status, len, gatelogic::kGateScanResponseCap), body, len,
+                                   gatelogic::kGateConfig.unlockHardCapMs);
       TEST_ASSERT_EQUAL_MESSAGE(!decided, d.fallbackToRoster, id);
       if (decided) {
         TEST_ASSERT_EQUAL_MESSAGE(flag(expect, "opened"), d.released, id);
@@ -378,9 +379,11 @@ void test_the_gates_budget_rows_are_the_buffers_this_image_compiles_in() {
 
 } // namespace
 
-void setUp() {}
+void setUp() {
+}
 
-void tearDown() {}
+void tearDown() {
+}
 
 int main(int, char**) {
   UNITY_BEGIN();

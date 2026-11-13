@@ -132,8 +132,11 @@ public:
   /// 2.0.0's idle states (door-gate.md §14.5). Each outranks the ones below it
   /// and none outranks a member-facing cue or a released door.
   void setSetup(bool on) { setup_ = on; }
+
   void setDownloading(bool on) { downloading_ = on; }
+
   void setProbation(bool on) { probation_ = on; }
+
   /// The last heartbeat was not a success, the roster is empty, or it is older
   /// than two intervals (DG-6).
   void setDegraded(bool on) { degraded_ = on; }

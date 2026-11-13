@@ -78,7 +78,8 @@ bool sealedPut(IBlobStore& store, const char* key, uint16_t layout, const T& val
 /// Reads a sealed record. False — and `out` untouched — when it is absent,
 /// another layout, another size, or its CRC does not match.
 template <class T>
-bool sealedGet(IBlobStore& store, const char* key, uint16_t layout, T& out, uint8_t* scratch, size_t scratchCap) {
+bool sealedGet(IBlobStore& store, const char* key, uint16_t layout, T& out, uint8_t* scratch,
+               size_t scratchCap) {
   const size_t total = sizeof(RecordHeader) + sizeof(T);
   if (scratchCap < total || store.get(key, scratch, scratchCap) != total) {
     return false;

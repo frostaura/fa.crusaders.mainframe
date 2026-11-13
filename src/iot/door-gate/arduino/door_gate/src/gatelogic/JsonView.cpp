@@ -363,7 +363,8 @@ bool asString(const Value& value, char* out, size_t cap, size_t& outLen) {
         c = '\t';
         break;
       case 'u': {
-        const int code = (hexDigit(p[1]) << 12) | (hexDigit(p[2]) << 8) | (hexDigit(p[3]) << 4) | hexDigit(p[4]);
+        const int code =
+            (hexDigit(p[1]) << 12) | (hexDigit(p[2]) << 8) | (hexDigit(p[3]) << 4) | hexDigit(p[4]);
         if (code == 0 || code > 0x7F) {
           return false;
         }

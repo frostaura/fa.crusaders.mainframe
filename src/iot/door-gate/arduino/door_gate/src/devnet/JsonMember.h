@@ -50,7 +50,8 @@ enum class Member : uint8_t {
 /// The string member `key`, decoded (all JSON escapes, `\uXXXX` and surrogate
 /// pairs to UTF-8) into `out`, NUL-terminated, with its byte length in `outLen`.
 /// A decoded NUL is Unreadable: nothing on this path may contain one.
-Member stringMember(const char* object, size_t len, const char* key, char* out, size_t outCap, size_t& outLen);
+Member stringMember(const char* object, size_t len, const char* key, char* out, size_t outCap,
+                    size_t& outLen);
 
 /// The unsigned integer member `key`: a bare JSON integer, no sign, no
 /// fraction, no exponent, at most 2^32 - 1.
@@ -62,7 +63,8 @@ bool isNullMember(const char* object, size_t len, const char* key);
 /// Locates the object under top-level `key` in `body`, braces INCLUDED, so the
 /// readers above can be pointed straight at it. False when absent or not an
 /// object.
-bool topLevelObjectText(const char* body, size_t len, const char* key, const char*& object, size_t& objectLen);
+bool topLevelObjectText(const char* body, size_t len, const char* key, const char*& object,
+                        size_t& objectLen);
 
 } // namespace json
 } // namespace devnet

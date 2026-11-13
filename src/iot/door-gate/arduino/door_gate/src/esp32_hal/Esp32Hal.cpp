@@ -5,14 +5,14 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <esp32/rtc.h>
 
 #include <HTTPClient.h>
 #include <Preferences.h>
-#include <esp_task_wdt.h>
 #include <WebServer.h>
 #include <esp_ota_ops.h>
 #include <esp_system.h>
-#include <esp32/rtc.h>
+#include <esp_task_wdt.h>
 #include <string.h>
 
 #include <atomic>
@@ -594,7 +594,8 @@ uint16_t Esp32Download::get(const char* path, uint32_t expectBytes, gatelogic::I
       delay(1);
       continue;
     }
-    const size_t want = static_cast<size_t>(available) < sizeof(buf) ? static_cast<size_t>(available) : sizeof(buf);
+    const size_t want =
+        static_cast<size_t>(available) < sizeof(buf) ? static_cast<size_t>(available) : sizeof(buf);
     const size_t remaining = expectBytes - got;
     const int n = client.read(buf, want < remaining ? want : remaining);
     if (n <= 0) {
@@ -653,14 +654,15 @@ void sendPage() {
       page += gReason;
       page += F("</p>");
     }
-    page += F("<form method=post action=/save>"
-              "<p>WiFi name<br><input name=ssid maxlength=32 required></p>"
-              "<p>WiFi password<br><input name=psk type=password maxlength=63></p>"
-              "<p>Second WiFi name (optional)<br><input name=ssid2 maxlength=32></p>"
-              "<p>Second WiFi password<br><input name=psk2 type=password maxlength=63></p>"
-              "<p>Server address, e.g. http://192.168.1.10:8088<br><input name=base maxlength=96 required></p>"
-              "<p>Device key id and key (optional)<br><input name=key_id maxlength=7>"
-              "<input name=key maxlength=43></p><p><button>Save</button></p></form>");
+    page +=
+        F("<form method=post action=/save>"
+          "<p>WiFi name<br><input name=ssid maxlength=32 required></p>"
+          "<p>WiFi password<br><input name=psk type=password maxlength=63></p>"
+          "<p>Second WiFi name (optional)<br><input name=ssid2 maxlength=32></p>"
+          "<p>Second WiFi password<br><input name=psk2 type=password maxlength=63></p>"
+          "<p>Server address, e.g. http://192.168.1.10:8088<br><input name=base maxlength=96 required></p>"
+          "<p>Device key id and key (optional)<br><input name=key_id maxlength=7>"
+          "<input name=key maxlength=43></p><p><button>Save</button></p></form>");
   }
   gPortalServer.send(200, "text/html", page);
 }

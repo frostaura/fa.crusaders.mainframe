@@ -328,6 +328,7 @@ public:
 class ConsoleRadio final : public gatelogic::IRadio {
 public:
   void join(const char* ssid, const char* psk) override;
+
   uint32_t joins() const { return joins_; }
 
 private:
@@ -340,6 +341,7 @@ class ConsoleSystem final : public gatelogic::ISystem {
 public:
   static constexpr int kRestartExit = 75;
   void restart() override;
+
   bool requested() const { return requested_; }
 
 private:
@@ -351,6 +353,7 @@ private:
 class SimDiag final : public gatelogic::IDiagSource {
 public:
   explicit SimDiag(bool warm) : warm_(warm) {}
+
   void read(gatelogic::GateDiag& out) override;
 
 private:

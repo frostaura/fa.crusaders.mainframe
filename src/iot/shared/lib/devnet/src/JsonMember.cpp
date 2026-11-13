@@ -136,7 +136,8 @@ char simpleEscape(char c) {
 
 } // namespace
 
-Member stringMember(const char* object, size_t len, const char* key, char* out, size_t outCap, size_t& outLen) {
+Member stringMember(const char* object, size_t len, const char* key, char* out, size_t outCap,
+                    size_t& outLen) {
   outLen = 0U;
   const size_t at = valueAt(object, len, key);
   if (at == devapi::json::kNotFound) {
@@ -224,7 +225,8 @@ bool isNullMember(const char* object, size_t len, const char* key) {
   return at + 4U == len || object[at + 4U] == ',' || object[at + 4U] == '}' || isWs(object[at + 4U]);
 }
 
-bool topLevelObjectText(const char* body, size_t len, const char* key, const char*& object, size_t& objectLen) {
+bool topLevelObjectText(const char* body, size_t len, const char* key, const char*& object,
+                        size_t& objectLen) {
   size_t inner = 0U;
   const size_t at = devapi::json::findTopLevelObject(body, len, key, inner);
   if (at == devapi::json::kNotFound || at == 0U || at + inner >= len) {

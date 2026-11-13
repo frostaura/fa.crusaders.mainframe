@@ -67,6 +67,7 @@ struct Drift {
   uint8_t count = 0U;
 
   void clear() { count = 0U; }
+
   void add(const char* name);
   bool contains(const char* name) const;
 };
@@ -133,9 +134,9 @@ struct StepImage {
 
 /// What one array did to its image.
 enum class ArrayRead : uint8_t {
-  Absent = 0U,   ///< no key: no opinion
-  Adopted = 1U,  ///< committed (possibly empty)
-  Kept = 2U,     ///< present but nothing readable: the previous value stands, drift
+  Absent = 0U,  ///< no key: no opinion
+  Adopted = 1U, ///< committed (possibly empty)
+  Kept = 2U,    ///< present but nothing readable: the previous value stands, drift
 };
 
 ArrayRead readRoster(const jv::Value& body, RosterImage& image, uint32_t nowMs, Drift& drift);
@@ -208,7 +209,8 @@ struct HeartbeatRead {
 };
 
 /// Reads one heartbeat answer into `state` by every rule above.
-HeartbeatRead readHeartbeat(uint16_t status, const char* body, size_t len, uint32_t nowMs, GateBoardState& state);
+HeartbeatRead readHeartbeat(uint16_t status, const char* body, size_t len, uint32_t nowMs,
+                            GateBoardState& state);
 
 // --- the scan decision and the events reply ---------------------------------
 

@@ -61,11 +61,13 @@ public:
   const char* baseUrl() const { return base_; }
 
   uint8_t profileCount() const { return profileCount_; }
+
   const devnet::Profile& profile(uint8_t index) const { return profiles_[index % kMaxProfiles]; }
 
   /// The profile the radio should join now, and the one after it on a
   /// supervisor reconnect.
   uint8_t activeProfile() const { return active_; }
+
   uint8_t advanceProfile();
 
   /// The server's `net` object. Adopted, persisted and made current; the
@@ -87,7 +89,9 @@ public:
   bool tick(uint32_t nowMs, uint32_t fallbackMinutes);
 
   uint32_t version() const;
+
   NetSource source() const { return static_cast<NetSource>(record_.source); }
+
   const NetRecord& record() const { return record_; }
 
 private:

@@ -23,8 +23,8 @@ bool validKey(const char* key) {
   }
   for (size_t i = 0U; i < devnet::kKeyLen; ++i) {
     const char c = key[i];
-    const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
-                    c == '_';
+    const bool ok =
+        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
     if (!ok) {
       return false;
     }

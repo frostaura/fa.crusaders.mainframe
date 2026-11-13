@@ -685,7 +685,6 @@ private:
   bool reported_ = false;
 };
 
-
 } // namespace
 
 int main(int argc, char** argv) {

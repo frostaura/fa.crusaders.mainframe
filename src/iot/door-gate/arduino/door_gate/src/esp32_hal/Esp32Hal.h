@@ -28,11 +28,11 @@
 #include "../hal/PinLevel.h"
 #include "../hal/Store.h"
 
+#include "../gatelogic/GateHeartbeat.h"
 #include "../gatelogic/GateNet.h"
 #include "../gatelogic/GateOta.h"
 #include "../gatelogic/GatePorts.h"
 #include "../gatelogic/GateStore.h"
-#include "../gatelogic/GateHeartbeat.h"
 #include "../gatelogic/HttpPort.h"
 #include "../gatelogic/PinOut.h"
 
@@ -298,6 +298,7 @@ class Esp32Download final : public gatelogic::IDownload {
 public:
   Esp32Download(const char* baseUrl, const char* authorization, hal::IClock& clock)
       : baseUrl_(baseUrl), authorization_(authorization), clock_(clock) {}
+
   uint16_t get(const char* path, uint32_t expectBytes, gatelogic::IChunkSink& sink) override;
 
 private:
@@ -317,6 +318,7 @@ public:
 class Esp32Portal final : public gatelogic::ISetupPortal {
 public:
   explicit Esp32Portal(const char* apPassword) : password_(apPassword) {}
+
   void open(const char* apName) override;
   bool service(gatelogic::PortalForm& form) override;
   void refuse(const char* reason) override;

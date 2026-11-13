@@ -97,7 +97,8 @@ bool readGateSettings(const jv::Value& gate, GateSettings& settings, Drift& drif
   if (unlock.present() && jv::asUint32(unlock, seconds)) {
     unlockClamped = seconds < kUnlockMinSeconds || seconds > kUnlockMaxSeconds;
   }
-  unsignedSetting(gate, "unlock_seconds", kUnlockMinSeconds, kUnlockMaxSeconds, settings.unlockSeconds, drift);
+  unsignedSetting(gate, "unlock_seconds", kUnlockMinSeconds, kUnlockMaxSeconds, settings.unlockSeconds,
+                  drift);
   unsignedSetting(gate, "power_restore_trust_minutes", 0U, 120U, settings.powerRestoreTrustMinutes, drift);
   unsignedSetting(gate, "net_fallback_minutes", 3U, 60U, settings.netFallbackMinutes, drift);
   unsignedSetting(gate, "ota_probation_minutes", 3U, 60U, settings.otaProbationMinutes, drift);
@@ -353,7 +354,8 @@ bool readHeartbeatSeconds(const jv::Value& body, uint32_t& intervalMs, Drift& dr
 
 // --- one whole heartbeat answer ----------------------------------------------
 
-HeartbeatRead readHeartbeat(uint16_t status, const char* body, size_t len, uint32_t nowMs, GateBoardState& state) {
+HeartbeatRead readHeartbeat(uint16_t status, const char* body, size_t len, uint32_t nowMs,
+                            GateBoardState& state) {
   HeartbeatRead read;
   read.authRetry = status == 401U;
   jv::Value object;

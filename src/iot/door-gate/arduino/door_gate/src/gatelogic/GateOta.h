@@ -132,9 +132,13 @@ public:
 
   /// For the heartbeat request.
   FwState state() const { return static_cast<FwState>(record_.state); }
+
   const char* failedVersion() const { return record_.failedVersion; }
+
   const char* error() const { return record_.error; }
+
   bool inProbation() const { return record_.state == static_cast<uint8_t>(FwState::Probation); }
+
   const devota::FailedList& failedList() const { return record_.failed; }
 
 private:

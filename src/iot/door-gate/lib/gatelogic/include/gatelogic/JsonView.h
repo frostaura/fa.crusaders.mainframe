@@ -55,7 +55,9 @@ struct Value {
   size_t len = 0U;
 
   bool present() const { return kind != Kind::Missing; }
+
   bool isObject() const { return kind == Kind::Object; }
+
   bool isArray() const { return kind == Kind::Array; }
 };
 

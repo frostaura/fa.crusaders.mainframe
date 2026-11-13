@@ -25,7 +25,8 @@ void copyText(char* out, size_t cap, const char* in) {
 /// Hashes and writes every chunk as it arrives, and counts it.
 class StagingSink final : public IChunkSink {
 public:
-  StagingSink(IOtaSlot& slot, GateOta::Hooks& hooks, uint32_t limit) : slot_(slot), hooks_(hooks), limit_(limit) {}
+  StagingSink(IOtaSlot& slot, GateOta::Hooks& hooks, uint32_t limit)
+      : slot_(slot), hooks_(hooks), limit_(limit) {}
 
   bool chunk(const uint8_t* data, size_t len) override {
     hooks_.duringDownload();
@@ -47,8 +48,11 @@ public:
   }
 
   uint32_t bytes() const { return bytes_; }
+
   bool overrun() const { return overrun_; }
+
   bool writeFailed() const { return writeFailed_; }
+
   void digest(uint8_t out[32]) { hash_.finish(out); }
 
 private:
@@ -113,7 +117,7 @@ GateOta::Boot GateOta::begin(IBlobStore* store, const char* runningVersion) {
   }
   static_cast<void>(persist());
   return devota::Probation::atBoot(record_.boots) == devota::Probation::Decision::RollBack ? Boot::RollBack
-                                                                                         : Boot::Normal;
+                                                                                           : Boot::Normal;
 }
 
 void GateOta::fail(const char* version, const char* why, bool neverAgain) {
@@ -148,7 +152,8 @@ void GateOta::offer(const jv::Value& ota, const uint8_t modulus[dc::kRsa2048Byte
   if (grammar != devota::Refusal::Ok) {
     // An offer this board cannot read at all, or one for another target: said
     // once, so the server can stop offering it.
-    if (record_.state != static_cast<uint8_t>(FwState::Failed) || strcmp(record_.error, devota::fwErrorFor(grammar)) != 0) {
+    if (record_.state != static_cast<uint8_t>(FwState::Failed) ||
+        strcmp(record_.error, devota::fwErrorFor(grammar)) != 0) {
       fail(parsed.version, devota::fwErrorFor(grammar), false);
       static_cast<void>(persist());
     }
@@ -163,7 +168,8 @@ void GateOta::offer(const jv::Value& ota, const uint8_t modulus[dc::kRsa2048Byte
   }
   char text[devota::kManifestCap] = {};
   const size_t n = devota::manifestText(parsed, text, sizeof(text));
-  const devota::Refusal sig = n == 0U ? devota::Refusal::Sig : devota::verifySignature(text, n, parsed.sig, modulus);
+  const devota::Refusal sig =
+      n == 0U ? devota::Refusal::Sig : devota::verifySignature(text, n, parsed.sig, modulus);
   if (sig != devota::Refusal::Ok) {
     fail(parsed.version, devota::fwErrorFor(sig), true);
     static_cast<void>(persist());

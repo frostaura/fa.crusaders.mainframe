@@ -1045,7 +1045,6 @@ void GateApp::commitEmptyRoster() {
   rosterDirty_ = true;
 }
 
-
 void GateApp::adoptHeartbeat(const HttpOutcome& outcome) {
   if (outcome.status == 403U) {
     commitEmptyRoster();

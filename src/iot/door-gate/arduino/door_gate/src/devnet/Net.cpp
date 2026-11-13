@@ -337,8 +337,9 @@ NetResult adoptNet(const char* netObjectJson, size_t len, uint32_t appliedVer, N
   if (b != json::Member::Missing) {
     // Present but not a string (null included) reads as no URL at all, as the
     // reference implementation's `base_url(None)` does: `base_empty`.
-    const Refusal why = b == json::Member::Ok ? checkBaseUrl(base)
-                                              : (b == json::Member::Unreadable ? Refusal::TooLong : Refusal::Empty);
+    const Refusal why = b == json::Member::Ok
+                            ? checkBaseUrl(base)
+                            : (b == json::Member::Unreadable ? Refusal::TooLong : Refusal::Empty);
     if (why != Refusal::Ok) {
       result.reason = prefixed(why);
       return result;
@@ -414,7 +415,8 @@ Action supervise(uint32_t downS, uint32_t sinceAttemptS, uint32_t attempts) {
     return Action::None;
   }
   if (attempts != 0U) {
-    const uint32_t step = attempts - 1U < kSupervisorBackoffSteps ? attempts - 1U : kSupervisorBackoffSteps - 1U;
+    const uint32_t step =
+        attempts - 1U < kSupervisorBackoffSteps ? attempts - 1U : kSupervisorBackoffSteps - 1U;
     if (sinceAttemptS < kSupervisorBackoffS[step]) {
       return Action::None;
     }

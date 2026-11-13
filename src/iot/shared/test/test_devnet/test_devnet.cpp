@@ -27,7 +27,8 @@ corpus::File g_manifest;
 void load() {
   TEST_ASSERT_TRUE_MESSAGE(g_cases.load("provision", "cases.json"),
                            "provision corpus not found — a skipped corpus proves nothing");
-  TEST_ASSERT_TRUE_MESSAGE(g_manifest.load("provision", "manifest.json"), "provision/manifest.json not found");
+  TEST_ASSERT_TRUE_MESSAGE(g_manifest.load("provision", "manifest.json"),
+                           "provision/manifest.json not found");
 }
 
 size_t declared(const char* section) {
@@ -217,11 +218,13 @@ void test_every_supervisor_case() {
     char id[corpus::kMaxNameLen] = {};
     text(c, "id", id, sizeof(id));
     const uint32_t down = static_cast<uint32_t>(corpus::unsignedValue(corpus::member(c, "down_seconds")));
-    const uint32_t since = static_cast<uint32_t>(corpus::unsignedValue(corpus::member(c, "since_attempt_seconds")));
+    const uint32_t since =
+        static_cast<uint32_t>(corpus::unsignedValue(corpus::member(c, "since_attempt_seconds")));
     const uint32_t attempts = static_cast<uint32_t>(corpus::unsignedValue(corpus::member(c, "attempts")));
     char action[32] = {};
     text(c, "action", action, sizeof(action));
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(action, devnet::actionName(devnet::supervise(down, since, attempts)), id);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(action, devnet::actionName(devnet::supervise(down, since, attempts)),
+                                     id);
     ++g_executed[3];
   }
   TEST_ASSERT_EQUAL_size_t(declared("supervisor"), g_executed[3]);
@@ -237,17 +240,19 @@ void test_every_corpus_section_is_declared_and_executed() {
     if (!corpus::isArray(value)) {
       continue;
     }
-    const bool known = strcmp(name, "base_urls") == 0 || strcmp(name, "nets") == 0 || strcmp(name, "keys") == 0 ||
-                       strcmp(name, "supervisor") == 0;
+    const bool known = strcmp(name, "base_urls") == 0 || strcmp(name, "nets") == 0 ||
+                       strcmp(name, "keys") == 0 || strcmp(name, "supervisor") == 0;
     TEST_ASSERT_TRUE_MESSAGE(known, "a provision/ section no test in this suite executes");
     ++seen;
   }
   TEST_ASSERT_EQUAL_size_t(4U, seen);
-  TEST_ASSERT_EQUAL_size_t(declared("base_urls") + declared("nets") + declared("keys") + declared("supervisor"),
+  TEST_ASSERT_EQUAL_size_t(declared("base_urls") + declared("nets") + declared("keys") +
+                               declared("supervisor"),
                            g_executed[0] + g_executed[1] + g_executed[2] + g_executed[3]);
 
   const char* constants = corpus::member(g_cases.root(), "constants");
-  TEST_ASSERT_EQUAL_UINT64(devnet::kBaseUrlMax, corpus::unsignedValue(corpus::member(constants, "base_url_max")));
+  TEST_ASSERT_EQUAL_UINT64(devnet::kBaseUrlMax,
+                           corpus::unsignedValue(corpus::member(constants, "base_url_max")));
   TEST_ASSERT_EQUAL_UINT64(devnet::kSupervisorGraceS,
                            corpus::unsignedValue(corpus::member(constants, "supervisor_grace_seconds")));
   TEST_ASSERT_EQUAL_UINT64(devnet::kSupervisorRestartS,
@@ -309,8 +314,9 @@ void test_supervisor_through_a_whole_outage() {
 /// The server's serialiser escapes `+`, `&`, `'` and every non-ASCII
 /// character. A board that stored the escape would join nothing.
 void test_net_values_are_read_with_their_escapes_decoded() {
-  const char* net = "{\"ver\":7,\"wifi0_ssid\":\"Caf\\u00e9 Court\",\"wifi0_psk\":\"squash\\u002Bcourt&\\\"4\\\"\","
-                    "\"base\":\"http:\\/\\/mainframe.lan:8088\"}";
+  const char* net =
+      "{\"ver\":7,\"wifi0_ssid\":\"Caf\\u00e9 Court\",\"wifi0_psk\":\"squash\\u002Bcourt&\\\"4\\\"\","
+      "\"base\":\"http:\\/\\/mainframe.lan:8088\"}";
   devnet::NetSet out;
   const devnet::NetResult got = devnet::adoptNet(net, strlen(net), 6U, out);
   TEST_ASSERT_EQUAL_STRING("ok", devnet::refusalName(got.reason));
@@ -320,10 +326,12 @@ void test_net_values_are_read_with_their_escapes_decoded() {
 
   // A non-ASCII PASSWORD is not WPA2-printable and is refused, not mangled.
   const char* bad = "{\"ver\":8,\"wifi0_ssid\":\"CLUB\",\"wifi0_psk\":\"p\\u00e4ssword1\"}";
-  TEST_ASSERT_EQUAL_STRING("wifi0_psk", devnet::refusalName(devnet::adoptNet(bad, strlen(bad), 6U, out).reason));
+  TEST_ASSERT_EQUAL_STRING("wifi0_psk",
+                           devnet::refusalName(devnet::adoptNet(bad, strlen(bad), 6U, out).reason));
   // A lone surrogate is not a character.
   const char* lone = "{\"ver\":8,\"wifi0_ssid\":\"\\ud800CLUB\",\"wifi0_psk\":\"\"}";
-  TEST_ASSERT_EQUAL_STRING("wifi0_ssid", devnet::refusalName(devnet::adoptNet(lone, strlen(lone), 6U, out).reason));
+  TEST_ASSERT_EQUAL_STRING("wifi0_ssid",
+                           devnet::refusalName(devnet::adoptNet(lone, strlen(lone), 6U, out).reason));
   // A profile named only as nulls is not named at all, and a null base is no
   // URL.
   const char* nulls = "{\"ver\":8,\"wifi1_ssid\":null,\"wifi1_psk\":null,\"base\":\"http://10.0.0.5\"}";
@@ -331,7 +339,8 @@ void test_net_values_are_read_with_their_escapes_decoded() {
   TEST_ASSERT_TRUE(devnet::adoptNet(nulls, strlen(nulls), 6U, n).adopted());
   TEST_ASSERT_FALSE(n.hasWifi[1]);
   const char* nullBase = "{\"ver\":8,\"base\":null}";
-  TEST_ASSERT_EQUAL_STRING("base_empty", devnet::refusalName(devnet::adoptNet(nullBase, strlen(nullBase), 6U, n).reason));
+  TEST_ASSERT_EQUAL_STRING("base_empty",
+                           devnet::refusalName(devnet::adoptNet(nullBase, strlen(nullBase), 6U, n).reason));
 }
 
 /// Only the outermost object's members count: a `ver` nested elsewhere is not
@@ -339,9 +348,11 @@ void test_net_values_are_read_with_their_escapes_decoded() {
 void test_net_reads_only_its_own_members() {
   const char* nested = "{\"note\":{\"ver\":9},\"base\":\"http://10.0.0.5\"}";
   devnet::NetSet out;
-  TEST_ASSERT_EQUAL_STRING("ver", devnet::refusalName(devnet::adoptNet(nested, strlen(nested), 0U, out).reason));
+  TEST_ASSERT_EQUAL_STRING("ver",
+                           devnet::refusalName(devnet::adoptNet(nested, strlen(nested), 0U, out).reason));
   const char* fraction = "{\"ver\":9.5,\"base\":\"http://10.0.0.5\"}";
-  TEST_ASSERT_EQUAL_STRING("ver", devnet::refusalName(devnet::adoptNet(fraction, strlen(fraction), 0U, out).reason));
+  TEST_ASSERT_EQUAL_STRING("ver",
+                           devnet::refusalName(devnet::adoptNet(fraction, strlen(fraction), 0U, out).reason));
 }
 
 /// Two rotations in a row: each moves the ring forward and drops the oldest.
@@ -386,7 +397,8 @@ void test_net_and_key_next_ignore_extra_keys_of_every_kind() {
   const char* noVer = "{\"meta\":{\"ver\":99},\"base\":\"http://192.168.1.20:8088\",\"wifi0_ssid\":\"C\","
                       "\"wifi0_psk\":\"squash-court-4\",\"extra\":[1,2]}";
   devnet::NetSet refused;
-  TEST_ASSERT_EQUAL_STRING("ver", devnet::refusalName(devnet::adoptNet(noVer, strlen(noVer), 0U, refused).reason));
+  TEST_ASSERT_EQUAL_STRING("ver",
+                           devnet::refusalName(devnet::adoptNet(noVer, strlen(noVer), 0U, refused).reason));
 
   devnet::KeyRing ring;
   memcpy(ring.currentId, "k1", 3U);
@@ -395,11 +407,13 @@ void test_net_and_key_next_ignore_extra_keys_of_every_kind() {
                         "\"n\":null,\"key\":\"Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr\",\"tags\":[\"a\"],"
                         "\"grace\":1.5,\"on\":true}";
   devnet::KeyRing next;
-  TEST_ASSERT_EQUAL_STRING("ok", devnet::refusalName(devnet::adoptKeyNext(keyNext, strlen(keyNext), ring, next)));
+  TEST_ASSERT_EQUAL_STRING("ok",
+                           devnet::refusalName(devnet::adoptKeyNext(keyNext, strlen(keyNext), ring, next)));
   TEST_ASSERT_EQUAL_STRING("k2", next.currentId);
   TEST_ASSERT_EQUAL_STRING("Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr", next.currentKey);
   TEST_ASSERT_EQUAL_STRING("k1", next.previousId);
-  const char* noKey = "{\"rotation\":{\"key\":\"Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr\"},\"id\":\"k2\"}";
+  const char* noKey =
+      "{\"rotation\":{\"key\":\"Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr\"},\"id\":\"k2\"}";
   devnet::KeyRing kept;
   TEST_ASSERT_NOT_EQUAL(static_cast<int>(devnet::Refusal::Ok),
                         static_cast<int>(devnet::adoptKeyNext(noKey, strlen(noKey), ring, kept)));
@@ -408,9 +422,11 @@ void test_net_and_key_next_ignore_extra_keys_of_every_kind() {
 
 } // namespace
 
-void setUp() {}
+void setUp() {
+}
 
-void tearDown() {}
+void tearDown() {
+}
 
 int main(int, char**) {
   UNITY_BEGIN();

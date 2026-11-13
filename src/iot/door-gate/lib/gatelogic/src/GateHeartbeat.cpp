@@ -143,8 +143,8 @@ private:
 
 } // namespace
 
-size_t renderGateHeartbeatV3(char* out, size_t cap, const char* mac, const char* firmwareVersion, uint64_t uptimeMs,
-                             const GateDiagnostics& counters, const GateReport& report) {
+size_t renderGateHeartbeatV3(char* out, size_t cap, const char* mac, const char* firmwareVersion,
+                             uint64_t uptimeMs, const GateDiagnostics& counters, const GateReport& report) {
   if (out == nullptr || cap == 0U) {
     return 0U;
   }

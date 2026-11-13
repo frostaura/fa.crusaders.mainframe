@@ -34,8 +34,8 @@ static_assert(sizeof(memcode::ReplayRing<kGateReplaySlots>) <= sizeof(WarmImage:
 /// Whether `b` (adopted at `bAnchor`) is `a` (adopted at `aAnchor`) re-sent: the
 /// same bookings with every window moved by exactly the time between the two.
 /// A roster that only aged is not a change worth a flash write (§14.1).
-bool sameContent(const roster::Entry* a, uint8_t aCount, uint32_t aAnchor, const roster::Entry* b, uint8_t bCount,
-                 uint32_t bAnchor) {
+bool sameContent(const roster::Entry* a, uint8_t aCount, uint32_t aAnchor, const roster::Entry* b,
+                 uint8_t bCount, uint32_t bAnchor) {
   if (aCount != bCount) {
     return false;
   }
@@ -45,7 +45,8 @@ bool sameContent(const roster::Entry* a, uint8_t aCount, uint32_t aAnchor, const
     if (strcmp(a[i].token, b[i].token) != 0 || a[i].court != b[i].court) {
       return false;
     }
-    const int64_t closes = static_cast<int64_t>(a[i].closesAtMs) - (static_cast<int64_t>(b[i].closesAtMs) + delta);
+    const int64_t closes =
+        static_cast<int64_t>(a[i].closesAtMs) - (static_cast<int64_t>(b[i].closesAtMs) + delta);
     if (closes > kSlack || closes < -kSlack) {
       return false;
     }
@@ -237,9 +238,9 @@ void GateApp::persistColdRoster(uint32_t nowMs) {
   if (!state_.roster.loaded) {
     return;
   }
-  const bool changed =
-      !rosterWrittenValid_ || !sameContent(rosterWritten_.entries, rosterWritten_.count, rosterWrittenAnchorMs_,
-                                           state_.roster.entries, state_.roster.count, state_.roster.anchorMs);
+  const bool changed = !rosterWrittenValid_ ||
+                       !sameContent(rosterWritten_.entries, rosterWritten_.count, rosterWrittenAnchorMs_,
+                                    state_.roster.entries, state_.roster.count, state_.roster.anchorMs);
   if (changed) {
     // Static, like every record buffer here: 1.7 KB is not the loop's to spend.
     static ColdRoster cold;
@@ -309,7 +310,8 @@ void GateApp::persistEvents() {
 
 void GateApp::loadCarriedEvents() {
   carriedCount_ = 0U;
-  if (blobs_ == nullptr || !sealedGet(*blobs_, kRecEvents, kEventsLayout, gEvents, gScratch, sizeof(gScratch))) {
+  if (blobs_ == nullptr ||
+      !sealedGet(*blobs_, kRecEvents, kEventsLayout, gEvents, gScratch, sizeof(gScratch))) {
     return;
   }
   for (uint16_t i = 0U; i < gEvents.count && i < kStoredEventSlots; ++i) {
@@ -375,7 +377,8 @@ bool GateApp::tagReplay(char* body, size_t cap, bool online) {
   if (len < 3U || strcmp(body + len - 3U, tail) != 0) {
     return false;
   }
-  const char* extra = online ? ",\"reason\":\"replayed\",\"online\":true" : ",\"reason\":\"replayed\",\"online\":false";
+  const char* extra =
+      online ? ",\"reason\":\"replayed\",\"online\":true" : ",\"reason\":\"replayed\",\"online\":false";
   const size_t add = strlen(extra);
   if (len + add + 1U > cap) {
     return false;
@@ -448,7 +451,8 @@ GateReport GateApp::report(GateDiag& diag) const {
 // --- the slow concerns -------------------------------------------------------
 
 bool GateApp::idle(uint32_t nowMs) const {
-  return !unlock_.released() && !unlock_.relocking(nowMs) && !assembler_.partial() && !anyInput_ && !setupOpen_;
+  return !unlock_.released() && !unlock_.relocking(nowMs) && !assembler_.partial() && !anyInput_ &&
+         !setupOpen_;
 }
 
 void GateApp::restart() {
@@ -509,7 +513,8 @@ void GateApp::pumpSetup(uint32_t nowMs) {
     char name[32] = {};
     const size_t macLen = mac_ == nullptr ? 0U : strlen(mac_);
     const char* last4 = macLen >= 4U ? mac_ + macLen - 4U : "0000";
-    static_cast<void>(snprintf(name, sizeof(name), "CRUSADERS-SETUP-%c%c%c%c", last4[0], last4[1], last4[2], last4[3]));
+    static_cast<void>(
+        snprintf(name, sizeof(name), "CRUSADERS-SETUP-%c%c%c%c", last4[0], last4[1], last4[2], last4[3]));
     for (size_t i = 16U; name[i] != '\0'; ++i) {
       if (name[i] >= 'a' && name[i] <= 'f') {
         name[i] = static_cast<char>(name[i] - 'a' + 'A');

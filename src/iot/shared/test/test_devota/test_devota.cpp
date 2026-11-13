@@ -35,7 +35,8 @@ corpus::File g_cases;
 corpus::File g_manifest;
 
 void load() {
-  TEST_ASSERT_TRUE_MESSAGE(g_cases.load("ota", "cases.json"), "ota corpus not found — a skipped corpus proves nothing");
+  TEST_ASSERT_TRUE_MESSAGE(g_cases.load("ota", "cases.json"),
+                           "ota corpus not found — a skipped corpus proves nothing");
   TEST_ASSERT_TRUE_MESSAGE(g_manifest.load("ota", "manifest.json"), "ota/manifest.json not found");
 }
 
@@ -155,7 +156,8 @@ void test_every_signature_verifies_or_is_refused_for_its_reason() {
     text(c, "reason", reason, sizeof(reason));
 
     char manifest[devota::kManifestCap] = {};
-    const size_t len = devota::manifestText(f.target, f.version, f.size, f.sha256, manifest, sizeof(manifest));
+    const size_t len =
+        devota::manifestText(f.target, f.version, f.size, f.sha256, manifest, sizeof(manifest));
     TEST_ASSERT_TRUE_MESSAGE(len > 0U, id);
     const devota::Refusal got = devota::verifySignature(manifest, len, sig, n);
     TEST_ASSERT_EQUAL_STRING_MESSAGE(reason, devota::refusalName(got), id);
@@ -273,12 +275,14 @@ void test_every_image_streams_hashes_and_verifies_in_any_chunking() {
     char target[32] = {};
     text(corpus::member(c, "offer"), "target", target, sizeof(target));
     devota::Offer offer;
-    TEST_ASSERT_EQUAL_STRING_MESSAGE("ok", devota::refusalName(devota::parseOffer(offerText, offerLen, target, offer)), id);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(
+        "ok", devota::refusalName(devota::parseOffer(offerText, offerLen, target, offer)), id);
 
     // Any chunking: a download arrives in whatever pieces TCP hands over.
     const size_t chunks[] = {1U, 7U, 64U, 1000U, len};
     for (size_t k = 0U; k < sizeof(chunks) / sizeof(chunks[0]); ++k) {
-      TEST_ASSERT_EQUAL_STRING_MESSAGE("ok", devota::refusalName(stream(image, len, chunks[k], offer, n)), id);
+      TEST_ASSERT_EQUAL_STRING_MESSAGE("ok", devota::refusalName(stream(image, len, chunks[k], offer, n)),
+                                       id);
     }
 
     // ONE TAMPERED BYTE anywhere — the first, a middle one, the last — is a
@@ -315,7 +319,8 @@ void test_every_corpus_section_is_declared_and_executed() {
       continue;
     }
     const bool known = strcmp(name, "manifests") == 0 || strcmp(name, "signatures") == 0 ||
-                       strcmp(name, "versions") == 0 || strcmp(name, "offers") == 0 || strcmp(name, "images") == 0;
+                       strcmp(name, "versions") == 0 || strcmp(name, "offers") == 0 ||
+                       strcmp(name, "images") == 0;
     TEST_ASSERT_TRUE_MESSAGE(known, "an ota/ section no test in this suite executes");
     ++seen;
   }
@@ -335,10 +340,13 @@ void test_every_corpus_section_is_declared_and_executed() {
   char prefix[64] = {};
   text(constants, "path_prefix", prefix, sizeof(prefix));
   TEST_ASSERT_EQUAL_STRING(devota::kPathPrefix, prefix);
-  TEST_ASSERT_EQUAL_UINT64(devota::kSigB64Len, corpus::unsignedValue(corpus::member(constants, "sig_b64_len")));
+  TEST_ASSERT_EQUAL_UINT64(devota::kSigB64Len,
+                           corpus::unsignedValue(corpus::member(constants, "sig_b64_len")));
   const char* maxBytes = corpus::member(constants, "target_max_bytes");
-  TEST_ASSERT_EQUAL_UINT64(devota::kCourtBridgeMaxBytes, corpus::unsignedValue(corpus::member(maxBytes, "court_bridge")));
-  TEST_ASSERT_EQUAL_UINT64(devota::kDoorGateMaxBytes, corpus::unsignedValue(corpus::member(maxBytes, "door_gate")));
+  TEST_ASSERT_EQUAL_UINT64(devota::kCourtBridgeMaxBytes,
+                           corpus::unsignedValue(corpus::member(maxBytes, "court_bridge")));
+  TEST_ASSERT_EQUAL_UINT64(devota::kDoorGateMaxBytes,
+                           corpus::unsignedValue(corpus::member(maxBytes, "door_gate")));
 }
 
 // --- beyond the corpus: properties the vectors cannot express ---------------
@@ -419,17 +427,20 @@ void test_an_offer_with_extra_keys_of_every_kind_is_read_for_its_own_fields() {
     text(offerObj, "sha256", sha, sizeof(sha));
     text(offerObj, "sig", sig, sizeof(sig));
     text(offerObj, "path", path, sizeof(path));
-    const unsigned long size = static_cast<unsigned long>(corpus::unsignedValue(corpus::member(offerObj, "size")));
+    const unsigned long size =
+        static_cast<unsigned long>(corpus::unsignedValue(corpus::member(offerObj, "size")));
     static char body[1400];
-    const int n = snprintf(body, sizeof(body),
-                           "{\"rollout\":{\"version\":\"9.9.9\",\"target\":\"court_box\",\"n\":[1,{\"size\":1}]},"
-                           "\"target\":\"%s\",\"note\":\"a \\\"quoted\\\" note\",\"version\":\"%s\","
-                           "\"weight\":1.5e3,\"size\":%lu,\"null_key\":null,\"sha256\":\"%s\",\"flag\":true,"
-                           "\"sig\":\"%s\",\"list\":[\"path\",\"/x\"],\"path\":\"%s\",\"zz\":false}",
-                           target, version, size, sha, sig, path);
+    const int n =
+        snprintf(body, sizeof(body),
+                 "{\"rollout\":{\"version\":\"9.9.9\",\"target\":\"court_box\",\"n\":[1,{\"size\":1}]},"
+                 "\"target\":\"%s\",\"note\":\"a \\\"quoted\\\" note\",\"version\":\"%s\","
+                 "\"weight\":1.5e3,\"size\":%lu,\"null_key\":null,\"sha256\":\"%s\",\"flag\":true,"
+                 "\"sig\":\"%s\",\"list\":[\"path\",\"/x\"],\"path\":\"%s\",\"zz\":false}",
+                 target, version, size, sha, sig, path);
     TEST_ASSERT_TRUE(n > 0 && static_cast<size_t>(n) < sizeof(body));
     devota::Offer offer;
-    TEST_ASSERT_EQUAL_STRING("ok", devota::refusalName(devota::parseOffer(body, static_cast<size_t>(n), target, offer)));
+    TEST_ASSERT_EQUAL_STRING(
+        "ok", devota::refusalName(devota::parseOffer(body, static_cast<size_t>(n), target, offer)));
     TEST_ASSERT_EQUAL_STRING(target, offer.target);
     TEST_ASSERT_EQUAL_STRING(version, offer.version);
     TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(size), offer.size);
@@ -454,9 +465,11 @@ void test_an_offer_with_extra_keys_of_every_kind_is_read_for_its_own_fields() {
 
 } // namespace
 
-void setUp() {}
+void setUp() {
+}
 
-void tearDown() {}
+void tearDown() {
+}
 
 int main(int, char**) {
   UNITY_BEGIN();

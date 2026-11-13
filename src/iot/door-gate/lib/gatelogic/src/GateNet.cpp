@@ -252,7 +252,8 @@ devnet::Refusal validatePortalForm(const PortalForm& form, devnet::NetSet& out) 
   const bool second = form.ssid2 != nullptr && form.ssid2[0] != '\0';
   if (!devapi::json::escapeInto(form.ssid ? form.ssid : none, strlen(form.ssid ? form.ssid : none), ssid,
                                 sizeof(ssid)) ||
-      !devapi::json::escapeInto(form.psk ? form.psk : none, strlen(form.psk ? form.psk : none), psk, sizeof(psk)) ||
+      !devapi::json::escapeInto(form.psk ? form.psk : none, strlen(form.psk ? form.psk : none), psk,
+                                sizeof(psk)) ||
       !devapi::json::escapeInto(form.ssid2 ? form.ssid2 : none, strlen(form.ssid2 ? form.ssid2 : none), ssid2,
                                 sizeof(ssid2)) ||
       !devapi::json::escapeInto(form.psk2 ? form.psk2 : none, strlen(form.psk2 ? form.psk2 : none), psk2,
@@ -263,13 +264,14 @@ devnet::Refusal validatePortalForm(const PortalForm& form, devnet::NetSet& out) 
   }
   int n = 0;
   if (second) {
-    n = snprintf(json, sizeof(json),
-                 "{\"ver\":1,\"base\":\"%s\",\"wifi0_ssid\":\"%s\",\"wifi0_psk\":\"%s\",\"wifi1_ssid\":\"%s\","
-                 "\"wifi1_psk\":\"%s\"}",
-                 base, ssid, psk, ssid2, psk2);
+    n = snprintf(
+        json, sizeof(json),
+        "{\"ver\":1,\"base\":\"%s\",\"wifi0_ssid\":\"%s\",\"wifi0_psk\":\"%s\",\"wifi1_ssid\":\"%s\","
+        "\"wifi1_psk\":\"%s\"}",
+        base, ssid, psk, ssid2, psk2);
   } else {
-    n = snprintf(json, sizeof(json), "{\"ver\":1,\"base\":\"%s\",\"wifi0_ssid\":\"%s\",\"wifi0_psk\":\"%s\"}", base,
-                 ssid, psk);
+    n = snprintf(json, sizeof(json), "{\"ver\":1,\"base\":\"%s\",\"wifi0_ssid\":\"%s\",\"wifi0_psk\":\"%s\"}",
+                 base, ssid, psk);
   }
   if (n < 0 || static_cast<size_t>(n) >= sizeof(json)) {
     return devnet::Refusal::TooLong;

@@ -188,8 +188,8 @@ inline constexpr char kGateCapsV3[] = ",\"caps\":[\"codes:m1\",\"ota:1\",\"key:1
 
 /// The 2.0.0 heartbeat request (`gate/` `gate-heartbeat-request-v3*`). 0 when
 /// it does not fit `cap`, which is kGateHeartbeatRequestCap on the board.
-size_t renderGateHeartbeatV3(char* out, size_t cap, const char* mac, const char* firmwareVersion, uint64_t uptimeMs,
-                             const GateDiagnostics& counters, const GateReport& report);
+size_t renderGateHeartbeatV3(char* out, size_t cap, const char* mac, const char* firmwareVersion,
+                             uint64_t uptimeMs, const GateDiagnostics& counters, const GateReport& report);
 
 bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs);
 

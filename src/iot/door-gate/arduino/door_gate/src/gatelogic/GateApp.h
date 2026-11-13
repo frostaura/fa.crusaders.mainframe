@@ -382,16 +382,24 @@ public:
   /// warm / cold / none: what this boot ran on before its first accepted
   /// heartbeat. Null once one has been accepted.
   const char* restoreReport() const { return restoreReported_ ? nullptr : restore_; }
+
   /// Names not read in the last answer, reported in the next request.
   const Drift& drift() const { return drift_; }
+
   const GateBoardState& boardState() const { return state_; }
+
   const GateOta& ota() const { return ota_; }
+
   bool setupOpen() const { return setupOpen_; }
+
   bool degraded() const { return degraded_; }
+
   /// Undelivered events carried over from earlier boots.
   uint16_t carriedEvents() const { return carriedCount_; }
+
   /// Times the supervisor re-joined the radio, and asked for a restart.
   uint32_t radioRejoins() const { return rejoins_; }
+
   uint32_t restartsAsked() const { return restartsAsked_; }
 
   /// The fault aggregator, for the host suite and the simulator's console.
@@ -440,7 +448,6 @@ private:
 
   void applyEventReaction(uint16_t status, const char* response);
 
-
   /// Arms or clears the drain's backoff, from whether the post that just
   /// finished actually MOVED the queue. Not from its status: a 200 that
   /// acknowledges nothing leaves the head exactly where a 429 does.
@@ -472,14 +479,17 @@ private:
   class Between final : public GateApi::IBetweenCalls {
   public:
     explicit Between(GateApp& app) : app_(app) {}
+
     void betweenCalls() override;
 
   private:
     GateApp& app_;
   };
+
   class DownloadHooks final : public GateOta::Hooks {
   public:
     explicit DownloadHooks(GateApp& app) : app_(app) {}
+
     void duringDownload() override;
 
   private:
@@ -759,12 +769,14 @@ private:
   /// Events carried from earlier boots, oldest first.
   StoredEvent carried_[kStoredEventSlots];
   uint16_t carriedCount_ = 0U;
+
   /// MCV1-10: this boot's queued refusals that were replays, and whether the
   /// link was up when they were refused. By sequence number.
   struct ReplayTag {
     uint32_t seq;
     bool online;
   };
+
   static constexpr uint8_t kReplayTags = 16U;
   ReplayTag replayTags_[kReplayTags] = {};
   uint8_t replayTagNext_ = 0U;
