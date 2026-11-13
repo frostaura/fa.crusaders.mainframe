@@ -1188,7 +1188,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-cmt-has-no-legacy-form",
@@ -1204,7 +1204,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-want-has-no-legacy-form",
@@ -1220,7 +1220,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-cfg-has-no-legacy-form",
@@ -1234,7 +1234,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-land-has-no-legacy-form",
@@ -1249,7 +1249,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-note-has-no-legacy-form",
@@ -1262,7 +1262,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-live-has-no-legacy-form",
@@ -1274,7 +1274,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-ack-has-no-legacy-form",
@@ -1287,7 +1287,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-boot-has-no-legacy-form",
@@ -1301,7 +1301,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-held-has-no-legacy-form",
@@ -1314,7 +1314,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     },
     {
       "id": "v3-encl-diag-has-no-legacy-form",
@@ -1330,7 +1330,7 @@
         ]
       },
       "cap": 4096,
-      "bytes": null
+      "bytes": ""
     }
   ],
   "decode": [
