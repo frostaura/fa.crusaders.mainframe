@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-frontend-bundle
 description: "What loads first and why: shell and My Code in the entry, the admin frame one lazy chunk, 4 icon weights, our own Archivo/JetBrains cuts; first load 557 → 304 (P10) → 255 kB, then 271 → 263 KiB gzip (R7)."
 type: decision
-last_verified: 2026-10-03
+last_verified: 2026-11-13
 ---
 
 # Live decisions — the frontend bundle
@@ -27,8 +27,8 @@ entry → 304 kB. Perf lane 2026-09-30: 328 → 255 kB. R7 (FD2), gzip -9 KiB on
   `lib/bellCopy` (29 kB of `playersCopy` in the entry once); R7: the admin badge's disputes
   sentence moved from `playCopy` into `lib/adminAttention` (−5 KiB first load).
   `src/entryGraph.test.ts` walks `main.tsx`'s static value imports and fails if `playCopy` re-enters.
-  Still in the entry by the same mistake (asked of FB/FD1, R7): `walletCopy` → `firstName`
-  (PLAYERS_COPY) and `PendingInviteNote` → `INVITES_COPY` — measured −12.4 KiB together.
+- **Admin doors code is lazy (go-live FM-6):** the badge reaches the doors store via `import()`, the
+  shut banner is `shell/AdminDoorsBanner`; ~30 kB had put the entry at 503.4 kB (now 480.0 / 151.5 gz).
 - **The display and code faces are our own Latin cuts (R7, `src/assets/fonts/`, recipe in
   `index.css`).** Archivo instanced to wght 600–800 / wdth 100–112 % (90 → 37.5 kB), JetBrains Mono
   to wght 400–700 without `calt` ligatures (40 → 14.4 kB); latin-ext/vietnamese stay Fontsource's.
