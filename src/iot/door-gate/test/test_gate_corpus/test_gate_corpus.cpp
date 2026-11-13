@@ -43,6 +43,7 @@
 #include "devnet/Net.h"
 #include "devota/Ota.h"
 #include "eventq/Event.h"
+#include "gatelogic/GateApp.h"
 #include "gatelogic/GateConfig.h"
 #include "gatelogic/GateFlow.h"
 #include "gatelogic/GateHeartbeat.h"
@@ -288,7 +289,7 @@ void executeScanRequest(const char* expected, size_t expectedLen, const char* ma
 /// endpoint's body — rendered by the SAME device-agnostic renderer the court
 /// box uses, which is the point of it being device-agnostic.
 void executeGateOpenEventRequest(const char* expected, size_t expectedLen, const char* mac,
-                                 eventq::Kind kind) {
+                                 eventq::Kind kind, bool replayedOnline = false) {
   uint32_t batchUptime = 0U;
   TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(expected, expectedLen, "uptime_ms", batchUptime));
 
@@ -355,8 +356,12 @@ void executeGateOpenEventRequest(const char* expected, size_t expectedLen, const
   TEST_ASSERT_EQUAL_UINT8(eventq::Event::kNoCourt, event.court);
 
   char rendered[devlink::kEventBodyCap] = {};
-  const size_t written =
-      devlink::renderEventBody(rendered, sizeof(rendered), mac, bootId, batchUptime, event);
+  size_t written = devlink::renderEventBody(rendered, sizeof(rendered), mac, bootId, batchUptime, event);
+  if (replayedOnline) {
+    // MCV1-10: the same body, tagged by the function the upload path calls.
+    TEST_ASSERT_TRUE(gatelogic::GateApp::tagReplay(rendered, sizeof(rendered), true));
+    written = strlen(rendered);
+  }
   TEST_ASSERT_EQUAL_size_t(expectedLen, written);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
 }
@@ -424,6 +429,9 @@ void test_every_request_vector_is_rendered_byte_for_byte() {
       // is pinned on the wire rather than only in a fuzz loop.
       TEST_ASSERT_EQUAL_STRING(gatelogic::kPathEvents, path);
       executeGateOpenEventRequest(expected, expectedLen, mac, eventq::Kind::UnknownScan);
+    } else if (strcmp(id, "gate-events-request-replayed") == 0) {
+      TEST_ASSERT_EQUAL_STRING(gatelogic::kPathEvents, path);
+      executeGateOpenEventRequest(expected, expectedLen, mac, eventq::Kind::UnknownScan, true);
     } else {
       // Never a skip. A vector this build does not recognise is a contract this
       // build does not implement, and saying so is the whole point.

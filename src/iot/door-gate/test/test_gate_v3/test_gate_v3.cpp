@@ -1160,7 +1160,8 @@ void test_an_online_replay_is_uploaded_as_replayed() {
   for (const Call& c : b.server.calls) {
     tagged =
         tagged || (c.path == gatelogic::kPathEvents && c.body.find("\"unknown_scan\"") != std::string::npos &&
-                   c.body.find("\"reason\":\"replayed\",\"online\":true}") != std::string::npos);
+                   c.body.find("\"cause\":\"replayed\",\"online\":true}") != std::string::npos &&
+                   c.body.find("\"reason\"") == std::string::npos);
   }
   TEST_ASSERT_TRUE_MESSAGE(tagged, "1.1.2 uploaded this as an untagged offline unknown_scan");
 }

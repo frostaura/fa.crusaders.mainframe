@@ -936,7 +936,10 @@ Each is a server behaviour; none changes a byte the corpus holds.
   compose held `CHANGE-ME`, and a master key changed after members enrol rotates every secret
   (§3.1). Set it once, before the first member's code is derived.
 - **A door's local replay refusal made while online is uploaded as `replayed`**, not as an offline
-  `unknown_scan`, and the activity view says so (MCV1-10).
+  `unknown_scan`, and the activity view says so (MCV1-10). The wire is the `unknown_scan` event
+  with the v3 event field `"cause":"replayed"` and the link state as `"online"`, after
+  `duration_ms` — pinned by `gate/` vector `gate-events-request-replayed`, which the gate renders
+  byte for byte and the server binds.
 - **One cue window.** The pay-for's search, its activate-or-reassign choice and the activation
   gate all read `BookingCodeWindow.CueMinutes` (clamped), so a hand-edited value cannot make them
   disagree.

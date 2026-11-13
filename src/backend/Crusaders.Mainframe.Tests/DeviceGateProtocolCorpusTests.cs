@@ -168,6 +168,14 @@ public class DeviceGateProtocolCorpusTests
         // scanned, not as the bytes that were sent: a quote inside a token is a quote, and a
         // corpus that only ever carried safe subjects would be pinning nothing.
         Assert.Equal("A\"B", refusal.Subject);
+
+        // MCV1-10: an online replay refusal is the same unknown_scan with the v3 event field
+        // `cause` = "replayed" — the field the server reads to record `replayed` rather than
+        // `refused_offline`. The gate's first 2.0.0 cut wrote `reason`, which binds to nothing.
+        var replay = Assert.Single(JsonSerializer.Deserialize<DeviceEventBatch>(
+            Body("requests", "gate-events-request-replayed"))!.Events!);
+        Assert.Equal(DeviceEventEndpoints.UnknownScanKind, replay.Kind);
+        Assert.Equal("replayed", replay.Cause);
     }
 
     // ---- Response bodies ---------------------------------------------------

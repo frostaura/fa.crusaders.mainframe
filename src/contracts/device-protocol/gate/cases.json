@@ -59,6 +59,14 @@
       "body_hex": "7b226d6163223a22356363663766306131623263222c22757074696d655f6d73223a38363430303030302c226576656e7473223a5b7b22736571223a382c22757074696d655f6d73223a38363339303030302c226b696e64223a22756e6b6e6f776e5f7363616e222c22636f757274223a2d312c226d6574686f64223a227172222c227375626a656374223a22415c2242222c226475726174696f6e5f6d73223a307d5d7d"
     },
     {
+      "id": "gate-events-request-replayed",
+      "note": "MCV1-10: a replay the door refused from its OWN state while its link was up. It is the `unknown_scan` event every offline refusal already is, with the v3 event field `cause` set to `replayed` and the link as it was (`online`), appended inside the event after `duration_ms`. The server re-checks the code as for any offline refusal and records the outcome `replayed` rather than `refused_offline`, which is what lets the console say 'code used again' instead of 'the door could not check it'. `cause` is the one additive field every v3 event has (a court box's release carries it too); the gate's first 2.0.0 cut sent `reason` instead, which the server ignores as unknown — so the wire is pinned here, on both sides.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/events",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c22626f6f745f6964223a323539363036393130342c22757074696d655f6d73223a38363430303030302c226576656e7473223a5b7b22736571223a392c22757074696d655f6d73223a38363339353030302c226b696e64223a22756e6b6e6f776e5f7363616e222c22636f757274223a2d312c226d6574686f64223a227172222c227375626a656374223a223141424344454647484a4b4d4e505152535455222c226475726174696f6e5f6d73223a302c226361757365223a227265706c61796564222c226f6e6c696e65223a747275657d5d7d"
+    },
+    {
       "id": "gate-heartbeat-request-v3",
       "note": "gate 2.0.0 on a quiet beat. The 1.x fields, then fw_state, net_ver and net_src, then caps LAST. `caps` names every v3 capability the image has; the server keys every new response field on it, so a 1.x gate is answered exactly as before.",
       "method": "POST",

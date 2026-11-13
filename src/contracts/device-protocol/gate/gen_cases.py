@@ -261,6 +261,39 @@ requests = [
             }],
         }),
     },
+    {
+        "id": "gate-events-request-replayed",
+        "note": (
+            "MCV1-10: a replay the door refused from its OWN state while its link was up. It is the "
+            "`unknown_scan` event every offline refusal already is, with the v3 event field `cause` "
+            "set to `replayed` and the link as it was (`online`), appended inside the event after "
+            "`duration_ms`. The server re-checks the code as for any offline refusal and records "
+            "the outcome `replayed` rather than `refused_offline`, which is what lets the console "
+            "say 'code used again' instead of 'the door could not check it'. `cause` is the one "
+            "additive field every v3 event has (a court box's release carries it too); the gate's "
+            "first 2.0.0 cut sent `reason` instead, which the server ignores as unknown — so the "
+            "wire is pinned here, on both sides."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/events",
+        "authorization": BEARER,
+        "body_hex": body_hex({
+            "mac": MAC,
+            "boot_id": 2596069104,
+            "uptime_ms": 86400000,
+            "events": [{
+                "seq": 9,
+                "uptime_ms": 86395000,
+                "kind": "unknown_scan",
+                "court": -1,
+                "method": "qr",
+                "subject": "1ABCDEFGHJKMNPQRSTU",
+                "duration_ms": 0,
+                "cause": "replayed",
+                "online": True,
+            }],
+        }),
+    },
 ]
 
 # The WORST case this response can be, not a representative one. A budget pinned by a
