@@ -64,6 +64,9 @@ public static class PlayerErrors
     public const string PayerOverridden = "booking_payer_overridden";
     public const string ShareChanged = "share_changed";
     public const string ExpectedShareRequired = "expected_share_required";
+
+    /// <summary>Pay what you can: the part named is not a whole part of the share (see <see cref="PayWhatYouCan"/>).</summary>
+    public const string PayMinutesInvalid = "pay_minutes_invalid";
     public const string PreviouslyDeclined = "player_previously_declined";
     public const string PreviouslyRemoved = "player_previously_removed";
     public const string InviteLimit = "player_invite_limit";
@@ -103,4 +106,18 @@ public static class InviteTokens
     /// <summary>A token is 22 base64url characters. Anything else is refused before it reaches the database.</summary>
     public static bool LooksValid(string? token) =>
         token is { Length: 22 } t && t.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
+}
+
+/// <summary>
+/// Pay what you can (players-and-splits.md §4): a partner short of their share pays part of it and
+/// the others decide how to split the rest.
+/// </summary>
+public static class PayWhatYouCan
+{
+    /// <summary>
+    /// A part the partner may pay: more than nothing, less than the whole share (that is a plain
+    /// accept), and never below what the seat has already paid — a part payment takes nothing back.
+    /// </summary>
+    public static bool IsValid(int pay, int shareMinutes, int paidMinutes) =>
+        pay > 0 && pay < shareMinutes && pay >= paidMinutes;
 }

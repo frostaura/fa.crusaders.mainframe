@@ -9,6 +9,7 @@ import { Bell, ShareNetwork, SlidersHorizontal, UserMinus, UserPlus } from "@/co
 import { MAX_SEATS, type DetailPlayer } from "@/lib/playersApi";
 import { CHANGE_SPLIT, DETAIL_ACTIONS, PLAYERS_UNSURE, playersRefusal, playersWhen } from "@/lib/playersCopy";
 import { ChangeSplitDialog } from "./ChangeSplitDialog";
+import { SplitLeftoverDialog } from "./LeftToCover";
 import { canNudge, canRemove, canShareLink, isCancelled, isLive, liveCount, seatName } from "./detailModel";
 import { ShareAskDialog } from "./ShareAskDialog";
 import { ShareLinkDialog } from "./ShareLinkDialog";
@@ -94,6 +95,12 @@ export function OrganiserDialogs({ hands }: { hands: OrganiserHands }) {
         <ChangeSplitDialog
           detail={detail} onClose={hands.closeSplit} onDone={hands.splitDone} onStale={hands.reload}
           onBusyChange={hands.setSplitBusy} refused={hands.splitRefused}
+        />
+      ) : null}
+      {hands.splittingLeft ? (
+        <SplitLeftoverDialog
+          detail={detail} onClose={hands.closeLeftover} onDone={hands.leftoverDone} onStale={hands.reload}
+          onBusyChange={hands.setLeftoverBusy} refused={hands.leftoverRefused}
         />
       ) : null}
       {hands.removing ? <RemoveDialog hands={hands} player={hands.removing} /> : null}

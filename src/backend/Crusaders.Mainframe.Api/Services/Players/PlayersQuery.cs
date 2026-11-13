@@ -197,6 +197,9 @@ public sealed partial class PlayersQuery
                 // paid and how much, instead of labelling the PAYER's charge "You paid at booking".
                 paid_by = cost.PaidBy is { } payer ? Member(payer, people) : null,
                 paid_by_minutes = cost.PaidBy is null ? 0 : owed,
+                // Pay what you can: the minutes partners could not pay that the organiser is covering
+                // until they split them — only while the game still takes payments.
+                left_to_cover_minutes = LeftToCover(booking, seats),
             },
             attendance = new
             {
@@ -384,6 +387,15 @@ public sealed partial class PlayersQuery
         return await _ledger.GetSpendableAsync(partner, ct) < due;
     }
 
+    /// <summary>
+    /// Pay what you can: Σ the live partners' shortfalls — what the organiser covers until they split
+    /// it — while the game still takes payments (booked or played); nothing on a game that is off.
+    /// </summary>
+    private static int LeftToCover(Booking booking, IEnumerable<BookingParticipant> seats) =>
+        booking.Status is BookingStatus.Booked or BookingStatus.Completed
+            ? seats.Where(s => s.IsPartner && s.IsLive).Sum(s => s.ShortfallMinutes)
+            : 0;
+
     private static object SeatView(Booking booking, BookingParticipant s, Dictionary<Guid, PublicMember> people, SeatMoney money, SeatTold told)
     {
         var (paid, target, unpaid) = (money.Paid, money.Target, money.Unpaid);
@@ -407,6 +419,9 @@ public sealed partial class PlayersQuery
             // F2-4: share minutes that came BACK to this seat — paid_minutes nets them out, so a
             // cancelled game read "paid 0" with no word of the refund.
             returned_minutes = money.Returned,
+            // Pay what you can: what this partner could not pay of the share they were asked for, which the
+            // organiser covers until they re-split. Nothing on a seat that is off the game.
+            shortfall_minutes = s.IsLive ? s.ShortfallMinutes : 0,
             // R16 J16-1: the one rule (PlayerNotices.NeedsConsent) — a share settled by hand asks nothing.
             needs_consent = s.IsPartner && PlayerNotices.NeedsConsent(booking, s),
             share_changed_by = told.Changer.By,
@@ -444,6 +459,7 @@ public sealed partial class PlayersQuery
             target_minutes = 0,
             unpaid_minutes = 0,
             returned_minutes = 0,
+            shortfall_minutes = 0,
             needs_consent = false,
             settled_outside = false,
             lapsed = false,

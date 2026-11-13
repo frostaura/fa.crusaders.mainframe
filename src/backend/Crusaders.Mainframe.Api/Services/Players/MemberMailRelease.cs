@@ -61,6 +61,7 @@ public static class MemberMailRelease
     public const string ReturnPosted = "return_posted";
     public const string ResultNotPending = "result_not_pending";
     public const string NotAsked = "not_asked";
+    public const string ShortfallSplit = "shortfall_split";
 
     /// <summary>The kinds whose later mail about the same booking replaces an earlier one still waiting.</summary>
     private static readonly HashSet<string> Coalesced = new(StringComparer.Ordinal)
@@ -89,6 +90,8 @@ public static class MemberMailRelease
                 return await ReturnWaitingAsync(c, ct);
             case MemberEventCatalogue.ResultToConfirm:
                 return await ResultToConfirmAsync(c, ct);
+            case MemberEventCatalogue.Shortfall:
+                return await ShortfallAsync(c, ct);
             default:
                 return ReleaseVerdict.Send(row.PayloadJson);
         }
@@ -223,6 +226,19 @@ public static class MemberMailRelease
     }
 
     /// <summary>"Your money is waiting" is dropped once it is not: the return posted, or is no longer due.</summary>
+    /// <summary>
+    /// "Part of a share is left to cover" only while it still is: once the organiser has split it (any
+    /// re-split clears every seat's shortfall), or the seat or the game is gone, the mail says nothing new.
+    /// </summary>
+    private static async Task<ReleaseVerdict> ShortfallAsync(ReleaseContext c, CancellationToken ct)
+    {
+        var p = Read<ShortfallPayload>(c.Row);
+        var (booking, seat) = await GameAndSeatAsync(c, p.BookingId, p.SeatId, ct);
+        if (booking is null || seat is null || !seat.IsLive) return ReleaseVerdict.Drop(SeatGone);
+        if (!GameOn(booking)) return ReleaseVerdict.Drop(GameOff);
+        return seat.ShortfallMinutes > 0 ? ReleaseVerdict.Send(c.Row.PayloadJson) : ReleaseVerdict.Drop(ShortfallSplit);
+    }
+
     private static async Task<ReleaseVerdict> ReturnWaitingAsync(ReleaseContext c, CancellationToken ct)
     {
         var p = Read<ReturnWaitingPayload>(c.Row);

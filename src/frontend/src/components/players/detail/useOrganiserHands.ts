@@ -115,8 +115,11 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, pag
   const [nudgingId, setNudgingId] = useState<string | null>(null);
   const [asking, setAsking] = useState<PickedPlayer | null>(null);
   const [changingSplit, setChangingSplit] = useState(false);
+  // Pay what you can — "Split what's left", its own dialog over the same split route.
+  const [splittingLeft, setSplittingLeft] = useState(false);
   const removeGuard = useGuardedDialog(removing !== null, () => setRemoving(null), "remove-player");
   const splitGuard = useGuardedDialog(changingSplit, () => setChangingSplit(false), "change-split");
+  const leftGuard = useGuardedDialog(splittingLeft, () => setSplittingLeft(false), "split-leftover");
 
   // R3 lost-reply audit — an add whose reply was lost is looked for on the booking.
   const invite = useAsyncAction(
@@ -202,6 +205,13 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, pag
     /** The split dialog reports its save in flight, so the system Back waits too (I5-2). */
     setSplitBusy: splitGuard.setBusy,
     splitRefused: splitGuard.refused,
+    splittingLeft,
+    openLeftover: () => setSplittingLeft(true),
+    /** Refused (false) while the save is on its way. */
+    closeLeftover: () => { leftGuard.tryClose(); },
+    leftoverDone: (notice: Notice) => { leftGuard.setBusy(false); setSplittingLeft(false); say(notice); reload(); },
+    setLeftoverBusy: leftGuard.setBusy,
+    leftoverRefused: leftGuard.refused,
     invitePending: invite.pending,
     nudge,
     isNudging: (p: DetailPlayer) => nudge.pending && nudgingId === p.participant_id,

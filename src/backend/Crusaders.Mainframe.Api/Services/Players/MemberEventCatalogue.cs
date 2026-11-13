@@ -45,6 +45,11 @@ public sealed record SharePayload(
     public string? Joined { get; init; }
 }
 
+/// <summary>Pay what you can: a partner paid part of their share; the rest is left for the organiser to cover or split.</summary>
+public sealed record ShortfallPayload(
+    Guid BookingId, string PartnerName, string CourtName, string StartsAtLocal, int PaidMinutes, int ShareMinutes, int ShortfallMinutes,
+    Guid SeatId);
+
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
 public sealed record ClubSeatPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, int ShareMinutes, bool Accepted, string Path,
@@ -146,6 +151,13 @@ public static class MemberEventCatalogue
     public const string ReturnWaiting = "players.return_waiting";
 
     /// <summary>
+    /// Pay what you can: a partner could pay only part of their share, and the organiser — who covers
+    /// the rest until they split it — is told so, with the booking to split it from. Mailed, not urgent;
+    /// dropped at release once the organiser has split it (<see cref="MemberMailRelease"/>).
+    /// </summary>
+    public const string Shortfall = "players.shortfall";
+
+    /// <summary>
     /// A partner's answer — accepted, declined, withdrew — told to the organiser on the INBOX only.
     /// It moves no money (a payment has its own receipt), and a mail per answer is how an organiser
     /// learns to ignore the club's mail.
@@ -172,7 +184,7 @@ public static class MemberEventCatalogue
 
     /// <summary>The kinds that are mailed. <see cref="Response"/> and the inbox-only play kinds never reach the outbox.</summary>
     public static readonly IReadOnlyList<string> All =
-        [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting, ResultToConfirm, ClubSeat];
+        [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting, ResultToConfirm, ClubSeat, Shortfall];
 
     private static readonly HashSet<string> Urgent = new(StringComparer.Ordinal) { ShareMoved, GameCancelled };
 
@@ -202,6 +214,8 @@ public static class MemberEventCatalogue
                 return ComposeResultToConfirm(c);
             case ClubSeat:
                 return ComposeClubSeat(c);
+            case Shortfall:
+                return ComposeShortfall(c);
             default:
                 throw new InvalidOperationException($"no message for member notice kind '{c.Row.Kind}'");
         }
@@ -240,6 +254,13 @@ public static class MemberEventCatalogue
         var p = c.Payload<ClubSeatPayload>();
         return EmailTemplates.ClubSeat(c.Club, c.To, new ClubSeatNotice(
             p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareMinutes, p.Accepted, c.BaseUrl + p.Path));
+    }
+
+    private static EmailMessage ComposeShortfall(MemberMailContext c)
+    {
+        var p = c.Payload<ShortfallPayload>();
+        return EmailTemplates.ShareShortfall(c.Club, c.To, new ShareShortfallNotice(
+            p.PartnerName, p.CourtName, p.StartsAtLocal, p.PaidMinutes, p.ShareMinutes, p.ShortfallMinutes, c.BookingUrl(p.BookingId)));
     }
 
     private static EmailMessage ComposeReminder(MemberMailContext c)

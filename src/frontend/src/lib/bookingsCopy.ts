@@ -130,6 +130,21 @@ export function bookedByLabel(where: string, firstName: string | null): string {
   return `${where} — booked by ${firstName ?? "another member"}`;
 }
 
+/** Another member's booking, as a MEMBER presses it: the player card opens. */
+export function bookedByOpenLabel(where: string, firstName: string | null): string {
+  return `${where} — booked by ${firstName ?? "another member"}. Show who is playing`;
+}
+
+/** The card a member's tap on somebody else's booking opens — photo, first name and when. */
+export const PLAYER_CARD = {
+  someone: "Another member",
+  booked: "Has this court booked",
+  onCourtBadge: "Playing now",
+  court: "Court",
+  day: "Day",
+  time: "Time",
+} as const;
+
 export function continuesLabel(where: string, mine: boolean): string {
   return mine ? `${where} — continues, your booking` : `${where} — continues, reserved`;
 }
