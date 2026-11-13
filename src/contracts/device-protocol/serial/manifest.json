@@ -2,7 +2,7 @@
   "description": "Line protocol between the ATmega2560 and the ESP8266 over Serial3 at 9600 baud. C++ only: both ends of that link are firmware.",
   "authority": "docs/specs/device-serial-protocol.md — the spec is the contract; src/iot/court-box/lib/protocol is the implementation, not the reference.",
   "case_count": {
-    "encode": 59,
-    "decode": 81
+    "encode": 101,
+    "decode": 137
   }
 }

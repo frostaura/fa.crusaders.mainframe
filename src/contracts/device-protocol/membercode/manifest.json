@@ -107,8 +107,17 @@
         "csharp"
       ],
       "case_count": {
-        "requests": 8,
-        "responses": 29
+        "requests": 5,
+        "responses": 9
+      }
+    },
+    "payfor.json": {
+      "read_by": [
+        "csharp"
+      ],
+      "case_count": {
+        "requests": 3,
+        "responses": 20
       }
     },
     "gate.json": {

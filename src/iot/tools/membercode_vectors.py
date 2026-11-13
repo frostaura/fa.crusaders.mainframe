@@ -939,7 +939,7 @@ def payfor_request(tok, court, confirm, scan_age=None, label=None):
     return body
 
 
-def http_cases():
+def _court_box_http_all():
     v1 = DEAN.token(ANCHOR_STEP)
     reqs = []
 
@@ -1147,9 +1147,35 @@ def http_cases():
        {"paid": False, "reason": "code_used", "court_number": 2},
        {"outcome": "refused", "screen": "CodeUsed", "rows": ["CODE USED", "WAIT 30 SECONDS"],
         "spends_scan": True})
+    return {"device_mac": MAC, "requests": reqs, "responses": resps}
+
+
+def _is_payfor(case):
+    return case["id"].startswith("payfor-") or case.get("kind", "").startswith("payfor_")
+
+
+def http_cases():
+    """The court box's member-code bodies. D10 pay-for is NOT here: the court-box image stopped
+    implementing it at bridge 3.0.0 (founder, 2026-11-13 — it had been unreachable from the panel
+    since 2.3.0), so its vectors moved to payfor.json, which only the server reads. A vector the box
+    can no longer execute is one its executed == declared count would have to skip."""
+    doc = _court_box_http_all()
     return {"description": "The court box's HTTP bodies for member codes: the capability on the heartbeat, "
-            "the code sync in its answer, scan_age_ms on the three paths that carry a scan, and the two-step "
-            "D10 pay-for.", "device_mac": MAC, "requests": reqs, "responses": resps}
+            "the code sync in its answer, and scan_age_ms on the paths that carry a scan.",
+            "device_mac": doc["device_mac"],
+            "requests": [c for c in doc["requests"] if not _is_payfor(c)],
+            "responses": [c for c in doc["responses"] if not _is_payfor(c)]}
+
+
+def payfor_cases():
+    """D10 pay-for at the box (member-code.md section 9): the server still serves /api/v1/device/pay-for and
+    is held to these bodies; no shipped court-box image after 2.3.0 sends them. Kept, not deleted, because the
+    flow can return by a bridge OTA alone — it needs nothing from the Mega that v3 does not already render."""
+    doc = _court_box_http_all()
+    return {"description": "D10 pay-for at the box: the two-step quote and confirm, held by the server only.",
+            "device_mac": doc["device_mac"],
+            "requests": [c for c in doc["requests"] if _is_payfor(c)],
+            "responses": [c for c in doc["responses"] if _is_payfor(c)]}
 
 
 # --------------------------------------------------------------------------
@@ -1262,6 +1288,7 @@ FILES = [
     ("roster.json", roster_cases, ["fw-shared", "csharp"]),
     ("codesync.json", codesync_cases, ["fw-shared", "csharp"]),
     ("http.json", http_cases, ["fw-court-box", "csharp"]),
+    ("payfor.json", payfor_cases, ["csharp"]),
     ("gate.json", gate_cases, ["fw-door-gate", "csharp"]),
 ]
 

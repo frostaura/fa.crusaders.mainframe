@@ -1,6 +1,6 @@
 .PHONY: install install-iot lint lint-backend lint-frontend lint-iot format-iot build build-iot \
         sweep-icloud \
-        test test-iot test-iot-asan test-integration test-integration-sharded test-classes test-e2e test-e2e-device complexity corpus-check \
+        test test-iot test-iot-asan test-integration test-integration-sharded test-classes test-e2e test-e2e-device complexity corpus-check device-replay-check \
         arduino-export arduino-check flash-mega flash-bridge monitor-bridge \
         virt-up virt-down ci-status up down down-reset clean
 
@@ -326,21 +326,60 @@ test-classes:
 # the whole directory, not a list: a family that gains a file must not be able
 # to gain it silently.
 MEMBERCODE_CORPUS = src/contracts/device-protocol/membercode
+#
+# THE V3 FAMILIES — `ota/`, `provision/`, `display/` — are each the reference
+# implementation of what they pin (signing, adoption, landing composition), so a
+# generator edited and not run is a contract nobody implements. Whole directories,
+# for the same reason as membercode/.
+V3_CORPUS = src/contracts/device-protocol/ota \
+	src/contracts/device-protocol/provision \
+	src/contracts/device-protocol/display \
+	src/contracts/device-protocol/compat
 CORPUS_GENERATED = $(IOT_DIR)/court-box/test/test_protocol/corpus_generated.h \
 	src/contracts/device-protocol/gate/cases.json \
 	src/contracts/device-protocol/gate/manifest.json \
-	$(MEMBERCODE_CORPUS)
+	$(MEMBERCODE_CORPUS) \
+	$(V3_CORPUS)
 
 corpus-check:
 	$(PY) $(IOT_TOOLS)/gen_corpus.py
 	$(PY) src/contracts/device-protocol/gate/gen_cases.py
 	$(PY) $(IOT_SHARED_TOOLS)/membercode_vectors.py
+	$(PY) src/contracts/device-protocol/ota/gen_cases.py
+	$(PY) src/contracts/device-protocol/provision/gen_cases.py
+	$(PY) src/contracts/device-protocol/display/gen_cases.py
+	$(PY) src/contracts/device-protocol/compat/gen_cases.py
 	@git diff --exit-code --stat -- $(CORPUS_GENERATED) \
 	  || (echo "generated corpus files are stale — rerun the generators and commit" && exit 1)
 	@untracked="$$(git ls-files --others --exclude-standard -- $(CORPUS_GENERATED))"; \
 	if [ -n "$$untracked" ]; then \
 	  echo "a generator produced files that are not committed:"; echo "$$untracked"; exit 1; \
 	fi
+
+# The server's REAL replies through the frozen firmware's REAL parsers
+# (docs/specs/device-api.md section 11). The corpus pins bytes someone wrote down;
+# this pins the bytes the server actually serialises today, for every heartbeat,
+# activate, walk-up, extend, events and gate reply the emitter's scenario matrix
+# produces, read by the bridge's and the gate's own host-compiled parsers. A
+# server change that a box in the field could not read goes red HERE, before it
+# is deployed to a club whose Mega can never be reflashed.
+#
+# Three steps, one directory: the backend's DeviceReplyEmitterTests write one
+# file per reply plus an index.json (Postgres-backed, so it needs
+# API_BOUNDARY_TEST_CONNECTION_STRING), then each firmware's native suite reads
+# every file the index names and fails if it read fewer.
+DEVICE_REPLAY_DIR ?= $(CURDIR)/.tmp/device-replay
+device-replay-check:
+	@test -n "$$API_BOUNDARY_TEST_CONNECTION_STRING" \
+	  || (echo "device-replay-check needs API_BOUNDARY_TEST_CONNECTION_STRING (a Postgres server)" && exit 1)
+	rm -rf "$(DEVICE_REPLAY_DIR)" && mkdir -p "$(DEVICE_REPLAY_DIR)"
+	cd src/backend && DEVICE_REPLAY_DIR="$(DEVICE_REPLAY_DIR)" $(TEST_DOTNET) test \
+	  Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo \
+	  --filter "FullyQualifiedName~.DeviceReplyEmitterTests."
+	@test -s "$(DEVICE_REPLAY_DIR)/index.json" || (echo "the emitter wrote no index.json" && exit 1)
+	DEVICE_REPLAY_DIR="$(DEVICE_REPLAY_DIR)" $(PIO) test -d $(IOT_DIR)/court-box -e native -f test_server_replies
+	DEVICE_REPLAY_DIR="$(DEVICE_REPLAY_DIR)" $(PIO) test -d $(IOT_DIR)/door-gate -e native -f test_gate_server_replies
+	rm -rf "$(DEVICE_REPLAY_DIR)"
 
 # Regenerate the Arduino IDE sketch folders from the PlatformIO sources.
 #

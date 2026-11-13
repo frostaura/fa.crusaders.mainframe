@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-device
-description: "The device contract is hobby-grade by founder decision — one per-tenant API key, auto-registration, no OTA or discovery; the brains are on the ESP8266 because the Mega cannot be flashed over WiFi; the wiring is fixed and untouchable."
+description: "The device contract: one per-tenant API key, auto-registration, no discovery; the brains are on the ESP8266 because the Mega cannot be flashed over WiFi; the wiring is fixed. OTA and runtime credentials arrived with v3."
 type: decision
 last_verified: 2026-10-03
 ---
@@ -11,12 +11,13 @@ last_verified: 2026-10-03
 electrical findings; the pin map matches the schematic and the club's old sketches exactly. Any fix
 that needs a wire moved is the wrong fix.
 
-- **The device contract is hobby grade** (founder, 2026-09-05/06). No OTA, signing, runtime
-  credential store, HMAC device auth, discovery, claim codes, per-device keys or device clock: one
-  per-tenant API key in `secrets.h`, and a box auto-registers on its first heartbeat. *Why:* box and
-  backend share a LAN and only the frontend is public — one club, one box, and that machinery
-  defended a threat model that does not exist here while being the largest single source of
-  firmware complexity and flashing ceremony. Requests are still unsigned. **`devcrypto` regained
+- **The device contract is hobby grade** (founder, 2026-09-05/06): no HMAC device auth, discovery,
+  claim codes, per-device keys or device clock — one per-tenant bearer key, and a box auto-registers
+  on its first heartbeat. *Why:* box and backend share a LAN and only the frontend is public, and
+  that machinery defended a threat model that does not exist here. Requests are still unsigned.
+  **Its "no OTA, no runtime credential store" clauses were reversed on 2026-11-13** — signed OTA,
+  key rotation and runtime WiFi/server settings are [`decisions-device-v3.md`](decisions-device-v3.md).
+  *Why:* their premise was that a USB reflash costs nothing; the last-flash rule removed it. **`devcrypto` regained
   SHA-256, HMAC, HKDF and base64url on 2026-09-23** for one narrower job — verifying the member
   code's OFF half offline ([`decisions-member-code.md`](decisions-member-code.md)) — not for
   device auth (still one bearer key).
@@ -38,11 +39,10 @@ that needs a wire moved is the wrong fix.
   layer with an **independent per-relay auto-off timer** and everything volatile runs on the ESP.
   *Why:* USB-only flashing of the Mega becomes a non-event rather than a trip to the club, and the
   independent timer is the fail-safe — nothing strands a lit court when the network goes away.
-- **The LCD is driven as 20×4** — the fitted 2004A (confirmed from a build photo) — with rows 0–1
-  holding the 16-column safe subset, so a 1602 swapped in degrades to a whole message rather than a
-  lying one. The geometry is a compile-time constant (`[lcd]` in `court-box/platformio.ini`); the
-  shared HAL's default, used by builds with no LCD flags, is still 16×2. Somebody must look at the
-  panel before a club box is flashed (go-live checklist).
+- **The LCD layout is a runtime setting from Mega 3.0.0** (compact 16×2 / expanded 20×4, booting and
+  falling back to compact) — [`decisions-device-v3.md`](decisions-device-v3.md). *Why:* the fitted
+  panel is unknown (a "2004A from a build photo" here, "a 16x2" in the code's own comments) and a
+  compile-time guess cannot be corrected after the last flash. Still look at the panel first.
 - **The legacy single-byte serial dialect is refused on the production Mega** (`LegacyDialect::
   Refuse`; the simulator opts in). The bare `A` closed a relay with no checksum on a UART that
   receives the ESP's 74880-baud boot banner at every reset — a phantom ninety-minute lighting with

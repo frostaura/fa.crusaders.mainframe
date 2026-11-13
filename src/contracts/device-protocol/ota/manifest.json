@@ -1,0 +1,16 @@
+{
+  "description": "Signed OTA for the ESP8266 bridge and the ESP32 door gate: manifest text, signature, version gate, offer grammar, image hashing.",
+  "authority": "docs/specs/device-api.md section 7; gen_cases.py beside this file is the reference implementation.",
+  "generator": "src/contracts/device-protocol/ota/gen_cases.py",
+  "read_by": [
+    "fw-shared",
+    "csharp"
+  ],
+  "case_count": {
+    "manifests": 3,
+    "signatures": 13,
+    "versions": 13,
+    "offers": 15,
+    "images": 2
+  }
+}

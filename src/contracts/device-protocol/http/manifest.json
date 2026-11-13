@@ -2,7 +2,7 @@
   "description": "Device HTTP request and response body shapes, plus the bearer header every device request carries.",
   "authority": "src/backend/Crusaders.Mainframe.Api/Endpoints/Device*Endpoints.cs and its device auth scheme \u2014 the server is the reference implementation; the firmware must match it.",
   "case_count": {
-    "requests": 12,
-    "responses": 25
+    "requests": 18,
+    "responses": 36
   }
 }

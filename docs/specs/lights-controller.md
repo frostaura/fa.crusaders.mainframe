@@ -21,23 +21,45 @@
 > `Authorization: Bearer` header, on requests the box makes *outbound*; nothing
 > calls the box. Kept for the design rationale and the fail-safe discussion.
 
-## The installed court box at the panel (bridge 2.3.0 / Mega 2.1.0)
+## The installed court box at the panel (bridge 3.0.0 / Mega 3.0.0)
 
-What a member sees and does at the Crusaders box today. Everything essential
-is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
+What a member sees and does at the Crusaders box from the v3 flash — the last
+USB flash the Mega will ever get. The wire is
+[`device-serial-protocol.md`](device-serial-protocol.md) (v3) and the heartbeat
+[`device-api.md`](device-api.md).
 
-- **Relays are ACTIVE HIGH.** The club fitted normally-open solid-state relays;
-  `court_mega` is built with `RELAY_ACTIVE_LOW=0`. The pin is still driven to
-  its released level (LOW) before it becomes an output, so a reset never
-  flashes a court on. Fit a pull-down on each SSR input so the bootloader's
-  high-Z second is a guaranteed off. The level mapping is one shared function,
-  `hal::relayLevelFor(on, polarity)`, host-tested for both polarities; the
-  native simulator is built with the Mega's own `RELAY_ACTIVE_LOW=0`, so its
-  transcript reads `(pin level HIGH)` for a lit court and the device e2e
-  asserts it.
-- **Landing screen (Mega-owned):** `SCAN YOUR CODE`, then `TO PLAY` while every
-  court is dark, or the lit courts' minutes left — `COURT B 45 MIN` for one,
-  `A45 C 5` for several.
+- **The panel size is not known, so the layout is a setting.** 2.1.0 drove
+  the HD44780 at I2C 0x27 with 20×4 row offsets; the documents disagree between
+  a 1602 and a 2004A. 3.0.0 probes the backpack's address (0x27, then 0x3F, then
+  the rest of both ranges) and reports which one answered. `lcd_layout` (club default, per-board override) chooses
+  **compact** (rows 0–1, sixteen columns — whole on either panel) or
+  **expanded** (20×4). The Mega boots compact, falls back to compact whenever
+  the bridge is silent or sends a value it does not know, and the admin can
+  revert a board remotely in one heartbeat. Every bridge screen is composed for
+  the layout the Mega acknowledged; a row that does not fit scrolls as a
+  software marquee on that one row (`lcd_marquee_enabled`), never the
+  controller's display shift.
+
+- **A released relay is an input, and the drive level is a setting.** The
+  club's relay modules are recorded only as "normally-open solid-state relays"
+  — no part number, trigger level or measurement — and a 4-channel SSR board is
+  sold in both high- and low-trigger versions ("normally open" describes the
+  output contact, not the input). So 3.0.0 releases a relay by making its pin an
+  input, which is off for **either** module type, and drives only "on", at
+  `hw_relay_active_level` (default `high`, the 2.1.0 build's). A wrong level
+  therefore fails **dark**, never lit, and is corrected from the console in one
+  heartbeat. **No pull-down is fitted**: none is needed, and the wiring is not
+  ours to change. The level mapping stays one shared function,
+  `hal::relayLevelFor(on, polarity)`, host-tested for both polarities.
+- **Landing screen (Mega-owned, composed from its own relay deadlines and the
+  server's snapshot):** `SCAN YOUR QR CODE` (compact: `SCAN YOUR QR`) and every
+  mapped court's state and minutes of light left — paid chained extensions
+  included — plus a status (`READY 18:05`, `NO WIFI`, `NO SERVER`,
+  `STARTING UP`). Expanded shows one court per row, three per page; compact
+  scrolls every court along row 1, or pages one court at a time with the
+  marquee off. With the bridge dead it reads `OUT OF SERVICE` / `SEE THE DESK`
+  and still shows the lit courts' minutes. The glass repaints and re-initialises
+  itself on landing, so an I2C glitch never leaves the call to action blank.
 - **Scan → greeting → outcome.** A recognised online scan reads
   `HI <NAME>` / `BALANCE <n> MIN` (from `/activate`'s `greeting_name` and
   `balance_minutes`; `HI` / `WELCOME` when absent, and for offline roster
@@ -57,7 +79,10 @@ is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
   `min(90 min, remaining + extended_minutes)` (longer sessions are held past the
   cap by `Relight`) and reads `COURT A +30 MIN` / `BALANCE <n> MIN`. Refusals:
   `COURT NOT ON` / `PICK ANOTHER`, `NO TIME BEFORE` / `NEXT BOOKING`,
-  `TOO FEW MINUTES` / `BUY & RETRY`, otherwise the walk-up's words. **Never
+  `TOO FEW MINUTES` / `BUY & RETRY`, otherwise the walk-up's words. A member
+  whose own court is lit may extend it after a rescan: the rescan keeps the scan
+  buyable and binds the window to that court instead of re-granting and spending
+  it (FSF-06). **Never
   offline:** `NO CONNECTION` / `EXTEND NEEDS NET`. A `200` whose body the box
   cannot read whole (cut by the transport, or naming no `extended_minutes`) is
   **undecided**, not "nothing added": the purchase may be on the ledger, so the
@@ -65,7 +90,67 @@ is on rows 0-1 within sixteen columns, because the fitted panel is a 16x2.
   retry with the first purchase (`replayed:true`) instead of selling a second. The D10 pay-for offer and
   pressing your own lit court to switch it off are gone from the panel.
 - Every screen reverts to the landing screen on its own (revert or choice hold,
-  and the Mega's 120 s clamp behind both).
+  the Mega's 120 s clamp on any one frame) **and no non-landing state outlives
+  the absolute ceiling** (`lcd_screen_ceiling_seconds`, 60 s by default) that the
+  Mega enforces whatever the bridge sends; presses never extend a screen; once a
+  court lights the glass is back on landing within
+  `lcd_after_lights_on_seconds`.
+- **The box keeps the courts the server says are paid for lit.** Every
+  heartbeat answer carries the complete snapshot; the bridge re-lights any court
+  that should be lit and is dark — after a Mega-only watchdog or brown-out
+  reset, a lost `!ON`, or a power cut — and never switches one off on the
+  server's word. The bridge keeps the snapshot, the roster and undelivered
+  attendance in flash, so a power cut with the network down still restores paid
+  courts (for at most `device_power_restore_trust_minutes`) and loses no
+  attendance.
+- **No identity overlays.** `CONNECTED` / `CRUSADERS COURTS` are no longer
+  painted on WiFi edges; the landing status says the same thing.
+- **No reflash for an operator change.** WiFi, server address and device key
+  change from the console or at the setup portal (hold court A and court D for
+  five seconds within a minute of power-on); the bridge updates itself from
+  signed releases the club uploads. Every hardware fact the Mega used to have
+  compiled in — relay level, LCD address, scanner baud and line end, which
+  buttons are court buttons — is a per-board setting
+  ([`device-api.md`](device-api.md) §12).
+
+### Commissioning the hardware facts (bench, then at the club)
+
+Each step is a person looking at something; the console shows what the box says
+it is running with (`mega` in the heartbeat) beside the setting. Do them in
+order, after Mega 3.0.0 and bridge 3.0.0 are flashed and the box is heartbeating.
+
+1. **Record the relay module before power is applied.** Photograph its markings
+   and write down the part number, trigger level, rating, output type (triac/AC
+   or MOSFET/DC) and **whether it switches a contactor coil (and that coil's
+   supply) or the lighting load** — the open electrical question in
+   `memory/safety-relays.md`. A triac SSR cannot switch a DC coil off; if that is
+   what is fitted, stop: it is an electrician's question, not a setting.
+2. **Prove that off is off.** With the box powered and nothing booked, every
+   court must be dark: every relay pin is an input, which is off for either
+   module type. A court that is lit now means a module that is neither, or a
+   wiring fault — stop. Power-cycle the box twice and watch the courts through
+   the bootloader's second: none may flash. (Whether a high-Z input near mains
+   wiring picks up enough to half-drive an SSR is a scope check on this step.)
+3. **Find the drive level.** Light court A the normal way (a test member's
+   walk-up). Lit: the level is right. Dark while the glass says the court is on:
+   set the board's *Relay drive level* to `low`, wait one heartbeat — the Mega
+   re-drives every closed relay at the new level — and court A lights. Then
+   switch it off and confirm dark. Repeat for B, C and D; a crossed channel is
+   fixed by the court map, never by a wire.
+4. **The glass.** *LCD address* reads the backpack that answered (`00` means
+   none did: check the four wires and the backpack's contrast pot before
+   anything else). Look at the panel: two rows of sixteen is `compact`, four of
+   twenty is `expanded`; set the club's `lcd_layout` to match.
+5. **The scanner.** Scan a member code; *Scanner* reads the baud the Mega
+   locked on and whether lines end on CR/LF or on the gap. Nothing arrives:
+   set the baud explicitly (9600, then 115200) before suspecting the scanner.
+6. **The buttons.** Press each of the eight unscanned and note which court or
+   time the glass names; if the order is not the assumed 22–28 courts / 30–36
+   times, set this board's button map to what you saw.
+7. **Write down what you found** (part numbers, the level, the address, the
+   panel size, the scanner model and suffix, the button order) in the go-live
+   checklist's commissioning entries, and the relay facts in
+   `memory/safety-relays.md`, so the next person does not re-derive them.
 
 [Superseded design] The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
 
