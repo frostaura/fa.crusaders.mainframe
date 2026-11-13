@@ -1335,7 +1335,43 @@ export type AdminDevice = {
    * the cadence above rather than from a frozen literal.
    */
   offline_after_seconds?: number;
+
+  // ---- device contract v3 (device-api §2, §5–§8, §10). All optional: an older API serves none. ----
+  /** What the board can do, as its last heartbeat named it (`codes:m1 hb:3 lcd:2 ota:1 key:1 net:1`). */
+  capabilities?: string | string[] | null;
+  /** This board's own layout, or null for the club's. Three-valued on the PATCH, like `button_map`. */
+  lcd_layout?: string | null;
+  /** This board's own marquee switch, or null for the club's. */
+  lcd_marquee_enabled?: boolean | null;
+  /** The layout the Mega ACKNOWLEDGED, as the box echoed it, and since when. */
+  lcd_layout_acknowledged?: string | null;
+  lcd_layout_acknowledged_at?: string | null;
+  /** `committed` · `probation` · `downloading` · `rolled_back` · `failed` (anything else is `unknown`). */
+  fw_state?: string | null;
+  /** With `rolled_back` / `failed`: the version, and why. */
+  fw_failed?: string | null;
+  fw_error?: string | null;
+  /** The network configuration version applied, and where it came from: `server` · `local` · `compiled`. */
+  net_ver?: number | null;
+  net_src?: string | null;
+  /** The device key id this board last authenticated with. */
+  key_id?: string | null;
+  /** The Mega's last reset cause (`MCUSR`, two hex digits) and when it was reported. */
+  mega_reset_cause?: string | null;
+  mega_reset_at?: string | null;
+  /** The first beat's `restore` report of the board's current boot: `warm` · `cold` · `none`. */
+  restore?: string | null;
 };
+
+/**
+ * The capabilities a board named, as a set. The wire carries them space-separated (the heartbeat's
+ * own field) or as a list; both read the same.
+ */
+export function deviceCaps(device: Pick<AdminDevice, "capabilities">): Set<string> {
+  const raw = device.capabilities;
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[\s,]+/) : [];
+  return new Set(list.map((cap) => cap.trim()).filter((cap) => cap !== ""));
+}
 
 /**
  * Is this row a door gate rather than a court box?
@@ -1560,6 +1596,110 @@ export type DeviceActivityPage = {
 export type DeviceApiKey = {
   api_key: string;
   regenerated_at: string;
+  /** v3 §6: the current key's id, `k1`, `k2`, …. Absent from a pre-v3 API. */
+  key_id?: string | null;
+  /** The rotation in progress, or null when none is. Absent from a pre-v3 API. */
+  rotation?: DeviceKeyRotation | null;
+};
+
+/** A board named in a key status: enough to find it on Boards. */
+export type DeviceKeyBoard = { id: string; name?: string | null; device_code?: string | null };
+
+/**
+ * A key rotation in progress (device-api §6). The board figures are counts or the boards
+ * themselves; `deviceKeyBoards` reads either, so the console says names where it is given them.
+ */
+export type DeviceKeyRotation = {
+  next_id: string;
+  started_at: string;
+  /** When the old key retires by itself — null while any board is still on it, or cannot rotate. */
+  grace_ends_at: string | null;
+  boards_on_new: number | DeviceKeyBoard[];
+  boards_on_old: number | DeviceKeyBoard[];
+  boards_cannot_rotate: number | DeviceKeyBoard[];
+};
+
+/** A count or a list of boards, as a count. */
+export function deviceKeyBoardCount(value: number | DeviceKeyBoard[] | undefined | null): number {
+  if (Array.isArray(value)) return value.length;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** A count or a list of boards, as the boards (empty when only a count is served). */
+export function deviceKeyBoards(value: number | DeviceKeyBoard[] | undefined | null): DeviceKeyBoard[] {
+  return Array.isArray(value) ? value : [];
+}
+
+/** The club's device network (device-api §8). Passwords are write-only: a GET says only whether one is set. */
+export type DeviceNetwork = {
+  ver: number;
+  base: string | null;
+  wifi: { ssid: string; psk_set: boolean }[];
+  updated_at: string | null;
+  updated_by: string | null;
+};
+
+/**
+ * A network save. `psk: null` keeps the stored password, `""` is an open network, a string sets it.
+ * `ver` is the version read, so a save over a colleague's is refused rather than silently winning.
+ */
+export type DeviceNetworkSave = {
+  ver: number;
+  base: string;
+  wifi: { ssid: string; psk: string | null }[];
+};
+
+/** A firmware target: the court box's bridge and the door gate. The Mega is never updated over WiFi. */
+export const FIRMWARE_TARGETS = ["court_bridge", "door_gate"] as const;
+export type FirmwareTarget = (typeof FIRMWARE_TARGETS)[number];
+
+/** A firmware rollout: nobody, one chosen board, or every acknowledged board of the target. */
+export type FirmwareRollout = "off" | "one" | "all";
+
+/** One uploaded, signature-verified release (device-api §7). */
+export type FirmwareRelease = {
+  id: string;
+  target: string;
+  version: string;
+  size: number;
+  sha256: string;
+  uploaded_at: string;
+  uploaded_by?: string | null;
+  rollout: FirmwareRollout;
+  /** The one board a `one` rollout offers it to. */
+  device_id?: string | null;
+  paused: boolean;
+  /** How many boards of the target are in each state for this release: committed, probation, … */
+  boards?: Partial<Record<string, number>>;
+};
+
+/** What a board says about its firmware in a v3 heartbeat (device-api §2). */
+export type FirmwareState = "committed" | "probation" | "downloading" | "rolled_back" | "failed" | "unknown";
+
+/** The member-code rollout (member-code §8), as `GET /admin/devices/member-codes` serves it. */
+export type MemberCodeRolloutBoard = {
+  id: string;
+  device_code: string;
+  name: string;
+  kind: string;
+  running_version: string | null;
+  capabilities: string | string[] | null;
+  last_seen_at: string | null;
+};
+
+export type MemberCodeRollout = {
+  phase: string;
+  cutover_at: string | null;
+  cutoff_at: string | null;
+  cutoff_days: number;
+  cutoff_due_at: string | null;
+  enabled_boards: number;
+  ready_boards: number;
+  blocking: MemberCodeRolloutBoard[];
+  manual_hold: boolean;
+  manual_hold_by: string | null;
+  manual_hold_at: string | null;
+  unacknowledged: MemberCodeRolloutBoard[];
 };
 
 /**
@@ -2703,7 +2843,13 @@ export const endpoints = {
    */
   adminDeviceUpdate: (
     id: string,
-    req: { name?: string; enabled?: boolean; court_numbers?: number[]; button_map?: string[] | null; gate_key?: string },
+    req: {
+      name?: string; enabled?: boolean; court_numbers?: number[]; button_map?: string[] | null; gate_key?: string;
+      // v3: three-valued like button_map (absent = unchanged, null = the club's, a value = the board's own).
+      lcd_layout?: string | null; lcd_marquee_enabled?: boolean | null;
+      // v3 §8: push the club's network to a board that was set up at its own portal (`net_src: local`).
+      push_network?: true;
+    },
   ) => api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, { ...req }),
   /**
    * Forgets a box. It is not a revocation and does not lock anything out: the box still
@@ -2734,8 +2880,53 @@ export const endpoints = {
 
   // Admin: the club's one device API key.
   adminDeviceApiKey: () => api.get<DeviceApiKey>("/api/v1/admin/devices/api-key"),
-  /** The old key stops working immediately, so every board, box or gate, has to be reflashed with this one. */
-  adminDeviceApiKeyRegenerate: () => api.post<DeviceApiKey>("/api/v1/admin/devices/api-key/regenerate", {}),
+  /**
+   * v3 §6: start a rotation. A new key is minted and EVERY unretired key keeps working; boards
+   * that can rotate (`key:1`) learn the new one in their next heartbeats. `409 rotation_in_progress`.
+   */
+  adminDeviceApiKeyRotate: () => api.post<DeviceApiKey>("/api/v1/admin/devices/api-key/rotate", {}),
+  /**
+   * Retire the old key now. Without the typed confirmation the API answers
+   * `409 boards_would_be_stranded` with the boards it would strand; `confirm` is the id of the key
+   * being retired, typed by the admin.
+   */
+  adminDeviceApiKeyRetire: (confirm?: string) =>
+    api.post<DeviceApiKey>("/api/v1/admin/devices/api-key/retire", confirm === undefined ? {} : { confirm }),
+  /**
+   * Put back a key the boards already hold, after a database loss. Owner only; the 43-character
+   * key is never shown again and never logged. `confirm` is the word the admin typed.
+   */
+  adminDeviceApiKeyRestore: (key: string, confirm: string) =>
+    api.post<DeviceApiKey>("/api/v1/admin/devices/api-key/restore", { key, confirm }),
+
+  /** v3 §8: the club's device network. */
+  adminDeviceNetwork: () => api.get<DeviceNetwork>("/api/v1/admin/devices/network"),
+  adminDeviceNetworkSave: (req: DeviceNetworkSave) => api.put<DeviceNetwork>("/api/v1/admin/devices/network", req),
+
+  /** v3 §7: the club's signed firmware releases. */
+  adminFirmwareList: () => api.get<FirmwareRelease[]>("/api/v1/admin/devices/firmware"),
+  /**
+   * Uploads an image and the manifest `ota_sign.py` wrote. Refused unless the signature verifies
+   * (`sig_invalid`), the bytes match the manifest, the target is known and the version is newer.
+   */
+  adminFirmwareUpload: async (image: File, manifest: string): Promise<FirmwareRelease> => {
+    const fd = new FormData();
+    fd.append("image", image);
+    fd.append("manifest", manifest);
+    const tok = tokenStore.get();
+    const res = await fetchWithTimeout("/api/v1/admin/devices/firmware", {
+      method: "POST",
+      headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
+      body: fd,
+    }, UPLOAD_TIMEOUT_MS);
+    if (!res.ok) throw await failureFrom(res);
+    return res.json();
+  },
+  adminFirmwareRollout: (id: string, req: { rollout?: FirmwareRollout; device_id?: string | null; paused?: boolean }) =>
+    api.patch<FirmwareRelease>(`/api/v1/admin/devices/firmware/${id}`, req),
+
+  /** The member-code rollout (member-code §8): phase, dates, and the boards blocking the cut-over. */
+  adminMemberCodeRollout: () => api.get<MemberCodeRollout>("/api/v1/admin/devices/member-codes"),
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),
