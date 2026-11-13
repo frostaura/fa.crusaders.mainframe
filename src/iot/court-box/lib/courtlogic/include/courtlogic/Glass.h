@@ -1,0 +1,99 @@
+// Crusaders Mainframe — what the court box's glass says, as pure functions.
+//
+// The Mega 3.0.0 composes its own landing screen and scrolls its own marquee,
+// so these are the rules every 3.0.0 Mega will keep for the life of the box:
+// the last Mega image cannot be patched. They are written once, here, free of
+// any port, and held to the contract's reference implementation by
+// test_display — every vector in src/contracts/device-protocol/display/
+// (gen_cases.py is the reference, docs/specs/device-serial-protocol.md v3 the
+// prose). The console's landing preview implements the same file in
+// TypeScript against the same vectors, so the office and the glass agree.
+//
+// C++11 as well as C++17 (court_mega's generated sketch is compiled at
+// gnu++11): no heap, no std::string, every buffer the caller's.
+
+#ifndef CRUSADERS_COURTLOGIC_GLASS_H
+#define CRUSADERS_COURTLOGIC_GLASS_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+namespace courtlogic {
+
+/// The two layouts. Compact is rows 0-1, sixteen columns — whole on a 1602 and
+/// on a 2004 — and is what the Mega falls back to on any doubt.
+enum class Layout : uint8_t { Compact = 0, Expanded = 1 };
+
+/// The widest glass either layout draws, and the most rows.
+inline constexpr uint8_t kGlassCols = 20U;
+inline constexpr uint8_t kGlassRows = 4U;
+
+inline constexpr uint8_t layoutWidth(Layout l) {
+  return l == Layout::Expanded ? static_cast<uint8_t>(20U) : static_cast<uint8_t>(16U);
+}
+
+inline constexpr uint8_t layoutRows(Layout l) {
+  return l == Layout::Expanded ? static_cast<uint8_t>(4U) : static_cast<uint8_t>(2U);
+}
+
+/// Between marquee items, and between the end of a marquee and its restart.
+inline constexpr char kMarqueeGap[] = "   ";
+inline constexpr uint8_t kMarqueeGapLen = 3U;
+
+/// Minutes shown are capped here: three digits is what the cell has room for.
+inline constexpr uint32_t kMaxMinutesShown = 999UL;
+
+/// The longest text one row can carry: two 24-character `!RW` segments.
+inline constexpr uint8_t kRowTextMax = 48U;
+
+/// The longest compact landing marquee: four courts of "COURT 9999 999 MIN",
+/// the status, and the gaps between them.
+inline constexpr uint8_t kLandingTextMax = 127U;
+
+/// What the landing's status slot says. `Offline` is the Mega's own verdict
+/// that the bridge is dead; it outranks a `!NOTE`.
+enum class LandStatus : uint8_t { Ready = 0, Starting, NoWifi, NoServer, Offline };
+
+/// One relay as the landing sees it. `number` 0 is unmapped and never drawn.
+/// `seconds` is already the larger of the Mega's own deadline and the
+/// bridge's `!LAND` figure; an open relay is `lit` false whatever said otherwise.
+struct LandCourt {
+  uint16_t number;
+  bool lit;
+  uint32_t seconds;
+};
+
+struct LandingInput {
+  Layout layout;
+  bool marquee;
+  LandStatus status;
+  const char* clock; ///< "1805", or nullptr with no trusted clock.
+  const char* note;  ///< A live `!NOTE`, or nullptr / "".
+  const LandCourt* courts;
+  uint8_t courtCount;
+  uint32_t page;   ///< Page turns since landing entry.
+  uint32_t offset; ///< Marquee steps since landing entry.
+};
+
+/// Rows the composer writes into: kGlassRows of kGlassCols + NUL. Each row is
+/// exactly the layout's width (space-padded); rows past the layout are "".
+typedef char GlassRows[kGlassRows][kGlassCols + 1U];
+
+/// Whole minutes of light left, rounded UP (20 s reads 1 MIN) and capped at 999.
+uint32_t minutesShown(uint32_t seconds);
+
+/// The visible `width` characters of `text` at `offset` steps: static (padded)
+/// when it fits, else the text, the gap, the text again, wrapping.
+/// `out` receives `width` characters and a NUL.
+void marqueeWindow(const char* text, uint8_t width, uint32_t offset, char* out);
+
+/// The idle glass for `in`. See display/gen_cases.py's `landing`.
+void composeLanding(const LandingInput& in, GlassRows rows);
+
+/// The compact marquee's whole text (every mapped court and the status, joined
+/// by the gap), so the caller can tell whether it scrolls. Returns its length.
+uint8_t landingMarqueeText(const LandingInput& in, char* out, size_t cap);
+
+} // namespace courtlogic
+
+#endif // CRUSADERS_COURTLOGIC_GLASS_H
