@@ -32,6 +32,7 @@ export function rolloutState(rollout: MemberCodeRollout): RolloutState {
 
 /** Is this blocking board one an admin has not acknowledged yet (it blocks without voting, MCV1-03)? */
 export function isUnacknowledged(board: MemberCodeRolloutBoard, rollout: MemberCodeRollout, devices: readonly AdminDevice[]): boolean {
+  if (board.blocks === "unacknowledged") return true;
   if (rollout.unacknowledged.some((u) => u.id === board.id)) return true;
   return devices.find((d) => d.id === board.id)?.auto_registered === true;
 }
@@ -73,6 +74,10 @@ export function blockingWhy(board: MemberCodeRolloutBoard, unacknowledged: boole
     return `${boardName(board)} has not been checked by an admin. Acknowledge it (its courts are right) or take it out of service.`;
   }
   const seen = board.last_seen_at ? `last heard ${at(board.last_seen_at)}` : "never heard";
+  if (board.blocks === "no_keyed_heartbeat") {
+    return `${boardName(board)} reads new codes but has not been sent its member-code keys in the last hour (${seen}).`
+      + " It is sent them the next time it calls in; if it stays silent, check it has power and WiFi.";
+  }
   return `${boardName(board)} does not read new codes yet (firmware ${board.running_version ?? "unknown"}, ${seen}).`
     + " Update it, or take it out of service if it is gone.";
 }

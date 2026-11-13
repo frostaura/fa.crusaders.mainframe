@@ -207,7 +207,7 @@ describe("AdminDevices", () => {
       expect(screen.getByText(/will not be retired by itself while 1 board that cannot rotate is in service/)).toBeInTheDocument();
     });
 
-    it("retires the old key early only once its id is typed, naming who it strands", async () => {
+    it("retires the old key early only once the API's phrase is typed, naming who it strands", async () => {
       const stub = stubFetch(keyRoutes(ROTATING, [
         { method: "POST", path: "/api/v1/admin/devices/api-key/retire", body: { ...V3_KEY, key_id: "k2" } },
       ]));
@@ -216,14 +216,19 @@ describe("AdminDevices", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Retire the old key now" }));
       expect(await screen.findByText("These boards would be cut off: Annex box and gate-08.")).toBeInTheDocument();
       // Not typed: the press says what is missing and sends nothing.
-      fireEvent.click(screen.getByRole("button", { name: "Retire key k1" }));
-      expect(await screen.findByText(/Type k1 — the id of the key being retired — to confirm\./)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Retire the old key" }));
+      expect(await screen.findByText('Type "retire the old key" to confirm.')).toBeInTheDocument();
       expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
 
-      fireEvent.change(screen.getByLabelText(/Type k1 to retire it/), { target: { value: "k1" } });
-      fireEvent.click(screen.getByRole("button", { name: "Retire key k1" }));
-      await waitFor(() => expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual({ confirm: "k1" }));
-      expect(await screen.findByText("Key k1 is retired. Boards on it can no longer reach the club.")).toBeInTheDocument();
+      // The key's id is not the phrase: typing it sends nothing (the API would refuse it).
+      fireEvent.change(screen.getByLabelText(/Type "retire the old key" to confirm/), { target: { value: "k1" } });
+      fireEvent.click(screen.getByRole("button", { name: "Retire the old key" }));
+      expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+      fireEvent.change(screen.getByLabelText(/Type "retire the old key" to confirm/), { target: { value: " Retire the old key " } });
+      fireEvent.click(screen.getByRole("button", { name: "Retire the old key" }));
+      await waitFor(() => expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual({ confirm: "Retire the old key" }));
+      expect(await screen.findByText("The old key is retired. Boards on it can no longer reach the club.")).toBeInTheDocument();
     });
 
     it("lists the boards the API says a retirement would strand, and keeps the dialog open", async () => {
@@ -233,8 +238,8 @@ describe("AdminDevices", () => {
       }]));
       renderPage(<AdminDevicesPage />);
       fireEvent.click(await screen.findByRole("button", { name: "Retire the old key now" }));
-      fireEvent.change(await screen.findByLabelText(/Type k1 to retire it/), { target: { value: "k1" } });
-      fireEvent.click(screen.getByRole("button", { name: "Retire key k1" }));
+      fireEvent.change(await screen.findByLabelText(/Type "retire the old key" to confirm/), { target: { value: "retire the old key" } });
+      fireEvent.click(screen.getByRole("button", { name: "Retire the old key" }));
       expect(await screen.findByText("These boards would be cut off: Court 4 box.")).toBeInTheDocument();
       expect(screen.getByText(/would cut boards off — they are named above/)).toBeInTheDocument();
     });
@@ -253,9 +258,9 @@ describe("AdminDevices", () => {
       expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
 
       fireEvent.change(screen.getByLabelText(/The key the boards hold/), { target: { value: KEY } });
-      fireEvent.change(screen.getByLabelText(/Type RESTORE to confirm/), { target: { value: "RESTORE" } });
+      fireEvent.change(screen.getByLabelText(/Type "restore this key" to confirm/), { target: { value: "restore this key" } });
       fireEvent.click(screen.getByRole("button", { name: "Restore this key" }));
-      await waitFor(() => expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual({ key: KEY, confirm: "RESTORE" }));
+      await waitFor(() => expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual({ key: KEY, confirm: "restore this key" }));
       expect(await screen.findByText("Only the club's owner can restore a key.")).toBeInTheDocument();
     });
 

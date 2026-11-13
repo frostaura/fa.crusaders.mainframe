@@ -49,7 +49,7 @@ const NETWORK = {
 
 const RELEASE = {
   id: "rel-1", target: "court_bridge", version: "3.0.1", size: 372144, sha256: "a".repeat(64),
-  uploaded_at: "2026-11-13T17:00:00Z", rollout: "off", device_id: null, paused: false, boards: {},
+  uploaded_at: "2026-11-13T17:00:00Z", rollout: "off", rollout_device_id: null, paused: false, boards: {},
 };
 
 const ROLLOUT = {

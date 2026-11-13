@@ -50,6 +50,6 @@ export function servesScreen(device: AdminDevice): boolean {
  * versions stay in the identity line and the status lines are not drawn (a phone's dense card).
  */
 export function servesStatusLines(device: AdminDevice, context: Pick<BoardsContext, "releases">): boolean {
-  const v3 = [device.fw_state, device.net_ver, device.net_src, device.key_id, device.capabilities, device.restore, device.mega];
+  const v3 = [device.fw_state, device.net_ver, device.net_src, device.key_id, device.capabilities, device.restore_report, device.mega];
   return v3.some((value) => value !== undefined && value !== null) || (context.releases?.length ?? 0) > 0;
 }

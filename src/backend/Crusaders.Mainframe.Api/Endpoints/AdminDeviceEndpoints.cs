@@ -93,6 +93,11 @@ public static class AdminDeviceEndpoints
             manual_hold_by = s.MemberCodeManualHoldBy,
             manual_hold_at = s.MemberCodeManualHoldAt,
             unacknowledged,
+
+            // Every acknowledged board's member-code keys as its last keyed answer carried them
+            // (member-code §5.4, MCV1-07) — ready boards too, which appear on neither list above,
+            // so the console can say "Court 2 box: 41 keys last sent, 3 did not fit" for each.
+            keys = boards.Select(Row).ToList(),
         });
 
         static RolloutBoard Row(Device d) => new(

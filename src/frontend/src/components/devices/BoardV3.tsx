@@ -32,7 +32,7 @@ export function BoardStatusLines({ device, context }: { device: AdminDevice; con
     megaLine(device),
     networkLine(device, context.networkVer),
     boardKeyLine(device, context.keyId, context.nextKeyId),
-    device.restore === "cold" ? "After its last power cut it restored from what it had saved" : null,
+    device.restore_report === "cold" ? "After its last power cut it restored from what it had saved" : null,
     caps.length > 0 ? `Can: ${caps.join(" ")}` : null,
   ].filter((line): line is string => line !== null);
   if (lines.length === 0) return null;

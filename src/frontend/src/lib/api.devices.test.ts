@@ -54,7 +54,7 @@ describe("device API wrappers", () => {
     await endpoints.adminDeviceApiKeyRotate();
     await endpoints.adminDeviceApiKeyRetire();
     await endpoints.adminDeviceApiKeyRetire("k1");
-    await endpoints.adminDeviceApiKeyRestore("A".repeat(43), "RESTORE");
+    await endpoints.adminDeviceApiKeyRestore("A".repeat(43), "restore this key");
     expect(stub.calls.map((c) => [c.method, c.path])).toEqual([
       ["POST", "/api/v1/admin/devices/api-key/rotate"],
       ["POST", "/api/v1/admin/devices/api-key/retire"],
@@ -64,7 +64,7 @@ describe("device API wrappers", () => {
     // Retire without a confirmation asks the API who it would strand; with one, it names the key.
     expect(stub.calls[1].raw).toBe("{}");
     expect(stub.calls[2].body).toEqual({ confirm: "k1" });
-    expect(stub.calls[3].body).toEqual({ key: "A".repeat(43), confirm: "RESTORE" });
+    expect(stub.calls[3].body).toEqual({ key: "A".repeat(43), confirm: "restore this key" });
   });
 
   it("sends the v3 per-board overrides three-valued, and a network push", async () => {

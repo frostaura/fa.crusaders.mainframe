@@ -158,6 +158,14 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
         Assert.Equal(2, rollout.GetProperty("enabled_boards").GetInt32());
         Assert.Equal(2, rollout.GetProperty("ready_boards").GetInt32());
 
+        // Every acknowledged board's keys, the ready ones included (the console's per-board line,
+        // MCV1-07); the unacknowledged spare is on the blocking list and not here.
+        var keys = rollout.GetProperty("keys").EnumerateArray().ToList();
+        Assert.Equal(2, keys.Count);
+        Assert.DoesNotContain(keys, k => k.GetProperty("device_code").GetString() == $"box-{spare[^6..]}");
+        Assert.All(keys, k => Assert.True(k.GetProperty("acknowledged").GetBoolean()));
+        Assert.All(keys, k => Assert.Equal(JsonValueKind.Number, k.GetProperty("keys_sent").ValueKind));
+
         // Heard more than a week ago — unplugged — it no longer blocks.
         await club.WriteAsync(app, async db =>
             (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == spare)).LastSeenAt = DateTimeOffset.UtcNow.AddDays(-8));

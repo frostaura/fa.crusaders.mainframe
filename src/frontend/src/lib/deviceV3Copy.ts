@@ -1,4 +1,4 @@
-import { ApiError, deviceCaps, type AdminDevice, type DeviceKeyBoard, type FirmwareRelease } from "./api";
+import { ApiError, deviceCaps, type AdminDevice, type DeviceKeyBoard, type FirmwareRelease, type FirmwareReleaseBoards } from "./api";
 import { RELAYS } from "./buttonMap";
 import { clubDayAndClock } from "./clubClock";
 import { mcusrWords } from "./deviceHealth";
@@ -43,6 +43,11 @@ export const plural = (n: number, one: string, many = `${one}s`): string => `${n
 // Key rotation (§6)
 // ---------------------------------------------------------------------------------------
 
+/** Does what the admin typed match one of the API's confirmation phrases (trimmed, case-blind, like the API)? */
+export function typedPhrase(typed: string, phrase: string): boolean {
+  return typed.trim().toLowerCase() === phrase.toLowerCase();
+}
+
 export const KEY_COPY = {
   rotateTitle: "Rotate the club's device key?",
   rotate: "A new key is made and the current one keeps working. Every board that can rotate picks the new key up "
@@ -53,18 +58,25 @@ export const KEY_COPY = {
   rotateWhether: "a rotation started",
   inProgress: "A rotation is already under way — it is shown below.",
   retireTitle: "Retire the old key now?",
-  retire: (oldId: string) => `Every board still on key ${oldId} stops reaching the club the moment it is retired, and a `
+  /**
+   * What the admin types to retire the old key, and to restore one: the API's own phrases
+   * (`DeviceKeyRing.RetirePhrase` / `RestorePhrase`, compared trimmed and case-blind), pinned against
+   * the server source by `deviceKeyPhrases.contract.test.ts`.
+   */
+  retirePhrase: "retire the old key",
+  retire: "Every board still on the old key stops reaching the club the moment it is retired, and a "
     + "board that cannot rotate can then be fixed only with a cable. Retire it only if it has leaked.",
-  retireType: (oldId: string) => `Type ${oldId} to retire it`,
-  retireNotReady: (oldId: string) => `Type ${oldId} — the id of the key being retired — to confirm.`,
-  retired: (oldId: string) => `Key ${oldId} is retired. Boards on it can no longer reach the club.`,
+  retireType: 'Type "retire the old key" to confirm',
+  retireNotReady: 'Type "retire the old key" to confirm.',
+  retireLabel: "Retire the old key",
+  retired: "The old key is retired. Boards on it can no longer reach the club.",
   stranded: (boards: string) => `These boards would be cut off: ${boards}.`,
   restoreTitle: "Put back a key the boards already hold?",
   restore: "After the club's database is lost or rebuilt, the boards still hold the key they had. Paste it here to make "
     + "it the club's current key again, so they can call in. Only the club's owner can do this; the key is never shown "
     + "again after it is saved.",
-  restoreWord: "RESTORE",
-  restoreNotReady: "Paste the 43-character key and type RESTORE to confirm.",
+  restoreWord: "restore this key",
+  restoreNotReady: 'Paste the 43-character key and type "restore this key" to confirm.',
   restoreKeyInvalid: "A device key is exactly 43 letters, digits, - and _.",
   restored: "Key restored. Boards holding it can call in again.",
   ownerOnly: "Only the club's owner can restore a key.",
@@ -330,15 +342,18 @@ const FIRMWARE_TARGET_WORD: Readonly<Record<string, string>> = { court_bridge: "
 export function releaseLine(release: FirmwareRelease): string {
   const who = release.rollout === "off" ? "offered to nobody"
     : release.rollout === "one" ? "offered to one board" : "offered to every board of this kind";
-  const counts = Object.entries(release.boards ?? {}).filter(([, n]) => typeof n === "number" && n > 0)
-    .map(([state, n]) => `${n} ${FW_STATE_SHORT[state] ?? state}`);
+  const boards = release.boards ?? {};
+  const counts = RELEASE_COUNT_WORDS.filter(([key]) => typeof boards[key] === "number" && boards[key]! > 0)
+    .map(([key, words]) => `${boards[key]} ${words}`);
   return `${release.version}, uploaded ${at(release.uploaded_at)} — ${who}${release.paused ? ", paused" : ""}`
     + `${counts.length > 0 ? ` (${counts.join(", ")})` : ""}.`;
 }
 
-const FW_STATE_SHORT: Readonly<Record<string, string>> = {
-  committed: "running it", probation: "on trial", downloading: "downloading", rolled_back: "put the old one back", failed: "refused it",
-};
+/** The counts a release line words, in the order it says them; `of_target` and `included` frame the rest and are not said. */
+const RELEASE_COUNT_WORDS: readonly (readonly [keyof FirmwareReleaseBoards, string])[] = [
+  ["running", "running it"], ["probation", "on trial"], ["downloading", "downloading"], ["failed", "refused it"],
+  ["cannot_update", "cannot take updates"],
+];
 
 /** Each board of a target against the latest release: what its own heartbeat says. */
 export function boardFirmwareProgress(devices: readonly AdminDevice[], latest: FirmwareRelease | null): { device: AdminDevice; words: string }[] {

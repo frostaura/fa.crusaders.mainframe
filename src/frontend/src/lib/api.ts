@@ -1356,8 +1356,16 @@ export type AdminDevice = {
   net_src?: string | null;
   /** The device key id this board last authenticated with. */
   key_id?: string | null;
-  /** The first beat's `restore` report of the board's current boot: `warm` · `cold` · `none`. */
-  restore?: string | null;
+  /**
+   * The first beat's `restore` report of the board's current boot: `warm` · `cold` · `none`. The API
+   * serves it as `restore_report` (DeviceView), with the instant beside it.
+   */
+  restore_report?: string | null;
+  restore_reported_at?: string | null;
+  /** Member-code keys the server's last answer to this board carried, and how many it had to trim (§11.3). */
+  code_keys_sent?: number | null;
+  code_keys_trimmed?: number | null;
+  code_keys_at?: string | null;
 
   // ---- v3 hardware facts (device-api §5, §12): this board's own overrides, null = the club's. ----
   hw_relay_active_level?: string | null;
@@ -1713,11 +1721,22 @@ export type FirmwareRelease = {
   uploaded_at: string;
   uploaded_by?: string | null;
   rollout: FirmwareRollout;
-  /** The one board a `one` rollout offers it to. */
-  device_id?: string | null;
+  /** The one board a `one` rollout offers it to (the PATCH names it `device_id`). */
+  rollout_device_id?: string | null;
   paused: boolean;
-  /** How many boards of the target are in each state for this release: committed, probation, … */
-  boards?: Partial<Record<string, number>>;
+  /** How many acknowledged boards of the target stand where, for this release (FirmwareService.ListAsync). */
+  boards?: FirmwareReleaseBoards;
+};
+
+/** The board counts a release carries: of its target, offered it, and where each stands. */
+export type FirmwareReleaseBoards = {
+  of_target?: number;
+  included?: number;
+  running?: number;
+  downloading?: number;
+  probation?: number;
+  failed?: number;
+  cannot_update?: number;
 };
 
 /** What a board says about its firmware in a v3 heartbeat (device-api §2). */
@@ -1732,6 +1751,12 @@ export type MemberCodeRolloutBoard = {
   running_version: string | null;
   capabilities: string | string[] | null;
   last_seen_at: string | null;
+  /**
+   * On the blocking list only, why it blocks: `no_member_codes` (its firmware cannot read new codes),
+   * `no_keyed_heartbeat` (a court box that reads them has not been sent its keys in the last hour) or
+   * `unacknowledged` (a court box nobody has checked, which blocks without voting — MCV1-03).
+   */
+  blocks?: "no_member_codes" | "no_keyed_heartbeat" | "unacknowledged" | null;
 };
 
 export type MemberCodeRollout = {

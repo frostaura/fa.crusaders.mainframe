@@ -89,8 +89,8 @@ function TargetReleases({ target, releases, devices, onChanged }: {
 function ReleaseControls({ release, devices, onChanged }: { release: FirmwareRelease; devices: AdminDevice[]; onChanged: () => void }) {
   const toast = useToast();
   const [rollout, setRollout] = useState<FirmwareRollout>(release.rollout);
-  const [deviceId, setDeviceId] = useState<string>(release.device_id ?? devices[0]?.id ?? "");
-  const changed = rollout !== release.rollout || (rollout === "one" && deviceId !== (release.device_id ?? ""));
+  const [deviceId, setDeviceId] = useState<string>(release.rollout_device_id ?? devices[0]?.id ?? "");
+  const changed = rollout !== release.rollout || (rollout === "one" && deviceId !== (release.rollout_device_id ?? ""));
 
   async function apply(req: { rollout?: FirmwareRollout; device_id?: string | null; paused?: boolean }, done: string) {
     const { proven, answered } = await writeOrReadBack(

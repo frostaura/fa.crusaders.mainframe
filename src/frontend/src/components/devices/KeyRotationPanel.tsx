@@ -5,7 +5,7 @@ import {
 import { describeDeviceError } from "../../lib/deviceErrors";
 import { isDeviceKey } from "../../lib/deviceProvision";
 import {
-  DEVICE_KEY_LINE_ID, KEY_COPY, describeV3Refusal, listBoards, retirementLine, rotationLine,
+  DEVICE_KEY_LINE_ID, KEY_COPY, describeV3Refusal, listBoards, retirementLine, rotationLine, typedPhrase,
 } from "../../lib/deviceV3Copy";
 import { unsureSentence, writeOrReadBack } from "../../lib/lostReply";
 import { LOST_REPLY, unsureWords } from "../../lib/lostReplyCopy";
@@ -97,13 +97,13 @@ function RotationStatus({ apiKey, onChanged }: { apiKey: DeviceApiKey; onChanged
         <p className="text-sm text-text-secondary">Not on the new key yet: {listBoards(named)}.</p>
       )}
       <p className="text-sm text-text-secondary">{retirementLine(rotation.grace_ends_at, counts.cannot, counts.onOld)}</p>
-      <RetireOldKey oldId={apiKey.key_id ?? "the old key"} known={named} onChanged={onChanged} />
+      <RetireOldKey known={named} onChanged={onChanged} />
     </div>
   );
 }
 
 /** "Retire the old key now" — typed, and it names who it strands (§6 step 4). */
-function RetireOldKey({ oldId, known, onChanged }: { oldId: string; known: DeviceKeyBoard[]; onChanged: (key: DeviceApiKey) => void }) {
+function RetireOldKey({ known, onChanged }: { known: DeviceKeyBoard[]; onChanged: (key: DeviceApiKey) => void }) {
   const toast = useToast();
   const [typed, setTyped] = useState("");
   const [stranded, setStranded] = useState<DeviceKeyBoard[] | null>(null);
@@ -117,7 +117,7 @@ function RetireOldKey({ oldId, known, onChanged }: { oldId: string; known: Devic
       );
       onChanged(value);
       setTyped("");
-      toast.push({ tone: "success", text: KEY_COPY.retired(oldId), durationMs: 10000 });
+      toast.push({ tone: "success", text: KEY_COPY.retired, durationMs: 10000 });
     } catch (e) {
       if (e instanceof ApiError && e.code === "boards_would_be_stranded") {
         const listed = (e.payload as { boards?: unknown }).boards;
@@ -131,20 +131,20 @@ function RetireOldKey({ oldId, known, onChanged }: { oldId: string; known: Devic
     <ConfirmDialog
       trigger={<Button variant="danger-soft" size="sm" className="self-start">Retire the old key now</Button>}
       title={KEY_COPY.retireTitle}
-      description={KEY_COPY.retire(oldId)}
-      confirmLabel={`Retire key ${oldId}`}
+      description={KEY_COPY.retire}
+      confirmLabel={KEY_COPY.retireLabel}
       cancelLabel="Keep both keys"
       onConfirm={retire}
       action="retire the old key"
-      notReady={typed.trim() !== oldId}
-      notReadyMessage={KEY_COPY.retireNotReady(oldId)}
+      notReady={!typedPhrase(typed, KEY_COPY.retirePhrase)}
+      notReadyMessage={KEY_COPY.retireNotReady}
       describe={(e) => unsureSentence(e, unsureWords("both keys still work", "the old key was retired", "the Boards page"))
         ?? describeV3Refusal(e)}
       focusAfter={focusKey}
     >
       {boards.length > 0 && <p className="text-sm text-danger-strong">{KEY_COPY.stranded(listBoards(boards))}</p>}
       <Field>
-        <FieldLabel>{KEY_COPY.retireType(oldId)} <span className="text-text-muted">(required)</span></FieldLabel>
+        <FieldLabel>{KEY_COPY.retireType} <span className="text-text-muted">(required)</span></FieldLabel>
         <Input value={typed} onChange={(event) => setTyped(event.target.value)} autoComplete="off" aria-required="true" />
       </Field>
     </ConfirmDialog>
@@ -156,7 +156,7 @@ function RestoreKey({ onChanged }: { onChanged: (key: DeviceApiKey) => void }) {
   const toast = useToast();
   const [key, setKey] = useState("");
   const [word, setWord] = useState("");
-  const ready = isDeviceKey(key.trim()) && word.trim() === KEY_COPY.restoreWord;
+  const ready = isDeviceKey(key.trim()) && typedPhrase(word, KEY_COPY.restoreWord);
 
   async function restore() {
     const wanted = key.trim();
@@ -197,7 +197,7 @@ function RestoreKey({ onChanged }: { onChanged: (key: DeviceApiKey) => void }) {
         <FieldDescription>{KEY_COPY.restoreKeyInvalid}</FieldDescription>
       </Field>
       <Field>
-        <FieldLabel>Type {KEY_COPY.restoreWord} to confirm <span className="text-text-muted">(required)</span></FieldLabel>
+        <FieldLabel>Type &quot;{KEY_COPY.restoreWord}&quot; to confirm <span className="text-text-muted">(required)</span></FieldLabel>
         <Input value={word} onChange={(event) => setWord(event.target.value)} autoComplete="off" aria-required="true" />
       </Field>
     </ConfirmDialog>
