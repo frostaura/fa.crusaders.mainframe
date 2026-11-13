@@ -58,17 +58,11 @@ def heartbeat(device_code: str, gate_key, roster, unlock_seconds: int = 15,
     DeviceEndpoints.HeartbeatAsync's gate branch. Changing one without the other
     is what the byte-identity test exists to catch.
 
-    TWO KEYS ARE COMING AND ARE DELIBERATELY NOT HERE YET. The gate firmware
-    reads `device_fault_reporting` (bool) and `device_fault_max_per_hour` (int,
-    clamped [1, 120]) out of this same `gate` object, for the aggregated `fault`
-    event channel — see src/iot/door-gate/README.md. It reads them with a
-    compile-time fallback and an absent key leaves the working value alone, so
-    there is nothing to pin until the server actually emits them: a vector
-    carrying keys `GateHeartbeatView.Of` does not produce would turn
-    DeviceGateProtocolCorpusTests red while pinning bytes nobody sends, which is
-    a corpus that agrees with neither side. When the backend emits them they go
-    in this object AFTER `unlock_seconds`, and a vector is owed in the same
-    change.
+    The 1.x body carries `unlock_seconds` only. The gate firmware has always read
+    `device_fault_reporting` (bool) and `device_fault_max_per_hour` (int, clamped
+    [1, 120]) out of this same `gate` object, and the server never sent them
+    (FC-8). From v3 they are sent to a v3 gate, inside `gate` after the three v3
+    settings (V3_GATE below); a 1.x gate is answered byte for byte as before.
 
     `unlock_seconds` defaults to FIFTEEN, which is the tenant default
     `TenantSettingsView.DefaultGateUnlockSeconds` — it was three, Carl's
@@ -483,12 +477,18 @@ NET = {"ver": 4, "base": "http://192.168.1.20:8088", "wifi0_ssid": "CRUSADERS", 
        "wifi1_ssid": "CRUSADERS-NEW", "wifi1_psk": "new-router-pass"}
 V3_CAPS = ["codes:m1", "ota:1", "key:1", "net:1"]
 V3_GATE = {"unlock_seconds": 15, "power_restore_trust_minutes": 20, "net_fallback_minutes": 10,
-           "ota_probation_minutes": 10}
+           "ota_probation_minutes": 10, "device_fault_reporting": True, "device_fault_max_per_hour": 60}
+# The gate's telemetry (docs/specs/device-api.md section 14): the same `diag` object as the court
+# box's, sent on every beat after the v3 fields and before caps.
+V3_DIAG = {"reset": "task_wdt", "exc": 0, "epc1": 0, "heap": 151552, "heap_min": 139264, "block": 110592,
+           "stack_min": 4416, "sketch_free": 1310720, "flash_mb": 4}
 
 
 def heartbeat_v3(extra=(), gate=None):
-    """Key order: the 1.x body, with the three v3 settings appended INSIDE `gate` after
-    unlock_seconds, then the transient v3 objects (ota, key_next, net) after `roster`."""
+    """Key order: the 1.x body, with the v3 settings appended INSIDE `gate` after
+    unlock_seconds (the three v3 ones, then the two fault settings), then the transient v3
+    objects (ota, key_next, net) after `roster`. The gate object holds scalars only, for the
+    life of the frozen readers (FC-12): a nested object here is never a setting."""
     body = heartbeat("gate-0a1b2c", "front-door", [entry("7Q3F9KM2XZ8B", 1800, 5400)])
     body["gate"] = dict(gate or V3_GATE)
     for k, v in extra:
@@ -530,6 +530,23 @@ requests += [
         }),
     },
     {
+        "id": "gate-heartbeat-request-v3-telemetry",
+        "note": (
+            "the gate's telemetry, after the v3 fields and before caps: `diag` is the reset reason "
+            "(esp_reset_reason() as a word), exception cause and epc1 (0 on an ESP32), free heap now "
+            "and lowest since boot, largest free block, the loop task's stack high-water mark in bytes, "
+            "the inactive app slot's size and the real flash size in MB; `drift` (absent here) names "
+            "what the board could not read in the last answer. Every number a JSON integer."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/heartbeat",
+        "authorization": BEARER,
+        "body_hex": body_hex({
+            "mac": MAC, "firmware_version": "2.0.0", "uptime_ms": 86400000, "kind": "gate",
+            "fw_state": "committed", "net_ver": 4, "net_src": "server", "diag": V3_DIAG, "caps": V3_CAPS,
+        }),
+    },
+    {
         "id": "gate-heartbeat-request-v3-rolled-back",
         "note": "2.0.1 failed probation; the gate is back on 2.0.0 in its other app slot and will never take 2.0.1 again.",
         "method": "POST",
@@ -551,8 +568,10 @@ responses += [
             "the gate's v3 settings, inside `gate` after unlock_seconds: power_restore_trust_minutes "
             "(tenant device_power_restore_trust_minutes, 0-120), net_fallback_minutes "
             "(device_net_fallback_minutes, 3-60) and ota_probation_minutes "
-            "(device_ota_probation_minutes, 3-60). Sent only to a gate whose caps include ota:1, "
-            "key:1 or net:1."
+            "(device_ota_probation_minutes, 3-60), then device_fault_reporting and "
+            "device_fault_max_per_hour (the tenant settings of the same names, 1-120), which every gate "
+            "firmware reads and no server sent before v3 (FC-8). Sent only to a gate whose caps include "
+            "ota:1, key:1 or net:1."
         ),
         "body_hex": body_hex(heartbeat_v3()),
         "expect": {"kind": "gate", "gate": V3_GATE, "roster": ["7Q3F9KM2XZ8B|0|1800|5400"]},
