@@ -11,6 +11,7 @@ using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
+using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Workers;
 using Microsoft.AspNetCore.Hosting;
@@ -172,6 +173,43 @@ public abstract class PlatformPassHttpTests
             Assert.Equal(HttpStatusCode.OK, other.StatusCode);
         }
 
+        /// <summary>
+        /// BP-07, the boards' half: a suspended club's court boxes and doors are closed with it — a
+        /// 403 club_suspended, never the 401 a v3 board would answer by trying its other key — and
+        /// only that club's: another club's board, on its own key, carries on.
+        /// </summary>
+        [SkippableFact]
+        public async Task A_suspended_clubs_boards_are_refused_and_only_theirs()
+        {
+            Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+            var factory = pg.SharedHost;
+            var closed = await SeedAsync(factory, "dsus", TenantStatus.Suspended);
+            var open = await SeedAsync(factory, "dopn");
+            var keys = new Dictionary<Guid, string> { [closed.TenantId] = DeviceApiKey.Generate(), [open.TenantId] = DeviceApiKey.Generate() };
+            await WriteAsync(factory, async db =>
+            {
+                foreach (var t in await db.Tenants.IgnoreQueryFilters().Where(t => keys.Keys.Contains(t.Id)).ToListAsync())
+                {
+                    t.DeviceApiKey = keys[t.Id];
+                }
+            });
+
+            async Task<HttpResponseMessage> BeatAsync(Club club)
+            {
+                var client = factory.CreateClient();
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", keys[club.TenantId]);
+                var mac = Guid.NewGuid().ToString("N")[..12];
+                return await client.PostAsJsonAsync("/api/v1/device/heartbeat", new { mac, firmware_version = "3.0.0", uptime_ms = 1000 });
+            }
+
+            using var refused = await BeatAsync(closed);
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            Assert.Equal("club_suspended", await ErrorOf(refused));
+
+            using var served = await BeatAsync(open);
+            Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        }
+
         /// <summary>Onboarding is open; any status this build does not know is closed (fail closed).</summary>
         [SkippableTheory]
         [InlineData(TenantStatus.Onboarding, HttpStatusCode.OK)]
@@ -259,6 +297,34 @@ public abstract class PlatformPassHttpTests
             using var home = await Anonymous(app, new Uri(url).Authority).PostAsJsonAsync("/api/v1/auth/verify-email", new { token });
             Assert.Equal(HttpStatusCode.OK, home.StatusCode);
             Assert.True(await ReadAsync(app, db => db.Users.IgnoreQueryFilters().Where(u => u.Email == email).Select(u => u.EmailVerified).SingleAsync()));
+            // BM-11: a pending applicant is told to wait, not to sign in.
+            Assert.False(JsonDocument.Parse(await home.Content.ReadAsStringAsync()).RootElement.GetProperty("approved").GetBoolean());
+        }
+
+        /// <summary>
+        /// BM-11, varied: an applicant the club approved before the approval gate existed (or an
+        /// admin) confirms the address and is told they can sign in, not to wait for the committee.
+        /// </summary>
+        [SkippableFact]
+        public async Task Confirming_an_already_approved_address_says_so()
+        {
+            Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+            var mail = new CapturingMail();
+            await using var app = CapturingMail.On(pg.SharedHost, mail);
+            var club = await SeedAsync(app, "verok");
+            var email = $"v-{Guid.NewGuid():N}@platform.review.test";
+
+            Assert.Equal(HttpStatusCode.OK, (await TestPhotos.RegisterAsync(Anonymous(app, club.Host), email, $"V-{Guid.NewGuid():N}"[..12])).StatusCode);
+            await WriteAsync(app, async db =>
+            {
+                var userId = await db.Users.IgnoreQueryFilters().Where(u => u.Email == email).Select(u => u.Id).SingleAsync();
+                (await db.Memberships.IgnoreQueryFilters().SingleAsync(m => m.UserId == userId)).Status = MembershipStatus.Active;
+            });
+
+            var (url, token) = LinkIn(Assert.Single(mail.Sent, m => m.To == email), "verify-email");
+            using var verified = await Anonymous(app, new Uri(url).Authority).PostAsJsonAsync("/api/v1/auth/verify-email", new { token });
+            Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
+            Assert.True(JsonDocument.Parse(await verified.Content.ReadAsStringAsync()).RootElement.GetProperty("approved").GetBoolean());
         }
 
         /// <summary>An operator-set address wins, for the reset and the welcome links alike.</summary>

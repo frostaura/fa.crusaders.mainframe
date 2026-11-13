@@ -78,6 +78,16 @@ public sealed class DeviceAuthenticationHandler : AuthenticationHandler<DeviceAu
             return AuthenticateResult.NoResult();
         }
 
+        // BP-07: a club the operator suspended is closed to its boards too, exactly as the tenant
+        // middleware closes it to members (unknown statuses fail closed). The board hears 403
+        // club_suspended — a decided refusal, so it keeps its own roster and asks again later —
+        // never a 401, which a v3 board would read as "try my other key".
+        if (!Domain.TenantStatus.IsOpen(tenant.Status))
+        {
+            Context.Items[SuspendedItem] = true;
+            return AuthenticateResult.Fail("club_suspended");
+        }
+
         var identity = new ClaimsIdentity(
         [
             new Claim(ClaimTypes.NameIdentifier, $"device:{tenant.Id:D}"),
@@ -95,10 +105,18 @@ public sealed class DeviceAuthenticationHandler : AuthenticationHandler<DeviceAu
     }
 
     /// <summary>A bare 401. Nothing in the body: why a key was refused is for the log.</summary>
-    protected override Task HandleChallengeAsync(AuthenticationProperties properties)
+    private const string SuspendedItem = "device_club_suspended";
+
+    protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
     {
+        if (Context.Items.ContainsKey(SuspendedItem))
+        {
+            Response.StatusCode = StatusCodes.Status403Forbidden;
+            await Response.WriteAsJsonAsync(new { error = "club_suspended" });
+            return;
+        }
+
         Response.StatusCode = StatusCodes.Status401Unauthorized;
         Response.Headers.WWWAuthenticate = SchemeName;
-        return Task.CompletedTask;
     }
 }
