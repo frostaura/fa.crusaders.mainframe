@@ -108,7 +108,7 @@ export function ControlBoardPage() {
   const timezone = view?.timezone;
   const readAtFace = readAt === null ? null : clubClock(readAt, timezone);
   const silent = silentCourts(courts);
-  const partial = partialBoardNotice(silent, readAtFace);
+  const partial = partialBoardNotice(silent, readAtFace, timezone);
   /*
    * `error` is `unknown` — deliberately, because `describeFailure` is the only thing that may
    * interpret it — so the page asks the boolean question it actually has: did the last read
@@ -121,7 +121,14 @@ export function ControlBoardPage() {
   return (
     // `--board-scale` is declared on the shell and consumed ONLY by CourtTile. Wall view is
     // therefore one declaration rather than a second set of class strings that drift from the first.
-    <PageShell width="full" style={wall ? ({ "--board-scale": "1.6" } as CSSProperties) : undefined}>
+    // BA-11: wall view covers the app's own chrome (bar, rail, banners) with the board itself —
+    // an overlay, not the Fullscreen API, so a notification cannot drop it back to the console —
+    // and drops the explanations, so every court fits a wall tablet.
+    <PageShell
+      width="full" data-wall-view={wall ? "" : undefined}
+      className={wall ? "fixed inset-0 z-overlay max-w-none overflow-y-auto bg-bg-surface" : undefined}
+      style={wall ? ({ "--board-scale": "1.6" } as CSSProperties) : undefined}
+    >
       <PageHeader
         title="Control board"
         // The freshness line is a fact about the SCREEN and changes on a timer: it is the
@@ -143,9 +150,11 @@ export function ControlBoardPage() {
       {/* Side by side where the page has the room (R4 form factor): two standing paragraphs
           stacked cost the tiles ~200px of a 1920 screen. Never collapsed — see the notice. */}
       <AutoGrid min="wide" max={2} gap="lg" className="-mt-2">
-        <Alert tone="info" live="standing" announceKey="control-board-what-this-is">
-          {BOARD_STANDING_NOTICE}
-        </Alert>
+        {!wall && (
+          <Alert tone="info" live="standing" announceKey="control-board-what-this-is">
+            {BOARD_STANDING_NOTICE}
+          </Alert>
+        )}
 
         {partial && (
           <Alert tone="warning" live="standing" announceKey={`control-board-silent:${silent.join(",")}`}>
@@ -189,7 +198,7 @@ export function ControlBoardPage() {
             beside the rail — one across on a phone, then two, then every court on one row once
             each tile has 18rem (four at 1920 beside the rail); odd counts go three across. */}
         <div className="@container/tiles">
-          <div data-court-tiles={courts.length} className={cn("grid gap-4", tileColumns(courts.length))}>
+          <div data-court-tiles={courts.length} className={cn("grid items-start gap-4", tileColumns(courts.length))}>
           {courts.map((court) => (
             <CourtTile
               key={court.court_id}
@@ -197,16 +206,19 @@ export function ControlBoardPage() {
               now={now}
               timezone={timezone}
               graceMinutes={settings?.grace_window_minutes ?? null}
+              generatedAt={view?.generated_at ?? null}
             />
           ))}
           </div>
         </div>
       </StateBlock>
 
-      <p className="flex items-start gap-2 text-sm text-text-muted">
-        <Prohibit size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
-        <span>{BOARD_NO_REMOTE_CONTROL}</span>
-      </p>
+      {!wall && (
+        <p className="flex items-start gap-2 text-sm text-text-muted">
+          <Prohibit size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span>{BOARD_NO_REMOTE_CONTROL}</span>
+        </p>
+      )}
     </PageShell>
   );
 }
