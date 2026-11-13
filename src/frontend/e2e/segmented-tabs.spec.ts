@@ -118,7 +118,8 @@ test.describe("the capsule", () => {
 test.describe("the keyboard", () => {
   test("arrows move focus and do not fire a request", async ({ page }) => {
     const calls: string[] = [];
-    page.on("request", (r) => { if (r.url().includes("/api/")) calls.push(r.url()); });
+    // FM-8: the app's boot reads which club this is; that read is the page load's, not a tab's.
+    page.on("request", (r) => { if (r.url().includes("/api/") && !r.url().includes("/api/v1/auth/club")) calls.push(r.url()); });
 
     await page.setViewportSize({ width: 390, height: 800 });
     await page.goto(TABS);

@@ -19,7 +19,7 @@ export function CodeHelp({ doors, signedOut }: { doors: boolean; signedOut: bool
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" icon={<Question aria-hidden="true" />} className="shrink-0">
+        <Button variant="ghost" icon={<Question aria-hidden="true" />} className="shrink-0">
           {CODE_HELP.label}
         </Button>
       </PopoverTrigger>
