@@ -51,6 +51,15 @@
 // microseconds, and the board queues what it did. The degraded mode is narrower
 // than the court box's and the contract says so: offline, only a member with a
 // rostered booking gets in.
+//
+// 2.0.0: THE LAST CABLE FLASH (door-gate.md §14)
+// ---------------------------------------------
+// Everything below secrets.h's four values is now a FIRST-BOOT DEFAULT: the
+// keys rotate over the heartbeat, the WiFi and the server URL change from the
+// server or at the BOOT-button setup portal, and the image itself is replaced by
+// signed OTA into the other app slot. What survives a reset is in RTC memory
+// (warm) and NVS (cold). This file wires the ports for all of it; GateApp
+// decides.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -63,7 +72,9 @@
 
 #include "src/devapi/DeviceClient.h"
 #include "src/devcrypto/Hex.h"
+#include "src/devcrypto/Rsa.h"
 #include "src/devlink/ApiBreaker.h"
+#include "src/devota/Ota.h"
 #include "src/esp32_hal/Esp32Hal.h"
 #include "src/fwversion/Version.h"
 #include "src/gatelogic/ApiBaseUrl.h"
@@ -73,6 +84,9 @@
 #include "src/gatelogic/GateApi.h"
 #include "src/gatelogic/GateApp.h"
 #include "src/gatelogic/GateConfig.h"
+#include "src/gatelogic/GateKeys.h"
+#include "src/gatelogic/GateNet.h"
+#include "src/gatelogic/GateStore.h"
 #include "src/gatelogic/LedPattern.h"
 #include "src/gatelogic/LockDriver.h"
 #include "src/gatelogic/ScanAssembler.h"
@@ -97,15 +111,11 @@
 #error                                                                                                       \
     "the gate's firmware version did not reach the compiler — see [env:door_gate] in src/iot/door-gate/platformio.ini"
 #endif
-// 1.1.0 is the single rotating member code (docs/specs/member-code.md): the
-// first gate image that verifies a v1 code offline and reports `codes:m1`.
-// 1.1.1 spends every gating window on the pass it ends, so none can outlive a
-// quiet spell past 2^31 ms (review round 17, D17-2). 1.1.2 observes every age
-// on every pass, so none reads young again after the 2^32 ms wrap (review round
-// 18, D18-2). The Devices page showing 1.1.2 is how the person who flashed it
-// knows it landed.
-#if (FW_VERSION_MAJOR != 1) || (FW_VERSION_MINOR != 1) || (FW_VERSION_PATCH != 2)
-#error "this image is not reporting the gate's own firmware version (1.1.2)"
+// 2.0.0 is device contract v3 (door-gate.md §14): persisted state, key
+// rotation, runtime network, signed OTA, the v3 readers. The Devices page
+// showing 2.0.0 is how the person who flashed it knows it landed.
+#if (FW_VERSION_MAJOR != 2) || (FW_VERSION_MINOR != 0) || (FW_VERSION_PATCH != 0)
+#error "this image is not reporting the gate's own firmware version (2.0.0)"
 #endif
 
 // The four compiled-in values, all MANDATORY. There is no runtime store and no
@@ -184,6 +194,33 @@ static_assert(gatelogic::isValidApiBaseUrl(API_BASE_URL),
               "cannot become an image on a wall");
 static_assert(gatelogic::apiBaseUrlFits(API_BASE_URL),
               "API_BASE_URL does not fit the URL buffer together with the longest device path");
+
+// 2.0.0's TWO NEW VALUES, mandatory like the four above (device-api.md §7, §8).
+//
+// OTA_PUBLIC_KEY_N is the release key's RSA-2048 modulus, 512 hex characters:
+// the ONLY key whose signature this board will boot. It is refused if it is the
+// corpus's TEST key (src/contracts/device-protocol/ota/), whose private half is
+// in the repository, so an image signed by anybody could otherwise be booted.
+// SETUP_AP_PASSWORD is the setup portal's WPA2 password, printed on the label
+// inside the enclosure: 8 to 63 characters.
+#ifndef OTA_PUBLIC_KEY_N
+#error "secrets.h does not define OTA_PUBLIC_KEY_N — see secrets.h.example, next to door_gate.ino"
+#endif
+#ifndef SETUP_AP_PASSWORD
+#error "secrets.h does not define SETUP_AP_PASSWORD — see secrets.h.example, next to door_gate.ino"
+#endif
+static_assert(sizeof(OTA_PUBLIC_KEY_N) == 513U && gatelogic::text::isHexRange(OTA_PUBLIC_KEY_N, 0U, 512U),
+              "OTA_PUBLIC_KEY_N must be the release key's RSA-2048 modulus as exactly 512 hex characters "
+              "(ota_sign.py prints it)");
+static_assert(!gatelogic::text::startsWith(OTA_PUBLIC_KEY_N, "d9ce9d8aeba6c19446077d6c0802c56f") &&
+                  !gatelogic::text::startsWith(OTA_PUBLIC_KEY_N, "a5105de8c0eeb5d3a8ddc78a4bc8a385"),
+              "OTA_PUBLIC_KEY_N is one of the contract corpus's TEST keys — their private halves are in the "
+              "repository. Put the club's own release key here");
+static_assert(sizeof(SETUP_AP_PASSWORD) >= 9U && sizeof(SETUP_AP_PASSWORD) <= 64U,
+              "SETUP_AP_PASSWORD must be 8 to 63 characters (WPA2)");
+static_assert(!gatelogic::text::equals(SETUP_AP_PASSWORD, "REPLACE_ME_SETUP_AP_PASSWORD"),
+              "SETUP_AP_PASSWORD is still secrets.h.example's placeholder — choose one and print it on the "
+              "label inside the enclosure");
 
 namespace {
 
@@ -302,7 +339,11 @@ const char* bootReasonCode() {
 /// `Bearer <DEVICE_API_KEY>`, rendered once at boot. Held rather than rebuilt
 /// per call because it is the same string for the life of the image and the
 /// heap it would churn is shared with the network stack.
-char gAuthHeader[devapi::kAuthorizationBufSize] = {};
+// The keys and the network, before the HTTP port: it holds their header and
+// base-URL buffers, which GateApp::begin() fills (persisted, or the compiled
+// first-boot defaults) and rewrites when a key rotates or the network changes.
+GateKeys gKeys;
+GateNet gNet;
 
 /// ONE FAULT LOG FOR THE WHOLE IMAGE, and it has to be one: the API client, the
 /// store wrapper and the loop all report into it, and a second instance would
@@ -310,7 +351,7 @@ char gAuthHeader[devapi::kAuthorizationBufSize] = {};
 /// half the rate it believes.
 FaultLog gFaults;
 
-esp32_hal::Esp32HttpPort gHttp(API_BASE_URL, gAuthHeader, gClock);
+esp32_hal::Esp32HttpPort gHttp(gNet.baseUrl(), gKeys.header(), gClock);
 devlink::ApiBreaker gBreaker;
 GateApi gApi(gHttp, gBreaker, gClock, gFaults);
 
@@ -336,6 +377,30 @@ char gHeartbeatBody[kGateResponseCap] = {};
 /// Every port the loop needs, named. Assigned rather than aggregate-initialised
 /// because two pointers of the same type swapped positionally is a build that
 /// compiles and a door that blinks when it should open.
+// 2.0.0's ports (door-gate.md §14).
+esp32_hal::Esp32NvsBlobs gBlobs;
+esp32_hal::Esp32RtcClock gRtc;
+esp32_hal::Esp32Radio gRadio;
+esp32_hal::Esp32System gSystem;
+esp32_hal::Esp32Diag gDiag;
+esp32_hal::Esp32OtaSlot gOtaSlot;
+esp32_hal::Esp32Download gDownload(gNet.baseUrl(), gKeys.header(), gClock);
+esp32_hal::Esp32BootButton gBootButton;
+esp32_hal::Esp32Portal gPortal(SETUP_AP_PASSWORD);
+uint8_t gOtaModulus[dc::kRsa2048Bytes] = {};
+
+// THE WARM IMAGE, in RTC slow memory that no reset but a power-on clears. Raw
+// bytes rather than a WarmImage: an object here would be constructed — zeroed —
+// on every boot, which is precisely what the attribute exists to prevent.
+RTC_NOINIT_ATTR uint8_t gWarmBytes[sizeof(WarmImage)];
+
+bool coldBoot() {
+  // A power-on clears RTC memory to garbage and restarts the RTC counter, so
+  // nothing in it dates anything (§14.1). Every other reset is warm.
+  const esp_reset_reason_t reason = esp_reset_reason();
+  return reason == ESP_RST_POWERON || reason == ESP_RST_UNKNOWN;
+}
+
 GateApp::Ports wire() {
   GateApp::Ports ports;
   ports.clock = &gClock;
@@ -367,6 +432,25 @@ GateApp::Ports wire() {
   ports.bootReason = bootReasonCode();
   ports.heartbeatBody = gHeartbeatBody;
   ports.heartbeatBodyCap = sizeof(gHeartbeatBody);
+  ports.blobs = &gBlobs;
+  ports.warmBytes = gWarmBytes;
+  ports.warmBytesCap = sizeof(gWarmBytes);
+  ports.warmClock = &gRtc;
+  ports.coldBoot = coldBoot();
+  ports.keys = &gKeys;
+  ports.net = &gNet;
+  ports.compiledKey = DEVICE_API_KEY;
+  ports.compiledSsid = WIFI_SSID;
+  ports.compiledPsk = WIFI_PASSWORD;
+  ports.compiledBase = API_BASE_URL;
+  ports.radio = &gRadio;
+  ports.system = &gSystem;
+  ports.diag = &gDiag;
+  ports.otaSlot = &gOtaSlot;
+  ports.download = &gDownload;
+  ports.otaModulus = gOtaModulus;
+  ports.setupButton = &gBootButton;
+  ports.portal = &gPortal;
   return ports;
 }
 
@@ -382,7 +466,7 @@ void setupIdentity() {
   uint8_t mac[6] = {0U, 0U, 0U, 0U, 0U, 0U};
   WiFi.macAddress(mac);
   static_cast<void>(dc::hex::encodeLower(mac, sizeof(mac), gMacHex, sizeof(gMacHex)));
-  static_cast<void>(devapi::renderAuthorization(gAuthHeader, sizeof(gAuthHeader), DEVICE_API_KEY));
+  // The bearer header is the key ring's now (GateKeys), rendered in begin().
 }
 
 /// ONE line, at boot, on the USB console — and nothing in the loop.
@@ -400,7 +484,9 @@ void bootLog(bool watchdogArmed) {
   Serial.print(F(" mac="));
   Serial.print(gMacHex);
   Serial.print(F(" api="));
-  Serial.print(F(API_BASE_URL));
+  Serial.print(gNet.baseUrl());
+  Serial.print(F(" net="));
+  Serial.print(netSourceName(gNet.source()));
   Serial.print(F(" watchdog="));
   Serial.print(static_cast<int>(kGateConfig.watchdogSeconds));
   Serial.print(watchdogArmed ? F("s") : F("s NOT ARMED — esp_task_wdt refused"));
@@ -425,6 +511,12 @@ void setup() {
   // watchdog reset causes at 3am.
   gApp.beginOutputs();
 
+  // SECOND: an image on probation counts this boot, and on its fourth is rolled
+  // back to the other slot before anything else runs (§14.2). It needs only the
+  // flash, so the flash opens here and nothing else does.
+  static_cast<void>(gBlobs.begin());
+  static_cast<void>(gApp.checkFirmwareAtBoot());
+
   // Retried inside begin(); false here means three attempts all refused. The
   // board still runs and still opens doors — a door that admits nobody is far
   // worse than one on the core's five seconds — but it says so, on the boot
@@ -437,14 +529,18 @@ void setup() {
   gScanner.begin(kGateConfig.scannerBaud, kGateConfig.scannerRxPin, kGateConfig.scannerTxPin);
   static_cast<void>(gStore.begin());
 
-  // The credential is the compiled-in one and nothing else — persistent(false)
-  // keeps the core from writing a second, invisible copy in its own flash
-  // record, which would outlive a reflash and join the wrong network.
-  // DHCP: no WiFi.config(), no static address — see the header.
+  gBootButton.begin();
+  // The release key, from its compile-time-checked hex.
+  static_cast<void>(devota::parseModulusHex(OTA_PUBLIC_KEY_N, gOtaModulus));
+
+  // persistent(false) keeps the core from writing a second, invisible copy of
+  // the credential in its own flash record, which would outlive a reflash and
+  // join the wrong network. The station is started here; WHICH network it joins
+  // is GateApp's (GateNet: the persisted set, else the compiled default), and
+  // the link supervisor re-joins from then on (DG-3). DHCP: no WiFi.config().
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   setupIdentity();
   bootLog(watchdogArmed);

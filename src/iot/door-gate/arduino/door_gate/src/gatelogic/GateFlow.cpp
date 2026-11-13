@@ -7,6 +7,7 @@
 
 #include "../devapi/Json.h"
 #include "../gatelogic/GateHeartbeat.h"
+#include "../gatelogic/GateReply.h"
 
 namespace gatelogic {
 namespace {
@@ -65,72 +66,11 @@ size_t renderScanBody(char* out, size_t cap, const char* mac, const char* token)
 
 ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint32_t adoptedUnlockMs,
                             uint32_t hardCapMs) {
-  ScanDecision decision;
-
-  // AUTHORITATIVE, AND NOT AN OUTAGE. A 403 on `/gate` is the club having taken
-  // this board out of service in the admin console — the one 4xx that is a
-  // statement about the board rather than about this request. Falling back
-  // would keep the door admitting rostered members for the whole staleness
-  // window after an admin pressed the button meant to stop exactly that.
-  //
-  // Before the body is looked at, and whatever the body says: the server sends
-  // none, and a proxy's error page must not be able to open a door.
-  if (status == 403U) {
-    setReason(decision, kReasonOutOfService);
-    // And the ROSTER goes, not just this scan. Denying the scan in front of us
-    // and keeping the roster would leave the next link drop admitting every
-    // rostered member again — which is the window the whole 403 rule exists to
-    // close, and the scan path is often the first one a board speaks on after
-    // an admin presses the button.
-    decision.outOfService = true;
-    return decision;
-  }
-
-  // devapi::react() is deliberately NOT used here. Its `Rejected` class means
-  // "a 4xx this box caused — drop it and move on", which is the right answer
-  // for an event upload and the wrong one for a door: a 400 or a 404 says this
-  // board learned nothing about the member standing in front of it, and the
-  // roster may well know them. Everything left is an outage.
-  if (status != 200U || body == nullptr) {
-    decision.fallbackToRoster = true;
-    return decision;
-  }
-
-  // THE TOP LEVEL, AND NOTHING NESTED INSIDE IT (round G4, B2). `boolField` is
-  // a flat any-depth scan — the court box depends on that for `button_map` in
-  // the heartbeat's nested `config` — and it was reading the one field that
-  // drives a lock. `{"outer":{"opened":true}}` released it, `[{"opened":true}]`
-  // released it, and `{"opened":false,"detail":{"opened":true}}` released it
-  // even though its top-level answer is a refusal, because the flat scan takes
-  // the FIRST match in document order. The same scoping `adoptUnlockMs` has
-  // always applied to `unlock_seconds`, applied to all three of these.
-  bool opened = false;
-  if (!devapi::json::topLevelBoolField(body, len, "opened", opened)) {
-    // A 200 whose body is truncated, empty, or shaped differently from the
-    // contract. It is not a refusal — nobody said no — so it is an outage with
-    // a 200 on it, and the roster gets its turn.
-    decision.fallbackToRoster = true;
-    return decision;
-  }
-
-  if (!devapi::json::topLevelStringField(body, len, "reason", decision.reason, sizeof(decision.reason))) {
-    // The flag is the decision; the reason is commentary. A 200 that opens the
-    // door with no readable reason still opens the door.
-    decision.reason[0] = '\0';
-  }
-
-  if (!opened) {
-    // AUTHORITATIVE. No roster second-guess, ever: the API knows about the
-    // membership suspended this morning and the roster does not.
-    return decision;
-  }
-
-  uint32_t seconds = 0U;
-  decision.released = true;
-  decision.unlockMs = devapi::json::topLevelUnsignedField(body, len, "unlock_seconds", seconds)
-                          ? unlockMsFromSeconds(seconds, hardCapMs)
-                          : clampUnlockMs(adoptedUnlockMs, hardCapMs);
-  return decision;
+  // 2.0.0 reads the decision by device-api.md §11.2 (GateReply.h): every 2xx,
+  // exact kinds, and an open with no `unlock_seconds` is unreadable — decided
+  // offline — rather than filled in from the heartbeat's release time.
+  static_cast<void>(adoptedUnlockMs);
+  return readScanReply(status, body, len, hardCapMs);
 }
 
 ScanDecision fromRoster(const roster::Decision& decision, uint32_t adoptedUnlockMs, uint32_t hardCapMs) {

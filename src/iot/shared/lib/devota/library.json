@@ -1,0 +1,10 @@
+{
+  "name": "devota",
+  "version": "1.0.0",
+  "description": "Signed OTA for both ESP images (device contract v3): the release manifest, its RSA-2048 PKCS#1 v1.5 SHA-256 signature, the strictly-newer version gate, the heartbeat's ota offer grammar, staged-image verification and the probation that keeps or rolls back a new image. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
+  "keywords": "device, ota, firmware update, signature, rsa, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": { "devcrypto": "*", "devnet": "*", "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}

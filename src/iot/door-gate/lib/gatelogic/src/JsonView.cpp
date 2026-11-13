@@ -1,0 +1,445 @@
+#include "gatelogic/JsonView.h"
+
+#include <string.h>
+
+namespace gatelogic {
+namespace jv {
+
+namespace {
+
+bool isWs(char c) {
+  return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+const char* skipWs(const char* p, const char* end) {
+  while (p < end && isWs(*p)) {
+    ++p;
+  }
+  return p;
+}
+
+bool isDigit(char c) {
+  return c >= '0' && c <= '9';
+}
+
+bool isHex(char c) {
+  return isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+/// Past the closing quote of a string starting at `p` (on the quote), or null.
+const char* skipString(const char* p, const char* end) {
+  ++p;
+  while (p < end) {
+    const unsigned char c = static_cast<unsigned char>(*p);
+    if (c == '"') {
+      return p + 1;
+    }
+    if (c < 0x20U) {
+      return nullptr;
+    }
+    if (c == '\\') {
+      ++p;
+      if (p >= end) {
+        return nullptr;
+      }
+      const char e = *p;
+      if (e == 'u') {
+        if (end - p < 5) {
+          return nullptr;
+        }
+        for (int i = 1; i <= 4; ++i) {
+          if (!isHex(p[i])) {
+            return nullptr;
+          }
+        }
+        p += 4;
+      } else if (e != '"' && e != '\\' && e != '/' && e != 'b' && e != 'f' && e != 'n' && e != 'r' &&
+                 e != 't') {
+        return nullptr;
+      }
+    }
+    ++p;
+  }
+  return nullptr;
+}
+
+/// Past a number starting at `p`, classifying it, or null.
+const char* skipNumber(const char* p, const char* end, Kind& kind) {
+  const char* q = p;
+  if (q < end && *q == '-') {
+    ++q;
+  }
+  if (q >= end || !isDigit(*q)) {
+    return nullptr;
+  }
+  if (*q == '0') {
+    ++q;
+  } else {
+    while (q < end && isDigit(*q)) {
+      ++q;
+    }
+  }
+  kind = Kind::Integer;
+  if (q < end && *q == '.') {
+    ++q;
+    if (q >= end || !isDigit(*q)) {
+      return nullptr;
+    }
+    while (q < end && isDigit(*q)) {
+      ++q;
+    }
+    kind = Kind::Number;
+  }
+  if (q < end && (*q == 'e' || *q == 'E')) {
+    ++q;
+    if (q < end && (*q == '+' || *q == '-')) {
+      ++q;
+    }
+    if (q >= end || !isDigit(*q)) {
+      return nullptr;
+    }
+    while (q < end && isDigit(*q)) {
+      ++q;
+    }
+    kind = Kind::Number;
+  }
+  return q;
+}
+
+const char* skipLiteral(const char* p, const char* end, const char* word) {
+  const size_t n = strlen(word);
+  if (static_cast<size_t>(end - p) < n || memcmp(p, word, n) != 0) {
+    return nullptr;
+  }
+  return p + n;
+}
+
+const char* skipValue(const char* p, const char* end, uint8_t depth, Kind& kind);
+
+/// Past a container whose opener is at `p`; `depth` is the container's own.
+const char* skipContainer(const char* p, const char* end, uint8_t depth, bool object) {
+  if (depth > kMaxDepth) {
+    return nullptr;
+  }
+  const char close = object ? '}' : ']';
+  p = skipWs(p + 1, end);
+  if (p < end && *p == close) {
+    return p + 1;
+  }
+  while (p < end) {
+    if (object) {
+      if (*p != '"') {
+        return nullptr;
+      }
+      p = skipString(p, end);
+      if (p == nullptr) {
+        return nullptr;
+      }
+      p = skipWs(p, end);
+      if (p >= end || *p != ':') {
+        return nullptr;
+      }
+      p = skipWs(p + 1, end);
+    }
+    Kind ignored = Kind::Missing;
+    p = skipValue(p, end, depth, ignored);
+    if (p == nullptr) {
+      return nullptr;
+    }
+    p = skipWs(p, end);
+    if (p >= end) {
+      return nullptr;
+    }
+    if (*p == close) {
+      return p + 1;
+    }
+    if (*p != ',') {
+      return nullptr;
+    }
+    p = skipWs(p + 1, end);
+  }
+  return nullptr;
+}
+
+/// `depth` is the depth of the container this value sits in.
+const char* skipValue(const char* p, const char* end, uint8_t depth, Kind& kind) {
+  if (p >= end) {
+    return nullptr;
+  }
+  switch (*p) {
+  case '{':
+    kind = Kind::Object;
+    return skipContainer(p, end, static_cast<uint8_t>(depth + 1U), true);
+  case '[':
+    kind = Kind::Array;
+    return skipContainer(p, end, static_cast<uint8_t>(depth + 1U), false);
+  case '"':
+    kind = Kind::String;
+    return skipString(p, end);
+  case 't':
+    kind = Kind::True;
+    return skipLiteral(p, end, "true");
+  case 'f':
+    kind = Kind::False;
+    return skipLiteral(p, end, "false");
+  case 'n':
+    kind = Kind::Null;
+    return skipLiteral(p, end, "null");
+  default:
+    return skipNumber(p, end, kind);
+  }
+}
+
+/// Whether the string token at `p` (on its opening quote, no escapes inside the
+/// key on this wire) equals `key`.
+bool keyEquals(const char* p, const char* end, const char* key) {
+  const size_t n = strlen(key);
+  if (static_cast<size_t>(end - p) < n + 2U || p[0] != '"') {
+    return false;
+  }
+  return memcmp(p + 1, key, n) == 0 && p[n + 1U] == '"';
+}
+
+bool parseMagnitude(const char* p, const char* end, uint64_t limit, uint64_t& out) {
+  uint64_t v = 0U;
+  if (p >= end) {
+    return false;
+  }
+  for (; p < end; ++p) {
+    v = (v * 10U) + static_cast<uint64_t>(*p - '0');
+    if (v > limit) {
+      return false;
+    }
+  }
+  out = v;
+  return true;
+}
+
+} // namespace
+
+bool completeObject(const char* body, size_t len, Value& object) {
+  object = Value();
+  if (body == nullptr) {
+    return false;
+  }
+  const char* p = body;
+  const char* end = body + len;
+  if (len >= 3U && static_cast<unsigned char>(p[0]) == 0xEFU && static_cast<unsigned char>(p[1]) == 0xBBU &&
+      static_cast<unsigned char>(p[2]) == 0xBFU) {
+    p += 3;
+  }
+  p = skipWs(p, end);
+  if (p >= end || *p != '{') {
+    return false;
+  }
+  const char* after = skipContainer(p, end, 1U, true);
+  if (after == nullptr || skipWs(after, end) != end) {
+    return false;
+  }
+  object.kind = Kind::Object;
+  object.at = p;
+  object.len = static_cast<size_t>(after - p);
+  return true;
+}
+
+Value member(const Value& object, const char* key) {
+  Value out;
+  if (object.kind != Kind::Object || object.at == nullptr || key == nullptr) {
+    return out;
+  }
+  const char* end = object.at + object.len;
+  const char* p = skipWs(object.at + 1, end);
+  while (p < end && *p == '"') {
+    const bool match = keyEquals(p, end, key);
+    p = skipString(p, end);
+    if (p == nullptr) {
+      return out;
+    }
+    p = skipWs(p, end);
+    if (p >= end || *p != ':') {
+      return out;
+    }
+    p = skipWs(p + 1, end);
+    Kind kind = Kind::Missing;
+    const char* after = skipValue(p, end, 1U, kind);
+    if (after == nullptr) {
+      return out;
+    }
+    if (match) {
+      out.kind = kind;
+      out.at = p;
+      out.len = static_cast<size_t>(after - p);
+      return out;
+    }
+    p = skipWs(after, end);
+    if (p < end && *p == ',') {
+      p = skipWs(p + 1, end);
+    }
+  }
+  return out;
+}
+
+bool asUint32(const Value& value, uint32_t& out) {
+  if (value.kind != Kind::Integer || value.len == 0U || value.at[0] == '-') {
+    return false;
+  }
+  uint64_t v = 0U;
+  if (!parseMagnitude(value.at, value.at + value.len, 0xFFFFFFFFULL, v)) {
+    return false;
+  }
+  out = static_cast<uint32_t>(v);
+  return true;
+}
+
+bool asInt32(const Value& value, int32_t& out) {
+  if (value.kind != Kind::Integer || value.len == 0U) {
+    return false;
+  }
+  const bool negative = value.at[0] == '-';
+  uint64_t v = 0U;
+  const uint64_t limit = negative ? 2147483648ULL : 2147483647ULL;
+  if (!parseMagnitude(value.at + (negative ? 1 : 0), value.at + value.len, limit, v)) {
+    return false;
+  }
+  out = negative ? static_cast<int32_t>(-static_cast<int64_t>(v)) : static_cast<int32_t>(v);
+  return true;
+}
+
+bool asBool(const Value& value, bool& out) {
+  if (value.kind == Kind::True) {
+    out = true;
+    return true;
+  }
+  if (value.kind == Kind::False) {
+    out = false;
+    return true;
+  }
+  return false;
+}
+
+namespace {
+
+int hexDigit(char c) {
+  if (c >= '0' && c <= '9') {
+    return c - '0';
+  }
+  if (c >= 'a' && c <= 'f') {
+    return c - 'a' + 10;
+  }
+  return c - 'A' + 10;
+}
+
+} // namespace
+
+bool asString(const Value& value, char* out, size_t cap, size_t& outLen) {
+  outLen = 0U;
+  if (value.kind != Kind::String || out == nullptr || cap == 0U || value.len < 2U) {
+    return false;
+  }
+  const char* p = value.at + 1;
+  const char* end = value.at + value.len - 1;
+  size_t n = 0U;
+  while (p < end) {
+    char c = *p;
+    if (c == '\\') {
+      ++p;
+      const char e = *p;
+      switch (e) {
+      case 'b':
+        c = '\b';
+        break;
+      case 'f':
+        c = '\f';
+        break;
+      case 'n':
+        c = '\n';
+        break;
+      case 'r':
+        c = '\r';
+        break;
+      case 't':
+        c = '\t';
+        break;
+      case 'u': {
+        const int code =
+            (hexDigit(p[1]) << 12) | (hexDigit(p[2]) << 8) | (hexDigit(p[3]) << 4) | hexDigit(p[4]);
+        if (code == 0 || code > 0x7F) {
+          return false;
+        }
+        c = static_cast<char>(code);
+        p += 4;
+        break;
+      }
+      default:
+        c = e;
+        break;
+      }
+    }
+    if (n + 1U >= cap) {
+      return false;
+    }
+    out[n] = c;
+    ++n;
+    ++p;
+  }
+  out[n] = '\0';
+  outLen = n;
+  return true;
+}
+
+bool stringEquals(const Value& value, const char* text) {
+  const char* raw = nullptr;
+  size_t n = 0U;
+  return rawString(value, raw, n) && n == strlen(text) && memcmp(raw, text, n) == 0;
+}
+
+bool rawString(const Value& value, const char*& text, size_t& len) {
+  if (value.kind != Kind::String || value.len < 2U) {
+    return false;
+  }
+  text = value.at + 1;
+  len = value.len - 2U;
+  return memchr(text, '\\', len) == nullptr;
+}
+
+ArrayIter::ArrayIter(const Value& array)
+    : p_(nullptr), end_(nullptr), valid_(array.kind == Kind::Array && array.at != nullptr) {
+  if (valid_) {
+    end_ = array.at + array.len - 1;
+    p_ = skipWs(array.at + 1, end_);
+  }
+}
+
+bool ArrayIter::next(Value& element) {
+  element = Value();
+  if (!valid_ || p_ >= end_) {
+    return false;
+  }
+  Kind kind = Kind::Missing;
+  const char* after = skipValue(p_, end_, 1U, kind);
+  if (after == nullptr) {
+    valid_ = false;
+    return false;
+  }
+  element.kind = kind;
+  element.at = p_;
+  element.len = static_cast<size_t>(after - p_);
+  p_ = skipWs(after, end_);
+  if (p_ < end_ && *p_ == ',') {
+    p_ = skipWs(p_ + 1, end_);
+  }
+  return true;
+}
+
+size_t ArrayIter::count() const {
+  ArrayIter copy = *this;
+  size_t n = 0U;
+  Value ignored;
+  while (copy.next(ignored)) {
+    ++n;
+  }
+  return n;
+}
+
+} // namespace jv
+} // namespace gatelogic

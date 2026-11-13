@@ -20,7 +20,12 @@ GateApp::GateApp(const Ports& ports)
       firmwareVersion_(ports.firmwareVersion), bootId_(ports.bootId),
       watchdogResetRun_(ports.watchdogResetRun), bootReason_(ports.bootReason),
       heartbeatBody_(ports.heartbeatBody), heartbeatBodyCap_(ports.heartbeatBodyCap),
-      ledActiveHigh_(ports.ledActiveHigh) {
+      ledActiveHigh_(ports.ledActiveHigh), blobs_(ports.blobs), warmBytes_(ports.warmBytes),
+      warmBytesCap_(ports.warmBytesCap), warmClock_(ports.warmClock), coldBoot_(ports.coldBoot),
+      keys_(ports.keys), net_(ports.net), compiledKey_(ports.compiledKey), compiledSsid_(ports.compiledSsid),
+      compiledPsk_(ports.compiledPsk), compiledBase_(ports.compiledBase), radio_(ports.radio),
+      system_(ports.system), diag_(ports.diag), otaSlot_(ports.otaSlot), download_(ports.download),
+      otaModulus_(ports.otaModulus), setupButton_(ports.setupButton), portal_(ports.portal) {
 }
 
 void GateApp::fault(const char* code) {
@@ -71,7 +76,26 @@ void GateApp::begin() {
     firstCallAt_.arm(now, firstCallHeldBackMs_);
   }
 
+  // 2.0.0: the keys and the network first — the HTTP port reads their buffers
+  // on its very first call — then whatever survived the reset (§14.1).
+  if (keys_ != nullptr) {
+    keys_->begin(compiledKey_, blobs_);
+    api_.useKeys(keys_, &between_);
+  }
+  if (net_ != nullptr) {
+    net_->begin(compiledSsid_, compiledPsk_, compiledBase_, blobs_);
+    net_->startClock(now);
+    if (radio_ != nullptr && net_->profileCount() > 0U) {
+      const devnet::Profile& first = net_->profile(net_->activeProfile());
+      radio_->join(first.ssid, first.psk);
+    }
+  }
+  restoreState(now);
+  gesture_.begin(now);
+  stallAt_.arm(now, kStallRestartMs);
+
   queue_.begin();
+  loadCarriedEvents();
   eventq::Event boot;
   boot.kind = eventq::Kind::Boot;
   boot.court = eventq::Event::kNoCourt;
@@ -109,7 +133,11 @@ void GateApp::pass() {
   const uint32_t now = clock_.nowMs();
   uptime_.tick(now);
   watchdog_.kick();
+  // Flash writes at the top of the pass, never from inside a decision (ESPR-1's
+  // rule; on this chip it keeps an NVS commit out from under a blocking call).
+  persistDirty(now);
   forgetElapsedWindows(now);
+  pumpSetup(now);
 
   // THE LINK FIRST, because it is the input every step below is decided
   // against. Read after the scanner, `linkUp_` was a whole pass out of date,
@@ -181,6 +209,14 @@ void GateApp::pass() {
   pumpHeartbeat();
   pumpEvents();
 
+  // 2.0.0's slow concerns, none of which makes a call a member could wait on:
+  // the link supervisor, an update that has been waiting for the door to be
+  // idle, and the stall watchdog.
+  const uint32_t later = clock_.nowMs();
+  pumpSupervisor(later);
+  pumpOta();
+  pumpStall(clock_.nowMs());
+
   // AFTER BOTH UPLOADS, so everything this pass noticed — including the HTTP
   // status of the one blocking call it made — is counted before the drain
   // looks. It makes no call of its own and is therefore outside the
@@ -189,6 +225,7 @@ void GateApp::pass() {
 
   // The lamp last, so what it shows is the state every step above just left it
   // in.
+  updateDegraded(clock_.nowMs());
   pumpLed();
 }
 
@@ -225,6 +262,22 @@ void GateApp::forgetElapsedWindows(uint32_t nowMs) {
   forgetIfElapsed(unreadableAt_, nowMs);
   forgetIfElapsed(heartbeatFloorAt_, nowMs);
   forgetIfElapsed(eventsAt_, nowMs);
+
+  // A COLD-RESTORED ROSTER'S TRUST, spent (§14.1): after a power-on with no
+  // server, the flash roster is believed for power_restore_trust_minutes and
+  // not one pass longer. Forgotten rather than emptied, so the refusal is
+  // `roster_stale` — the board no longer knows — not `not_recognised`.
+  if (coldTrustUntil_.isArmed() && coldTrustUntil_.remaining(nowMs) == 0U) {
+    coldTrustUntil_.disarm();
+    roster_ = GateRoster(kGateConfig.rosterMaxAgeMs);
+    state_.roster.loaded = false;
+    state_.roster.count = 0U;
+    warmDirty_ = true;
+  }
+  if (stallAt_.isArmed() && stallAt_.remaining(nowMs) == 0U) {
+    stallAt_.disarm();
+    stallDue_ = true;
+  }
 
   // AND EVERY "HOW OLD IS IT?" AGE, for the mirror-image reason (review round
   // 18, D18-2). An age is a 32-bit difference, so one 2^32 ms + 1 s old reads
@@ -306,6 +359,13 @@ void GateApp::afterBlocking() {
 }
 
 Attempt GateApp::attempt(uint32_t nowMs) {
+  // INSIDE THE POST-WATCHDOG HOLD-BACK A SCAN IS DECIDED FROM THE ROSTER (DG-8).
+  // The hold-back exists because a peer dribbling headers reset this board; a
+  // scan that went online inside it would reach that same peer and earn the
+  // next reset, lengthening the run the hold-back is trying to end.
+  if (firstCallAt_.remaining(nowMs) > 0U) {
+    return Attempt::RosterOnly;
+  }
   return chooseAttempt(linkUp_, breaker_.open(nowMs));
 }
 
@@ -343,7 +403,7 @@ void GateApp::pumpScanner() {
     }
     assembler_.reset();
     if (!endedOnTerminator) {
-      assembler_.markCorrupt();
+      assembler_.markCorrupt(clock_.nowMs());
     }
   }
 
@@ -354,13 +414,38 @@ void GateApp::pumpScanner() {
   // the UART buffer and are decided on the passes that follow, ten milliseconds
   // apart.
   uint8_t byte = 0U;
-  for (uint16_t i = 0U; i < kScannerBytesPerPass && !blocked_ && scanner_.read(byte); ++i) {
+  bool drained = false;
+  for (uint16_t i = 0U; i < kScannerBytesPerPass && !blocked_; ++i) {
+    if (!scanner_.read(byte)) {
+      drained = true;
+      break;
+    }
+    lastInputMs_ = clock_.nowMs();
+    anyInput_ = true;
     feedByte(byte);
+  }
+  // THE IDLE GAP (DG-5), judged only on a pass that found the UART EMPTY. A
+  // pass that stopped for its one blocking call, or ran out of its byte budget,
+  // may have the rest of the line still waiting in the driver, and a gap
+  // measured across a four-second call would cut a whole member's scan in two.
+  if (drained) {
+    switch (assembler_.idle(clock_.nowMs())) {
+    case ScanEvent::Token:
+      decideScan(assembler_.token());
+      break;
+    case ScanEvent::Refused:
+      fault(kFaultScanOversize);
+      refuseUnreadableLine();
+      break;
+    case ScanEvent::Corrupt:
+    case ScanEvent::None:
+      break;
+    }
   }
 }
 
 void GateApp::feedByte(uint8_t byte) {
-  switch (assembler_.feed(byte)) {
+  switch (assembler_.feed(byte, clock_.nowMs())) {
   case ScanEvent::Token:
     decideScan(assembler_.token());
     break;
@@ -443,6 +528,7 @@ void GateApp::decideScan(const char* token) {
     // about them — and scans again.
     decision = refuseRelocking(how == Attempt::RosterOnly);
   } else if (how == Attempt::Online && knownReplay(token, asked)) {
+
     // A CODE THIS DOOR HAS ALREADY ACTED ON is not a question for the API
     // (refuted 2026-09-28). A door that opened OFFLINE for code C and whose link
     // came back inside C's window has not uploaded that open yet, so the server
@@ -467,6 +553,10 @@ void GateApp::decideScan(const char* token) {
     decision = refuseTooFast(false);
   } else if (how == Attempt::Online) {
     scanCallFloorAt_.arm(asked, kMinScanCallSpacingMs);
+    // "SCAN SEEN" (DG-4): the lamp goes solid now, straight to the pin, because
+    // the pass is about to block for as long as the server takes and nothing
+    // else will touch the lamp until it returns.
+    ledPin_.write(ledPinLevel(true, ledActiveHigh_));
     beforeBlocking();
     decision = api_.scan(mac_, token, unlockMs_, kGateConfig.unlockHardCapMs);
     afterBlocking();
@@ -493,6 +583,13 @@ void GateApp::decideScan(const char* token) {
     decision = decideFromRoster(token, now, member);
   }
 
+  // MCV1-10: a replay refused here is uploaded AS a replay, with the link state
+  // as it was — the online one used to read as an offline `unknown_scan` in the
+  // club's activity view.
+  if (decision.queueEvent && strcmp(decision.reason, kReasonReplayed) == 0) {
+    tagNextReplay_ = true;
+    tagNextOnline_ = linkUp_;
+  }
   const uint32_t granted = apply(decision, now);
   recordCodeUse(decision, member, token, granted, now);
   // What the lock was ACTUALLY given, not what was asked for. The two differ
@@ -534,6 +631,7 @@ void GateApp::recordCodeUse(const ScanDecision& decision, const memcode::Verdict
     // opening that did not happen.
     return;
   }
+  warmDirty_ = true;
   if (member.status == memcode::Status::Ok) {
     codeUses_.commit(member.token.ref, member.step);
   } else if (!decision.queueEvent) {
@@ -586,6 +684,10 @@ uint32_t GateApp::apply(ScanDecision& decision, uint32_t nowMs) {
 }
 
 void GateApp::queue(const ScanDecision& decision, const char* subject, uint32_t nowMs, uint32_t grantedMs) {
+  const bool tag = tagNextReplay_;
+  const bool online = tagNextOnline_;
+  tagNextReplay_ = false;
+  tagNextOnline_ = false;
   if (!decision.queueEvent) {
     // Never for a decision the API itself made: the API already wrote its own
     // audit row, and a second copy would show every member entering twice.
@@ -600,6 +702,10 @@ void GateApp::queue(const ScanDecision& decision, const char* subject, uint32_t 
   event.durationMs = decision.released ? grantedMs : 0U;
   static_cast<void>(event.setSubject(subject));
   static_cast<void>(queue_.push(event));
+  if (tag) {
+    replayTags_[replayTagNext_] = ReplayTag{event.seq, online};
+    replayTagNext_ = static_cast<uint8_t>((replayTagNext_ + 1U) % kReplayTags);
+  }
 }
 
 // --- the lock, the link and the lamp ----------------------------------------
@@ -703,8 +809,8 @@ bool GateApp::eventDrainReady(uint32_t nowMs) const {
   //
   // THE BACKOFF IS PART OF "READY". A drain that is backed off is not waiting
   // for the pass's call and must not make a member's scan wait for one.
-  return linkUp_ && !queue_.empty() && !breaker_.open(nowMs) && eventsAt_.remaining(nowMs) == 0U &&
-         firstCallAt_.remaining(nowMs) == 0U;
+  return linkUp_ && (!queue_.empty() || carriedCount_ > 0U) && !breaker_.open(nowMs) &&
+         eventsAt_.remaining(nowMs) == 0U && firstCallAt_.remaining(nowMs) == 0U;
 }
 
 void GateApp::pumpEvents() {
@@ -717,6 +823,12 @@ void GateApp::pumpEvents() {
     return;
   }
 
+  // AN EARLIER BOOT'S EVENTS FIRST, each with its own boot identity (§14.1).
+  if (carriedCount_ > 0U) {
+    static_cast<void>(pumpCarried(now));
+    return;
+  }
+
   // One event per pass. A board back from a week offline has a full ring, and
   // draining it in one iteration would stop the scanner being read — which is a
   // member standing at a door that is busy talking about last Tuesday.
@@ -725,8 +837,11 @@ void GateApp::pumpEvents() {
     return;
   }
 
-  char body[devlink::kEventBodyCap];
-  if (devlink::renderEventBody(body, sizeof(body), mac_, bootId_, uptime_.value(), event) == 0U) {
+  static char body[devlink::kEventBodyCap];
+  bool online = false;
+  const bool replayed = replayTagged(event.seq, online);
+  if (devlink::renderEventBody(body, sizeof(body), mac_, bootId_, uptime_.value(), event) == 0U ||
+      (replayed && !tagReplay(body, sizeof(body), online))) {
     // Unrenderable. The caps make this unreachable, but KEEPING it would pin
     // every later event behind it forever and the board would stop reporting
     // anything at all.
@@ -734,7 +849,7 @@ void GateApp::pumpEvents() {
     return;
   }
 
-  char response[192] = {};
+  char response[kGateEventsResponseCap] = {};
   const uint16_t held = queue_.size();
   // AN UPLOAD IS TAKING THE PASS, so the scanner owes nothing. Cleared here as
   // well as in pumpHeartbeat because the bound covers both uploads: counting
@@ -803,6 +918,16 @@ void GateApp::applyEventReaction(uint16_t status, const char* response) {
     // all — a base URL with a trailing slash, a misconfigured route — which is
     // a fault a person fixes and in the meantime is an outage, not a refusal.
     // Both readings want the event KEPT, at the backoff's pace.
+    return;
+  }
+
+  // EVERY 2xx IS A SUCCESS (FC-4), read by the exact-kind reader; an unreadable
+  // one releases nothing and the backoff paces the retry.
+  if (isSuccess(status)) {
+    uint32_t through = 0U;
+    if (readEventsReply(status, response, strlen(response), through)) {
+      static_cast<void>(queue_.releaseThrough(through));
+    }
     return;
   }
 
@@ -875,8 +1000,10 @@ void GateApp::pumpHeartbeat() {
   // a gap the board owes anybody.
   heartbeatFloorAt_.arm(clock_.nowMs(), kMinHeartbeatSpacingMs);
   beforeBlocking();
-  const HttpOutcome outcome = api_.heartbeat(mac_, firmwareVersion_, uptime_.value(), diagnostics(),
-                                             heartbeatBody_, heartbeatBodyCap_);
+  GateDiag diag;
+  const GateReport v3 = report(diag);
+  const HttpOutcome outcome = api_.heartbeatV3(mac_, firmwareVersion_, uptime_.value(), diagnostics(), v3,
+                                               heartbeatBody_, heartbeatBodyCap_);
   afterBlocking();
 
   // ARMED AFTER THE CALL. Armed before it, the call's own duration comes out of
@@ -907,107 +1034,91 @@ void GateApp::commitEmptyRoster() {
   // And the member-code keys with it: a board out of service verifies nobody.
   codeKeys_.clear();
   stepClock_.forget();
-}
-
-void GateApp::adoptGateSettings(const char* body, size_t len) {
-  static_cast<void>(adoptUnlockMs(body, len, unlockMs_));
-
-  // THE SERVER AND THIS BOARD DISAGREE ABOUT THIS DOOR. The clamp above is not
-  // in dispute — the board must not trust the server to have clamped, and it
-  // does not — but the clamp cannot say that it HAPPENED, so the door then runs
-  // for a number no console shows while the server believes its own. This is
-  // the first thing on this hardware that can say so.
-  if (unlockSecondsWereClamped(body, len)) {
-    fault(kFaultUnlockClamped);
-  }
-
-  // The two fault settings, adopted on the SAME rule as the release time: the
-  // board's working values go in, whatever the body actually carried comes
-  // back, and an absent key — or one of the wrong JSON type — leaves that value
-  // exactly where it was. An older API that sends neither must not silence a
-  // board a newer one configured.
-  GateFaultSettings settings{faults_.reporting(), faults_.maxPerHour()};
-  if (adoptFaultSettings(body, len, settings)) {
-    faults_.setReporting(settings.reporting);
-    faults_.setMaxPerHour(settings.maxPerHour);
-  }
+  // The images the board persists, so a reset does not bring them back.
+  state_.roster.count = 0U;
+  state_.roster.loaded = true;
+  state_.roster.anchorMs = clock_.nowMs();
+  state_.codes = CodeImage();
+  state_.step = StepImage();
+  coldTrustUntil_.disarm();
+  warmDirty_ = true;
+  rosterDirty_ = true;
 }
 
 void GateApp::adoptHeartbeat(const HttpOutcome& outcome) {
   if (outcome.status == 403U) {
     commitEmptyRoster();
+    lastHeartbeatOk_ = false;
     // A REFUSAL OF THE HEARTBEAT SPECIFICALLY, and it is not the same fact as
-    // the `http_4xx` `GateApi` already counted for this call. That one says a
-    // 4xx happened somewhere; this one says THE HEARTBEAT was refused, which
-    // means this board has no roster and, offline, will admit nobody. Two
-    // codes, because a club reading the trail needs to tell "one scan was
-    // refused" from "this door has been switched off".
+    // the `http_4xx` `GateApi` already counted for this call: this board has no
+    // roster and, offline, will admit nobody.
     fault(kFaultHeartbeatRejected);
     return;
   }
 
-  if (devapi::react(outcome.status) != devapi::Reaction::Accepted) {
-    // A 401 with the wrong compiled-in key, a 400, a 404 on a proxied path:
-    // every one of them is a board that is not being given a roster. A
-    // transport failure is NOT counted here — `GateApi` already recorded it as
-    // `http_timeout`, and a board whose WiFi is down has not been rejected by
-    // anybody.
+  if (!isSuccess(outcome.status)) {
+    lastHeartbeatOk_ = false;
+    // A 401 on both keys, a 400, a 404 on a proxied path: a board that is not
+    // being given a roster. A transport failure is NOT counted here — `GateApi`
+    // already recorded it as `http_timeout`.
     if (devapi::react(outcome.peerStatus) == devapi::Reaction::Rejected) {
       fault(kFaultHeartbeatRejected);
     }
-    // A BODY THAT DID NOT ARRIVE ON AN OTHERWISE-ACCEPTED HEARTBEAT IS A
-    // NO-PUSH, AND ROUND G2 MADE IT THE QUIETEST PATH IN THE FIRMWARE.
-    //
-    // Before G2 an over-long body was truncated, `applyRoster` refused it, and
-    // the counter below moved. After G2 it became status 0 — correctly, a
-    // transport failure — and this early return skipped the count, so the one
-    // diagnostic that exists to say "the roster is not being refreshed" went
-    // silent in exactly the case it was built for. `peerStatus` is what tells
-    // that apart from a host that never answered, which is not a no-push and
-    // must not inflate the number an admin reads off the device row.
-    if (bodyFailed(outcome) && devapi::react(outcome.peerStatus) == devapi::Reaction::Accepted) {
+    // A body that did not arrive on an otherwise-accepted heartbeat is a
+    // no-push (round G2); `peerStatus` tells it apart from a host that never
+    // answered.
+    if (bodyFailed(outcome) && isSuccess(outcome.peerStatus)) {
       noPushHeartbeats_ = saturatingIncrement(noPushHeartbeats_);
     }
-    // Otherwise: transient, refused, or a key the tenant does not know. Nothing
-    // to adopt and nothing to do but keep the cadence — the heartbeat IS the
-    // probe the breaker closes on, and a board whose key is wrong is fixed by a
-    // reflash.
     return;
   }
 
+  const uint32_t now = clock_.nowMs();
   const size_t len = strlen(heartbeatBody_);
-  // The release time, whether this board's own clamp had to change it, and the
-  // two fault settings — everything the `gate` object carries, in one place.
-  adoptGateSettings(heartbeatBody_, len);
-  // The roster's times are relative to the instant the server produced them,
-  // so the roster is anchored to a FRESH read. Every accepted heartbeat
-  // re-anchors it, which is what resets staleness; ROSTER_MAX_AGE_MS only
-  // governs how long the last one survives offline.
-  lastSync_ = devlink::applyRoster(heartbeatBody_, len, roster_, clock_.nowMs());
-  // The member-code sync — step clock, day slots, per-day keys — anchored to a
-  // fresh read like the roster, and wholesale like it: a server that has not
-  // shipped member codes sends no `code_keys`, and nothing here changes.
-  //
-  // Refused and dropped keys are NOT recorded as faults, exactly as refused
-  // roster elements are not: the gate's fault vocabulary is closed and the
-  // server validates it, so a new code is a wire change of its own.
-  static_cast<void>(devlink::applyCodeSync(heartbeatBody_, len, stepClock_, codeKeys_, clock_.nowMs()));
-  if (!lastSync_.replaced) {
-    // AN ACCEPTED HEARTBEAT THAT PUSHED NOTHING. A body cut short by a peer
-    // that hung up, or one missing the `roster` key the contract says is
-    // always present. The roster silently does not change and its age silently
-    // keeps running, and the one feedback surface on this board is a lamp with
-    // nothing to say about it — so the count goes out in the next request,
-    // where an admin can read it off the device row. Counted rather than acted
-    // on: it changes no decision here.
+  const HeartbeatRead read = readHeartbeat(outcome.status, heartbeatBody_, len, now, state_);
+  // What could not be read goes out in the NEXT request (device-api.md §2).
+  drift_ = read.drift;
+  lastSync_ = devlink::SyncResult();
+  if (!read.accepted) {
+    // A 2xx that is not one complete object — cut, HTML, BOM-and-garbage:
+    // nothing adopted, nothing spent, and it is a no-push. The link is up.
     noPushHeartbeats_ = saturatingIncrement(noPushHeartbeats_);
+    lastHeartbeatOk_ = false;
+    return;
   }
-  // Takes effect from the NEXT arm. The one above already used the old value,
-  // which is a one-interval delay and not worth a re-arm that could shorten
-  // this interval to nothing.
-  static_cast<void>(devlink::parseHeartbeatInterval(heartbeatBody_, len, heartbeatMs_));
-  // Unknown keys — anything a later contract adds — are ignored by
-  // construction: every reader above looks up the key it wants.
+
+  heartbeatAccepted(now);
+
+  if (read.kindMismatch) {
+    // The row behind this MAC is not a door (DG-9): no roster, keys or
+    // settings from it. The lifeline still applies, below — a re-kinded row is
+    // an admin's mistake, and the door must stay reachable to be fixed.
+    fault(kFaultKindMismatch);
+  } else {
+    applySettings(read);
+    if (read.roster == ArrayRead::Adopted) {
+      applyRosterImage(state_.roster, roster_);
+      coldTrustUntil_.disarm();
+      lastSync_.replaced = true;
+      lastSync_.accepted = state_.roster.count;
+      rosterDirty_ = true;
+    } else {
+      // An accepted heartbeat that pushed no roster — absent, or a grammar this
+      // board cannot read. Its age silently keeps running, so the count goes
+      // out in the next request where an admin can read it.
+      noPushHeartbeats_ = saturatingIncrement(noPushHeartbeats_);
+    }
+    if (read.days == ArrayRead::Adopted || read.keys == ArrayRead::Adopted) {
+      applyCodeImage(state_.codes, codeKeys_);
+    }
+    if (read.stepSynced) {
+      static_cast<void>(stepClock_.sync(state_.step.step, state_.step.stepMs, state_.step.anchorMs));
+    }
+    warmDirty_ = true;
+  }
+  // Takes effect from the NEXT arm, as it always has.
+  heartbeatMs_ = state_.heartbeatMs;
+  adoptLifeline(read, now);
 }
 
 } // namespace gatelogic

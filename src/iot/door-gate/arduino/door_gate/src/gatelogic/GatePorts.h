@@ -117,6 +117,62 @@ public:
                        uint32_t nowMs) = 0;
 };
 
+// --- 2.0.0's ports (door-gate.md §14) ----------------------------------------
+//
+// Every one is optional: a composition root that leaves one null gets the 1.x
+// behaviour for that concern, which is what keeps the 1.x host suite honest
+// about what it never had.
+
+/// The WiFi radio, under the link supervisor (DG-3).
+class IRadio {
+public:
+  virtual ~IRadio() = default;
+  /// Disconnect and join this profile. Never blocks for the association.
+  virtual void join(const char* ssid, const char* psk) = 0;
+};
+
+/// The chip itself.
+class ISystem {
+public:
+  virtual ~ISystem() = default;
+  /// Restart. LOCKED is written before the lock pin drives on every boot, so
+  /// this is safe whatever the door was doing — and it is only called idle.
+  virtual void restart() = 0;
+};
+
+struct GateDiag;
+
+/// The board's own health (device-api.md §13).
+class IDiagSource {
+public:
+  virtual ~IDiagSource() = default;
+  virtual void read(GateDiag& out) = 0;
+};
+
+/// A plain button: the board's BOOT button on GPIO 0.
+class IButton {
+public:
+  virtual ~IButton() = default;
+  virtual bool pressed() = 0;
+};
+
+struct PortalForm;
+
+/// The setup portal's access point and its one page (device-api.md §8).
+class ISetupPortal {
+public:
+  virtual ~ISetupPortal() = default;
+  /// Opens `CRUSADERS-SETUP-<last four hex of the MAC>` and the page.
+  virtual void open(const char* apName) = 0;
+  /// Serves the page. True when a form was submitted, filled into `form`.
+  virtual bool service(PortalForm& form) = 0;
+  /// The submission was refused: the page shows `reason` and stays open.
+  virtual void refuse(const char* reason) = 0;
+  /// Accepted: the page says so; the board restarts next.
+  virtual void accept() = 0;
+  virtual void close() = 0;
+};
+
 } // namespace gatelogic
 
 #endif // CRUSADERS_GATELOGIC_GATEPORTS_H

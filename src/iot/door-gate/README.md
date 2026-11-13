@@ -22,6 +22,61 @@ sources compile for the ESP32 and for the host test runner — which is what let
 
 ---
 
+## 2.0.0 — the last cable flash
+
+Gate **2.0.0** is device contract v3 for the door
+([`docs/specs/door-gate.md`](../../../docs/specs/door-gate.md) §14,
+[`docs/specs/device-api.md`](../../../docs/specs/device-api.md)). The USB flash that
+puts it on a board is the last one that board gets, so everything an operator might
+change later changes without a cable:
+
+| What | How it changes after the flash | Where it lives |
+|---|---|---|
+| the firmware | **signed OTA** into the other app slot: the offer's grammar, target, a strictly newer version and the release signature are checked before a byte is fetched; the download is hashed as it streams, verified again, and only then is the boot partition switched; a new image is on **probation** until a heartbeat is accepted within `ota_probation_minutes`, and three resets or the window passing roll it back to the other slot — which still holds the old image — for good | `GateOta`, `Esp32OtaSlot`, `Esp32Download` |
+| the device key | `key_next` on the heartbeat; persisted before it is used; a 401 retried once with the other key; both kept | `GateKeys` |
+| WiFi and the server URL | the server's `net` (all or nothing) or the **setup portal**; profiles tried new → previous → compiled; a new base URL that brings no accepted heartbeat within `net_fallback_minutes` abandoned for the old one | `GateNet` |
+| what survives a reset | warm (watchdog, panic, brown-out, software): roster, member-code keys and step clock, gate settings and replay ring in RTC memory, every age continuing; cold (power-on): the same from NVS, written only on a **content** change, the roster trusted for `power_restore_trust_minutes`; undelivered events persisted and re-uploaded with their own boot id | `GateStore`, `GateAppV3.cpp` |
+
+The values in `secrets.h` — WiFi, base URL, `DEVICE_API_KEY` — are **first-boot
+defaults** only. Two values are new and mandatory: `OTA_PUBLIC_KEY_N`, the release
+key's modulus (512 hex; the corpus's test keys are refused at compile time), and
+`SETUP_AP_PASSWORD`, the portal's WPA2 password, printed on the enclosure label.
+
+**The setup portal.** Power the door up, wait for the two boot blinks, then hold
+the board's **BOOT** button for five seconds within the first minute (never *during*
+power-up — that enters the ROM loader). The lamp shows the setup pattern and the
+board opens `CRUSADERS-SETUP-<last four hex of the MAC>`; join it, open
+`http://192.168.4.1/`, enter the WiFi (one or two networks), the server address and,
+optionally, a device key id and key. The page validates with the same rules as a
+server `net` and names the field it refused. A saved set is `net_src: local` and the
+server never overwrites it unless an admin pushes the club's network to that board.
+The portal closes after ten minutes either way.
+
+**The analysis's door checks, closed in 2.0.0:** the link supervisor re-joins the
+next profile after 30 s down and restarts the chip after fifteen minutes (Arduino-ESP32
+stops reconnecting for good after `AUTH_FAIL`, DG-3); a scan seen while the board waits
+on the server lights the lamp solid straight away (DG-4); a partial scanner line is
+dropped after 150 ms with no byte, and a suffix-less line of eight or more characters
+is read as a scan at that gap (DG-5); a door whose heartbeats fail, whose roster is
+empty or older than two intervals blips once every five seconds (DG-6); a failed
+watchdog subscription falls back to the loop task by handle and an already-subscribed
+task counts as armed (DG-7); a scan inside the post-watchdog hold-back is decided from
+the roster (DG-8); an answer whose `kind` is not `gate` adopts nothing and files
+`kind_mismatch` (DG-9); the stall watchdog restarts an idle board whose link is up but
+which has had no accepted heartbeat for six hours (HW-8); a replay refused locally is
+uploaded as `"reason":"replayed","online":<bool>` (MCV1-10).
+
+**How it reads a server answer** is device-api.md §11.2, for the life of the image:
+one complete object or nothing; known keys only where they live (the gate's settings
+are scalars of `gate` — a nested `"lamp":{"unlock_seconds":30}` never drives the lock);
+exact kinds (12.5 or `"30"` read as absent and are reported in the next request's
+`drift`); element grammars by their first fields; every 2xx a success. The heartbeat
+answer is read into 8192 bytes, the scan decision into 256, the events reply into 192,
+and the request — with `diag` telemetry every beat — renders into 1536
+(`compat/` `budgets`).
+
+---
+
 ## Wiring — Carl's, and fixed
 
 | | Pin | Notes |
@@ -528,16 +583,17 @@ a door.
 
 Two consequences of that rule, stated because both look like faults:
 
-- **an error with an EMPTY buffer costs the NEXT line.** There is nothing
-  buffered to discard, so the assembler is marked corrupt and stays that way
-  until a terminator arrives — which means the next whole line a member scans is
-  thrown away and they scan again. Discarding nothing instead would leave the
-  far side of the hole to be assembled as a token;
-- **a scanner that never sends a terminator produces nothing at all.** No token,
-  no refusal, no queued event, no blink: the assembler refuses a line past the
-  token cap and then waits for the terminator that ends it. A code taped over
-  the window is therefore a silent door rather than a door refusing repeatedly,
-  and the thing to look at is the scanner's own configuration.
+- **an error with an EMPTY buffer costs the rest of THAT line, not the next
+  one.** There is nothing buffered to discard, so the assembler is marked corrupt
+  until a terminator arrives — or, since 2.0.0, until 150 ms pass with no byte
+  (DG-5), when the holed line is dropped silently. 1.x held the mark until a
+  terminator and threw away the next whole line a member scanned;
+- **a scanner that never sends a terminator is read at the idle gap** (2.0.0,
+  DG-5). A line of at least eight characters followed by 150 ms of silence is a
+  scan; anything shorter is a stray byte and is dropped, so a scanner's power-up
+  byte cannot spoil the next member's scan. An over-long suffix-less line is
+  refused at the gap exactly as a terminated one is. 1.x produced nothing at all
+  from a suffix-less scanner.
 
 ---
 
@@ -650,6 +706,11 @@ owed and is a shared-library change neither device's lane could make alone.
 | Slow 1 Hz blink | the radio is not associated; the board is deciding from its roster |
 | Fast 4 Hz blink | the task watchdog refused to arm — a board to look at |
 | 2 quick blinks | the board has just booted |
+| Solid, the moment a scan is read | the board is asking the server (2.0.0, DG-4) — written straight to the pin before the call |
+| Long-short, repeating | the setup portal is open (2.0.0) |
+| 2 Hz | an update is downloading (2.0.0) |
+| A double blip every 5 s | a new image on probation, not yet committed (2.0.0) |
+| One short blip every 5 s | degraded: the last heartbeat failed, or the roster is empty or older than two intervals (2.0.0, DG-6) |
 
 Solid beats everything: while the door is open the lamp is solid even if the WiFi
 dropped a second ago, because "you may go in" is the only thing that matters to
@@ -662,10 +723,12 @@ should be showing once per pass and answers from the clock.
 
 **The fault blink does not change what the door does, in either direction.** A
 board that refused to open because its watchdog would not arm would be a door
-that admits nobody, which is far worse than one running on the core's own five
-seconds instead of the fifteen this image asks for. The board retries three
-times, then says so and
-carries on.
+that admits nobody, which is far worse than one running under a watchdog it
+did not choose. The board retries three times, then says so and carries on.
+**On this core the loop task is not watched by default** (`loopTaskWDTEnabled` is
+false), so 2.0.0 falls back to subscribing the loop task by handle when the plain
+subscription fails, and counts `ESP_ERR_INVALID_ARG` — already subscribed — as armed
+(DG-7). 1.x's "it runs on the core's own five-second watchdog" was not true.
 
 **A board that accepted a heartbeat carrying no usable roster counts it**, and
 sends the running total as `no_push` in its next heartbeat request. That case is
@@ -688,13 +751,12 @@ wrapping, because the API binds them as a signed 64-bit value and silently
 ignores a negative or oversized one. Both are **omitted at zero**, so a healthy
 board's request stays byte-identical to the contract corpus's vector.
 
-**Where they actually go, and it is not the device row.** The server *logs* both
-against the device code and stores neither — a column would be an EF migration
-for a diagnostic, and the gate corpus's own vector says so. So they reach a
-server log and the native simulator's transcript, and **no console anywhere
-shows them**. That is still better than a counter nothing reads, which is what
-`events_lost` was until round G3; it is not what this section used to claim.
-Surfacing them belongs to whoever owns the admin console. The same is true of
+**Where they go: the device row.** The server stores the latest of each on the
+device (`NoPush`, `NoPushReportedAt`, `EventsLost`, `EventsLostReportedAt`) and
+logs both against the device code (DG-10: this section said it stored neither
+after those columns had been added). The same reaches the native simulator's
+transcript. 2.0.0's `diag` telemetry and `drift` list ride the same request. The
+same is not yet true of
 `GateApp::capForcedCloses()` — the count of release windows the hard cap ended,
 which is new in round G4 and reaches the simulator's `status` line and nothing
 else.
@@ -858,12 +920,9 @@ and every flag in `build_config.h` that is safe to change.
 That folder is **generated** and is never hand-edited: `make arduino-export`
 writes it from `lib/`, `../shared/lib/`, `src/` and the `-D` flags in
 [`platformio.ini`](platformio.ini) (with `build_unflags` applied, which is what
-makes the sketch report **1.1.2** — the single rotating member code,
-[`docs/specs/member-code.md`](../../../docs/specs/member-code.md), with every
-gating window spent on the pass it ends (review round 17) and every age
-observed on every pass so none reads young again after the 49.7-day wrap
-(review round 18) — rather than
-the 2.0.0 `[common]` pins for the court box), and `make arduino-check`
+makes the sketch report **2.0.0** — device contract v3, the last cable flash
+(see *2.0.0* above); the board environment spells its version out rather than
+inheriting `[common]`'s), and `make arduino-check`
 regenerates and fails on a diff. A hand-edit
 there is deleted by the next export, not flagged.
 
@@ -874,7 +933,8 @@ against:
 make install-iot                 # once: creates src/iot/.venv
 cp src/iot/door-gate/src/common/secrets.h.example \
    src/iot/door-gate/src/common/secrets.h
-# fill in WIFI_SSID, WIFI_PASSWORD, API_BASE_URL, DEVICE_API_KEY — it is gitignored
+# fill in WIFI_SSID, WIFI_PASSWORD, API_BASE_URL, DEVICE_API_KEY, OTA_PUBLIC_KEY_N and
+# SETUP_AP_PASSWORD — it is gitignored
 make build-iot                   # compiles every board target, this one included
 src/iot/.venv/bin/pio run -d src/iot/door-gate -e door_gate -t upload
 src/iot/.venv/bin/pio device monitor -d src/iot/door-gate -e door_gate
@@ -887,6 +947,13 @@ until it is screwed to a wall. Each route reads its own copy — the PlatformIO
 build `src/common/secrets.h`, the sketch `arduino/door_gate/secrets.h` — and
 both are gitignored.
 
+**This is the LAST cable flash.** After it, a firmware change is a signed release
+uploaded in the console and offered over the heartbeat (device-api.md §7); the
+board's image fills about 66% of one of the two 1.25 MB app slots of the pinned
+`default.csv` partition table, which is what leaves the other slot for the update.
+Whether the core's prebuilt bootloader also has app rollback enabled is a bench
+check; the firmware's own probation does not depend on it.
+
 The monitor runs at 115200 — unlike the court bridge, whose UART0 *is* its link
 to the Mega. On this board UART0 is the USB console and nothing else; the scanner
 is on `Serial2`.
@@ -898,7 +965,12 @@ door-gate/
   platformio.ini          the wiring flags, the board pin and the host test envs
   lib/gatelogic/          every decision, pure, host-tested
     GateApp               the loop itself — one pass, over ports a fake answers
-    GatePorts             watchdog, link, scanner-error and decision-log ports
+    GateAppV3.cpp         its 2.0.0 half: persistence, lifeline, supervisor, portal, OTA, stall
+    GateReply, JsonView   the §11.2 readers: strict JSON, exact kinds, drift
+    GateStore             sealed flash records and the warm (RTC) image
+    GateKeys, GateNet     the key ring, the network, the portal form, the setup gesture
+    GateOta               the signed-OTA runner and probation
+    GatePorts             watchdog, link, scanner-error, decision-log and 2.0.0 ports
     ApiBaseUrl/StaticText compile-time checks on API_BASE_URL, C++11-clean
   lib/esp32_hal/          the only place allowed to include Arduino headers
   lib/posix_gate_hal/     the SIMULATOR's drivers — never reaches a board
@@ -906,7 +978,10 @@ door-gate/
   src/simulator/main.cpp  the native simulator's wiring — the same two calls
   src/common/             secrets.h.example (secrets.h is gitignored)
   test/test_gatelogic/    the unit suite, including the whole loop
-  test/test_gate_corpus/  all 15 contract vectors, executed and counted
+  test/test_gate_corpus/  every gate/ contract vector, executed and counted
+  test/test_gate_compat/  the compat/ door_gate and scan cases, and the budget rows
+  test/test_gate_v3/      2.0.0 across simulated power cuts, warm resets and OTA reboots
+  test/test_gate_server_replies/  the server's real replies (make device-replay-check)
 ```
 
 **`main.cpp` decides nothing.** `build_src_filter = -<*>` means the host suite

@@ -2,7 +2,7 @@
 name: crusaders-mainframe-watch-doors
 description: "What the door gates leave owed: no-power behaviour unmeasured and two facts owed by Carl, no gate has run on hardware, a court box's roster is an unnamed door key, and everything that is NOT a door row still grows for ever."
 type: watch
-last_verified: 2026-09-19
+last_verified: 2026-11-13
 ---
 
 # Watch list — the doors
@@ -23,11 +23,10 @@ was decided and why is [`decisions-door-gate.md`](decisions-door-gate.md) and
    reset, and the pre-`setup()` window where the pin is hi-Z and the relay module's input bias
    decides. **Do not close this by reasoning about the flags** — an earlier pass asserted "Carl's
    board is wired fail-secure" and prescribed a rewire, unverified and against wiring-is-fixed.
-2. **No gate has ever run on hardware.** Every decision is proved on the host — the polarity
-   combinations, the release window and its cap, online-first and the roster fallback, the whole
-   loop with its watchdog budget, the contract vectors — and none of that is a board on a wall
-   with a lock on the other end. The firmware has never been flashed. Fire egress must be
-   mechanical and independent of the board; nothing here is a life-safety device.
+2. **No gate has run on hardware, and 2.0.0's flash is the last cable one.** Bench one board first:
+   a real signed OTA round trip, a power cut with the server down, the BOOT-button portal, the RTC
+   image across a watchdog reset, and whether the bootloader has app rollback. Fire egress must be
+   mechanical; nothing here is a life-safety device.
 3. **A court box's roster is a door key, and nothing gates it — open question for the owner.**
    A gate is pushed no roster until an admin names the door, which stops anyone holding the club
    device key self-registering a board and being handed the club's live codes. **A court box has

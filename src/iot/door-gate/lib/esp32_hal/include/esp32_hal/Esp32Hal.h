@@ -26,7 +26,11 @@
 #include "hal/PinLevel.h"
 #include "hal/Store.h"
 
+#include "gatelogic/GateHeartbeat.h"
+#include "gatelogic/GateNet.h"
+#include "gatelogic/GateOta.h"
 #include "gatelogic/GatePorts.h"
+#include "gatelogic/GateStore.h"
 #include "gatelogic/HttpPort.h"
 #include "gatelogic/PinOut.h"
 
@@ -227,6 +231,101 @@ public:
   /// Restart the countdown. From the orchestration and never from inside a
   /// driver, where it would hide the stall it exists to end.
   void kick() override;
+};
+
+// --- gate 2.0.0 (door-gate.md §14) -------------------------------------------
+
+/// Flash records of any length: NVS blobs in their own namespace, so nothing
+/// 1.x wrote (the event sequence checkpoint) is disturbed.
+class Esp32NvsBlobs final : public gatelogic::IBlobStore {
+public:
+  bool begin();
+  bool put(const char* key, const void* data, size_t len) override;
+  size_t get(const char* key, void* out, size_t cap) override;
+  void erase(const char* key) override;
+
+private:
+  bool ready_ = false;
+};
+
+/// The RTC counter: keeps counting across every reset but a power-on.
+class Esp32RtcClock final : public gatelogic::IWarmClock {
+public:
+  uint64_t nowUs() override;
+};
+
+/// The station radio, under the link supervisor. Never blocks.
+class Esp32Radio final : public gatelogic::IRadio {
+public:
+  void join(const char* ssid, const char* psk) override;
+};
+
+class Esp32System final : public gatelogic::ISystem {
+public:
+  void restart() override;
+};
+
+/// `diag` (device-api.md §13): esp_reset_reason() as a word, the heap, the
+/// loop task's stack high-water mark, the other app slot and the flash size.
+class Esp32Diag final : public gatelogic::IDiagSource {
+public:
+  void read(gatelogic::GateDiag& out) override;
+};
+
+/// The inactive app slot, through esp_ota_*. The boot partition is switched
+/// only by activate(), after the image has been verified.
+class Esp32OtaSlot final : public gatelogic::IOtaSlot {
+public:
+  bool begin(uint32_t size) override;
+  bool write(const uint8_t* data, size_t len) override;
+  bool finish() override;
+  void abort() override;
+  bool activate() override;
+  bool rollBack() override;
+  uint32_t capacity() override;
+
+private:
+  bool open_ = false;
+  bool finished_ = false;
+};
+
+/// The firmware download: a GET from this board's own server with its bearer
+/// key, `Content-Length` required to equal the offer's size, streamed in
+/// chunks with an idle bound per read.
+class Esp32Download final : public gatelogic::IDownload {
+public:
+  Esp32Download(const char* baseUrl, const char* authorization, hal::IClock& clock)
+      : baseUrl_(baseUrl), authorization_(authorization), clock_(clock) {}
+
+  uint16_t get(const char* path, uint32_t expectBytes, gatelogic::IChunkSink& sink) override;
+
+private:
+  const char* baseUrl_;
+  const char* authorization_;
+  hal::IClock& clock_;
+};
+
+/// The board's BOOT button (GPIO 0, active low).
+class Esp32BootButton final : public gatelogic::IButton {
+public:
+  void begin();
+  bool pressed() override;
+};
+
+/// The setup portal: a WPA2 access point and one page at 192.168.4.1.
+class Esp32Portal final : public gatelogic::ISetupPortal {
+public:
+  explicit Esp32Portal(const char* apPassword) : password_(apPassword) {}
+
+  void open(const char* apName) override;
+  bool service(gatelogic::PortalForm& form) override;
+  void refuse(const char* reason) override;
+  void accept() override;
+  void close() override;
+
+private:
+  const char* password_;
+  bool open_ = false;
 };
 
 } // namespace esp32_hal

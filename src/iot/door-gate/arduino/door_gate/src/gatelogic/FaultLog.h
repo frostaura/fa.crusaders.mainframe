@@ -141,6 +141,14 @@ inline constexpr char kFaultUnlockClamped[] = "unlock_clamped";
 /// which is the failure the whole of that arithmetic exists to bound.
 inline constexpr char kFaultRelockOverdue[] = "relock_overdue";
 
+/// A heartbeat answer whose `kind` is not "gate" (DG-9): the row this MAC maps
+/// to is not a door, so nothing in it — roster, keys, settings — was adopted.
+inline constexpr char kFaultKindMismatch[] = "kind_mismatch";
+
+/// A base URL from the server that brought no accepted heartbeat within
+/// `net_fallback_minutes` was abandoned for the previous one (§8).
+inline constexpr char kFaultNetFallback[] = "net_fallback";
+
 /// `boot_reason_<x>` from `esp_reset_reason()`, one code per reason. The
 /// composition root supplies the whole string — this header cannot, because
 /// `esp_reset_reason()` is an IDF call and no `lib/` but `esp32_hal/` may see
