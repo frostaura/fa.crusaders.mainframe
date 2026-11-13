@@ -75,6 +75,9 @@ export const DOOR_REFUSAL_REASONS: Record<string, string> = {
   /** R11 D11-2: an offline door refused a code the server later proved genuine (replayed, too
    *  early or late, a stale saved list) — the member is named; nothing was opened. */
   refused_offline: "The board refused the code while it was offline",
+  /** MCV1-10: the door refused a code it had already seen (a second scan, or a copy) while it was
+   *  ONLINE — a replay, said as one, never as "refused offline". */
+  replayed: "The door had already seen that code — a second scan of it, or a copy",
 };
 
 /**
@@ -112,6 +115,8 @@ export const DOOR_OUTCOME_CHIPS: Record<string, string> = {
   code_used: "Code already used",
   // R11 D11-2: the server's DoorWords and the Night say it this way.
   refused_offline: "Refused offline",
+  // MCV1-10: the server's word for a door's own replay refusal.
+  replayed: "Replayed code",
 };
 
 /**
@@ -464,6 +469,9 @@ export function describeActivityReason(entry: DeviceActivityEntry): string | nul
   // R11 D11-2: the server proved the code genuine and named the member — the saved-list
   // sentence would be false. Checked before the action rule, which answers for the rest.
   if (entry.reason === "refused_offline") return DOOR_REFUSAL_REASONS.refused_offline;
+  // MCV1-10: a replay the door refused while online is uploaded as `replayed` — never the
+  // offline sentence, even on a row the server still files under the unknown-scan action.
+  if (entry.reason === "replayed") return DOOR_REFUSAL_REASONS.replayed;
   if (entry.action === "device.unknown_scan") return OFFLINE_REFUSED;
   if (entry.reason === null || entry.reason.trim() === "") return null;
   if (entry.reason === "ok" && entry.action === "gate.opened") return null;

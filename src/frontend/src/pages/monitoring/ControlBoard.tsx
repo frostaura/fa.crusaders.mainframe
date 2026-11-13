@@ -108,7 +108,7 @@ export function ControlBoardPage() {
   const timezone = view?.timezone;
   const readAtFace = readAt === null ? null : clubClock(readAt, timezone);
   const silent = silentCourts(courts);
-  const partial = partialBoardNotice(silent, readAtFace);
+  const partial = partialBoardNotice(silent, readAtFace, timezone);
   /*
    * `error` is `unknown` — deliberately, because `describeFailure` is the only thing that may
    * interpret it — so the page asks the boolean question it actually has: did the last read
@@ -121,7 +121,10 @@ export function ControlBoardPage() {
   return (
     // `--board-scale` is declared on the shell and consumed ONLY by CourtTile. Wall view is
     // therefore one declaration rather than a second set of class strings that drift from the first.
-    <PageShell width="full" style={wall ? ({ "--board-scale": "1.6" } as CSSProperties) : undefined}>
+    // BA-11: wall view covers the app's own chrome (bar, rail, banners) with the board itself —
+    // an overlay, not the Fullscreen API, so a notification cannot drop it back to the console —
+    // and drops the explanations, so every court fits a wall tablet.
+    <PageShell width="full" {...wallFrame(wall)}>
       <PageHeader
         title="Control board"
         // The freshness line is a fact about the SCREEN and changes on a timer: it is the
@@ -143,9 +146,7 @@ export function ControlBoardPage() {
       {/* Side by side where the page has the room (R4 form factor): two standing paragraphs
           stacked cost the tiles ~200px of a 1920 screen. Never collapsed — see the notice. */}
       <AutoGrid min="wide" max={2} gap="lg" className="-mt-2">
-        <Alert tone="info" live="standing" announceKey="control-board-what-this-is">
-          {BOARD_STANDING_NOTICE}
-        </Alert>
+        <StandingNotice wall={wall} />
 
         {partial && (
           <Alert tone="warning" live="standing" announceKey={`control-board-silent:${silent.join(",")}`}>
@@ -189,7 +190,7 @@ export function ControlBoardPage() {
             beside the rail — one across on a phone, then two, then every court on one row once
             each tile has 18rem (four at 1920 beside the rail); odd counts go three across. */}
         <div className="@container/tiles">
-          <div data-court-tiles={courts.length} className={cn("grid gap-4", tileColumns(courts.length))}>
+          <div data-court-tiles={courts.length} className={cn("grid items-start gap-4", tileColumns(courts.length))}>
           {courts.map((court) => (
             <CourtTile
               key={court.court_id}
@@ -197,16 +198,14 @@ export function ControlBoardPage() {
               now={now}
               timezone={timezone}
               graceMinutes={settings?.grace_window_minutes ?? null}
+              generatedAt={view?.generated_at ?? null}
             />
           ))}
           </div>
         </div>
       </StateBlock>
 
-      <p className="flex items-start gap-2 text-sm text-text-muted">
-        <Prohibit size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
-        <span>{BOARD_NO_REMOTE_CONTROL}</span>
-      </p>
+      <NoRemoteControl wall={wall} />
     </PageShell>
   );
 }
@@ -215,6 +214,32 @@ export function ControlBoardPage() {
  * The tile grid's columns for a number of courts, by the grid's own box: 18rem a tile at the
  * least, and a count that never leaves one court alone on a row. Written whole for the scanner.
  */
+/** The frame in wall view: the board over the app's own chrome, everything bigger (BA-11). */
+function wallFrame(wall: boolean): { className?: string; style?: CSSProperties; "data-wall-view"?: string } {
+  if (!wall) return {};
+  return {
+    className: "fixed inset-0 z-overlay max-w-none overflow-y-auto bg-bg-surface",
+    style: { "--board-scale": "1.6" } as CSSProperties,
+    "data-wall-view": "",
+  };
+}
+
+/** What the board IS — said on the console, dropped on the wall where every court must fit. */
+function StandingNotice({ wall }: { wall: boolean }) {
+  if (wall) return null;
+  return <Alert tone="info" live="standing" announceKey="control-board-what-this-is">{BOARD_STANDING_NOTICE}</Alert>;
+}
+
+function NoRemoteControl({ wall }: { wall: boolean }) {
+  if (wall) return null;
+  return (
+    <p className="flex items-start gap-2 text-sm text-text-muted">
+      <Prohibit size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+      <span>{BOARD_NO_REMOTE_CONTROL}</span>
+    </p>
+  );
+}
+
 function tileColumns(count: number): string {
   if (count <= 1) return "grid-cols-1";
   if (count === 2) return "grid-cols-1 @[37.5rem]/tiles:grid-cols-2";

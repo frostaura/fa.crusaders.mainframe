@@ -183,6 +183,9 @@ export const MEMBER_DOOR_REASON_LINES: Record<string, string> = {
   // R11 D11-2: the door was offline and could only check your code against what it had kept —
   // a code it had seen, or one outside its saved window. The club knows it was you.
   refused_offline: "The door was offline and couldn't accept your code. A fresh code from My Code usually works once it's back.",
+  // MCV1-10: the door itself had just seen that same code (a second scan, or a copy) while it was
+  // online — the same fix as a used code, never "offline".
+  replayed: "That door had just taken your same code, and a code opens a door once. The next code on My Code works.",
 };
 
 // --- club contact ------------------------------------------------------------------
@@ -680,6 +683,7 @@ const ARMS: Record<string, (ctx: DecisionContext) => Arm> = {
   not_recognised: armNotRecognised,
   code_used: armCodeUsed,
   refused_offline: armRefusedOffline,
+  replayed: armCodeUsed,
   method_not_supported: armBoardFault,
   not_a_gate: armBoardFault,
 };
@@ -2147,6 +2151,7 @@ const CHIP_LABELS: Record<string, string> = {
   no_membership: "No membership on file",
   code_used: "Code already used",
   refused_offline: "Refused offline",
+  replayed: "Code already used",
 };
 
 const CHIP_TONES: Record<string, ChipTone> = {
@@ -2159,6 +2164,7 @@ const CHIP_TONES: Record<string, ChipTone> = {
   no_membership: "danger",
   code_used: "warning",
   refused_offline: "warning",
+  replayed: "warning",
 };
 
 /**

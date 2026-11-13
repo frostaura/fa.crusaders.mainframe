@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { unsureSentence, writeOrReadBack } from "@/lib/lostReply";
+import { unsureWords } from "@/lib/lostReplyCopy";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { useToast } from "@/components/toastContext";
 import { Button } from "@/components/ui/button";
@@ -74,10 +76,14 @@ function ManagePhase({ member, templates, onChange, onClose, onEnrol }: Omit<Fin
   const toast = useToast();
   const removeAll = async () => {
     try {
-      await Promise.all(templates.map((t) => endpoints.adminBiometricRemoveTemplate(t.template_id)));
+      await Promise.all(templates.map((t) => removeOrReadBack(t.template_id)));
       await onChange();
       toast.push({ tone: "success", text: COPY.allRemoved(member.full_name) });
-    } catch { toast.push({ tone: "danger", text: COPY.allRemoveFailed }); }
+    } catch (e) {
+      // FA-11: whatever happened, the list is read again, so it shows what the club holds now.
+      await onChange().catch(() => undefined);
+      toast.push({ tone: "danger", text: unsureSentence(e, unsureWords("some fingerprints may still be enrolled", "every fingerprint was removed", "this list")) ?? COPY.allRemoveFailed });
+    }
   };
   return (
     <>
@@ -106,12 +112,23 @@ function ManagePhase({ member, templates, onChange, onClose, onEnrol }: Omit<Fin
   );
 }
 
+/** Remove one template; a lost reply is read back from the enrolments — gone means removed (FA-11). */
+async function removeOrReadBack(templateId: string): Promise<void> {
+  await writeOrReadBack(
+    async () => { await endpoints.adminBiometricRemoveTemplate(templateId); return {}; },
+    async () => ((await endpoints.adminBiometricEnrollments()).some((r) => r.templates.some((t) => t.template_id === templateId)) ? null : {}),
+  );
+}
+
 function FingerChip({ template, onChange }: { template: BiometricTemplateRow; onChange: () => Promise<void> }) {
   const label = template.finger_label ?? COPY.unspecified;
   const remove = useAsyncAction(async () => {
-    await endpoints.adminBiometricRemoveTemplate(template.template_id);
-    await onChange();
-  }, { toast: { success: COPY.removed, failure: COPY.removeFailed } });
+    try {
+      await removeOrReadBack(template.template_id);
+    } finally {
+      await onChange().catch(() => undefined);
+    }
+  }, { toast: { success: COPY.removed, failure: (e) => unsureSentence(e, unsureWords("the fingerprint may still be enrolled", "the fingerprint was removed", "this list")) ?? COPY.removeFailed } });
   return (
     <li className="inline-flex items-center gap-1 rounded-full border border-border bg-info-soft py-0.5 pl-3 pr-0.5 text-sm font-medium text-info-strong">
       <Fingerprint size={16} aria-hidden="true" />
@@ -147,9 +164,17 @@ function CapturePhase({ member, finger, setFinger, onBack, onCaptured }: {
   onCaptured: () => Promise<void>;
 }) {
   const capture = useAsyncAction(async () => {
-    await endpoints.adminBiometricEnroll(member.user_id, finger);
+    // FA-11: a lost reply is read back — enrolled means the member now holds a template for this finger.
+    await writeOrReadBack(
+      () => endpoints.adminBiometricEnroll(member.user_id, finger),
+      async () => {
+        const row = (await endpoints.adminBiometricEnrollments()).find((r) => r.user_id === member.user_id);
+        const held = row?.templates.find((t) => t.finger_label === finger);
+        return held ? { template_id: held.template_id } : null;
+      },
+    );
     await onCaptured();
-  }, { toast: { success: COPY.enrolledToast(member.full_name, finger), failure: COPY.enrolFailed } });
+  }, { toast: { success: COPY.enrolledToast(member.full_name, finger), failure: (e) => unsureSentence(e, unsureWords("the fingerprint may not be enrolled", "the fingerprint was enrolled", "this list")) ?? COPY.enrolFailed } });
   return (
     <>
       <DialogBody className="flex flex-col gap-4">

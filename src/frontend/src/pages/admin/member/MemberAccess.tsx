@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { unsureSentence, writeOrReadBack } from "@/lib/lostReply";
+import { LOST_REPLY, unsureWords } from "@/lib/lostReplyCopy";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { AdminRoleSwitch } from "@/components/members/AdminRoleSwitch";
 import { EmailWithBreaks } from "@/components/members/EmailWithBreaks";
@@ -164,9 +166,15 @@ function RemoveFinger({ enrolment, onRemoved }: { enrolment: FingerprintEnrolmen
       description={COPY.removeBody}
       confirmLabel={COPY.removeConfirm}
       action={COPY.removeAction}
+      // FA-11: a lost reply is read back from the enrolments — gone means it was removed.
+      describe={(e) => unsureSentence(e, unsureWords("the fingerprint may still be enrolled", "the fingerprint was removed", "this tab"))}
       onConfirm={async () => {
-        await endpoints.adminBiometricRemoveTemplate(enrolment.template_id);
-        toast.push({ tone: "success", text: COPY.removed });
+        const { proven, answered } = await writeOrReadBack(
+          async () => { await endpoints.adminBiometricRemoveTemplate(enrolment.template_id); return {}; },
+          async () => ((await endpoints.adminBiometricEnrollments())
+            .some((r) => r.templates.some((t) => t.template_id === enrolment.template_id)) ? null : {}),
+        );
+        toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(COPY.removed, answered) : COPY.removed });
         await onRemoved();
       }}
     />

@@ -93,14 +93,21 @@ out (a magnitude) and their difference over the filtered range.
 Charts render with Recharts. See `design-system.md` § Charts for color rotation and styling rules.
 
 ## Exports
-Every report has an "Export" button with format options:
-- **CSV** — flat table, one row per ledger entry / booking.
-- **XLSX** — same data, with column types preserved and a header row formatted in bold.
-- **PDF** — formatted report including the charts (Puppeteer-rendered backend job).
+What is built (2026-11-13, FA-7/BA-08), and what is not:
 
-Export respects the active filters. Filename pattern: `crusaders-mainframe_<tenant-slug>_<report-name>_<from>-<to>.<ext>`.
-
-Exports run as a backend job; for >10k rows the user gets an email with a download link rather than a synchronous download. Generated files are kept for 7 days, then deleted.
+- **Transactions › Export CSV** — every ledger movement the page's filters select (range, type,
+  one member, and the name search on top), read a page at a time to the end, capped at 50 000
+  movements with the cap said in the toast. Columns: when (UTC), type, signed whole minutes,
+  member, who did it, reason, from, to, booking, movement id.
+- **Reports › Days (CSV)** and **Courts (CSV)** — the day-by-day movement and court use, exactly
+  the figures the page shows for its range.
+- Both are built in the console from the reads the page already makes and fetched with the
+  session's token, in the API's CSV conventions (`CsvCell`: a cell starting `= + - @` is defused
+  with `'`, quoting per RFC 4180, CRLF lines; numbers are written as numbers). Filenames:
+  `transactions-<from>-to-<to>.csv`, `report-days-…`, `report-courts-…`.
+- **Not built, and cut from this spec:** XLSX, PDF with charts, the backend export job and the
+  emailed link for >10k rows. A CSV opens in every spreadsheet, and a PDF of a Recharts page is a
+  browser print. Members and no-show exports are not built yet either.
 
 ## The door log is not a report
 

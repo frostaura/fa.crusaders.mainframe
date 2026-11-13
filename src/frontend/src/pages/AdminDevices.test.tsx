@@ -17,6 +17,10 @@ import {
 import { clubInstant } from "../lib/clubClock";
 import { rateLimitedSentence } from "../lib/errors";
 
+const V3_ABSENT: StubRoute[] = ["network", "firmware", "member-codes"].map((path) => ({
+  path: `/api/v1/admin/devices/${path}`, status: 404, body: { error: "not_found" },
+}));
+
 /**
  * A Radix Select, found by its name (P3 replaced the native selects — R7). Opened the way a
  * pointer opens it; the option chosen by the words on it, which is what an admin reads.
@@ -69,7 +73,7 @@ const select = (label: string) => screen.getByRole("combobox", { name: label });
  *
  * <p>
  * So these tests are about three things: can an admin actually get the key (masked,
- * revealed, copied, regenerated behind a confirm that says what it costs), does a box
+ * revealed, copied, rotated with an overlap and never regenerated), does a box
  * that registered itself say so loudly enough that somebody checks its courts, and do
  * edit and delete send what the API binds.
  * </p>
@@ -91,6 +95,10 @@ describe("AdminDevices", () => {
 
   const baseRoutes = () => [
     { path: "/api/v1/admin/devices/api-key", body: DEVICE_API_KEY_FIXTURE },
+    // The v3 panels' routes, as an API before v3 answers them: 404, so the panels are absent
+    // here (they have their own file, AdminDevices.v3.test.tsx). Longer than the list's prefix,
+    // so a `sequence` on the list is not spent by them.
+    ...V3_ABSENT,
     { path: "/api/v1/admin/devices/", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
     { path: "/api/v1/admin/courts/", body: COURTS_FIXTURE },
@@ -131,108 +139,147 @@ describe("AdminDevices", () => {
     expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••a1c2");
   });
 
-  it("says when the key was last regenerated", async () => {
+  it("says when the key came into use, not an ISO string", async () => {
     stubFetch(baseRoutes());
     renderPage(<AdminDevicesPage />);
 
-    // Not the ISO string. The question this answers is "is this from before or after
-    // I flashed the boxes", and an admin cannot read that off a Z-suffixed timestamp.
-    const line = await screen.findByText(/Last regenerated/);
+    // The question this answers is "is this from before or after I flashed the boxes", and an
+    // admin cannot read that off a Z-suffixed timestamp.
+    const line = await screen.findByText(/In use since/);
     expect(line).not.toHaveTextContent("2026-09-01T08:30:00Z");
   });
 
-  it("regenerates the key only behind a confirm that says every box must be reflashed", async () => {
-    const next = { api_key: "crsdr_live_0000111122223333aaaa", regenerated_at: "2026-09-05T09:00:00Z" };
-    const stub = stubFetch([
-      ...baseRoutes(),
-      { method: "POST", path: "/api/v1/admin/devices/api-key/regenerate", body: next },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    // The cost of this button is a physical trip to every box with a laptop, so the
-    // armed label says so rather than asking "are you sure?".
-    const regenerate = await screen.findByRole("button", { name: /Regenerate key/ });
-    expect(screen.getByText(/old key stops working immediately/)).toBeInTheDocument();
-
-    // First click arms, and sends nothing.
-    fireEvent.click(regenerate);
-    expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
-    expect(await screen.findByRole("button", { name: /Reflash every board after this/ })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Reflash every board after this/ }));
-
-    await waitFor(() => {
-      const post = stub.calls.find((c) => c.method === "POST");
-      expect(post?.path).toBe("/api/v1/admin/devices/api-key/regenerate");
-    });
-
-    // The panel shows the NEW key, masked, without a reload.
-    await waitFor(() => expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••aaaa"));
-    expect(await screen.findByText(/New key issued/)).toHaveTextContent(/every board, court boxes and door gates alike, has to be reflashed/i);
-  });
-
-  it("explains a refused regeneration instead of silently keeping the old key on screen", async () => {
-    stubFetch([
-      ...baseRoutes(),
-      // A refusal (4xx) says itself; a 5xx is an unknown outcome and is looked up — see below.
-      { method: "POST", path: "/api/v1/admin/devices/api-key/regenerate", status: 409, body: { message: "Key store is unavailable." } },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: /Regenerate key/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /Reflash every board after this/ }));
-
-    // The failure mode this stops: a silent refusal, an admin who believes the key
-    // rotated, and a fleet flashed with a key the API never issued.
-    expect(await screen.findByText("Key store is unavailable.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••a1c2");
-  });
-
   /**
-   * Review round 3 (lost-reply audit): a regeneration whose reply is lost is looked up. The stub
-   * performs the write, then fails the reply — as the lost reply did.
+   * BA-01 / device-api §6: there is no Regenerate. It killed the old key at once and every board
+   * then needed a reflash — after the last flash, one click from a dead fleet.
    */
-  describe("a regeneration whose reply was lost", () => {
-    const NEXT = { api_key: "crsdr_live_0000111122223333bbbb", regenerated_at: "2026-09-05T09:00:00Z" };
-    function lostAfter(landed: boolean, readable = true): StubRoute[] {
-      let current = DEVICE_API_KEY_FIXTURE;
-      return [
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/api-key"),
-        { path: "/api/v1/admin/devices/api-key", respond: () => (readable || current === DEVICE_API_KEY_FIXTURE ? current : refuse(503, {})) },
-        {
-          method: "POST", path: "/api/v1/admin/devices/api-key/regenerate",
-          respond: () => { if (landed) current = NEXT; return refuse(504, { error: "gateway_timeout" }); },
-        },
-      ];
-    }
-    async function press() {
-      fireEvent.click(await screen.findByRole("button", { name: /Regenerate key/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /Reflash every board after this/ }));
-    }
+  describe("the device key rotates with an overlap, and never forces a reflash", () => {
+    const V3_KEY = { ...DEVICE_API_KEY_FIXTURE, key_id: "k1", rotation: null };
+    const ROTATING = {
+      ...V3_KEY,
+      rotation: {
+        next_id: "k2", started_at: "2026-11-13T16:00:00Z", grace_ends_at: null,
+        boards_on_new: 3, boards_on_old: [{ id: "d9", name: "Annex box", device_code: "box-99" }],
+        boards_cannot_rotate: [{ id: "d8", name: null, device_code: "gate-08" }],
+      },
+    };
+    // Key routes first: the list route's `startsWith` would otherwise answer them.
+    const keyRoutes = (key: unknown, extra: StubRoute[] = []): StubRoute[] => [
+      ...extra,
+      { path: "/api/v1/admin/devices/api-key", body: key },
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/api-key"),
+    ];
 
-    it("shows the new key and says it was issued when the club has it", async () => {
-      stubFetch(lostAfter(true));
+    it("offers no Regenerate on any API", async () => {
+      stubFetch(keyRoutes(V3_KEY));
       renderPage(<AdminDevicesPage />);
-      await press();
-      await waitFor(() => expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••bbbb"));
-      expect(await screen.findByText(/^New key issued\. .*The club's reply didn't arrive, so we checked its record\.$/)).toBeInTheDocument();
+      await screen.findByLabelText("Device API key");
+      expect(screen.queryByRole("button", { name: /Regenerate/ })).toBeNull();
+      expect(screen.queryByText(/reflashed with the new one/)).toBeNull();
     });
 
-    it("says nothing changed when the club still has the old key", async () => {
-      stubFetch(lostAfter(false));
+    it("shows no rotation surface against a pre-v3 API, rather than one bound to nothing", async () => {
+      stubFetch(baseRoutes());
       renderPage(<AdminDevicesPage />);
-      await press();
-      expect(await screen.findByText(/we checked: the club's device key is the one shown — nothing changed/)).toBeInTheDocument();
-      expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••a1c2");
+      await screen.findByLabelText("Device API key");
+      expect(screen.queryByRole("button", { name: "Rotate key" })).toBeNull();
     });
 
-    it("says it cannot tell when the key cannot be read either", async () => {
-      stubFetch(lostAfter(true, false));
+    it("starts a rotation behind a confirm that says the old key keeps working", async () => {
+      let current: unknown = V3_KEY;
+      const stub = stubFetch(keyRoutes(V3_KEY, [
+        { method: "POST", path: "/api/v1/admin/devices/api-key/rotate", respond: () => { current = ROTATING; return ROTATING; } },
+        { path: "/api/v1/admin/devices/api-key", respond: () => current },
+      ]));
       renderPage(<AdminDevicesPage />);
-      await press();
-      expect(await screen.findByText(/can't tell whether the key was replaced/)).toBeInTheDocument();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Rotate key" }));
+      expect(await screen.findByText(/the current one keeps working/)).toBeInTheDocument();
+      expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+      fireEvent.click(screen.getByRole("button", { name: "Start the rotation" }));
+
+      await waitFor(() => expect(stub.calls.find((c) => c.method === "POST")?.path).toBe("/api/v1/admin/devices/api-key/rotate"));
+      expect(await screen.findByText(/Rotation started: key k2 is being handed to the boards\. The old key still works\./)).toBeInTheDocument();
+      // The status: how many have moved, and who has not, by name.
+      expect(screen.getByText(/Rotating to key k2 since .*: 3 boards on the new key, 1 board still on the old one, 1 board that cannot rotate\./)).toBeInTheDocument();
+      expect(screen.getByText("Not on the new key yet: Annex box and gate-08.")).toBeInTheDocument();
+      // A board that cannot rotate holds the old key in service, and the page says so.
+      expect(screen.getByText(/will not be retired by itself while 1 board that cannot rotate is in service/)).toBeInTheDocument();
+    });
+
+    it("retires the old key early only once its id is typed, naming who it strands", async () => {
+      const stub = stubFetch(keyRoutes(ROTATING, [
+        { method: "POST", path: "/api/v1/admin/devices/api-key/retire", body: { ...V3_KEY, key_id: "k2" } },
+      ]));
+      renderPage(<AdminDevicesPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Retire the old key now" }));
+      expect(await screen.findByText("These boards would be cut off: Annex box and gate-08.")).toBeInTheDocument();
+      // Not typed: the press says what is missing and sends nothing.
+      fireEvent.click(screen.getByRole("button", { name: "Retire key k1" }));
+      expect(await screen.findByText(/Type k1 — the id of the key being retired — to confirm\./)).toBeInTheDocument();
+      expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+      fireEvent.change(screen.getByLabelText(/Type k1 to retire it/), { target: { value: "k1" } });
+      fireEvent.click(screen.getByRole("button", { name: "Retire key k1" }));
+      await waitFor(() => expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual({ confirm: "k1" }));
+      expect(await screen.findByText("Key k1 is retired. Boards on it can no longer reach the club.")).toBeInTheDocument();
+    });
+
+    it("lists the boards the API says a retirement would strand, and keeps the dialog open", async () => {
+      stubFetch(keyRoutes(ROTATING, [{
+        method: "POST", path: "/api/v1/admin/devices/api-key/retire", status: 409,
+        body: { error: "boards_would_be_stranded", boards: [{ id: "d7", name: "Court 4 box", device_code: "box-07" }] },
+      }]));
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Retire the old key now" }));
+      fireEvent.change(await screen.findByLabelText(/Type k1 to retire it/), { target: { value: "k1" } });
+      fireEvent.click(screen.getByRole("button", { name: "Retire key k1" }));
+      expect(await screen.findByText("These boards would be cut off: Court 4 box.")).toBeInTheDocument();
+      expect(screen.getByText(/would cut boards off — they are named above/)).toBeInTheDocument();
+    });
+
+    it("restores a known key only with a well-formed key and the typed word, and says who may", async () => {
+      const KEY = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde";
+      const stub = stubFetch(keyRoutes(V3_KEY, [
+        { method: "POST", path: "/api/v1/admin/devices/api-key/restore", status: 403, body: { error: "forbidden" } },
+      ]));
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Restore a key" }));
+      fireEvent.change(await screen.findByLabelText(/The key the boards hold/), { target: { value: "too-short" } });
+      fireEvent.click(screen.getByRole("button", { name: "Restore this key" }));
+      // The description says the shape, and the press repeats it as the reason it did not go.
+      await waitFor(() => expect(screen.getAllByText(/exactly 43 letters, digits, - and _\./)).toHaveLength(2));
+      expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+      fireEvent.change(screen.getByLabelText(/The key the boards hold/), { target: { value: KEY } });
+      fireEvent.change(screen.getByLabelText(/Type RESTORE to confirm/), { target: { value: "RESTORE" } });
+      fireEvent.click(screen.getByRole("button", { name: "Restore this key" }));
+      await waitFor(() => expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual({ key: KEY, confirm: "RESTORE" }));
+      expect(await screen.findByText("Only the club's owner can restore a key.")).toBeInTheDocument();
+    });
+
+    /** Lost-reply audit: a rotation whose reply is lost is looked up before anything is said. */
+    it("says the rotation started when the reply was lost but the club has it", async () => {
+      let current: unknown = V3_KEY;
+      stubFetch(keyRoutes(V3_KEY, [
+        { method: "POST", path: "/api/v1/admin/devices/api-key/rotate", respond: () => { current = ROTATING; return refuse(504, { error: "gateway_timeout" }); } },
+        { path: "/api/v1/admin/devices/api-key", respond: () => current },
+      ]));
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Rotate key" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Start the rotation" }));
+      expect(await screen.findByText(/^Rotation started: key k2 .*The club's reply didn't arrive, so we checked its record\.$/)).toBeInTheDocument();
+    });
+
+    it("says nothing changed when the reply was lost and no rotation exists", async () => {
+      stubFetch(keyRoutes(V3_KEY, [
+        { method: "POST", path: "/api/v1/admin/devices/api-key/rotate", status: 504, body: { error: "gateway_timeout" } },
+      ]));
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Rotate key" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Start the rotation" }));
+      expect(await screen.findByText(/we checked: the key is as it was — nothing changed/)).toBeInTheDocument();
     });
   });
 
@@ -289,9 +336,12 @@ describe("AdminDevices", () => {
     // The OTA channel picker went with the firmware endpoints it drove.
     expect(screen.queryByLabelText(/update channel/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Code on the box/i)).not.toBeInTheDocument();
-    for (const gone of ["discovered", "discovery-status", "claim", "rotate-key", "revoke", "firmware"]) {
+    for (const gone of ["discovered", "discovery-status", "claim", "rotate-key", "revoke", "regenerate"]) {
       expect(stub.calls.some((c) => c.path.includes(gone))).toBe(false);
     }
+    // v3's signed releases (device-api §7) are read, and nothing else under firmware is called.
+    expect(stub.calls.filter((c) => c.path.includes("firmware")).every((c) => c.method === "GET"
+      && c.path === "/api/v1/admin/devices/firmware")).toBe(true);
   });
 
   // --- the fleet ------------------------------------------------------------------
@@ -304,6 +354,8 @@ describe("AdminDevices", () => {
     expect(await screen.findByText("Court 1 box")).toBeInTheDocument();
     // Relay order is the meaning: relay A drives court 1, relay B drives court 3.
     expect(screen.getByText(/A: court 1, B: court 3/)).toBeInTheDocument();
+    // A board with nothing v3 to say keeps its versions in the identity line (a dense card);
+    // with v3 state they are lines of their own (FA-12, AdminDevices.v3.test.tsx).
     expect(screen.getByText(/firmware 1\.0\.0/)).toBeInTheDocument();
   });
 

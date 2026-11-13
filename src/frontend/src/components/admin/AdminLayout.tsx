@@ -1,4 +1,5 @@
 import { Outlet, useLocation } from "react-router-dom";
+import { useScrollResetOnPage } from "../../lib/scrollPage";
 import { useAdminAttention } from "@/lib/adminAttention";
 import { AdminRail } from "./AdminRail";
 import { AdminSectionSwitcher } from "./AdminSectionSwitcher";
@@ -51,8 +52,9 @@ const FRAME = [
 ].join(" ");
 
 export default function AdminLayout() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   const attention = useAdminAttention();
+  useScrollResetOnPage(pathname, hash);
   return (
     // `grow shrink-0`, not `flex-1`: the app shell's frame is a column that may not grow
     // (min-h-0), and `min-h-full` replaces a flex item's content-height floor — so with

@@ -7,6 +7,9 @@ import { PAYMENT_CHOICES, SELL_COPY as COPY } from "../../../lib/deskMinutesCopy
 import { adminEndpoints } from "../../../lib/adminApi";
 import { formatMoney } from "../../../lib/utils";
 
+/** BA-20: the note's label says "(required)" up front, so it is found by its first word. */
+const SALE_NOTE = new RegExp(`^${COPY.detailLabel}\\b`);
+
 /**
  * Review round 9 on the desk's Sell sheet.
  *
@@ -50,7 +53,7 @@ async function toCheck(paid: boolean) {
     fireEvent.pointerDown(await screen.findByRole("combobox", { name: COPY.paymentLabel }), POINTER);
     fireEvent.click(await screen.findByRole("option", { name: PAYMENT_CHOICES[0].label }));
   }
-  fireEvent.change(await screen.findByLabelText(COPY.detailLabel), { target: { value: "Receipt 7" } });
+  fireEvent.change(await screen.findByLabelText(SALE_NOTE), { target: { value: "Receipt 7" } });
   fireEvent.click(screen.getByRole("button", { name: COPY.next }));
 }
 

@@ -40,7 +40,7 @@ import { useLongNameCards } from "./useLongNameCards";
  * <p>
  * <b>Why the arithmetic works.</b> Status 8 + Balance 9 + Actions 16 + a 13rem floor for Member is
  * 46rem, inside the 48rem where the table starts; Groups (9) arrives at 59rem, leaving Member 17;
- * the date (6) at 65rem (R4 V-14 narrowed Actions from 18 and Groups from 12). Below 48rem a name column narrower than 13rem truncated most real names at 768px, and
+ * the date (7, BA-16) at 65rem (R4 V-14 narrowed Actions from 18 and Groups from 12). Below 48rem a name column narrower than 13rem truncated most real names at 768px, and
  * two cards side by side read better there than a table of initials. Actions is 18rem
  * because a pending row holds Approve, Reject and ⋯, and every `Button` is as wide as its label
  * WITH the spinner it shows while working (width-locked, so it never jumps). Change a width and
@@ -204,7 +204,8 @@ const TH = {
   email: cn("w-72", EMAIL_COLUMN),
   status: "w-32",
   groups: cn("hidden w-36 [@container(min-width:59rem)]:!table-cell", GROUPS_WIDE),
-  date: "hidden w-24 [@container(min-width:65rem)]:!table-cell",
+  // BA-16: 7rem, not 6 — "JOINED" in tracked capitals beside its sort caret read "JOIN…" at 1440.
+  date: "hidden w-28 [@container(min-width:65rem)]:!table-cell",
   balance: "w-36 sticky right-64 z-sticky border-l border-border text-right",
   actions: "w-64 min-w-64 sticky right-0 z-sticky text-right",
 } as const;

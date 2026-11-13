@@ -35,6 +35,7 @@ import { capsSentence, doorHorizonBasis } from "../components/settings/sentences
 import { useSettingFocus } from "../components/settings/useSettingFocus";
 import { useSettingsDocument } from "../components/settings/useSettingsDocument";
 import { YourEmailAlerts } from "../components/settings/YourEmailAlerts";
+import { ScreensPreview } from "../components/devices/ScreensPreview";
 
 /**
  * Admin · Settings — ~70 settings made navigable (plan R13: "admin settings overwhelming —
@@ -401,6 +402,10 @@ function sectionExtras(id: SettingsSectionId, settings: AdminSettings): { before
       };
     case "alerts":
       return { footer: <YourEmailAlerts /> };
+    case "screens":
+      // device-api §10 / FA-6: the start screen in both layouts, from the courts' lights now. A
+      // footer, so it reads the control board only while the section is open.
+      return { footer: <ScreensPreview settings={settings} /> };
     case "doors":
       return { after: <DoorHorizon settings={settings} /> };
     case "records":

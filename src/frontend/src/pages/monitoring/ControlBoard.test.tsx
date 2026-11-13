@@ -205,7 +205,40 @@ describe("the control board", () => {
     // this audience will press it and then walk to a dark court.
     const controls = screen.getAllByRole("button").map((b) => b.textContent ?? "");
     expect(controls.some((t) => /light/i.test(t)), "a lights control on a pull-only box").toBe(false);
-    expect(screen.getByText(/Lights cannot be switched from here/)).toBeInTheDocument();
+    // v3: the club's record re-lights a paid court after a power cut, and never switches one off.
+    expect(screen.getByText(/Lights cannot be switched off from here/)).toHaveTextContent(/never switches a court off/);
+  });
+
+  it("covers the app's own chrome in wall view and drops the explanations (BA-11)", async () => {
+    stubFetch(routes(boardFixture()));
+    renderPage(<ControlBoardPage />);
+    await screen.findByText("SHOULD BE LIT");
+    expect(screen.getByText(/Lights cannot be switched off from here/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Wall view" }));
+    const frame = document.querySelector("[data-wall-view]");
+    expect(frame).not.toBeNull();
+    expect(frame!.className).toMatch(/\bfixed\b/);
+    expect(frame!.className).toMatch(/\binset-0\b/);
+    expect(screen.queryByText(/Lights cannot be switched off from here/)).not.toBeInTheDocument();
+  });
+
+  it("counts the lights' own time and says the booking's end apart from it (FA-8)", async () => {
+    // A grant 75 minutes long on a 45-minute booking: the big number is the lights', the booking apart.
+    const until = new Date(Date.now() + 75 * 60_000).toISOString();
+    const endsAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const base = boardCourtFixture();
+    stubFetch(routes(boardFixture({
+      courts: [boardCourtFixture({ lights: { ...base.lights!, until }, current: { ...base.current!, ends_at: endsAt } })],
+    })));
+    renderPage(<ControlBoardPage />);
+    const label = await waitFor(() => {
+      const found = document.querySelector("[data-countdown]");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(label.getAttribute("data-countdown")).toBe("lights");
+    expect(label).toHaveTextContent("of light left");
+    expect(document.querySelector("[data-booking-apart]")).not.toBeNull();
   });
 
   it("says what the board IS, standing, and says it once", async () => {

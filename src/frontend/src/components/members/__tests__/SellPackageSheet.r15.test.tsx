@@ -5,6 +5,9 @@ import { renderPage, stubFetch } from "../../../test/harness";
 import { seededShelf } from "../../../test/minutesFixtures";
 import { PAYMENT_CHOICES, SELL_COPY as COPY } from "../../../lib/deskMinutesCopy";
 
+/** BA-20: the note's label says "(required)" up front, so it is found by its first word. */
+const SALE_NOTE = new RegExp(`^${COPY.detailLabel}\\b`);
+
 /**
  * R15 J15-11 — the Give step at R0.00 said "Cash paid at the desk — 'Staff'" under "Money received
  * R0.00": a payment nobody made. No rand taken is a gift on the check step too; with rand taken the
@@ -25,7 +28,7 @@ async function toCheck(zar: string) {
   fireEvent.pointerDown(await screen.findByRole("combobox", { name: COPY.paymentLabel }), POINTER);
   fireEvent.click(await screen.findByRole("option", { name: CASH }));
   fireEvent.change(screen.getByLabelText(COPY.zarLabel), { target: { value: zar } });
-  fireEvent.change(screen.getByLabelText(COPY.detailLabel), { target: { value: "Staff" } });
+  fireEvent.change(screen.getByLabelText(SALE_NOTE), { target: { value: "Staff" } });
   fireEvent.click(screen.getByRole("button", { name: COPY.next }));
   await screen.findByText(COPY.revenueFor(Number(zar)));
 }

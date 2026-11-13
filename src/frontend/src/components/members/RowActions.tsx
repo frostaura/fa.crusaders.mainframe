@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -15,7 +16,6 @@ import {
 } from "@/lib/membersCopy";
 import { DELETE_MEMBER_COPY } from "@/lib/deleteMemberCopy";
 import { FEATURES } from "@/lib/features";
-import { useAsyncAction } from "@/lib/useAsyncAction";
 import { cn } from "@/lib/utils";
 import { rowAdminRoleOffer } from "./adminRoleOffer";
 import type { MemberRow } from "./membersModel";
@@ -68,12 +68,25 @@ const RESET_CODE_LABEL = ACTIONS_COPY.resetCode;
 const TABLE_ONLY = "[@container(max-width:47.99rem)]:hidden";
 
 export function RowActions({ row, handlers, compact = false }: { row: MemberRow; handlers: RowActionHandlers; compact?: boolean }) {
-  const approve = useAsyncAction(() => handlers.approve(row));
   return (
     <div className="flex flex-row items-center justify-end gap-2">
       {row.status === "PendingApproval" ? (
         <>
-          <Button size="sm" data-approve-row={row.user_id} pending={approve.pending} onClick={() => void approve.run()}>{COPY.approve}</Button>
+          {/* BA-02: armed, never one click. One click approved straight away and the next
+              applicant's row slid under the pointer, so two clicks 0.7 s apart let in somebody
+              the admin never looked at. The armed control also swallows the second click of a
+              double-click. */}
+          <span data-approve-row={row.user_id} className="contents">
+            <ConfirmButton
+              idleLabel={COPY.approve}
+              confirmLabel={COPY.approveConfirm(row.full_name)}
+              onConfirm={async () => { await handlers.approve(row); }}
+              subject={row.full_name}
+              // F3.20: the queue's next step — the NEXT applicant's Approve, never this row's
+              // (which is leaving) and never <body>.
+              focusAfter={() => document.querySelector<HTMLElement>(`[data-approve-row]:not([data-approve-row="${row.user_id}"]) button`)}
+            />
+          </span>
           <Button size="sm" variant="danger-soft" onClick={() => handlers.reject(row)}>{COPY.reject}</Button>
         </>
       ) : null}

@@ -11,6 +11,17 @@ import {
 } from "../test/harness";
 
 /**
+ * FA-13: a relative-time assertion ("heard from 12 seconds ago") read the real clock between the
+ * fixture and the render, so a loaded machine made it 13. Only `Date` is faked — timers stay real
+ * for the page's own waits — and restored after each test.
+ */
+function freezeDate(at = Date.now()) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(at);
+}
+afterEach(() => { vi.useRealTimers(); });
+
+/**
  * Door confirms are dialogs (P3 — they were inline two-tap ConfirmButtons whose armed state
  * was "choose again to confirm"). The dialog's title asks the question; its description is the
  * door's own consequence, word for word what the copy layer says after the question.
@@ -112,6 +123,8 @@ describe("the doors surface", () => {
      * dead and the lock may be seized.
      */
     it("says Reporting, and no chip on the page says Working", async () => {
+      // FA-13: only Date is frozen, so "12 seconds ago" cannot become 13 on a loaded machine.
+      freezeDate();
       openDoors([doorFixture({ last_seen_at: ago(12) })]);
 
       expect(await screen.findByText("Reporting")).toBeInTheDocument();
@@ -1395,6 +1408,7 @@ describe("the doors surface", () => {
      * shut" and stopped would be true of the database and false of the corridor.
      */
     it("shows a per-door result, confirmed and NOT CONFIRMED, with the power-loss line", async () => {
+      freezeDate();
       openDoors([
         doorFixture({ last_seen_at: ago(12) }),
         doorFixture({ id: OTHER_ID, name: "Front door", gate_key: "front-door", last_seen_at: ago(6 * 3600), power_loss_behaviour: "released" }),

@@ -1,6 +1,10 @@
 import {
   endpoints, type DailyAdminPoint, type RevenueReport, type UtilisationRow,
 } from "../../lib/api";
+import { Button } from "../../components/ui/button";
+import { csvBlob, courtsCsv, dailyCsv } from "../../lib/csvExport";
+import { saveFile } from "../../lib/memberDetailApi";
+import { DownloadSimple } from "../../components/ui/icons";
 import { formatMinutes, formatMoney } from "../../lib/utils";
 import { AutoGrid } from "../../components/ui/auto-grid";
 import { Minutes } from "../../components/Minutes";
@@ -67,7 +71,13 @@ export default function AdminReportsPage() {
       <PageHeader
         title={COPY.title}
         description={COPY.description}
-        actions={<RefreshButton onRefresh={report.refresh} loading={report.loading && data !== null} />}
+        actions={(
+          <div className="flex flex-wrap items-center gap-2">
+            {/* FA-7 / BA-08: the figures on screen, for the treasurer and the committee. */}
+            {data ? <ReportExports data={data} markers={range} /> : null}
+            <RefreshButton onRefresh={report.refresh} loading={report.loading && data !== null} />
+          </div>
+        )}
         freshness={<Freshness at={report.readAt} />}
       />
       <RangeToolbar range={range} onChange={setRange} />
@@ -83,6 +93,26 @@ export default function AdminReportsPage() {
         {data ? <ClubBody data={data} /> : null}
       </StateBlock>
     </PageShell>
+  );
+}
+
+/**
+ * The two CSVs a report is reconciled with: the day-by-day movement and court use, exactly the
+ * figures the page shows for its range, in the API's CSV conventions (`lib/csvExport`).
+ */
+function ReportExports({ data, markers }: { data: ClubReport; markers: { from: string; to: string } }) {
+  const name = (what: string) => `report-${what}-${markers.from || "start"}-to-${markers.to || "today"}.csv`;
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => saveFile({ blob: csvBlob(dailyCsv(data.days)), filename: name("days") })}
+        icon={<DownloadSimple aria-hidden="true" />}>
+        Days (CSV)
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => saveFile({ blob: csvBlob(courtsCsv(data.utilisation)), filename: name("courts") })}
+        icon={<DownloadSimple aria-hidden="true" />}>
+        Courts (CSV)
+      </Button>
+    </>
   );
 }
 

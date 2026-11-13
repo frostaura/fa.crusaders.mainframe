@@ -3,6 +3,8 @@ import { doorDeletedNotice, doorDisplayName, doorStateNotice } from "../../lib/d
 import { clubDayAndClock } from "../../lib/clubClock";
 import { doorAlreadyNotice, unnamedGateOfflineNotice } from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
+import { unsureSentence, writeOrReadBack } from "../../lib/lostReply";
+import { LOST_REPLY, unsureWords } from "../../lib/lostReplyCopy";
 import { markOwnDoorsAction } from "./useDoorsChrome";
 import { doorEndpoints, endpoints, type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
 
@@ -165,16 +167,22 @@ export function useDoorActions(
       try {
         // C11: a deleted door leaves the shut set, which is a change this tab caused.
         markOwnDoorsAction();
-        await endpoints.adminDeviceDelete(door.id);
+        // FA-11: a lost reply is read back from the board list — gone means it was deleted.
+        const { proven, answered } = await writeOrReadBack(
+          async () => { await endpoints.adminDeviceDelete(door.id); return {}; },
+          async () => ((await endpoints.adminDevicesList()).some((d) => d.id === door.id) ? null : {}),
+        );
         // A-M7 / R3-14: the same sentence goes to the toast AND travels with the navigation,
         // because the navigation is what made the toast invisible. One generator, so the
         // two cannot say different things about one click — which is the lesson `gateCopy`'s
         // own header records.
-        const said = doorDeletedNotice(name);
+        const said = proven ? LOST_REPLY.proven(doorDeletedNotice(name), answered) : doorDeletedNotice(name);
         toast.push({ tone: "success", text: said, durationMs: 8000 });
         context.afterDelete(said);
       } catch (e) {
-        toast.push({ tone: "danger", text: describeDeviceError(e, "Could not delete that door.") });
+        const unsure = unsureSentence(e, unsureWords(`${name} is still on Doors`, `${name} was deleted`, "Doors"));
+        if (unsure) void context.reload();
+        toast.push({ tone: "danger", text: unsure ?? describeDeviceError(e, "Could not delete that door.") });
       }
     },
   };

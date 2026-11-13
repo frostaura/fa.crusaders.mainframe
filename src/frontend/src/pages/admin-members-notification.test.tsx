@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
-import { memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
+import { approveFromRow, memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
 import { OUTCOMES } from "../lib/membersCopy";
 
 /**
@@ -52,7 +52,7 @@ describe("AdminMembers — approving when the mail server is down", () => {
     stubFetch(routes([approveRoute({ approved: true, member_email_queued: false })]));
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await approveFromRow();
 
     // Both halves in one sentence, because both are true and an admin acts on the second.
     // "Ada Lovelace approved." on its own is how a club leaves an active member waiting for
@@ -68,7 +68,7 @@ describe("AdminMembers — approving when the mail server is down", () => {
     stubFetch(routes([approveRoute({ approved: true, member_email_queued: true })]));
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await approveFromRow();
 
     expect(await screen.findByText("Ada Lovelace approved.")).toBeInTheDocument();
     expect(screen.queryByText(/couldn't be queued/i)).not.toBeInTheDocument();
@@ -85,7 +85,7 @@ describe("AdminMembers — approving when the mail server is down", () => {
     ));
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await approveFromRow();
 
     // Review round 2 (F3-3): the member is read again and the toast says what is TRUE.
     expect(await screen.findByText(OUTCOMES.approvedAfterLostReply("Ada Lovelace"))).toBeInTheDocument();
@@ -105,7 +105,7 @@ describe("AdminMembers — approving when the mail server is down", () => {
     ]));
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await approveFromRow();
 
     expect(await screen.findByText(OUTCOMES.approveUnknown("Ada Lovelace"))).toBeInTheDocument();
     expect(screen.queryByText(OUTCOMES.approveFailed)).not.toBeInTheDocument();
@@ -118,7 +118,7 @@ describe("AdminMembers — approving when the mail server is down", () => {
     ]));
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await approveFromRow();
 
     expect(await screen.findByText(OUTCOMES.approveFailed)).toBeInTheDocument();
   });

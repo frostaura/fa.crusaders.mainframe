@@ -36,6 +36,16 @@ import { ButtonMapEditor } from "../components/ButtonMapEditor";
 import { buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../lib/buttonMap";
 import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapCard";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
+import { BoardScreen, BoardScreenEditor, BoardStatusLines } from "../components/devices/BoardV3";
+import { servesStatusLines } from "../lib/boardScreen";
+import {
+  BoardHardwareEditor, BoardHardwareSummary, BoardHealth, CommissioningChecklist, type HwPatch,
+} from "../components/devices/BoardHardware";
+import { servesHardware } from "../lib/deviceHardware";
+import { describeRelayCourts as describeCourts } from "../lib/deviceV3Copy";
+import { useBoardsContext } from "../components/devices/useBoardsContext";
+import { RemoteFixes } from "../components/devices/RemoteFixes";
+import type { BoardsContext } from "../lib/boardScreen";
 import { useToast } from "../components/toastContext";
 import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
 import { AutoGrid } from "../components/ui/auto-grid";
@@ -108,11 +118,6 @@ import { useInlineEditorFocus } from "../components/admin/useInlineEditorFocus";
  */
 const REFRESH_MS = 15_000;
 
-/** "A: court 1, B: court 2" — the relay bank as an admin reads it off the box. */
-function describeCourts(courtNumbers: number[]) {
-  if (courtNumbers.length === 0) return "no courts";
-  return courtNumbers.map((n, i) => `${RELAYS[i]}: court ${n}`).join(", ");
-}
 
 /**
  * The one line under a board's name: its code, what it is, and whatever it reported about
@@ -123,15 +128,18 @@ function describeCourts(courtNumbers: number[]) {
  * The second element is the whole difference between the two kinds: a box says which court
  * sits on which relay, a door says which door it is.
  */
-function identityLine(device: AdminDevice): string {
+function identityLine(device: AdminDevice, statusLines: boolean): string {
   const parts = [
     device.device_code,
     isGate(device) ? describeGate(device.gate_key) : describeCourts(device.court_numbers),
   ];
   if (device.mac_address) parts.push(device.mac_address);
   if (device.last_ip_address) parts.push(device.last_ip_address);
-  if (device.running_version) parts.push(`firmware ${device.running_version}`);
-  if (device.mega_version) parts.push(`Mega ${device.mega_version}`);
+  // With anything v3 to say, firmware and the Mega are their own lines (BoardStatusLines, FA-12):
+  // a muted run of versions told nobody which board missed the last flash. Without it — a 2.x
+  // board on an API with no releases — the versions stay here, and a phone keeps its dense card.
+  if (!statusLines && device.running_version) parts.push(`firmware ${device.running_version}`);
+  if (!statusLines && device.mega_version) parts.push(`Mega ${device.mega_version}`);
   return parts.join(" · ");
 }
 
@@ -281,6 +289,12 @@ function DeviceButtonMapPanel({
 type DeviceActions = {
   details: (name: string, courtNumbers: number[]) => Promise<boolean>;
   buttonMap: (map: string[] | null) => Promise<boolean>;
+  /** v3: the board's own layout and marquee, or null for the club's (three-valued, like the map). */
+  screen: (layout: string | null, marquee: boolean | null) => Promise<boolean>;
+  /** v3 §8: send the club's network to a board set up at its own portal. */
+  pushNetwork: () => Promise<boolean>;
+  /** v3 §12: this board's hardware facts, three-valued per key. */
+  hardware: (patch: HwPatch) => Promise<boolean>;
   /** Out of service, or back in. See DeviceRow for what the switch actually does. */
   setEnabled: (enabled: boolean) => Promise<void>;
   remove: () => Promise<void>;
@@ -340,7 +354,9 @@ function DeviceDetailsEditor({
 }
 
 /** The badges and the identity line — everything about a row that is read-only. */
-function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online: boolean; now: number }) {
+function DeviceRowHeader({ device, online, now, context }: {
+  device: AdminDevice; online: boolean; now: number; context: BoardsContext;
+}) {
   // Presence-gated: an API that does not send the field cannot have an override.
   const hasOwnMapField = device.button_map !== undefined;
   return (
@@ -382,7 +398,8 @@ function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online:
           two version strings. The row used to push the page wider than the phone on a long
           device NAME alone (R2 I-F6); an unbreakable 64-character token is the same defect
           with a larger token. */}
-      <div className="mt-1 break-words text-xs text-text-muted">{identityLine(device)}</div>
+      <div className="mt-1 break-words text-xs text-text-muted">{identityLine(device, servesStatusLines(device, context))}</div>
+      <BoardStatusLines device={device} context={context} />
     </>
   );
 }
@@ -655,10 +672,12 @@ function backInServiceId(deviceId: string): string {
 }
 
 function DeviceRow({
-  device, boxEditing, actions, liveness, coverage,
+  device, boxEditing, actions, liveness, coverage, context,
 }: {
   device: AdminDevice;
   boxEditing: BoxEditing;
+  /** What the page read beside the list, for the v3 lines (device-api §10). */
+  context: BoardsContext;
   actions: DeviceActions;
   liveness: Liveness;
   /** What each of this box's courts would be left with without it. See lib/deviceCoverage. */
@@ -666,7 +685,8 @@ function DeviceRow({
 }) {
   const { now } = liveness;
   const online = isOnline(device, liveness.offlineAfter, now);
-  const [editing, setEditing] = useState<"details" | "buttons" | null>(null);
+  const [editing, setEditing] = useState<"details" | "buttons" | "screen" | "hardware" | null>(null);
+  const [compacting, setCompacting] = useState(false);
   // R8 X8-3: the editor takes focus when it opens and gives it back to its Edit button on close.
   const card = useRef<HTMLDivElement>(null);
   const editorRegion = useInlineEditorFocus(editing, (was) => card.current?.querySelector<HTMLElement>(`[data-opens-editor="${was}"]`));
@@ -680,7 +700,7 @@ function DeviceRow({
     <div className="@container/boardslot min-w-0">
     <div ref={card} data-board-card="" className="flex flex-col gap-2 rounded-xl border border-border bg-bg-surface p-2 shadow-xs sm:gap-3 @[16rem]/boardslot:p-4 sm:p-5">
       <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1"><DeviceRowHeader device={device} online={online} now={now} /></div>
+        <div className="min-w-0 flex-1"><DeviceRowHeader device={device} online={online} now={now} context={context} /></div>
         {/* Deleting is not a revocation and locks nothing out — the box still holds the
             club's key. It forgets the row, and the box makes a new one on its next call.
             The dialog says exactly that, because "Really delete?" would let an admin think
@@ -717,7 +737,30 @@ function DeviceRow({
             onClose={() => setEditing(null)}
           />
         )}
+
+        {editing === "screen" && (
+          <BoardScreenEditor device={device} club={context.club} onSave={actions.screen} onClose={() => setEditing(null)} />
+        )}
+
+        {editing === "hardware" && (
+          <BoardHardwareEditor device={device} settings={context.settings} onSave={actions.hardware} onClose={() => setEditing(null)} />
+        )}
       </div>
+
+      {editing !== "hardware" && <BoardHardwareSummary device={device} settings={context.settings} />}
+      <BoardHealth device={device} rises={context.risesOf(device)} />
+      {servesHardware(device) && <CommissioningChecklist device={device} />}
+
+      {editing !== "screen" && (
+        <BoardScreen
+          device={device} context={context} busy={compacting}
+          onBackToCompact={() => {
+            setCompacting(true);
+            // One press, always one heartbeat from taking effect (device-api §5).
+            void actions.screen("compact", device.lcd_marquee_enabled ?? null).finally(() => setCompacting(false));
+          }}
+        />
+      )}
 
       {!device.enabled && <OutOfServiceNotice device={device} coverage={coverage} />}
 
@@ -730,6 +773,28 @@ function DeviceRow({
 
         {hasOwnMapField && editing === null && (
           <Button variant="outline" size="sm" className={WRAPS} data-opens-editor="buttons" onClick={() => setEditing("buttons")}>Edit buttons</Button>
+        )}
+
+        {device.lcd_layout !== undefined && editing === null && (
+          <Button variant="outline" size="sm" className={WRAPS} data-opens-editor="screen" onClick={() => setEditing("screen")}>Edit screen</Button>
+        )}
+
+        {servesHardware(device) && editing === null && (
+          <Button variant="outline" size="sm" className={WRAPS} data-opens-editor="hardware" onClick={() => setEditing("hardware")}>Edit hardware</Button>
+        )}
+
+        {/* A board set up at its own portal keeps that network until an admin pushes the club's (§8). */}
+        {device.net_src === "local" && editing === null && (
+          <ConfirmDialog
+            trigger={<Button variant="outline" size="sm" className={WRAPS}>Send it the club network</Button>}
+            title={`Send ${device.name} the club's network?`}
+            description={"It was set up at the box itself and keeps that WiFi and server address until you send it the club's. "
+              + "It tries the club's the next time it calls in, and goes back to its own if it cannot reach the club with it."}
+            confirmLabel="Send the club network"
+            cancelLabel="Leave it as it is"
+            tone="primary"
+            onConfirm={actions.pushNetwork}
+          />
         )}
 
         {/* Out of service — the control the API, the health sweep and the settlement model
@@ -979,6 +1044,35 @@ function useDeviceActions(reload: () => Promise<void>) {
           still: `${named}'s buttons are as they were`, whether: `${named}'s buttons were saved`,
         },
       ),
+      screen: (layout, marquee) => write(
+        device.id, () => endpoints.adminDeviceUpdate(device.id, { lcd_layout: layout, lcd_marquee_enabled: marquee }),
+        (row) => row !== undefined && (row.lcd_layout ?? null) === layout && (row.lcd_marquee_enabled ?? null) === marquee,
+        {
+          done: layout === null
+            ? `${named} draws the club's screen layout again. It picks that up the next time it calls in.`
+            : `${named} will draw ${layout === "expanded" ? "the expanded 20×4" : "the compact 16×2"} screen. It picks that up the next time it calls in.`,
+          failed: "Could not save that box's screen.",
+          still: `${named}'s screen is as it was`, whether: `${named}'s screen was saved`,
+        },
+      ),
+      hardware: (patch) => write(
+        device.id, () => endpoints.adminDeviceUpdate(device.id, patch),
+        (row) => row !== undefined && Object.entries(patch).every(([key, value]) => (row[key as keyof AdminDevice] ?? null) === value),
+        {
+          done: `${named}'s hardware settings are saved. It picks them up the next time it calls in, and reports what it runs with.`,
+          failed: "Could not save that box's hardware settings.",
+          still: `${named}'s hardware settings are as they were`, whether: `${named}'s hardware settings were saved`,
+        },
+      ),
+      pushNetwork: () => write(
+        device.id, () => endpoints.adminDeviceUpdate(device.id, { push_network: true }),
+        (row) => row !== undefined && row.net_src !== "local",
+        {
+          done: `${named} gets the club's network the next time it calls in.`,
+          failed: "Could not send that board the club network.",
+          still: `${named} keeps the network it was set up with`, whether: `${named} was sent the club network`,
+        },
+      ),
       /**
        * Out of service, or back in. `enabled` has been on the API and on the typed client
        * since the row existed and nothing ever sent it — the three mutations above send
@@ -1013,6 +1107,14 @@ function sameCourts(a: number[] | undefined, b: number[]): boolean {
   return (a ?? []).length === b.length && (a ?? []).every((n, i) => n === b[i]);
 }
 
+/** The out-of-service consequence for one board, as its own row's confirm says it. */
+function outOfServiceWordsFor(id: string, devices: AdminDevice[], tenantHeartbeat: number | null, now: number): string {
+  const board = devices.find((d) => d.id === id);
+  if (!board) return "The box stops switching lights on.";
+  const coverage = coverageWithout(board, devices, (d) => isOnline(d, offlineAfterSecondsFor(d, tenantHeartbeat), now));
+  return outOfServiceConfirm(coverage).replace(/^Out of service\? /, "");
+}
+
 export function AdminDevicesPage() {
   const toast = useToast();
   const [devices, setDevices] = useState<AdminDevice[]>([]);
@@ -1023,21 +1125,12 @@ export function AdminDevicesPage() {
   const [loadError, setLoadError] = useState<unknown>(null);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  /**
-   * One instant per paint, from one timer (A2.7's extraction).
-   *
-   * Every age on this page used to read `Date.now()` for itself, so three rows rendered
-   * across a second boundary could print two different numbers for one moment — and the page
-   * only re-rendered on a poll, so the ages stepped in fifteen-second jumps.
-   */
+  /** One instant per paint, from one timer (A2.7): every age read `Date.now()` for itself, so rows
+   * across a second boundary printed two moments, and the ages stepped in fifteen-second jumps. */
   const now = useTicker(true);
 
-  /**
-   * Re-reads the boxes and nothing else — this is the only thing on the page that goes
-   * stale on its own. Settings and courts change when an admin changes them, and
-   * re-fetching them on a timer would fight the club button map an admin is editing
-   * below.
-   */
+  /** Re-reads the boxes and nothing else — the only thing here that goes stale on its own. Settings
+   * and courts change when an admin changes them; a timer on them would fight the map being edited. */
   const refreshDevices = useCallback(async () => {
     setDevices(await endpoints.adminDevicesList());
     setCheckedAt(new Date().toISOString());
@@ -1134,7 +1227,7 @@ export function AdminDevicesPage() {
   }
 
   const actionsFor = useDeviceActions(load);
-
+  const boardsContext = useBoardsContext(settings, devices, now); // v3: each read on its own
   // The bound a minute button is actually held to: the club's own walk-up maximum, never
   // above the relay's hard cap. The editor already refuses anything past the hard cap; the
   // club's cap is the half nothing on this page knew about.
@@ -1199,6 +1292,7 @@ export function AdminDevicesPage() {
                   boxEditing={{ courts, clubMap: buttonMap, walkUpMax: walkUpCap }}
                   actions={actionsFor(device, coverage)} coverage={coverage}
                   liveness={{ offlineAfter: offlineAfterSecondsFor(device, tenantHeartbeat), now }}
+                  context={boardsContext}
                 />
               );
             })}
@@ -1212,6 +1306,10 @@ export function AdminDevicesPage() {
         settings={settings} value={buttonMap} onChange={setButtonMap}
         loading={loading} walkUpCap={walkUpCap}
       />
+
+      {/* v3 (device-api §7, §8; member-code §8): what reaches the boards without a cable. */}
+      <RemoteFixes devices={devices} settings={settings} outOfServiceWords={(id) => outOfServiceWordsFor(id, devices, tenantHeartbeat, now)}
+        onChanged={() => { boardsContext.reload(); void load().catch(() => undefined); }} />
     </PageShell>
   );
 }

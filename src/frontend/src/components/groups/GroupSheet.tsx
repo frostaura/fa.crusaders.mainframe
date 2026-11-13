@@ -53,7 +53,13 @@ export function GroupSheet(props: {
 
   const save = () => {
     setPressed(true);
-    if (Object.keys(draftProblems(draft)).length > 0) return;
+    if (Object.keys(draftProblems(draft)).length > 0) {
+      // BA-10: the message sat under the sticky footer and focus stayed on Save, so a red edge
+      // was all an admin saw. The first field with a problem is scrolled to and focused, once
+      // the press has rendered its message.
+      requestAnimationFrame(() => focusFirstProblem());
+      return;
+    }
     onSave(bodyFrom(draft, group));
   };
 
@@ -105,4 +111,14 @@ export function GroupSheet(props: {
       </SheetContent>
     </Sheet>
   );
+}
+
+/** The first field the group sheet marks invalid: scrolled to the middle of the sheet and focused. */
+function focusFirstProblem(): void {
+  const field = document.querySelector<HTMLElement>(
+    '[data-sheet="group"] [data-slot="field"][data-invalid] input, [data-sheet="group"] [data-slot="field"][data-invalid] textarea',
+  );
+  if (!field) return;
+  field.scrollIntoView?.({ block: "center" });
+  field.focus();
 }

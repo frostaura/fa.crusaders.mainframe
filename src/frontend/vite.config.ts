@@ -323,5 +323,12 @@ export default defineConfig({
     // reads as a broken Playwright install and is not one. Two runners, two
     // directories: unit tests live under src/, browser tests under e2e/.
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+
+    // FA-13: at a load average near 50 the admin set reported 15 "timed out in 5000ms" — specs
+    // that pass in a second on a quiet machine. A busy CI runner or a parallel local session
+    // read them as regressions. The per-test ceiling is 20 s, still far below anything that is
+    // genuinely stuck; nothing here waits on a real clock for longer than a few hundred ms.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });

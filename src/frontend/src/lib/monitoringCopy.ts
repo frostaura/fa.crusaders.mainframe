@@ -115,6 +115,86 @@ export function courtExpectation(court: ControlBoardCourt): CourtExpectation {
 }
 
 // ---------------------------------------------------------------------------------------
+// The lights' own time, and the two disagreements an admin must see (FA-8, BA-04)
+// ---------------------------------------------------------------------------------------
+
+/** Are the lights on — by the box's own word where it gave one, else by the club's record? */
+function lightsOn(lights: ControlBoardLights): boolean {
+  return lights.confirmed_state ? lights.confirmed_state === "on" : lights.state === "on";
+}
+
+/**
+ * The LIGHTS' time left, in whole seconds, or null (FA-8). The relay's own deadline (`until`),
+ * never the booking's end: a court re-lit after a power cut, or one whose grant differs from the
+ * booking, has light the booking does not describe. `seconds_remaining` was computed at the read
+ * (`generated_at`), so without `until` it is re-based on that instant, never counted from as_of.
+ */
+export function lightsSecondsLeft(
+  lights: ControlBoardLights | null | undefined, now: number, generatedAt: string | null | undefined,
+): number | null {
+  if (!lights || !lightsOn(lights)) return null;
+  if (lights.until) {
+    const left = Math.round((Date.parse(lights.until) - now) / 1000);
+    if (Number.isFinite(left)) return left > 0 ? left : null;
+  }
+  if (typeof lights.seconds_remaining === "number") {
+    const base = generatedAt ? Date.parse(generatedAt) : Number.NaN;
+    const elapsed = Number.isFinite(base) ? Math.max(0, (now - base) / 1000) : 0;
+    const left = Math.round(lights.seconds_remaining - elapsed);
+    return left > 0 ? left : null;
+  }
+  return null;
+}
+
+/** What the big number counts: the lights, or (with no light time) the booking. */
+export type CountdownSource = "lights" | "booking";
+
+export const COUNTDOWN_LABEL: Record<CountdownSource, string> = {
+  lights: "of light left",
+  booking: "of the booking left",
+};
+
+export type LightsMismatch = "lit_nothing_booked" | "checked_in_dark";
+
+export const LIGHTS_MISMATCH_WORDS: Record<LightsMismatch, string> = {
+  lit_nothing_booked: "Lights on, nothing booked. The box says this court is lit and nobody has it — switch it off at the"
+    + " wall if nobody is playing, and look at Faults for this box.",
+  checked_in_dark: "Checked in, lights off. Somebody checked in, but the box says the lights are off — switched off early"
+    + " at the box, or the relay did not close. Ask at the court.",
+};
+
+/**
+ * The two disagreements between bookings and the box's own word (BA-04), each only after the
+ * club's grace window, so a court switching over between two bookings is not flagged. Only the
+ * box's CONFIRMED state counts: the club's own record cannot disagree with itself.
+ */
+export function lightsMismatch(court: ControlBoardCourt, now: number, graceMinutes: number | null): LightsMismatch | null {
+  const lights = court.lights;
+  if (!lights?.confirmed_state || !lights.confirmed_at || courtExpectation(court) === "unknown") return null;
+  const confirmed = Date.parse(lights.confirmed_at);
+  if (!Number.isFinite(confirmed)) return null;
+  const graceMs = Math.max(0, graceMinutes ?? 0) * 60_000;
+  if (lights.confirmed_state === "on") return litNothingBooked(court, lights, confirmed, now - graceMs);
+  if (lights.confirmed_state === "off") return checkedInDark(court, confirmed, now - graceMs);
+  return null;
+}
+
+/** Lit by the box's word, nothing current, and lit since before the grace window began. */
+function litNothingBooked(court: ControlBoardCourt, lights: ControlBoardLights, confirmed: number, graceStart: number): LightsMismatch | null {
+  if (court.current) return null;
+  const since = lights.since ? Date.parse(lights.since) : confirmed;
+  return Number.isFinite(since) && since < graceStart ? "lit_nothing_booked" : null;
+}
+
+/** Checked in before the grace window began, and the box said "off" AFTER the check-in. */
+function checkedInDark(court: ControlBoardCourt, confirmed: number, graceStart: number): LightsMismatch | null {
+  const at = court.current?.checked_in_at;
+  if (!at) return null;
+  const checkedIn = Date.parse(at);
+  return Number.isFinite(checkedIn) && confirmed > checkedIn && checkedIn < graceStart ? "checked_in_dark" : null;
+}
+
+// ---------------------------------------------------------------------------------------
 // What the box last said — always qualified
 // ---------------------------------------------------------------------------------------
 
@@ -340,8 +420,9 @@ export const BOARD_STANDING_NOTICE
  * disabled one is not.
  */
 export const BOARD_NO_REMOTE_CONTROL
-  = "Lights cannot be switched from here. Each court box decides for itself and is never told "
-  + "what to do by the club's system — a member identifying at the box is what turns a court on.";
+  = "Lights cannot be switched off from here. A member identifying at the box turns a court on, and a box that lost"
+  + " power or restarted puts paid courts back on by itself from the club's record — which never switches a court off."
+  + " A court lit when nobody is playing is switched off with its OFF button at the box, or at the wall.";
 
 /** How this page is getting its updates right now. Four states, and none of them inferred. */
 export type FreshnessMode = "connecting" | "live" | "polling" | "lost";
@@ -391,15 +472,25 @@ export function boardStaleBand(readAt: string | null): string {
  */
 export function partialBoardNotice(
   silent: ReadonlyArray<Pick<ControlBoardCourt, "name" | "court_id" | "device">>, readAt: string | null,
+  timezone?: string,
 ): string | null {
   if (silent.length === 0) return null;
+  // BA-09: "what we last knew" is when the BOXES last spoke, not when this page last read the
+  // club — the read time moved forward every few seconds while the boxes had been silent for
+  // half an hour. The oldest last-heard across the silent boxes is the honest figure.
+  const heard = silent.map((c) => (c.device?.last_seen_at ? Date.parse(c.device.last_seen_at) : Number.NaN))
+    .filter((t) => Number.isFinite(t));
+  const lastHeard = heard.length === silent.length && heard.length > 0
+    ? clubClock(new Date(Math.min(...heard)).toISOString(), timezone) : null;
   const boxes = new Set(silent.map((c) => c.device?.device_id ?? c.device?.device_code ?? `court:${c.court_id}`));
   const courts = silent.length === 1 ? "that court" : "those courts";
   const which = boxes.size > 1
     ? `${boxes.size} boxes haven't called in`
     : silent.length === 1 ? `${silent[0].name}'s box hasn't called in` : `The box for ${courtList(silent.map((c) => c.name))} hasn't called in`;
+  if (lastHeard) return `${which}. What you see for ${courts} is what we last heard from ${boxes.size > 1 ? "them" : "it"} at ${lastHeard}.`;
+  // When a box's last-heard time is not known, no time is given rather than the page's own.
   return readAt
-    ? `${which}. What you see for ${courts} is what we last knew at ${readAt}.`
+    ? `${which}, so what you see for ${courts} may be out of date.`
     : `${which}, so nothing can be said about ${courts}.`;
 }
 
@@ -413,8 +504,8 @@ export const BOARD_EMPTY_HINT = "Add the club's courts under Courts, then this w
 /** The wall-view switch, and the thing people ask about it straight afterwards. */
 export const WALL_VIEW_LABEL = "Wall view";
 export const WALL_VIEW_HINT
-  = "Makes everything bigger, for a tablet on a wall. Use your browser's own full screen for the rest — "
-  + "a page that drops out of full screen on a notification and needs somebody to touch it is worse than one that is simply big.";
+  = "Fills the screen with the courts, bigger, for a tablet on a wall: the menus and the explanations go until you switch"
+  + " it off. Use your browser's own full screen as well to hide its address bar.";
 
 /**
  * The countdown, as a screen reader hears it — once per state change, never per second.

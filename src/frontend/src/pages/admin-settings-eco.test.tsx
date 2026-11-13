@@ -33,7 +33,7 @@ const routes = (extra: Record<string, unknown> = {}): StubRoute[] => [
 /** The full set, as a club on a backend that has shipped everything would see it. */
 const ALL = {
   lcd_revert_seconds: 10,
-  rapid_scan_window_seconds: 10,
+  lcd_choice_seconds: 20,
   member_max_slots_per_day: 4,
   admin_bulk_max_items: 100,
   schedule_materialisation_days: 60,
@@ -102,13 +102,15 @@ describe("the club's money symbol", () => {
 });
 
 describe("the settings rows this release owes", () => {
-  it("gives the box's screen timeout and the rapid-scan window a row each", async () => {
-    stubFetch(routes(ALL));
+  it("gives the box's screen timeouts a row each, and the dead rapid-scan window none", async () => {
+    stubFetch(routes({ ...ALL, rapid_scan_window_seconds: 10 }));
     renderPage(<AdminSettingsPage />);
 
-    // GOAL item 1 and item 18. Both were firmware constants with no way to change them.
-    expect(await findControl(/Screen returns to the start after/)).toHaveValue(10);
-    expect(control(/Next person may scan within/)).toHaveValue(10);
+    // GOAL item 1: the result hold, and the court-choice hold Dean's stuck-screen report is about.
+    expect(await findControl(/Screen returns to the start after a result/)).toHaveValue(10);
+    expect(control(/Court choice waits/)).toHaveValue(20);
+    // FA-10: a key the API neither serves nor binds gets no row, even if something sends it.
+    expect(queryControl(/Next person may scan within/)).toBeNull();
     // And the block says WHEN a change takes effect, because a pull-only box is never told
     // anything except in the answer to a call it made itself. In the estate's own words —
     // "the next time it calls in" — and NOT "on its next heartbeat", which is a protocol

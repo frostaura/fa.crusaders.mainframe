@@ -222,6 +222,18 @@ describe("creating one", () => {
     )).toBeInTheDocument();
   });
 
+  /** BA-26: a pristine sentence opened on a refusal before anything was typed. */
+  it("says nothing is wrong with a sentence nobody has written yet, and says it once they start", async () => {
+    stubFetch([...sessionRoutes(), { path: SCHEDULES, body: { schedules: [] } }, ...editorPrerequisiteRoutes()]);
+    renderPage(<AdminSchedulesPage />);
+    await screen.findByText(LIST_EMPTY_TITLE);
+    await openEditor();
+    await screen.findByRole("heading", { name: "A new repeating booking" });
+    expect(screen.queryByText(/Give it a name of 2 to 128 characters/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("A name for this repeating booking, for admins"), { target: { value: "T" } });
+    expect(await screen.findByText(/Give it a name of 2 to 128 characters/)).toBeInTheDocument();
+  });
+
   it("counts in the club's OWN slice, not in fifteens", async () => {
     // Vary the fixture, not the code. On a half-hour club the same sentence holds half as
     // many slots, and the consequence line is the only thing that says so.

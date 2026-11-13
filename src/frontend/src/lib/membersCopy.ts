@@ -211,6 +211,8 @@ export function lastSeenTitle(iso: string | null | undefined): string {
 
 export const ROW_ACTIONS = {
   approve: "Approve",
+  /** BA-02: what the armed Approve says before it lets anybody in. */
+  approveConfirm: (name: string) => `Approve ${name}? They are emailed a welcome and can book courts and open doors at once.`,
   reject: "Reject",
   /** P13 §3.7: the desk takes money by selling a package off the member's own shelf. */
   sell: "Sell package",
@@ -246,6 +248,11 @@ export const OUTCOMES = {
     `${name} is approved — the reply got lost, so the club was asked, and their membership is active. Check with them that the welcome email arrived.`,
   approveUnknown: (name: string) =>
     `It isn't known yet whether ${name} was approved: the reply got lost and the club couldn't be asked. Look at their status in the list before pressing Approve again.`,
+  /** FA-11: a lost reply on reject / suspend / reactivate, read back from the member's status. */
+  transitionAfterLostReply: (name: string, did: string) =>
+    `${name} is ${did} — the reply got lost, so the club was asked, and that is their status now. Check with them that the email arrived.`,
+  transitionUnknown: (name: string, verb: string) =>
+    `It isn't known yet whether ${name} was ${verb}: the reply got lost and the club couldn't be asked. Look at their status in the list before trying again.`,
   rejected: "Application rejected.",
   rejectedUnnotified: (name: string) =>
     `${name}'s application is rejected, but the email couldn't be queued. Tell them directly — they'll be refused at sign-in until someone does.`,

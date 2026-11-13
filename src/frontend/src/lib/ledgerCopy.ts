@@ -28,6 +28,10 @@ export type LedgerRowWithActor = LedgerRow & {
 };
 
 export const LEDGER_COPY = {
+  /** FA-7 / BA-08: what the export says once the file is saved. */
+  exported: (rows: number, truncated: boolean) => (truncated
+    ? `${rows} movements downloaded — the file stops there; narrow the dates for the rest.`
+    : `${rows === 1 ? "1 movement" : `${rows} movements`} downloaded.`),
   actorHeader: "Done by",
   categoryHeader: "Category",
   detailsHeader: "Details",

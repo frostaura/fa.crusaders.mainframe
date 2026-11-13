@@ -964,8 +964,8 @@ export const adminEndpoints = {
    */
   memberTrace: (userId: string, range: AdminRange & { cursor?: string; limit?: number } = {}) =>
     api.get<TraceView>(`/api/v1/admin/members/${userId}/trace${qs({ ...range })}`),
-  memberTraceCsvUrl: (userId: string, range: AdminRange = {}) =>
-    `/api/v1/admin/members/${userId}/trace.csv${qs({ ...range })}`,
+  // The night's CSV is fetched with the token (memberDetailEndpoints.traceCsv); no bare URL is
+  // exported for it, because a URL here is how a bare <a href> gets written (FA-1).
 
   // --- The change record (item 14) -------------------------------------------------------
   adminChanges: (filters: AdminChangeFilters = {}) =>
