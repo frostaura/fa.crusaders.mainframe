@@ -4,12 +4,13 @@
 //
 // WHY THIS EXISTS
 // ---------------
-// An HD44780-compatible panel behind a PCF8574 I2C backpack at 0x27. The panel
-// fitted is a 20x4 and the court box drives it as 20x4 (LCD_COLS/LCD_ROWS in
-// court-box/platformio.ini [lcd]). Rows 0-1 hold the 16-column safe subset, so
-// a 1602 swapped in at the club shows a whole, smaller message rather than
-// garbage on a court-side box nobody can service quickly. A build with no LCD
-// flags falls back to 16x2 (below).
+// An HD44780-compatible panel behind a PCF8574 I2C backpack. Which panel is
+// fitted — a 1602 or a 2004 — and at which address is unrecorded (HW-2,
+// HW-11), so since Mega 3.0.0 neither is compiled in: the driver addresses the
+// 20x4 DDRAM grid either controller has, the runtime LAYOUT setting decides
+// how much of it is drawn (compact 16x2 on any doubt), and the address is
+// probed. Columns 16-19 and rows 2-3 written to a 1602 land in off-glass DDRAM
+// and are harmless.
 //
 // WHY print() TRUNCATES AND NEVER WRAPS
 // -------------------------------------
@@ -33,21 +34,11 @@
 
 namespace hal {
 
-// Geometry follows the target's LCD_COLS/LCD_ROWS build flags when they are
-// defined (see platformio.ini env:court_mega) and falls back to the 16x2
-// decision otherwise, so the host build and the strict-compile gate agree with
-// the firmware without either one hardcoding a second copy of the number.
-#ifdef LCD_COLS
-constexpr uint8_t kDisplayCols = static_cast<uint8_t>(LCD_COLS);
-#else
-constexpr uint8_t kDisplayCols = 16U;
-#endif
-
-#ifdef LCD_ROWS
-constexpr uint8_t kDisplayRows = static_cast<uint8_t>(LCD_ROWS);
-#else
-constexpr uint8_t kDisplayRows = 2U;
-#endif
+/// The grid the driver addresses: the expanded layout's 20x4. Not a build
+/// flag any more (FWM-17): a flag that described a panel nobody had looked at
+/// was the defect.
+constexpr uint8_t kDisplayCols = 20U;
+constexpr uint8_t kDisplayRows = 4U;
 
 /// The columns a 16-column panel would show.
 ///
@@ -85,6 +76,45 @@ public:
   /// string or clear first, otherwise the tail of the previous message stays
   /// on the glass — which is how "COURT A 45 MIN" becomes "COURT A 5 MIN".
   virtual void print(uint8_t row, uint8_t col, const char* text) = 0;
+
+  // --- v3: the self-healing glass (Mega 3.0.0) -------------------------------
+  //
+  // The Mega keeps a shadow of what it believes is on the glass and paints
+  // toward what it wants there, a few cells a pass. These four let a driver
+  // tell it how far to trust that shadow. The defaults are a perfect panel,
+  // which is what a console or a fake is.
+
+  /// False while the driver is holding off after a bus fault: whatever the
+  /// caller writes now is dropped, so the glass is UNKNOWN, never "landing".
+  virtual bool writable() { return true; }
+
+  /// True once after the glass may have changed behind the caller's back (a
+  /// bus timeout, a resync that cleared the controller): every cell is dirty.
+  virtual bool takeGlassLost() { return false; }
+
+  /// Re-run the controller's initialisation (HD44780: 0x3,0x3,0x3,0x2 and the
+  /// mode commands), without clearing — the caller repaints every cell. Fixes
+  /// a nibble desync that no bus timeout reports (DL-05).
+  virtual void reinit() {}
+
+  /// How many character cells may be written in one pass of the Mega's loop
+  /// within its paint budget (8 ms): the per-character bus time decides it.
+  virtual uint8_t cellsPerPass() const { return 255U; }
+
+  /// Bus errors since boot — I2C timeouts AND NACKs, so a backpack that
+  /// stopped answering is counted, not silent (`!DIAG` arg 0, HW-2).
+  virtual uint16_t timeouts() const { return 0U; }
+
+  /// Controller re-initialisations the driver ran on its own to recover from a
+  /// bus error (`!DIAG` arg 1 adds the periodic ones the caller asked for).
+  virtual uint16_t recoveries() const { return 0U; }
+
+  /// The I2C address that answered, 0 when none did (`!HW` arg 0).
+  virtual uint8_t address() const { return 0x27U; }
+
+  /// `!CFG,LCDA`: 0 probes 0x27, 0x3F, 0x20-0x26, 0x38-0x3E in that order at
+  /// the next (re-)initialisation; any other value drives that address only.
+  virtual void setAddress(uint8_t address) { static_cast<void>(address); }
 };
 
 } // namespace hal

@@ -6,16 +6,12 @@
 // must produce the same behaviour; `make arduino-check` is what enforces it.
 #pragma once
 
-#define FW_VERSION_MAJOR 2
+#define FW_VERSION_MINOR 0
 #define FW_VERSION_PATCH 0
 #define TARGET_COURT_MEGA 1
-#define LCD_COLS 20
-#define LCD_ROWS 4
-#define LCD_PHYSICAL_COLS 20
-#define LCD_PHYSICAL_ROWS 4
 #define LCD_HOLD_MAX_MS 120000UL
 #define RELAY_ACTIVE_LOW 0
 #define SCANNER_BAUD 9600
 #define BRIDGE_BAUD 9600
 #define RELAY_HARD_CAP_MS 5400000UL
-#define FW_VERSION_MINOR 1
+#define FW_VERSION_MAJOR 3

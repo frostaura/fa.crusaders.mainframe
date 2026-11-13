@@ -12,17 +12,11 @@ namespace arduino_hal {
 
 namespace {
 
-// THE COURT RELAY POLARITY, from the build (Mega 2.1.0). The club replaced the
-// SONGLE coil board with NORMALLY-OPEN SOLID-STATE relays, which close when
-// their input is driven HIGH; the 2.0.0 image drove LOW for "on" and so turned
-// the lights OFF whenever it meant ON. platformio.ini now builds court_mega
-// with RELAY_ACTIVE_LOW=0. A build that does not say is refused: guessing the
-// polarity of a building's lighting circuit is not a default.
-//
-// The mapping itself is hal::relayLevelFor(on, polarity) — shared, pure and
-// host-tested for BOTH polarities (test_hal_fakes, test_courtlogic). This file
-// only names which polarity THIS board has, from the build flag, and
-// ArduinoRelay is its only caller.
+// THE BOOT DEFAULT OF THE DRIVE LEVEL (Mega 3.0.0, HW-1). The relay module's
+// trigger level is unrecorded, so it is the runtime `!CFG,RPOL`
+// (`hw_relay_active_level`, per board); the build's RELAY_ACTIVE_LOW only
+// names the level the Mega boots with. A court_mega build that does not say is
+// refused: a default nobody chose is a guess.
 //
 // Here and not in Pins.h because the bridge compiles this library too (for its
 // clock, serial and store) and has no relays: only the Mega must name it.
@@ -32,33 +26,36 @@ namespace {
 #endif
 #define RELAY_ACTIVE_LOW 0
 #endif
-constexpr hal::RelayPolarity kCourtRelayPolarity = hal::relayPolarityFor(RELAY_ACTIVE_LOW != 0);
+constexpr hal::RelayPolarity kBootPolarity = hal::relayPolarityFor(RELAY_ACTIVE_LOW != 0);
 
-/// The single translation from "the lights are on" to a level on a pin. It goes
-/// through hal::relayLevelFor() with kCourtRelayPolarity (above, from the
-/// RELAY_ACTIVE_LOW build flag)
-/// and nowhere else: an inverted digitalWrite written out by hand here would put
-/// the building's lights on whenever the system believed they were off, and
-/// nothing in software would ever notice.
-void drive(uint8_t pin, bool on) {
-  digitalWrite(pin, hal::toDigital(hal::relayLevelFor(on, kCourtRelayPolarity)));
+/// The single translation from "the lights are on" to what the pin does, via
+/// hal::relayDriveFor() and nowhere else. Off is DDR = 0 THEN PORT = 0: the
+/// pin stops driving before its latch is cleared, so at worst a weak pull-up
+/// shows for an instruction — off for either module. On is PORT = level THEN
+/// DDR = 1, so the pin becomes an output already at the closing level.
+void drive(uint8_t pin, bool on, hal::RelayPolarity polarity) {
+  const hal::PinDrive d = hal::relayDriveFor(on, polarity);
+  if (d == hal::PinDrive::kInput) {
+    pinMode(pin, INPUT); // DDR = 0 (and the core clears PORT: no pull-up)
+    digitalWrite(pin, LOW);
+    return;
+  }
+  digitalWrite(pin, d == hal::PinDrive::kHigh ? HIGH : LOW);
+  pinMode(pin, OUTPUT);
 }
 
 } // namespace
 
-ArduinoRelay::ArduinoRelay() : state_() {
+ArduinoRelay::ArduinoRelay() : state_(), polarity_(kBootPolarity) {
   for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
     state_[i] = false;
   }
 }
 
 void ArduinoRelay::begin() {
+  // Every relay an input: what the AVR's reset left, and off for either module.
   for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
-    // Level first, direction second. See the header: the other order closes
-    // all four contacts for the width of one instruction at every reset.
-    drive(kRelayPins[i], false);
-    pinMode(kRelayPins[i], OUTPUT);
-    drive(kRelayPins[i], false);
+    drive(kRelayPins[i], false, polarity_);
     state_[i] = false;
   }
   pinMode(kStatusLedPin, OUTPUT);
@@ -72,13 +69,26 @@ void ArduinoRelay::set(uint8_t channel, bool on) {
     return;
   }
   state_[channel] = on;
-  drive(kRelayPins[channel], on);
+  drive(kRelayPins[channel], on, polarity_);
 
   bool any = false;
   for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
     any = any || state_[i];
   }
   digitalWrite(kStatusLedPin, any ? HIGH : LOW);
+}
+
+void ArduinoRelay::setPolarity(hal::RelayPolarity polarity) {
+  if (polarity == polarity_) {
+    return;
+  }
+  polarity_ = polarity;
+  for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
+    // Every closed relay re-driven at the new level; an open one stays an input.
+    if (state_[i]) {
+      drive(kRelayPins[i], true, polarity_);
+    }
+  }
 }
 
 bool ArduinoRelay::isOn(uint8_t channel) const {

@@ -125,6 +125,14 @@ enum class Fault : uint8_t {
   ApiBreakerOpen,
   HeartbeatRejected,
 
+  // v3 (bridge 3.0.0).
+  /// A tagged frame the Mega never acknowledged (three retries, DL-06).
+  MegaUnacked,
+  /// Three `!WANT`s and a relay still not lit as the snapshot owes (§4).
+  RelightFailed,
+  /// A screen dropped whole from the full Mega queue.
+  ScreenDropped,
+
   /// More than kMaxFaultCodes distinct codes inside one window.
   FaultOverflow,
 };

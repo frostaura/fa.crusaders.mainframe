@@ -218,8 +218,9 @@ Attempt ScanFlow::onScan(const LinkState& link) const {
 ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body, size_t len,
                                               const int16_t courtNumbers[devlink::kMaxCourts],
                                               uint8_t courtCount) const {
-  if (status != 200U || body == nullptr) {
-    // Includes 0, 401, 429 and every 5xx. Only a 200 carries a decision.
+  if (status < 200U || status > 299U || body == nullptr) {
+    // Includes 0, 401, 429 and every 5xx. Every 2xx carries a decision
+    // (device-api.md §11.2, FC-4: 2.3.0 read a 201 as no decision at all).
     return fallback();
   }
 
@@ -271,7 +272,17 @@ ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body,
     return result;
   }
 
-  return granted(grantedSeconds, relay);
+  ActivationResult result = granted(grantedSeconds, relay);
+  // v3 (device-api.md §9, FSF-05): the UNCAPPED time to the end of the chained
+  // run, which arms the !EXT relighting past the 90-minute relay cap. Absent
+  // (a pre-v3 server) or unreadable falls back to granted_seconds.
+  uint32_t playRemaining = 0U;
+  result.playRemainingSeconds =
+      devapi::json::topLevelUnsignedField(body, len, "play_remaining_seconds", playRemaining) &&
+              playRemaining >= grantedSeconds
+          ? playRemaining
+          : grantedSeconds;
+  return result;
 }
 
 } // namespace bridgelogic

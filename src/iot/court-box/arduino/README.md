@@ -103,7 +103,7 @@ If nothing ever appears, the two halves are not talking: check DIP 1 and 2.
 |---|---|---|
 | PlatformIO environment | `[env:court_mega]` | `[env:court_bridge]` |
 | `lib/` modules | `arduino_hal`, `courtlogic`, `fwversion`, `hal`, `protocol`, `timebase` | `arduino_hal`, `bridgelogic`, `court`, `courtlogic`, `devapi`, `devcrypto`, `devlink`, `eventq`, `fwversion`, `hal`, `memcode`, `protocol`, `roster`, `timebase` |
-| Build flags in `src/build_config.h` | 13 | 14 |
+| Build flags in `src/build_config.h` | 9 | 10 |
 
 Vendored third-party libraries — copied out of `src/iot/court-box/.pio/libdeps/<env>/`,
 which is what PlatformIO resolved from `lib_deps`, so the Library Manager is
@@ -112,10 +112,9 @@ is copied whole apart from its `examples/` (the IDE would try to compile them):
 
 | Library | Version | Where | Licence file |
 |---|---|---|---|
-| `LiquidCrystal_I2C` | 1.1.4 | `court_mega/src/LiquidCrystal_I2C/` | none shipped upstream |
-| `ArduinoJson` | 7.2.1 | `court_bridge/src/ArduinoJson/` | `LICENSE.txt` |
+| _(none)_ | | | |
+| _(none)_ | | | |
 
-`ArduinoJson` is vendored because `[env:court_bridge]` declares it in `lib_deps`, but **nothing in the firmware includes it** — it costs nothing to compile (header-only, and no translation unit pulls it in) and it is here so the two builds resolve the same dependency set. Deleting the `lib_deps` line is what would remove it from both.
 
 `src/build_config.h` carries every `-D` its PlatformIO environment sets and is
 included first in every file of the sketch, because the IDE cannot pass a build
