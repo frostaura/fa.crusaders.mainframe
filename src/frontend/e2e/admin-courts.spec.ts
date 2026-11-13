@@ -37,7 +37,7 @@ test("lists the courts and renames one in a sheet that has no price", async ({ p
     respond: (request) => { sent.push(request.body); return { saved: true }; },
   }]);
 
-  await expect(page.getByText("2 in use · 3 courts")).toBeVisible();
+  await expect(page.getByText("2 bookable · 3 courts")).toBeVisible();
   await page.getByRole("button", { name: "Edit Glass court" }).click();
   const sheet = page.getByRole("dialog", { name: "Edit Glass court" });
   await expect(sheet).toBeVisible();

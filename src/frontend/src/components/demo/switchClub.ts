@@ -93,10 +93,23 @@ async function untilAnswered<T>(ask: () => Promise<T>): Promise<T> {
  * when the club refuses. `from` names the member view when that is where the session is: the
  * persona is not an admin, so its way out is the member route, not the admin switch.
  */
+/**
+ * BA-12: where a switch lands. An admin switching between live and demo from a console page
+ * stays on that page — the switch threw them onto My Code, both ways, and they had to find their
+ * place again. A page naming one record (an id in its path) goes to the console's start instead,
+ * because that record is the other club's; the member view, and a switch from outside the
+ * console, land on My Code as before.
+ */
+export function landingAfterSwitch(to: ClubMode, pathname: string, search: string): string {
+  if (to === "demo_member" || !/^\/admin(\/|$)/.test(pathname)) return AFTER_SWITCH_PATH;
+  return ID_SEGMENT.test(pathname) ? "/admin" : pathname + search;
+}
+
 export async function switchClub(to: ClubMode, from?: ClubMode): Promise<void> {
   const leaving = from === "demo_member" && to !== "demo_member";
   const answer = await untilAnswered(() => (leaving ? clubModeApi.leaveMemberView(to as "demo" | "live") : clubModeApi.switchTo(to)));
-  await startAfresh(answer.access_token, answer.user_id, answer.mode, AFTER_SWITCH_PATH);
+  const landing = landingAfterSwitch(answer.mode, window.location.pathname, window.location.search);
+  await startAfresh(answer.access_token, answer.user_id, answer.mode, landing);
 }
 
 /**

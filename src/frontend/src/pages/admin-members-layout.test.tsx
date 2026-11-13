@@ -179,6 +179,14 @@ describe("the members table's own controls", () => {
    * a finger. P5 uses the design system's dense admin size — 36px to the eye, 44px to the finger
    * through the button's own extended hit area — so a pending row's three controls fit its line.
    */
+  it("gives the date column room for its tracked capitals and its caret (BA-16)", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+    const head = (await screen.findByRole("button", { name: /^Joined/i })).closest("th")!;
+    // 6rem cut "JOINED" to "JOIN…" at 1440; 7rem holds the word, the tracking and the caret.
+    expect(head.className.split(" ")).toContain("w-28");
+  });
+
   it("gives Approve and Reject a 44px target", async () => {
     stubFetch(routes());
     renderPage(<AdminMembersPage />);
