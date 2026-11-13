@@ -115,6 +115,47 @@ public static class DeviceView
             capabilities = d.Capabilities,
             capabilities_reported_at = d.CapabilitiesReportedAt,
             member_codes = d.SpeaksMemberCodes,
+
+            // ---- Device contract v3 (device-api.md §2, §5–§8, §10): what the board last
+            //      reported, and this board's own overrides. Always present (null on a 2.x
+            //      board), for the one-shape argument above. ----
+            fw_state = d.FwState,
+            fw_failed = d.FwFailed,
+            fw_error = d.FwError,
+            fw_state_changed_at = d.FwStateChangedAt,
+            fw_failed_versions = d.FwFailedVersions,
+            net_ver = d.NetVer,
+            net_src = d.NetSrc,
+            net_push_requested = d.NetPushRequested,
+            // The layout the Mega ACKNOWLEDGED and since when — "showing expanded since 18:05" —
+            // beside this board's own overrides (null = the club's).
+            lcd_layout_acknowledged = d.LcdLayoutAcknowledged,
+            lcd_layout_acknowledged_at = d.LcdLayoutAcknowledgedAt,
+            lcd_layout = d.LcdLayoutOverride,
+            lcd_marquee_enabled = d.LcdMarqueeOverride,
+            restore_report = d.RestoreReport,
+            restore_reported_at = d.RestoreReportedAt,
+            key_id = d.LastKeyId is { } key ? Services.DeviceProvision.KeyId(key) : null,
+            key_seen_at = d.LastKeyAt,
+
+            // §12: this board's own hardware facts (null = the club's tenant setting).
+            hw_relay_active_level = d.HwRelayActiveLevel,
+            hw_lcd_i2c_address = d.HwLcdI2cAddress,
+            hw_scanner_baud = d.HwScannerBaud,
+            hw_scanner_line_end = d.HwScannerLineEnd,
+            hw_scanner_gap_ms = d.HwScannerGapMs,
+
+            // §13: what the board last reported about itself — the Mega's own facts and counters,
+            // the board's health, and the keys of the last answer it could not read.
+            mega = DeviceTelemetry.View(d.MegaJson),
+            diag = DeviceTelemetry.View(d.DiagJson),
+            drift = d.Drift,
+            telemetry_at = d.TelemetryAt,
+
+            // §11.3, member-code §5.4: what the server's own shedding cost this board.
+            code_keys_sent = d.CodeKeysSent,
+            code_keys_trimmed = d.CodeKeysTrimmed,
+            code_keys_at = d.CodeKeysAt,
         };
 
     /// <summary>

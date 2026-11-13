@@ -33,8 +33,9 @@ public static class AdminDeviceEndpoints
 
         // Declared before the "/{id:guid}" routes for readability only — the guid
         // constraint already stops "api-key" matching them.
-        g.MapGet("/api-key", ApiKeyAsync);
-        g.MapPost("/api-key/regenerate", RegenerateApiKeyAsync);
+        // Device contract v3 (device-api.md §6–§8): the key ring (rotate / retire / restore, in
+        // place of v2's Regenerate), the club's device network and signed firmware.
+        g.MapAdminDeviceV3Endpoints();
 
         g.MapGet("/", ListAsync);
         g.MapGet("/member-codes", MemberCodeRolloutAsync);
@@ -63,8 +64,16 @@ public static class AdminDeviceEndpoints
 
         // Only ACKNOWLEDGED boards vote on the cut-over (MemberCodeRollout.EveryEnabledBoardSpeaksAsync);
         // the unacknowledged ones are listed apart so the page can say why they do not block.
+        var now = DateTimeOffset.UtcNow;
         var boards = enabled.Where(MemberCodeHeartbeat.Acknowledged).ToList();
-        var blocking = boards.Where(d => !d.SpeaksMemberCodes).Select(Row).ToList();
+        // MCV1-03: an acknowledged board blocks when it does not speak codes:m1, or — a court box —
+        // when it has not been sent a keyed heartbeat in the last hour; an unacknowledged court box
+        // heard this week blocks too, without voting. Each row says why.
+        var blocking = boards
+            .Where(d => !d.SpeaksMemberCodes || (d.Kind == DeviceKind.CourtBox && !MemberCodeRollout.HasKeyedBeat(d, now)))
+            .Select(d => Row(d) with { Blocks = d.SpeaksMemberCodes ? "no_keyed_heartbeat" : "no_member_codes" })
+            .Concat(enabled.Where(d => MemberCodeRollout.BlocksUnacknowledged(d, now)).Select(d => Row(d) with { Blocks = "unacknowledged" }))
+            .ToList();
         var unacknowledged = enabled.Where(d => !MemberCodeHeartbeat.Acknowledged(d)).Select(Row).ToList();
 
         return Results.Ok(new
@@ -75,7 +84,7 @@ public static class AdminDeviceEndpoints
             cutoff_days = MemberCodeSettings.CutoffDays(s),
             cutoff_due_at = s.MemberCodeCutoverAt?.AddDays(MemberCodeSettings.CutoffDays(s)),
             enabled_boards = boards.Count,
-            ready_boards = boards.Count - blocking.Count,
+            ready_boards = boards.Count - blocking.Count(b => b.Blocks != "unacknowledged"),
             blocking,
 
             // An administrator's rollback holds the automatic rollout until they move forward
@@ -86,16 +95,9 @@ public static class AdminDeviceEndpoints
             unacknowledged,
         });
 
-        static object Row(Device d) => new
-        {
-            id = d.Id,
-            device_code = d.DeviceCode,
-            name = DeviceView.Named(d.Name),
-            kind = d.Kind.ToString(),
-            running_version = d.RunningVersion,
-            capabilities = d.Capabilities,
-            last_seen_at = d.LastSeenAt,
-        };
+        static RolloutBoard Row(Device d) => new(
+            d.Id, d.DeviceCode, DeviceView.Named(d.Name), d.Kind.ToString(), d.RunningVersion, d.Capabilities, d.LastSeenAt,
+            d.CodeKeysSent, d.CodeKeysTrimmed, d.CodeKeysAt, MemberCodeHeartbeat.Acknowledged(d));
     }
 
     /// <summary>
@@ -119,45 +121,6 @@ public static class AdminDeviceEndpoints
         return Results.Ok(rows.Select(d => DeviceView.Of(d, heartbeat, PersonNames.Of(d.ShutByUserId, names))).ToList());
     }
 
-    /// <summary>
-    /// <c>GET /api/v1/admin/devices/api-key</c> — the club's device key, minted on the
-    /// first read so the page is never empty.
-    /// </summary>
-    private static async Task<IResult> ApiKeyAsync(
-        DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
-    {
-        // Demo mode: a demo club never holds a device key, so no box can ever talk to it.
-        if (InDemo(ctx)) return Services.Demo.DemoTenants.Refusal(DemoKeyRefusal);
-        return Results.Ok(ApiKeyView(await devices.ApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
-    }
-
-    private const string DemoKeyRefusal = "Boxes can't connect to the demo club.";
-
-    private static bool InDemo(HttpContext ctx) =>
-        Services.Demo.DemoTenants.IsDemo(ctx.RequestServices.GetRequiredService<Multitenancy.ITenantContext>().TenantId);
-
-    /// <summary>
-    /// <c>POST /api/v1/admin/devices/api-key/regenerate</c> — a new key, effective
-    /// immediately. Every box is offline until it is reflashed with it.
-    /// </summary>
-    private static async Task<IResult> RegenerateApiKeyAsync(
-        DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
-    {
-        if (InDemo(ctx)) return Services.Demo.DemoTenants.Refusal(DemoKeyRefusal);
-        return Results.Ok(ApiKeyView(await devices.RegenerateApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
-    }
-
-    // Block body, not an expression body: lizard's C# parser mis-scopes an
-    // expression-bodied member containing braces into a *global* pseudo-function the
-    // length of the file — see memory/gotchas.md.
-    private static object ApiKeyView(Domain.Tenant tenant)
-    {
-        return new
-        {
-            api_key = tenant.DeviceApiKey,
-            regenerated_at = tenant.DeviceApiKeyRegeneratedAt,
-        };
-    }
 
     /// <summary>
     /// The admin PATCH. <c>enabled</c> is the one field here that moves money after the fact, and
@@ -205,6 +168,16 @@ public static class AdminDeviceEndpoints
 
         if (ParseButtonMapPatch(req.ButtonMap, out var buttons) is { } badMap) return badMap;
 
+        // Device contract v3 (device-api.md §5, §10, §12): this board's own layout, marquee and
+        // hardware facts, three-valued like button_map, and the explicit network push. A door has
+        // no glass, relays or scanner settings of this kind, so it is refused them.
+        if (device.Kind == DeviceKind.Gate && DeviceBoardOverrides.Mentions(req.Extra))
+        {
+            return Results.BadRequest(new { error = "court_box_fields_on_gate" });
+        }
+        var (board, badBoard) = DeviceBoardOverrides.Parse(req.Extra);
+        if (badBoard is not null) return Results.BadRequest(badBoard);
+
         // The effective map after this PATCH — the override it sets, else the one the row
         // keeps, else the club's — must be able to address the effective court list, and a
         // new list must be well-formed and name real courts. Including the trim: shrinking
@@ -233,6 +206,7 @@ public static class AdminDeviceEndpoints
             {
                 LocationNote = req.EffectiveLocationNote?.Trim(),
                 PowerLossBehaviour = powerLoss,
+                Board = board,
             },
             ctx.User.Id() ?? Guid.Empty, ct);
 
@@ -505,6 +479,29 @@ public static class AdminDeviceEndpoints
 /// There is no <c>kind</c>. See <c>KindFieldsRefusal</c>.
 /// </para>
 /// </summary>
+/// <summary>
+/// One board on the member-code rollout view (FA-3, MCV1-03, MCV1-07): who it is, what it speaks,
+/// the keys it was last sent and how many were trimmed, and — on the blocking list — why it blocks.
+/// </summary>
+public sealed record RolloutBoard(
+    [property: JsonPropertyName("id")] Guid Id,
+    [property: JsonPropertyName("device_code")] string DeviceCode,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("running_version")] string? RunningVersion,
+    [property: JsonPropertyName("capabilities")] IReadOnlyList<string> Capabilities,
+    [property: JsonPropertyName("last_seen_at")] DateTimeOffset? LastSeenAt,
+    [property: JsonPropertyName("keys_sent")] int? KeysSent,
+    [property: JsonPropertyName("keys_trimmed")] int? KeysTrimmed,
+    [property: JsonPropertyName("keys_sent_at")] DateTimeOffset? KeysSentAt,
+    [property: JsonPropertyName("acknowledged")] bool Acknowledged)
+{
+    /// <summary>On the blocking list only: <c>no_member_codes</c>, <c>no_keyed_heartbeat</c> or <c>unacknowledged</c>.</summary>
+    [JsonPropertyName("blocks")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Blocks { get; init; }
+}
+
 public sealed record UpdateDeviceRequest(
     string? Name,
     bool? Enabled,
@@ -546,6 +543,15 @@ public sealed record UpdateDeviceRequest(
     /// </summary>
     [property: JsonPropertyName("expected_enabled")] bool? ExpectedEnabled = null)
 {
+    /// <summary>
+    /// Every key this record has no member for — where the device contract v3 per-board settings
+    /// (<c>lcd_layout</c>, <c>lcd_marquee_enabled</c>, the five <c>hw_*</c> keys) and
+    /// <c>push_network</c> are read from by <see cref="DeviceBoardOverrides"/>. As bare elements,
+    /// because each is THREE-valued: absent, JSON null (the club's) and a value (the board's).
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; init; }
+
     /// <summary>
     /// The door's name as the caller asked for it, under either spelling — or null when
     /// neither arrived, which is the two-valued "leave it alone".

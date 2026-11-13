@@ -41,6 +41,9 @@ public static class DeviceEndpoints
         // DeviceEventEndpoints' group with the court box's money paths.
         g.MapPost("/gate", DeviceGateEndpoint.HandleAsync);
 
+        // Device contract v3 §7: the signed image a board's OTA offer points at.
+        g.MapDeviceFirmwareDownload();
+
         return app;
     }
 
@@ -58,7 +61,7 @@ public static class DeviceEndpoints
         ILoggerFactory logs,
         CancellationToken ct)
     {
-        var (db, tenant, settings, registry, codes, _, _, _, faults, _, _, _, clock) = services;
+        var (db, tenant, settings, registry, codes, _, _, _, faults, _, _, _, clock, _, _, _) = services;
 
         // Validated BEFORE the MAC is resolved, so a firmware that believes in a device kind
         // this server does not have is told so whether or not its row already exists. The
@@ -116,7 +119,17 @@ public static class DeviceEndpoints
         device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
         NoteVersions(faults, device, req);
 
+        // Device contract v3 (device-api.md §2, §6, §13): what the board reports about its
+        // firmware, network, glass and health, and which club key it authenticated with — the
+        // last of which may retire a rotation's old key once the grace window has passed.
+        var keyId = ctx.User.DeviceKeyId();
+        DeviceTelemetry.NoteReport(device, req, keyId, now);
+        var notices = DeviceTelemetry.NoteTelemetry(device, req, now);
+        var club = await db.Tenants.FirstAsync(t => t.Id == tenant.TenantId, ct);
+        await services.Keys.NoteAsync(device, club, keyId, s, ct);
+
         await db.SaveChangesAsync(ct);
+        RaiseNotices(services, device, notices, now);
 
         // The club's cut-over (§8), judged with this board's capabilities already on its row.
         // Re-read when it moved, so this very answer is the first one in the new phase.
@@ -160,10 +173,54 @@ public static class DeviceEndpoints
             // Checked here and not inside BuildAsync, which deliberately takes no Device: two
             // NAMED gates on one club are still handed the identical list, and that sentence
             // is pinned. This is a gate on whether the board is asked at all.
-            return Results.Ok(await GateBodyAsync(services, device, s, now, ct));
+            return Results.Ok(await GateBodyAsync(services, device, new Beat(club, keyId, s, now), ct));
         }
 
-        return Results.Ok(await CourtBoxBodyAsync(services, device, req, s, now, ct));
+        return Results.Ok(await CourtBoxBodyAsync(services, device, req, new Beat(club, keyId, s, now), ct));
+    }
+
+    /// <summary>One heartbeat's fixed inputs: the club row, the key it authenticated with, the settings and the instant.</summary>
+    private sealed record Beat(Tenant Club, int? KeyId, TenantSettingsView Settings, DateTimeOffset Now);
+
+    /// <summary>The §13 notices this beat's telemetry raised, off the request thread like every device notice.</summary>
+    private static void RaiseNotices(HeartbeatServices services, Device device, List<(string Code, string Detail)> notices, DateTimeOffset now)
+    {
+        foreach (var (code, detail) in notices)
+        {
+            DeviceErrorService.InBackground(
+                services.Scopes, services.Logs.CreateLogger(typeof(DeviceEndpoints)),
+                device.TenantId, services.Tenant.TenantSlug,
+                new DeviceErrorReport(code, DeviceErrorSource.Server, DeviceId: device.Id,
+                    ClaimedDeviceCode: device.DeviceCode, Detail: detail, At: now));
+        }
+    }
+
+    /// <summary>
+    /// The lifeline objects this board is owed on this beat (§6–§8), each keyed on its own cap.
+    /// Computed BEFORE the beat's save: delivering the club's network may clear a push request.
+    /// </summary>
+    private static async Task<DeviceLifeline> LifelineAsync(HeartbeatServices services, Device device, Beat beat, CancellationToken ct)
+    {
+        var ota = await services.Firmware.OfferForAsync(device, ct);
+        var next = DeviceKeyRing.KeyNextFor(device, beat.Club, beat.KeyId);
+        var net = await services.Network.NetForAsync(device, ct);
+        return new DeviceLifeline(ota, next, net);
+    }
+
+    /// <summary>The trimmed-key count onto the row, and the first trim raised as a notice (§11.3, member-code §5.4).</summary>
+    private static void NoteKeysSent(HeartbeatServices services, Device device, Dictionary<string, object?> body, MemberCodeSync? sync, DateTimeOffset now)
+    {
+        if (sync is null) return;
+        var sent = body.TryGetValue("code_keys", out var k) && k is IReadOnlyList<string> keys ? keys.Count : 0;
+        device.CodeKeysSent = sent;
+        device.CodeKeysTrimmed = Math.Max(0, sync.Wanted - sent);
+        device.CodeKeysAt = now;
+        if (device.CodeKeysTrimmed > 0 && device.CodeKeysTrimNoticedAt is null)
+        {
+            device.CodeKeysTrimNoticedAt = now;
+            RaiseNotices(services, device, [(DeviceErrorCodes.CodeKeysTrimmed,
+                $"{device.CodeKeysTrimmed} of {sync.Wanted} member-code keys left out of the heartbeat")], now);
+        }
     }
 
     /// <summary>The widest version string a board's row keeps (<c>running_version</c>, <c>mega_version</c>: <c>varchar(32)</c>).</summary>
@@ -201,9 +258,13 @@ public static class DeviceEndpoints
     /// gate branch is in the comment at its call.
     /// </summary>
     private static async Task<object> GateBodyAsync(
-        HeartbeatServices services, Device device, TenantSettingsView s, DateTimeOffset now, CancellationToken ct)
+        HeartbeatServices services, Device device, Beat beat, CancellationToken ct)
     {
-        if (device.SpeaksMemberCodes) return await GateBodyWithCodesAsync(services, device, s, now, ct);
+        var (_, _, s, now) = beat;
+        var lifeline = await LifelineAsync(services, device, beat, ct);
+        var v3 = GateV3Settings.For(device, s);
+        await services.Db.SaveChangesAsync(ct);
+        if (device.SpeaksMemberCodes) return await GateBodyWithCodesAsync(services, device, beat, new GateV3Parts(v3, lifeline), ct);
 
         // A door on legacy firmware: the legacy roster while legacy codes are honoured at
         // all, minted only while the club has not cut over, and nothing once they are not.
@@ -211,25 +272,35 @@ public static class DeviceEndpoints
             ? []
             : await DeviceGateRosterBuilder.BuildAsync(services.Db, services.Codes, s, now, MemberCodeSettings.MintsBookingCodes(s), ct);
 
-        return GateHeartbeatView.Of(
+        var cadence = HeartbeatCadence.Effective(s.HeartbeatSeconds);
+        var parts = new GateV3Parts(v3, lifeline);
+        var body = GateHeartbeatView.Of(
             // HeartbeatCadence.Effective, not the raw setting. A stored 3600 used to be
             // sent verbatim to a board that clamps to 300, while the console showed 300 —
             // the exact failure HeartbeatCadence exists to prevent, reproduced on the one
             // path that bypassed it.
-            device, services.Tenant.TenantSlug, HeartbeatCadence.Effective(s.HeartbeatSeconds),
-            GateAccess.UnlockSecondsFor(s), gateRoster, now);
+            device, services.Tenant.TenantSlug, cadence,
+            GateAccess.UnlockSecondsFor(s), gateRoster, now, parts);
+        var max = DeviceHeartbeatBudget.For(device);
+        if (!lifeline.Any || DeviceHeartbeatBudget.SizeOf(body) <= max || !DeviceHeartbeatBudget.LifelineTurn(now, cadence)) return body;
+        return DeviceHeartbeatBudget.LifelineOnly(now, services.Tenant.TenantSlug, device, cadence, lifeline);
     }
 
-    /// <summary>A court box's answer: its roster, the member-code sync, and the restore. Lifted out of <see cref="HeartbeatAsync"/> for the complexity gate.</summary>
+    /// <summary>A court box's answer: its roster, the member-code sync, the restore or snapshot, and the lifeline. Lifted out of <see cref="HeartbeatAsync"/> for the complexity gate.</summary>
     private static async Task<Dictionary<string, object?>> CourtBoxBodyAsync(
-        HeartbeatServices services, Device device, HeartbeatRequest req, TenantSettingsView s, DateTimeOffset now, CancellationToken ct)
+        HeartbeatServices services, Device device, HeartbeatRequest req, Beat beat, CancellationToken ct)
     {
+        var (_, _, s, now) = beat;
         var db = services.Db;
         // The bookings this box may admit on its own, as TOKEN|relay|opens_in|closes_in.
         // Always present, even when empty: the firmware replaces its cache wholesale on
         // every push, and a cancelled booking is expressed by its absence from the next
         // one — an omitted key would leave a stale roster live. See DeviceRosterBuilder.
-        var v1 = device.SpeaksMemberCodes && MemberCodeSettings.RostersCarryPlayers(s);
+        //
+        // MCV1-04 (member-code §5.2–§5.3): an ACKNOWLEDGED codes:m1 box gets v1 elements and keys
+        // in every phase, not only after the cut-over — the phone shows nothing but v1 codes.
+        var acknowledged = MemberCodeHeartbeat.Acknowledged(device);
+        var v1 = device.SpeaksMemberCodes && (acknowledged || MemberCodeSettings.RostersCarryPlayers(s));
         var entries = v1
             ? await DeviceRosterBuilder.BuildV1Async(new RosterSources(db, services.Players, services.MemberCodes), device, s, now, ct)
             : [];
@@ -239,28 +310,43 @@ public static class DeviceEndpoints
                 ? await DeviceRosterBuilder.BuildAsync(new LegacyRosterSources(db, services.Codes), device, s, now, MemberCodeSettings.MintsBookingCodes(s), ct)
                 : [];
         var sync = device.SpeaksMemberCodes
-            ? MemberCodeHeartbeat.Sync(entries, v1 && MemberCodeHeartbeat.Acknowledged(device),
-                MemberCodeWire.CourtBoxKeyCap, services.MemberCodes, MemberCodeMath.ZoneOf(s.Timezone), now)
+            ? MemberCodeHeartbeat.Sync(entries, v1 && acknowledged,
+                DeviceHeartbeatBudget.CourtBoxKeyCap(device), services.MemberCodes, MemberCodeMath.ZoneOf(s.Timezone), now)
             : null;
 
-        // GOAL item 17. Settled BEFORE the response is composed, because the previous beat's
-        // outcome and this beat's answer are one decision: a box that just told us it restored
-        // nothing needs the same answer again, and one that told us it restored two courts
-        // needs those courts on the server's books before the control board is asked about them.
-        var relays = await RestoreAsync(services, device, req, s, now, ct);
+        // GOAL item 17, and since v3 the snapshot (device-api.md §3–§4). Settled BEFORE the response
+        // is composed, because the previous beat's outcome and this beat's answer are one decision.
+        // A hb:3 box gets the complete snapshot every beat (acknowledged only, BR-13) and no `relays`;
+        // a 2.x box keeps its one-shot restore, now chain-aware and cause-aware.
+        IReadOnlyList<string>? relays = null;
+        IReadOnlyList<string>? courts = null;
+        if (DeviceCaps.Has(device, DeviceCaps.Hb3))
+        {
+            var snapshot = await DeviceSnapshotRestore.SettleAsync(services, device, req, s, now, ct);
+            if (acknowledged) courts = [.. snapshot.Select(c => c.ToWire())];
+        }
+        else
+        {
+            relays = await RestoreAsync(services, device, req, s, now, ct);
+        }
+
+        var lifeline = await LifelineAsync(services, device, beat, ct);
+        var cadence = HeartbeatCadence.Effective(s.HeartbeatSeconds);
+        var body = DeviceHeartbeatBudget.Fit(
+            codes => CourtBoxView(device, services.Tenant.TenantSlug, s, new CourtBoxLists(roster, relays, codes) { Courts = courts, Lifeline = lifeline }, now),
+            sync, DeviceHeartbeatBudget.For(device), lifeline,
+            () => DeviceHeartbeatBudget.LifelineOnly(ClubWallTime(s, now), services.Tenant.TenantSlug, device, cadence, lifeline),
+            DeviceHeartbeatBudget.LifelineTurn(now, cadence));
+        NoteKeysSent(services, device, body, sync, now);
 
         await db.SaveChangesAsync(ct);
 
         // AFTER the commit, for the reason the activation path publishes after its own: a
         // restored court that appears on the board and then vanishes because the save failed
         // sends somebody to a dark court believing the software said otherwise.
-        await PublishRestoredAsync(services, relays, ct);
-
-        return MemberCodeHeartbeat.Fit(
-            codes => CourtBoxView(device, services.Tenant.TenantSlug, s, new CourtBoxLists(roster, relays, codes), now),
-            sync, MemberCodeWire.CourtBoxMaxBytes);
+        await PublishRestoredAsync(services, relays ?? req.Relight?.OfType<string>().ToList(), ct);
+        return body;
     }
-
 
     /// <summary>
     /// A <c>codes:m1</c> door's answer (member-code §5.2–§5.3): v1 elements and keys once the club
@@ -268,10 +354,14 @@ public static class DeviceEndpoints
     /// gets no roster and no keys either way.
     /// </summary>
     private static async Task<Dictionary<string, object?>> GateBodyWithCodesAsync(
-        HeartbeatServices services, Device device, TenantSettingsView s, DateTimeOffset now, CancellationToken ct)
+        HeartbeatServices services, Device device, Beat beat, GateV3Parts parts, CancellationToken ct)
     {
+        var (_, _, s, now) = beat;
         var named = !string.IsNullOrWhiteSpace(device.GateKey);
-        var v1 = MemberCodeSettings.RostersCarryPlayers(s);
+        // MCV1-04 (member-code §5.2–§5.3): a named codes:m1 door gets v1 elements and keys in EVERY
+        // phase — the phone has shown only v1 codes since 42d3990d, so before this no member held a
+        // code a door could check offline until the cut-over.
+        var v1 = named || MemberCodeSettings.RostersCarryPlayers(s);
         var entries = named && v1
             ? await DeviceGateRosterBuilder.BuildV1Async(services.Db, services.Players, services.MemberCodes, s, now, ct)
             : [];
@@ -284,11 +374,17 @@ public static class DeviceEndpoints
             entries, v1 && MemberCodeHeartbeat.Acknowledged(device), MemberCodeWire.GateKeyCap,
             services.MemberCodes, MemberCodeMath.ZoneOf(s.Timezone), now);
 
-        return MemberCodeHeartbeat.Fit(
+        var cadence = HeartbeatCadence.Effective(s.HeartbeatSeconds);
+        var body = DeviceHeartbeatBudget.Fit(
             codes => GateHeartbeatView.WithCodes(
                 device, services.Tenant.TenantSlug,
-                new GateTiming(HeartbeatCadence.Effective(s.HeartbeatSeconds), GateAccess.UnlockSecondsFor(s)), roster, now, codes),
-            sync, MemberCodeWire.GateMaxBytes);
+                new GateTiming(cadence, GateAccess.UnlockSecondsFor(s)), roster, now, codes, parts),
+            sync, DeviceHeartbeatBudget.For(device), parts.Lifeline,
+            () => DeviceHeartbeatBudget.LifelineOnly(now, services.Tenant.TenantSlug, device, cadence, parts.Lifeline),
+            DeviceHeartbeatBudget.LifelineTurn(now, cadence));
+        NoteKeysSent(services, device, body, sync, now);
+        await services.Db.SaveChangesAsync(ct);
+        return body;
     }
 
     /// <summary>
@@ -373,10 +469,18 @@ public static class DeviceEndpoints
         // roster, which is the order both corpora pin (the firmware scans by key and does not
         // care; the byte-for-byte vectors do).
         if (relays is not null) body["relays"] = relays;
+
+        // Device contract v3 (device-api.md §3): the complete snapshot, before the roster — only
+        // for an acknowledged hb:3 box (the caller leaves it null otherwise, so the key is absent:
+        // "no opinion", never "everything dark").
+        if (lists.Courts is not null) body["courts"] = lists.Courts;
         body["roster"] = roster;
 
         // The member-code sync, after the roster (§5.2), for a board that said `codes:m1`.
         codes?.WriteTo(body);
+
+        // The lifeline (§6–§8, §11.1), last: transient, each present only while owed.
+        lists.Lifeline?.WriteTo(body);
 
         return body;
     }
@@ -411,7 +515,30 @@ public static class DeviceEndpoints
     /// which is what keeps an older API from blanking what a newer one configured.
     /// </para>
     /// </summary>
-    private static object ConfigView(Device device, TenantSettingsView s)
+    internal static object ConfigView(Device device, TenantSettingsView s)
+    {
+        // A hb:3 box (device-api.md §5): the twelve 2.x keys, then the thirteen display and five
+        // hardware keys, then button_map. A 2.x box is answered byte for byte as before (§1).
+        if (DeviceCaps.Has(device, DeviceCaps.Hb3)) return ConfigViewV3(device, s);
+        return ConfigView2x(device, s);
+    }
+
+    /// <summary>The v3 <c>config</c>, in the wire's order (§5): the 2.x keys, then <see cref="DeviceSettings.HeartbeatConfig"/>, then <c>button_map</c>.</summary>
+    private static Dictionary<string, object?> ConfigViewV3(Device device, TenantSettingsView s)
+    {
+        var config = System.Text.Json.JsonSerializer.SerializeToElement(ConfigView2x(device, s));
+        var ordered = new Dictionary<string, object?>();
+        foreach (var p in config.EnumerateObject())
+        {
+            if (p.Name == "button_map") continue;
+            ordered[p.Name] = p.Value.Clone();
+        }
+        foreach (var (key, value) in DeviceSettings.HeartbeatConfig(device, s)) ordered[key] = value;
+        ordered["button_map"] = config.GetProperty("button_map").Clone();
+        return ordered;
+    }
+
+    private static object ConfigView2x(Device device, TenantSettingsView s)
     {
         return new
         {
@@ -460,7 +587,12 @@ public static class DeviceEndpoints
             // rebooted and missed the change would otherwise open the wrong
             // court until somebody edited the setting again. Same wire shape
             // whether the map is the box's own or the club's.
-            button_map = ButtonMap.EffectiveFor(device.ButtonMapJson, s.Buttons).ToWire(),
+            //
+            // FC-8: capped at the walk-up maximum above, so a club that lowers it no longer leaves
+            // the box offering minute buttons the API refuses. The settings PUT caps the stored
+            // maps too (so the console shows what the box does); this is the belt to that brace.
+            button_map = ButtonMap.EffectiveFor(device.ButtonMapJson, s.Buttons)
+                .CappedAt(Math.Min(s.WalkUpMaxMinutes, RelayHardCap.Minutes)).ToWire(),
         };
     }
 
@@ -533,9 +665,10 @@ public static class DeviceEndpoints
 
         if (!BoxSettings.RelayRestoreEnabled(s)) return null;
 
-        var plan = await RelayRestorePlan.ForAsync(services.Db, device, now, ct);
+        var plan = await RelayRestorePlan.ForAsync(services.Db, device, now, ct, BookingCodeWindow.CueMinutes(s));
         var boot = RestoreBoot.Of(req, now);
-        await SettleRestoreAsync(services, device, boot, plan, now, ct);
+        var closed = req.RelayState is { } state ? ClosedRelays(state) : null;
+        await SettleRestoreAsync(services, device, boot, new ServedRestore(plan, closed), now, ct);
 
         // Marked ONLY for a board that looks freshly booted. The answer is served on every
         // heartbeat because only the box knows whether it has just started, but an ordinary
@@ -597,25 +730,14 @@ public static class DeviceEndpoints
     /// and losing the evidence that they disagreed.
     /// </para>
     /// </summary>
-    private static async Task NoteRelayReportAsync(
+    internal static async Task NoteRelayReportAsync(
         HeartbeatServices services, Device device, HeartbeatRequest req, DateTimeOffset now,
         CancellationToken ct)
     {
         if (req.RelayState is not { } report) return;
         if (device.Kind != DeviceKind.CourtBox) return;
 
-        var closed = new HashSet<int>();
-        foreach (var element in report)
-        {
-            // One bad element must not discard the evening's other three — the rule the roster
-            // parser already states. A malformed entry is skipped silently here because the
-            // fault channel is where a board's malformed output belongs, and raising one row
-            // per heartbeat for a board with a stuck formatter is the flood item 7 exists to
-            // prevent.
-            var pipe = element?.IndexOf('|') ?? -1;
-            if (pipe <= 0) continue;
-            if (int.TryParse(element![..pipe], out var relay) && relay >= 0) closed.Add(relay);
-        }
+        var closed = ClosedRelays(report);
 
         var courts = await services.Lights.CourtsByRelayAsync(device, ct);
         for (var relay = 0; relay < courts.Count; relay++)
@@ -624,6 +746,25 @@ public static class DeviceEndpoints
             await services.Lights.RecordConfirmationAsync(
                 court.Id, device.Id, relay, closed.Contains(relay), now, ct);
         }
+    }
+
+    /// <summary>
+    /// The relays a <c>relay_state</c> report says are closed. One bad element must not discard the
+    /// evening's other three — the rule the roster parser already states. A malformed entry is
+    /// skipped silently because the fault channel is where a board's malformed output belongs, and
+    /// raising one row per heartbeat for a board with a stuck formatter is the flood item 7 exists
+    /// to prevent.
+    /// </summary>
+    internal static HashSet<int> ClosedRelays(IEnumerable<string?> report)
+    {
+        var closed = new HashSet<int>();
+        foreach (var element in report)
+        {
+            var pipe = element?.IndexOf('|') ?? -1;
+            if (pipe <= 0) continue;
+            if (int.TryParse(element![..pipe], out var relay) && relay >= 0) closed.Add(relay);
+        }
+        return closed;
     }
 
     /// <summary>
@@ -673,8 +814,9 @@ public static class DeviceEndpoints
     /// </summary>
     private static async Task SettleRestoreAsync(
         HeartbeatServices services, Device device, RestoreBoot boot,
-        IReadOnlyList<RelayRestoreItem> plan, DateTimeOffset now, CancellationToken ct)
+        ServedRestore served_, DateTimeOffset now, CancellationToken ct)
     {
+        var (plan, closed) = served_;
         var served = device.RestoreServedRelays;
         if (device.RestoreServedAt is null) return;
         if (!boot.IsBootServed(device))
@@ -717,7 +859,25 @@ public static class DeviceEndpoints
             restored,
         });
 
-        foreach (var item in plan)
+        // BD-6: a PARTIAL restore is not a full one. With the box's own relay report beside the
+        // count, only the relays it says are closed are recorded restored; without one, a count
+        // short of what was served records nothing it cannot stand behind. Either way the shortfall
+        // is filed, so a court the box failed to relight no longer looks restored on the board.
+        var confirmed = closed is not null
+            ? [.. plan.Where(p => closed.Contains(p.Relay))]
+            : restored >= plan.Count ? plan : [];
+        if (restored < served || confirmed.Count < plan.Count)
+        {
+            DeviceErrorService.InBackground(
+                services.Scopes, services.Logs.CreateLogger(typeof(DeviceEndpoints)),
+                services.Tenant.TenantId, services.Tenant.TenantSlug,
+                new DeviceErrorReport(
+                    DeviceErrorCodes.RestoreNotConfirmed, DeviceErrorSource.Server,
+                    DeviceId: device.Id, ClaimedDeviceCode: device.DeviceCode,
+                    Detail: PartialRestoreDetail(served, Math.Min(restored, served))));
+        }
+
+        foreach (var item in confirmed)
         {
             var evidence = new LightEvidence(item.CourtId, device.Id, item.Relay, Seq: 0, BootId: 0, At: now);
             var row = await services.Lights.RecordOnAsync(
@@ -743,7 +903,7 @@ public static class DeviceEndpoints
     }
 
     /// <summary>One audit row about this board, with the details already shaped by the caller.</summary>
-    private static void Audit(HeartbeatServices services, Device device, string action, object details)
+    internal static void Audit(HeartbeatServices services, Device device, string action, object details)
     {
         services.Db.AuditLogs.Add(new AuditLog
         {
@@ -851,6 +1011,10 @@ public static class DeviceEndpoints
                 Detail: $"since_boot={current}", Count: rise, At: now));
     }
 
+    /// <summary>The partial restore's detail, in the club's words.</summary>
+    internal static string PartialRestoreDetail(int served, long restored) =>
+        $"The box was told to switch {served} courts' lights back on after the power cut and confirmed only {restored}.";
+
     /// <summary>The restore fault's detail, in the club's words (B16).</summary>
     internal static string RestoreDetail(int served)
     {
@@ -895,7 +1059,13 @@ public sealed record HeartbeatServices(
     /// <summary>Capabilities and the club's cut-over (§8).</summary>
     MemberCodeRollout Rollout,
     /// <summary>The instant the beat is answered at — liveness, roster and code sync (R14 D14-4; <see cref="GateServices.Clock"/>).</summary>
-    TimeProvider Clock);
+    TimeProvider Clock,
+    /// <summary>Key rotation (device-api.md §6): which key a board is on, <c>key_next</c>, the automatic retirement.</summary>
+    DeviceKeyRing Keys,
+    /// <summary>Signed OTA offers (§7).</summary>
+    FirmwareService Firmware,
+    /// <summary>The club's device network (§8).</summary>
+    DeviceNetworkService Network);
 
 /// <summary>
 /// What a court box reports about itself. Only <c>mac</c> is required — it is the board's
@@ -960,11 +1130,10 @@ public sealed record HeartbeatRequest(
     /// </para>
     ///
     /// <para>
-    /// <b>It is logged and not stored.</b> A column on <see cref="Device"/> would be an EF
-    /// migration for a counter nothing decides anything on, and this repository's rule is
-    /// that a schema change needs one; the log line carries the device code, which is what a
-    /// technician searches by. It changes nothing about the response. Corpus vector
-    /// <c>gate-heartbeat-request-no-push</c>.
+    /// <b>It is logged AND stored</b> (BD-11 corrected this sentence, which said "not stored"):
+    /// <see cref="NoteCounterRows"/> keeps it on <see cref="Device.NoPush"/> with the instant it
+    /// arrived, and its rise goes to the club's error log. It changes nothing about the response.
+    /// Corpus vector <c>gate-heartbeat-request-no-push</c>.
     /// </para>
     ///
     /// <para>
@@ -1035,7 +1204,25 @@ public sealed record HeartbeatRequest(
     /// What this image speaks — <c>["codes:m1"]</c> for the member-code firmware, sent LAST on
     /// every heartbeat (member-code §5.1). Absent from every older image, which reads as "nothing".
     /// </summary>
-    [property: JsonPropertyName("caps")] string?[]? Caps = null)
+    [property: JsonPropertyName("caps")] string?[]? Caps = null,
+    // ---- Device contract v3 (device-api.md §2). Every one nullable: absent is "no report",
+    //      a 2.x board sends none of them, and none of them can cost a board its heartbeat. ----
+    [property: JsonPropertyName("fw_state")] string? FwState = null,
+    [property: JsonPropertyName("fw_failed")] string? FwFailed = null,
+    [property: JsonPropertyName("fw_error")] string? FwError = null,
+    [property: JsonPropertyName("net_ver")] long? NetVer = null,
+    [property: JsonPropertyName("net_src")] string? NetSrc = null,
+    [property: JsonPropertyName("lcd_layout")] string? LcdLayout = null,
+    [property: JsonPropertyName("restore")] string? Restore = null,
+    [property: JsonPropertyName("relight")] string?[]? Relight = null,
+    /// <summary>
+    /// §13 telemetry. Bound as bare elements, never as typed records: a board ahead of this
+    /// server may put any key of any kind inside them, and none of that may cost the board its
+    /// heartbeat. <see cref="DeviceTelemetry"/> reads the keys it knows, 64-bit, and drops the rest.
+    /// </summary>
+    [property: JsonPropertyName("mega")] System.Text.Json.JsonElement Mega = default,
+    [property: JsonPropertyName("diag")] System.Text.Json.JsonElement Diag = default,
+    [property: JsonPropertyName("drift")] System.Text.Json.JsonElement Drift = default)
 {
     /// <summary>R15 D15-1: read through <see cref="DeviceBody"/> — lenient UTF-8, 400 <c>malformed_body</c> for anything not JSON.</summary>
     public static ValueTask<HeartbeatRequest> BindAsync(HttpContext ctx) => DeviceBody.ReadAsync<HeartbeatRequest>(ctx);
@@ -1055,4 +1242,14 @@ public sealed record HeartbeatRequest(
 /// The three lists a court box's heartbeat body carries — its roster, the relays to restore
 /// (null when the club has restore off) and the member-code sync — bundled for the parameter gate.
 /// </summary>
-internal sealed record CourtBoxLists(IReadOnlyList<string> Roster, IReadOnlyList<string>? Relays, MemberCodeSync? Codes = null);
+/// <summary>The plan a 2.x box was served and the relays its report says are closed (null: no report).</summary>
+internal sealed record ServedRestore(IReadOnlyList<RelayRestoreItem> Plan, HashSet<int>? Closed);
+
+internal sealed record CourtBoxLists(IReadOnlyList<string> Roster, IReadOnlyList<string>? Relays, MemberCodeSync? Codes = null)
+{
+    /// <summary>The v3 snapshot (device-api.md §3), or null when this box is not sent one.</summary>
+    public IReadOnlyList<string>? Courts { get; init; }
+
+    /// <summary>The lifeline objects this board is owed (§11.1), or null.</summary>
+    public DeviceLifeline? Lifeline { get; init; }
+}

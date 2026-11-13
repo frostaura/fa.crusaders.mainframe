@@ -282,6 +282,20 @@ public sealed class ButtonMap
     }
 
     /// <summary>
+    /// The map with every <c>minutes:N</c> button above <paramref name="maxMinutes"/> lowered to it
+    /// (FC-8): <c>walk_up_max_minutes</c> governs what the box offers, not only what the API sells.
+    /// Unchanged — the same instance — when nothing is above it.
+    /// </summary>
+    public ButtonMap CappedAt(int maxMinutes)
+    {
+        if (maxMinutes < 1 || !Actions.Any(a => a is ButtonAction.GrantMinutes g && g.Minutes > maxMinutes)) return this;
+
+        return new ButtonMap(Actions
+            .Select(a => a is ButtonAction.GrantMinutes g && g.Minutes > maxMinutes ? new ButtonAction.GrantMinutes(maxMinutes) : a)
+            .ToList());
+    }
+
+    /// <summary>
     /// This map with every court button the box has no relay for turned off, or
     /// <c>this</c> when there is nothing to trim.
     ///

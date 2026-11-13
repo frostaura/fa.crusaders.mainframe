@@ -247,7 +247,9 @@ public static class MemberCodeMath
     /// <summary>Whether a scanned string is to be treated as a v1 token at all: length alone (§3.8).</summary>
     public static bool IsV1Shaped(string? token)
     {
-        return token is { Length: TokenLength };
+        // MCV1-11: exactly 19 characters AND a leading `1` — `memcode::looksLikeV1`'s rule, the same
+        // thing on every side (member-code §3.8). Length alone disagreed on 1,981 of 3,006 strings.
+        return token is { Length: TokenLength } && token[0] == '1';
     }
 
     /// <summary>

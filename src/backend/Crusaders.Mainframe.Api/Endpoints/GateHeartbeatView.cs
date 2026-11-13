@@ -42,9 +42,45 @@ public static class GateHeartbeatView
     // memory/gotchas.md.
     public static object Of(
         Device device, string tenantSlug, int heartbeatSeconds, int unlockSeconds,
-        IReadOnlyList<string> roster, DateTimeOffset now)
+        IReadOnlyList<string> roster, DateTimeOffset now, GateV3Parts? v3 = null)
     {
-        return Legacy(device, tenantSlug, heartbeatSeconds, unlockSeconds, roster, now);
+        if (v3 is null || (v3.Settings is null && !v3.Lifeline.Any))
+        {
+            return Legacy(device, tenantSlug, heartbeatSeconds, unlockSeconds, roster, now);
+        }
+
+        // A v3 door (door-gate.md §14, device-api.md §11.1): the same keys in the same order, the
+        // gate object grown at its end, and the lifeline objects after the roster.
+        var body = new Dictionary<string, object?>
+        {
+            ["server_time"] = now,
+            ["tenant_slug"] = tenantSlug,
+            ["device_code"] = device.DeviceCode,
+            ["kind"] = DeviceKinds.Gate,
+            ["gate_key"] = device.GateKey,
+            ["heartbeat_seconds"] = heartbeatSeconds,
+            ["gate"] = GateObject(unlockSeconds, v3.Settings),
+            ["roster"] = roster,
+        };
+        v3.Lifeline.WriteTo(body);
+        return body;
+    }
+
+    /// <summary>
+    /// The <c>gate</c> object: <c>unlock_seconds</c>, then — for a v3 door only — its three v3
+    /// settings and the two fault settings every gate firmware reads and no server sent before
+    /// (FC-8). Scalars only, forever (FC-12): a nested object here is never a setting.
+    /// </summary>
+    private static Dictionary<string, object> GateObject(int unlockSeconds, GateV3Settings? v3)
+    {
+        var gate = new Dictionary<string, object> { ["unlock_seconds"] = unlockSeconds };
+        if (v3 is null) return gate;
+        gate["power_restore_trust_minutes"] = v3.PowerRestoreTrustMinutes;
+        gate["net_fallback_minutes"] = v3.NetFallbackMinutes;
+        gate["ota_probation_minutes"] = v3.OtaProbationMinutes;
+        gate["device_fault_reporting"] = v3.DeviceFaultReporting;
+        gate["device_fault_max_per_hour"] = v3.DeviceFaultMaxPerHour;
+        return gate;
     }
 
     /// <summary>
@@ -54,7 +90,7 @@ public static class GateHeartbeatView
     /// </summary>
     public static Dictionary<string, object?> WithCodes(
         Device device, string tenantSlug, GateTiming timing,
-        IReadOnlyList<string> roster, DateTimeOffset now, MemberCodeSync? codes)
+        IReadOnlyList<string> roster, DateTimeOffset now, MemberCodeSync? codes, GateV3Parts? v3 = null)
     {
         var (heartbeatSeconds, unlockSeconds) = timing;
         var body = new Dictionary<string, object?>
@@ -65,10 +101,11 @@ public static class GateHeartbeatView
             ["kind"] = DeviceKinds.Gate,
             ["gate_key"] = device.GateKey,
             ["heartbeat_seconds"] = heartbeatSeconds,
-            ["gate"] = new { unlock_seconds = unlockSeconds },
+            ["gate"] = GateObject(unlockSeconds, v3?.Settings),
             ["roster"] = roster,
         };
         codes?.WriteTo(body);
+        v3?.Lifeline.WriteTo(body);
         return body;
     }
 
@@ -103,3 +140,22 @@ public static class GateHeartbeatView
 
 /// <summary>A door's two timings — its heartbeat interval and how long it holds the lock open — as <see cref="GateHeartbeatView.WithCodes"/> takes them.</summary>
 public sealed record GateTiming(int HeartbeatSeconds, int UnlockSeconds);
+
+/// <summary>A v3 door's settings inside <c>gate</c> (door-gate.md §14), each clamped.</summary>
+public sealed record GateV3Settings(
+    int PowerRestoreTrustMinutes, int NetFallbackMinutes, int OtaProbationMinutes,
+    bool DeviceFaultReporting, int DeviceFaultMaxPerHour)
+{
+    /// <summary>The settings for a door naming any v3 ESP capability; null for a 1.x door, answered byte for byte as before.</summary>
+    public static GateV3Settings? For(Device device, Services.TenantSettingsView s) => !Services.DeviceCaps.GateV3(device)
+        ? null
+        : new GateV3Settings(
+            Services.DeviceSettings.Value(s, Services.DeviceSettings.PowerRestoreTrustMinutes),
+            Services.DeviceSettings.Value(s, Services.DeviceSettings.NetFallbackMinutes),
+            Services.DeviceSettings.Value(s, Services.DeviceSettings.OtaProbationMinutes),
+            Services.BoxSettings.DeviceFaultReporting(s),
+            Services.BoxSettings.DeviceFaultMaxPerHour(s));
+}
+
+/// <summary>What a v3 door's answer adds: the v3 gate settings (null for a 1.x door) and the lifeline.</summary>
+public sealed record GateV3Parts(GateV3Settings? Settings, DeviceLifeline Lifeline);

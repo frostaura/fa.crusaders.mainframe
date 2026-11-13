@@ -136,7 +136,16 @@ public static class DeviceActivateEndpoint
 
         // One acting use per code per class (§4.4): claimed before the court is lit, given back
         // below if it is not. A used code is a DECISION — `code_used` — never a second opinion.
-        var (used, claim) = await ClaimCourtUseAsync(match, device, services, ct);
+        //
+        // MCV1-02 (member-code §13): a repeat activation of the session already lit by THIS box on
+        // THIS court is answered as before — a re-grant — but writes no court use, so the member's
+        // rescan-then-extend at their own lit court can still buy with the same code. It adds no
+        // purchase a photo of the code could not already make there: an unused step at the
+        // victim's own lit court can already buy an extension directly.
+        var repeat = match is not null && await IsLitHereAsync(found.Booking!, device, now, services, ct);
+        var (used, claim) = repeat
+            ? (await services.MemberCodes.IsUsedAsync(match!, MemberCodeUseClass.Money, ct), (MemberCodeClaim?)null)
+            : await ClaimCourtUseAsync(match, device, services, ct);
         if (used) return (await CodeUsedAsync(found.Court, who, services), resolved.UserId);
 
         // Given back if the activation THROWS, too: a claim stranded by a 500 refused the member's
@@ -160,6 +169,13 @@ public static class DeviceActivateEndpoint
 
         var answer = From(result, found.Court!, now, display);
         if (!answer.Activated) await services.MemberCodes.ReleaseAsync(claim);
+        else
+        {
+            // FSF-05 (device-api.md §9): the UNCAPPED time to the end of the chained run beside the
+            // capped grant, so a 105-minute booking activated online is not dark at minute 90.
+            var end = await RelayRestorePlan.ChainEndAsync(services.Db, found.Booking!, ct);
+            answer = answer with { PlayRemainingSeconds = Math.Max(answer.GrantedSeconds, (int)Math.Min(int.MaxValue, Math.Floor((end - now).TotalSeconds))) };
+        }
 
         // A scan the API would not act on, onto the club's monitoring page. Only from here
         // down: the refusals above this line are a board asking a question it should not have
@@ -172,6 +188,16 @@ public static class DeviceActivateEndpoint
     }
 
     private sealed record Found(Booking? Booking, Court? Court, string? Reason);
+
+    /// <summary>Whether <paramref name="booking"/> is checked in and its court is believed lit by this very box for it (MCV1-02).</summary>
+    private static async Task<bool> IsLitHereAsync(
+        Booking booking, Device device, DateTimeOffset now, DeviceActivateServices services, CancellationToken ct)
+    {
+        if (booking.CheckedInAt is null || booking.EndsAt <= now) return false;
+        return await services.Db.CourtLightStates.AsNoTracking().AnyAsync(l =>
+            l.CourtId == booking.CourtId && l.State == LightState.On && l.DeviceId == device.Id
+            && l.BookingId == booking.Id && (l.OnUntil == null || l.OnUntil > now), ct);
+    }
 
     /// <summary>
     /// The court use for a v1 code: <c>Used</c> when the code may not light a court, else the
@@ -411,7 +437,7 @@ public sealed record DeviceActivateResponse(
     [property: JsonPropertyName("court_number")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? CourtNumber,
     [property: JsonPropertyName("booking_id")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? BookingId,
     [property: JsonPropertyName("granted_seconds")] int GrantedSeconds,
-    [property: JsonPropertyName("starts_in_seconds")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? StartsInSeconds,
+    [property: JsonPropertyName("starts_in_seconds")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)][property: JsonPropertyOrder(1)] int? StartsInSeconds,
     /// <summary>
     /// The member's name for the LCD's greeting line, at most
     /// <see cref="MemberDisplay.MaxLength"/> characters — GOAL item 4.
@@ -428,7 +454,7 @@ public sealed record DeviceActivateResponse(
     /// case surfaced as copy. Last in the record so the field is purely additive on the wire.
     /// </para>
     /// </summary>
-    [property: JsonPropertyName("member_display")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MemberDisplay = null)
+    [property: JsonPropertyName("member_display")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)][property: JsonPropertyOrder(1)] string? MemberDisplay = null)
 {
     /// <summary>
     /// The member's FIRST name for the box's greeting (<see cref="Services.MemberDisplay.GreetingNameAsync"/>):
@@ -437,7 +463,19 @@ public sealed record DeviceActivateResponse(
     /// </summary>
     [JsonPropertyName("greeting_name")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyOrder(1)]
     public string? GreetingName { get; init; }
+
+    /// <summary>
+    /// Device contract v3 §9 (FSF-05): the UNCAPPED seconds to the end of the chained run of
+    /// checked-in bookings on this court, beside <see cref="GrantedSeconds"/> (capped at 5400 for
+    /// the relay). A v3 bridge arms its re-light from this, falling back to the grant when it is
+    /// absent (every 2.x server). Present only on a grant. Ordered right after the grant
+    /// (<c>v3-activate-response-play-remaining</c>), before the greeting.
+    /// </summary>
+    [JsonPropertyName("play_remaining_seconds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? PlayRemainingSeconds { get; init; }
 
     /// <summary>
     /// What that member may spend now, in whole minutes — the ledger sum less held shares, read after
@@ -445,5 +483,6 @@ public sealed record DeviceActivateResponse(
     /// </summary>
     [JsonPropertyName("balance_minutes")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyOrder(1)]
     public int? BalanceMinutes { get; init; }
 }

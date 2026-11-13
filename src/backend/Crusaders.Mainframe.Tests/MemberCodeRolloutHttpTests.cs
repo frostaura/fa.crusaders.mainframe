@@ -46,7 +46,9 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         var step = m1.GetProperty("code_step").GetInt64();
         Assert.InRange(step, MemberCodeMath.StepOf(DateTimeOffset.UtcNow) - 1, MemberCodeMath.StepOf(DateTimeOffset.UtcNow));
         Assert.InRange(m1.GetProperty("code_step_ms").GetInt32(), 0, 29_999);
-        Assert.Empty(m1.GetProperty("code_days").EnumerateArray());
+        // MCV1-04 (member-code §5.2, 2026-11-13): an ACKNOWLEDGED codes:m1 box is entitled to keys
+        // in every phase, legacy included — today's day slot, and no keys because nobody is booked.
+        Assert.Single(m1.GetProperty("code_days").EnumerateArray());
         Assert.Empty(m1.GetProperty("code_keys").EnumerateArray());
         Assert.Equal(
             ["roster", "code_step", "code_step_ms", "code_days", "code_keys"],
@@ -98,9 +100,10 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         Assert.StartsWith($"m{refText}|1|", Assert.Single(box.GetProperty("roster").EnumerateArray()).GetString());
         Assert.Single(box.GetProperty("code_keys").EnumerateArray());
 
-        // Before the cut-over the box's legacy roster minted the booking a code; a booking arriving
-        // after it gets none, and is named by its player instead.
-        Assert.Equal(1, await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters().CountAsync(c => c.BookingId == booking.Id)));
+        // MCV1-04: an acknowledged codes:m1 box was sent v1 elements and keys from its first beat,
+        // in the legacy phase too, so no roster ever minted the booking a legacy code; a booking
+        // arriving after the cut-over gets none either, and is named by its player.
+        Assert.Equal(0, await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters().CountAsync(c => c.BookingId == booking.Id)));
         var later = await club.BookAsync(app, club.Pam, courtIndex: 2, startsInMinutes: 30);
         var after = await BeatAsync(device, club, club.BoxMac, m1: true);
         Assert.Equal(2, after.GetProperty("roster").GetArrayLength());

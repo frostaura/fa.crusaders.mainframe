@@ -182,6 +182,7 @@ public partial class MainframeDbContext : DbContext
         });
 
         ConfigureDevices(modelBuilder);
+        ConfigureDeviceV3(modelBuilder);
         ConfigureMemberGroups(modelBuilder);
         ConfigureMinutePackages(modelBuilder);
         ConfigureAccessCodes(modelBuilder);
@@ -563,6 +564,22 @@ public partial class MainframeDbContext : DbContext
             e.Property(d => d.LastIpAddress).HasMaxLength(64);
             e.Property(d => d.RunningVersion).HasMaxLength(32);
             e.Property(d => d.MegaVersion).HasMaxLength(32);
+            // Device contract v3 (device-api.md §2, §5, §7, §8). Short closed vocabularies, sized
+            // with room: an unknown fw_state is stored as "unknown" rather than as given.
+            e.Property(d => d.FwState).HasMaxLength(16);
+            e.Property(d => d.FwFailed).HasMaxLength(32);
+            e.Property(d => d.FwError).HasMaxLength(16);
+            e.Property(d => d.FwFailedVersions).HasColumnType("text[]").IsRequired().HasDefaultValueSql("'{}'::text[]");
+            e.Property(d => d.NetSrc).HasMaxLength(16);
+            e.Property(d => d.LcdLayoutAcknowledged).HasMaxLength(16);
+            e.Property(d => d.LcdLayoutOverride).HasMaxLength(16);
+            e.Property(d => d.RestoreReport).HasMaxLength(16);
+            e.Property(d => d.RelayDarkStreak).IsRequired().HasDefaultValueSql("'{}'::integer[]");
+            e.Property(d => d.HwRelayActiveLevel).HasMaxLength(8);
+            e.Property(d => d.HwScannerLineEnd).HasMaxLength(8);
+            e.Property(d => d.MegaJson).HasColumnType("jsonb");
+            e.Property(d => d.DiagJson).HasColumnType("jsonb");
+            e.Property(d => d.Drift).HasColumnType("text[]").IsRequired().HasDefaultValueSql("'{}'::text[]");
             // Latest heartbeat's `caps` (member-code rollout). An empty array, never null, for a
             // board that named nothing — see Device.Capabilities.
             e.Property(d => d.Capabilities).HasColumnType("text[]").IsRequired().HasDefaultValueSql("'{}'::text[]");
@@ -604,6 +621,7 @@ public partial class MainframeDbContext : DbContext
             e.HasKey(r => r.Id);
             e.Property(r => r.Kind).HasMaxLength(32).IsRequired();
             e.Property(r => r.Outcome).HasMaxLength(64);
+            e.Property(r => r.Cause).HasMaxLength(DeviceEventReceipt.CauseMaxLength);
             e.HasQueryFilter(r => r.TenantId == _tenant.TenantId);
 
             // The whole reason this table exists. A box retrying an upload it never saw the

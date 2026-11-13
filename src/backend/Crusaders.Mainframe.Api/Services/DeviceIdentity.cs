@@ -28,6 +28,16 @@ public static class DeviceIdentity
     public const string MacRequired = "mac_required";
 
     /// <summary>
+    /// BD-13: a MAC was sent and is not one — distinct from <see cref="MacRequired"/>, which a
+    /// technician debugging a box with a mangled MAC was told, as if it had sent none.
+    /// </summary>
+    public const string MacInvalid = "mac_invalid";
+
+    /// <summary>The refusal for a MAC that did not normalise: absent or blank is required, anything else invalid.</summary>
+    public static IResult MacRefusal(string? mac) =>
+        Results.BadRequest(new { error = string.IsNullOrWhiteSpace(mac) ? MacRequired : MacInvalid });
+
+    /// <summary>
     /// The board this request names, or the refusal to return instead. Never registers —
     /// see <see cref="ResolveOrRegisterAsync"/> for the heartbeat's version.
     /// </summary>
@@ -36,7 +46,7 @@ public static class DeviceIdentity
         MainframeDbContext db, string? mac, CancellationToken ct, TimeProvider? clock = null)
     {
         var normalised = DeviceRegistryService.NormaliseMacAddress(mac);
-        if (normalised is null) return (null, Results.BadRequest(new { error = MacRequired }));
+        if (normalised is null) return (null, MacRefusal(mac));
 
         var device = await db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
         if (device is null) return (null, Results.NotFound());
@@ -131,7 +141,7 @@ public static class DeviceIdentity
     {
         var (mac, hintedKind, tenantId) = call;
         var normalised = DeviceRegistryService.NormaliseMacAddress(mac);
-        if (normalised is null) return (null, Results.BadRequest(new { error = MacRequired }));
+        if (normalised is null) return (null, MacRefusal(mac));
 
         var device = await db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
         if (device is null)

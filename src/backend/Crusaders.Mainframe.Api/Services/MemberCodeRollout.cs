@@ -73,7 +73,7 @@ public sealed class MemberCodeRollout
         // road is closed until they do. See MemberCodeSettings.HoldKey for the incident.
         if (settings.MemberCodeManualHold) return false;
 
-        if (phase == MemberCodeSettings.Legacy && await EveryEnabledBoardSpeaksAsync(ct))
+        if (phase == MemberCodeSettings.Legacy && await EveryEnabledBoardSpeaksAsync(ct, now))
         {
             return await MoveAsync(MemberCodeSettings.Legacy, MemberCodeSettings.V1, MemberCodeSettings.CutoverAtKey, now, ct);
         }
@@ -102,13 +102,40 @@ public sealed class MemberCodeRollout
     /// acknowledged is served no keys and no roster players, so it has no say in the phase either.
     /// </para>
     /// </summary>
-    public async Task<bool> EveryEnabledBoardSpeaksAsync(CancellationToken ct)
+    /// <remarks>
+    /// <b>Unacknowledged court boxes block, without voting (MCV1-03, member-code §8 step 3).</b> One
+    /// named door cut a club over while all nine of its court boxes were unacknowledged and so held
+    /// no keys: no court could verify anyone offline. An enabled court box nobody has acknowledged,
+    /// heard in the last <see cref="UnacknowledgedBlocksDays"/> days, now holds the cut-over — it can
+    /// block, never decide — and a bench spare that is unplugged stops blocking after a week. The
+    /// cut-over also waits until every acknowledged court box was sent a keyed heartbeat in the last
+    /// <see cref="KeyedBeatWithinMinutes"/> minutes, so the boards hold keys before legacy codes go.
+    /// </remarks>
+    public async Task<bool> EveryEnabledBoardSpeaksAsync(CancellationToken ct, DateTimeOffset? now = null)
     {
-        var boards = (await _db.Devices.AsNoTracking().Where(d => d.Enabled).ToListAsync(ct))
-            .Where(Endpoints.MemberCodeHeartbeat.Acknowledged)
-            .ToList();
-        return boards.Count > 0 && boards.All(d => d.SpeaksMemberCodes);
+        var at = now ?? DateTimeOffset.UtcNow;
+        var enabled = await _db.Devices.AsNoTracking().Where(d => d.Enabled).ToListAsync(ct);
+        if (enabled.Any(d => BlocksUnacknowledged(d, at))) return false;
+        var boards = enabled.Where(Endpoints.MemberCodeHeartbeat.Acknowledged).ToList();
+        return boards.Count > 0
+               && boards.All(d => d.SpeaksMemberCodes)
+               && boards.Where(d => d.Kind == DeviceKind.CourtBox).All(d => HasKeyedBeat(d, at));
     }
+
+    /// <summary>How long an unacknowledged court box keeps blocking after it was last heard.</summary>
+    public const int UnacknowledgedBlocksDays = 7;
+
+    /// <summary>How recent every acknowledged court box's keyed heartbeat must be for the cut-over.</summary>
+    public const int KeyedBeatWithinMinutes = 60;
+
+    /// <summary>An enabled court box nobody has acknowledged, heard in the last week (MCV1-03).</summary>
+    public static bool BlocksUnacknowledged(Device d, DateTimeOffset now) =>
+        d.Enabled && d.Kind == DeviceKind.CourtBox && !Endpoints.MemberCodeHeartbeat.Acknowledged(d)
+        && d.LastSeenAt is { } seen && seen >= now.AddDays(-UnacknowledgedBlocksDays);
+
+    /// <summary>Whether the server sent this board a heartbeat carrying its keys in the last hour.</summary>
+    public static bool HasKeyedBeat(Device d, DateTimeOffset now) =>
+        d.CodeKeysAt is { } at && at >= now.AddMinutes(-KeyedBeatWithinMinutes);
 
     /// <summary>
     /// Ends every legacy access code at the cut-off (§8 step 4): <c>v1_only</c> refuses them on

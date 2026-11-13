@@ -41,6 +41,20 @@ public sealed class Tenant
     public DateTimeOffset? DeviceApiKeyRegeneratedAt { get; set; }
 
     /// <summary>
+    /// The id number of <see cref="DeviceApiKey"/> (device-api.md §6): the current key is
+    /// <c>k&lt;DeviceApiKeyId&gt;</c>. 1 for every club that existed before key rotation; every
+    /// rotation and every restore moves it on by one. <c>k0</c> is what a BOARD calls the key
+    /// compiled into it and is never a server id.
+    /// </summary>
+    public int DeviceApiKeyId { get; set; } = 1;
+
+    /// <summary>
+    /// When the rotation now in progress started — null when the current key is the only valid
+    /// one. Every key in <see cref="DevicePreviousKey"/> that is not retired is still accepted.
+    /// </summary>
+    public DateTimeOffset? DeviceKeyRotationStartedAt { get; set; }
+
+    /// <summary>
     /// Set on a DEMO club only: the real club it is the demo of (one per club). A demo club is a
     /// second tenant full of made-up members that an admin switches into from the account menu
     /// (<see cref="Services.Demo.DemoModeService"/>). Null on every real club.

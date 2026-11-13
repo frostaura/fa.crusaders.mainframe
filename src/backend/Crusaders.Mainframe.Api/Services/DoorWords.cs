@@ -60,6 +60,9 @@ public static class DoorWords
     /// </summary>
     public const string RefusedOffline = "Refused offline";
 
+    /// <summary>MCV1-10: the door refused a code it had just opened for — a replayed or photographed code.</summary>
+    public const string Replayed = "Code used again (refused as a replay)";
+
     /// <summary>The outcome of one action, in the product's words.</summary>
     public static string? OutcomeOf(string action)
     {
@@ -89,6 +92,7 @@ public static class DoorWords
         // deciding from a saved list. Checked before the reason rather than after, so the
         // sentence cannot drift when the code changes.
         if (reason == DoorTrail.RefusedOffline) return RefusedOffline;
+        if (reason == DoorTrail.Replayed) return Replayed;
         if (action == DoorTrail.OfflineUnknownScanAction) return NotOnTheSavedList;
 
         if (string.IsNullOrWhiteSpace(reason)) return NoReason;

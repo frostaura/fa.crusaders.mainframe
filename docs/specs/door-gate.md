@@ -74,7 +74,8 @@ deliberately *not* the 200 a decision gets, because none of them is a decision:
 
 | Condition | Answer |
 |---|---|
-| `mac` not twelve hex characters | `400 {"error":"mac_required"}` |
+| `mac` absent or blank | `400 {"error":"mac_required"}` |
+| `mac` present but not twelve hex characters | `400 {"error":"mac_invalid"}` (BD-13) |
 | unknown MAC (any route but `/heartbeat`) | `404` |
 | the board is disabled | `403` |
 | unknown or missing bearer key | `401` |
