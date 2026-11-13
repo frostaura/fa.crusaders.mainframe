@@ -47,6 +47,15 @@ All "configurable" knobs from the brief live here. Default values are the Crusad
 | `peach_account_id` | string | — | Required before top-ups can be enabled. |
 | `webhook_signing_secret` | string | auto-generated | Rotatable. |
 
+## The club's identity in the member app (go-live FM-8)
+
+The app's own chrome names the club an address serves, from tenant data, never a literal:
+
+- **`GET /api/v1/auth/club`** → `{ "slug", "name" }`. Anonymous and tenant-scoped (the `/api/v1/auth/` prefix: JWT, then the host's subdomain, then `Tenancy:DefaultTenantSlug`); a token naming one club on another club's host is the middleware's 403. `name` is `Tenant.DisplayName` through `ClubIdentityResolver` — the source the club's emails use — and `"the club"` for a nameless row. Nothing from the settings, no contact detail.
+- **The frontend** (`lib/clubIdentity.ts`) reads it once per page load and keeps it in `localStorage` (per origin, so per club). The crest link, the sign-in band and brand panel, the pass band and the tab title carry it; while unknown they carry **no** name (the crest is "Home", the tab is the page alone), never another club's. A failed read keeps what the phone knew.
+- **Club content is per slug** until the API serves a profile: the sign-in panel's place line and facts (`lib/clubProfiles.ts`) and the public landing (`clubs/<slug>/`, chosen in `pages/Home.tsx`). A club with neither gets facts true at any club and the generic landing under its own name.
+- **Not yet per club** (declared): the static shell served before any script — `index.html`'s title/meta/OG/JSON-LD, `public/manifest.webmanifest`, `SITE_ORIGIN` — is the first club's (`APP_NAME`, held by `seo-posture.test`); serving it per host is a gateway/nginx job. The crest mark is drawn, not `brand_logo_url`.
+
 ## Onboarding a new tenant (BP-07)
 
 There is no HTTP surface for it, by decision: an account above every club would be worth more than any one club's admin and reachable from the internet. The operator runs the CLI inside the backend container, where only somebody who can already run commands on the host can reach it:

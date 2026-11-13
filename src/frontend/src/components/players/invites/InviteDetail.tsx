@@ -29,7 +29,8 @@ export function InviteDetail({ invite, onReread }: { invite: Invite; onReread: (
     [bookingId, participantId, openLink, onReread],
   );
   const flow = useAcceptFlow(invite, port);
-  const heading = answerHeading(invite, INVITES_COPY.sheetTitle, flow.askingDecline);
+  const declined = flow.outcome?.kind === "declined";
+  const heading = answerHeading(invite, INVITES_COPY.sheetTitle, flow.askingDecline, declined);
   const dismiss = flow.outcome ? (
     <Button asChild variant="outline"><Link to="/bookings">{INVITES_COPY.toBookings}</Link></Button>
   ) : null;
@@ -40,7 +41,7 @@ export function InviteDetail({ invite, onReread }: { invite: Invite; onReread: (
         <h2 id={headingId} className={typography({ variant: "h2" })}>{heading.title}</h2>
         <p className="mt-1 text-sm text-text-secondary">{heading.line}</p>
       </div>
-      <AcceptBody flow={flow} reasonId={reasonId} />
+      <AcceptBody flow={flow} reasonId={reasonId} headed={declined} />
       <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
         <AcceptActions flow={flow} reasonId={reasonId} dismiss={dismiss} />
       </div>

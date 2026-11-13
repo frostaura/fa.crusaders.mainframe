@@ -177,3 +177,9 @@ afterAll(async () => {
   vi.useRealTimers();
   await new Promise((resolve) => setTimeout(resolve, 20));
 });
+
+// Go-live FM-8 — the club's name is tenant data (`lib/clubIdentity`), read from
+// `/api/v1/auth/club` at boot. Every test starts at the seeded first club, as a phone that has
+// read it before would; a test about the name itself puts another club in place.
+import { setClubIdentityForTests } from "../lib/clubIdentity";
+beforeEach(() => { setClubIdentityForTests({ slug: "crusaders", name: "Crusaders Squash Club" }); });

@@ -136,6 +136,7 @@ export { StarIcon, StarIcon as Star } from "@phosphor-icons/react/dist/csr/Star"
 export { ShareNetworkIcon, ShareNetworkIcon as ShareNetwork } from "@phosphor-icons/react/dist/csr/ShareNetwork";
 export { TargetIcon, TargetIcon as Target } from "@phosphor-icons/react/dist/csr/Target";
 export { PauseIcon, PauseIcon as Pause } from "@phosphor-icons/react/dist/csr/Pause";
+export { PlayIcon, PlayIcon as Play } from "@phosphor-icons/react/dist/csr/Play";
 export { SunHorizonIcon, SunHorizonIcon as SunHorizon } from "@phosphor-icons/react/dist/csr/SunHorizon";
 export { MoonStarsIcon, MoonStarsIcon as MoonStars } from "@phosphor-icons/react/dist/csr/MoonStars";
 export { CalendarCheckIcon, CalendarCheckIcon as CalendarCheck } from "@phosphor-icons/react/dist/csr/CalendarCheck";

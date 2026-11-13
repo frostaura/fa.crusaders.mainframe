@@ -81,7 +81,8 @@ function TotalsSkeleton({ rows }: { rows: number }) {
 export function SplitTotals({ players, hidePayNow = false }: { players: SplitEditor; hidePayNow?: boolean }) {
   const state = players.preview.state;
   if (state.status === "invalid") {
-    return <Alert tone="danger" live="polite">{PLAYERS_REFUSAL[state.error] ?? PLAYERS_REFUSAL.split_preview_invalid}</Alert>;
+    // Marked for `useRefusalInView`: a refused Continue scrolls it into view and focuses it (BM-05).
+    return <Alert tone="danger" live="polite" data-sheet-refusal="" tabIndex={-1}>{PLAYERS_REFUSAL[state.error] ?? PLAYERS_REFUSAL.split_preview_invalid}</Alert>;
   }
   if (state.status === "error") {
     return (

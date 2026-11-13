@@ -13,6 +13,7 @@ import { MY_CODE, newCodeIn } from "@/lib/myCodeCopy";
 import { phoneIsOffline } from "@/lib/api";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { initialsOf } from "@/lib/initials";
+import { useClubShortName } from "@/lib/clubIdentity";
 
 /**
  * The member's pass with the rotating code on it (D1, R9; design-system.md → Pass card).
@@ -117,11 +118,13 @@ function ReachBadge() {
 export function MemberCodePass(props: MemberCodePassProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { token, remainingMs, offline, memberName, photoUrl, onOpenFullScreen, triggerRef } = props;
+  // FM-8 — the club's name on the band is the crest link's: the tenant's, never a literal.
+  const club = useClubShortName();
   return (
     <PassCard
       label={MY_CODE.passLabel}
       overline={MY_CODE.overline}
-      clubName={MY_CODE.clubName}
+      clubName={club ?? ""}
       crest={<CrestMark className="h-10" />}
       memberName={memberName}
       avatar={<MemberAvatar name={memberName} photoUrl={photoUrl} />}

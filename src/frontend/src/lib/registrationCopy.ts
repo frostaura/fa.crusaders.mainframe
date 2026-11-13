@@ -79,6 +79,17 @@ export const REGISTER_MESSAGES: Record<string, string> = {
 };
 
 /**
+ * FM-4 — the application's reply went missing (a timeout, a dropped connection, the gateway saying
+ * the club's system did not answer): it may have arrived. Said beside the failure, and — when the
+ * next try is told the address is taken — instead of "an account with that email already exists".
+ */
+export const REGISTER_UNSURE = {
+  mayHaveArrived: "It may have arrived anyway — check your email for a confirmation link before sending it again.",
+  probablyArrived:
+    "Your first try probably arrived: an application with this email is already in. Check your email for the confirmation link — if nothing came, use Forgot password on the sign-in page.",
+} as const;
+
+/**
  * <b>The sentence that could not be reached, and the bug it is the other half of.</b>
  *
  * <p>
@@ -134,6 +145,22 @@ export const VERIFY_WORKING = "Confirming your email address…";
 export const VERIFY_OK_HEADING = "Email confirmed";
 export const VERIFY_OK_BODY = "That's your address confirmed. Somebody at the club now checks your membership "
   + "number against their records and approves your account — you'll get a second email when they have.";
+
+/**
+ * Go-live BM-11 — an admin may approve before the address is confirmed, and the page told that
+ * member to wait for an approval that had already happened. When the API says so, it says the
+ * account is ready; when the API does not say, it claims neither.
+ */
+export const VERIFY_OK_BODY_APPROVED = "That's your address confirmed, and the club has already approved your account. "
+  + "You can sign in now.";
+export const VERIFY_OK_BODY_UNKNOWN = "That's your address confirmed. If the club hasn't approved your account yet, "
+  + "somebody there checks your membership number against their records — you'll get an email when they have.";
+
+export function verifyOkBody(approved: boolean | undefined): string {
+  if (approved === true) return VERIFY_OK_BODY_APPROVED;
+  if (approved === false) return VERIFY_OK_BODY;
+  return VERIFY_OK_BODY_UNKNOWN;
+}
 
 /**
  * <b>"Try registering again" was the dead end.</b>

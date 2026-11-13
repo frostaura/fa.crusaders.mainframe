@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, type ComponentType } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ADMIN_RAIL_OFFSET_XL, ADMIN_RAIL_WIDTH_XL, CREST_BOX_OVER_RAIL } from "@/components/ui/layout";
@@ -9,8 +9,6 @@ import { useDataOwner } from "@/lib/offline/useCachedRead";
 import { useNavigationPending } from "@/routeChunks";
 import { cn } from "@/lib/utils";
 import { CelebrationOverlay } from "../play/CelebrationOverlay";
-import { ShutDoorsBanner } from "../doors/ShutDoorsBanner";
-import { useDoorsChrome } from "../doors/useDoorsChrome";
 import { AccountMenu } from "./AccountMenu";
 import { DemoPart } from "./demoChrome";
 import { MinutesChip } from "./MinutesChip";
@@ -159,7 +157,6 @@ export default function AppShell() {
   const memberChrome = signedIn || offlineMember || holdsSession(auth.status);
   // One read each, shared with the admin rail and the Overview (both stores dedupe their requests).
   const attention = useAdminAttention({ enabled: isAdmin });
-  const doors = useDoorsChrome(isAdmin, location.pathname);
   const headerRef = useRef<HTMLElement>(null);
   // P5-3 — a followed link waiting on its page's code (first session: nothing on the phone yet).
   const navigationPending = useNavigationPending();
@@ -252,7 +249,7 @@ export default function AppShell() {
         */}
         {isAdmin ? (
           <div className={frame.banner}>
-            <ShutDoorsBanner chrome={doors} />
+            <Suspense fallback={null}><AdminDoorsBanner routeKey={location.pathname} /></Suspense>
           </div>
         ) : null}
         <div data-shell-frame={wide ? "wide" : "content"} className={cn(FRAME, wide ? "max-w-wide" : "max-w-content", SELF_FRAMED)}>
@@ -265,6 +262,15 @@ export default function AppShell() {
     </div>
   );
 }
+
+type DoorsBannerProps = { routeKey: string };
+const noBanner: ComponentType<DoorsBannerProps> = () => null;
+/**
+ * Go-live FM-6 — the shut banner (and the doors store behind it) is an admin-only chunk, so the entry
+ * carries a loader and not ~30 kB of doors code. A chunk that cannot arrive draws nothing, as a failed
+ * doors read does: the banner's absence was never an all-clear.
+ */
+const AdminDoorsBanner = lazy<ComponentType<DoorsBannerProps>>(() => import("./AdminDoorsBanner").catch(() => ({ default: noBanner })));
 
 const LAST_ADMIN_KEY = "crusaders.mainframe.last-admin";
 

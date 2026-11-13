@@ -6,7 +6,8 @@ import { TextLink } from "@/components/ui/text-link";
 import { endpoints } from "@/lib/api";
 import { GET_STARTED } from "@/lib/onboardingCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { isPasskeySupported, registerPasskey } from "@/lib/webauthn";
+import { isPasskeyAlreadyHere, isPasskeyCancel, isPasskeySupported, registerPasskey } from "@/lib/webauthn";
+import { PASSKEY_ALREADY_HERE } from "@/lib/profileCopy";
 import { passkeyLabelFor } from "./passkeyLabel";
 import { StepFrame } from "./StepFrame";
 
@@ -48,7 +49,7 @@ export function PasskeyStep({ focusOnMount }: { focusOnMount?: boolean }) {
     try {
       await registerPasskey(passkeyLabelFor(navigator.userAgent));
     } catch (error) {
-      if (error instanceof Error && error.message === "passkey_cancelled") return false;
+      if (isPasskeyCancel(error)) return false;
       throw error;
     }
     return true;
@@ -58,7 +59,7 @@ export function PasskeyStep({ focusOnMount }: { focusOnMount?: boolean }) {
       setAdded(true);
       void load();
     },
-    toast: { failure: COPY.failed },
+    toast: { failure: (error) => (isPasskeyAlreadyHere(error) ? PASSKEY_ALREADY_HERE : COPY.failed) },
   });
 
   return (

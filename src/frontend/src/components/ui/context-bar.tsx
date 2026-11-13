@@ -43,6 +43,14 @@ type Breakpoint = "sm" | "md" | "lg" | "xl";
  */
 const EMPTY_HIDDEN = "[&:not(:has(button)):not(:has(a)):not(:has(input)):not(:has([data-context-summary]))]:hidden";
 
+/**
+ * Go-live BM-08 — a docked bar with ONE verb and nothing to summarise ("Invite a player") was a
+ * 640px panel, mostly empty, with the button at its right end, lying over the page's own controls
+ * ("Remove" on a guest's row). It hugs the verb now, on the right where the thumb is, and covers
+ * that much of the page and no more.
+ */
+const LONE_VERB = "w-fit max-w-full mr-0";
+
 /** Written whole, so Tailwind's scanner sees every class. */
 const HIDE_FROM: Record<Breakpoint, string> = { sm: "sm:hidden", md: "md:hidden", lg: "lg:hidden", xl: "xl:hidden" };
 const SHOW_FROM: Record<Breakpoint, string> = { sm: "hidden sm:flex", md: "hidden md:flex", lg: "hidden lg:flex", xl: "hidden xl:flex" };
@@ -96,6 +104,8 @@ export function ContextBar(props: ContextBarProps) {
   usePublishDockedHeight(ref, position === "bottom");
   const sticks = useStickyTop(ref, position === "top", stickyMax);
   const parts = <Parts summary={summary} actions={actions} primary={primary}>{children}</Parts>;
+  // BM-08 — a bar holding one verb and nothing else hugs it, at the thumb's side.
+  const lone = !summary && !actions && !children && Boolean(primary);
 
   if (position === "bottom") {
     return (
@@ -106,7 +116,7 @@ export function ContextBar(props: ContextBarProps) {
         data-context-bar="bottom"
         className={cn("pointer-events-none fixed inset-x-0 z-actionbar px-4 print:hidden", DOCK_BOTTOM, EMPTY_HIDDEN, until && HIDE_FROM[until], className)}
       >
-        <div className={cn(DOCK_PANEL, "animate-sheet-up motion-reduce:animate-none")}>{parts}</div>
+        <div className={cn(DOCK_PANEL, "animate-sheet-up motion-reduce:animate-none", lone && LONE_VERB)}>{parts}</div>
       </div>
     );
   }

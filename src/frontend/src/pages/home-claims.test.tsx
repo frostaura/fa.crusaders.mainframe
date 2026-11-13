@@ -39,7 +39,12 @@ import { forgetLastKnown } from "../lib/lastKnown";
 describe("the public landing page", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetLastKnown(); });
 
-  const source = readFileSync(join(__dirname, "Home.tsx"), "utf8");
+  // FM-8: the page is the generic landing (Home), the parts every club shares, and a club's own.
+  const source = [
+    join(__dirname, "Home.tsx"),
+    join(__dirname, "..", "components", "landing", "LandingParts.tsx"),
+    join(__dirname, "..", "clubs", "crusaders", "CrusadersLanding.tsx"),
+  ].map((file) => readFileSync(file, "utf8")).join("\n");
   /** Prose only. A comment explaining a retired claim must not read as the claim. */
   const prose = source.replace(/\{?\/\*[\s\S]*?\*\/\}?/g, "");
 

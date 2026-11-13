@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import { endpoints } from "./api";
 import { adminEndpoints, type DeviceErrorCounts } from "./adminApi";
 import { useAuth } from "./useAuth";
 import { pendingApplicationsKnown, pendingApplicationsVersion, subscribePendingApplications } from "./pendingApplications";
 import { playEndpoints } from "./playApi";
-import { refreshDoorsView, useDoorsStore } from "../components/doors/useDoorsChrome";
+import type { DoorsState } from "../components/doors/useDoorsChrome";
 
 /**
  * What needs an admin — pending applications, doors, faults — as ONE read the whole console shares.
@@ -346,6 +346,57 @@ function oldestRead(counts: CountsState, doorsCheckedAt: number | null): number 
 }
 
 /**
+ * Go-live FM-6 — the doors store, `doorsCopy`, `gateCopy` and the device-liveness code it summarises
+ * with are an admin-only chunk: this badge is in every member's first load, and importing the store
+ * statically put ~30 kB no member runs into the entry and the entry past its 500 kB budget. The chunk
+ * is fetched once a session is a confirmed admin one; until it lands the doors half reads as loading.
+ */
+type DoorsModule = typeof import("../components/doors/useDoorsChrome");
+let doorsModule: Promise<DoorsModule> | null = null;
+function loadDoors(): Promise<DoorsModule> {
+  doorsModule ??= import("../components/doors/useDoorsChrome").catch((error: unknown) => {
+    doorsModule = null; // the next admin mount asks again
+    throw error;
+  });
+  return doorsModule;
+}
+
+type DoorsCue = Pick<DoorsState, "loading" | "failed" | "checkedAt"> & { attention: string[]; total: number };
+const DOORS_IDLE: DoorsCue = { attention: [], total: 0, loading: true, failed: false, checkedAt: null };
+/** The chunk did not arrive: a failed doors read, as far as the badge can say. */
+const DOORS_UNAVAILABLE: DoorsCue = { ...DOORS_IDLE, loading: false, failed: true };
+
+function cueOf(next: DoorsState): DoorsCue {
+  return { attention: next.chrome.attention, total: next.chrome.total, loading: next.loading, failed: next.failed, checkedAt: next.checkedAt };
+}
+
+function useDoorsCue(enabled: boolean): DoorsCue {
+  const [cue, setCue] = useState<DoorsCue>(DOORS_IDLE);
+  useEffect(() => {
+    if (!enabled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the cue when the session stops being an admin one
+      setCue(DOORS_IDLE);
+      return;
+    }
+    let live = true;
+    let unsubscribe: (() => void) | null = null;
+    loadDoors().then(
+      (doors) => { if (live) unsubscribe = doors.subscribeDoorsStore((next) => setCue(cueOf(next))); },
+      () => { if (live) setCue(DOORS_UNAVAILABLE); },
+    );
+    return () => {
+      live = false;
+      unsubscribe?.();
+    };
+  }, [enabled]);
+  return cue;
+}
+
+function refreshDoors(): Promise<void> {
+  return loadDoors().then((doors) => doors.refreshDoorsView(), () => undefined);
+}
+
+/**
  * The console's attention, live.
  *
  * <p>
@@ -359,14 +410,14 @@ export function useAdminAttention(options: { enabled?: boolean } = {}): AdminAtt
   const { pathname } = useLocation();
   const enabled = options.enabled ?? (auth.status === "authenticated" && auth.isAdmin);
   const counts = useCountsStore(enabled, pathname);
-  const doorsStore = useDoorsStore(enabled);
+  const doorsStore = useDoorsCue(enabled);
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshAttentionCounts(), refreshDoorsView()]);
+    await Promise.all([refreshAttentionCounts(), refreshDoors()]);
   }, []);
 
   const pending = counts.pending.value;
-  const doors = doorsStore.chrome.attention.length;
+  const doors = doorsStore.attention.length;
   const faults = counts.faults.value;
   return {
     pending,
@@ -378,8 +429,8 @@ export function useAdminAttention(options: { enabled?: boolean } = {}): AdminAtt
     loading: !enabled || counts.loading || (doorsStore.loading && doorsStore.checkedAt === null),
     refreshing: counts.inFlight,
     failed: failedSources(counts, doorsStore.failed),
-    doorReasons: doorsStore.chrome.attention,
-    doorsTotal: doorsStore.checkedAt === null ? null : doorsStore.chrome.total,
+    doorReasons: doorsStore.attention,
+    doorsTotal: doorsStore.checkedAt === null ? null : doorsStore.total,
     faultCounts: counts.faults.breakdown,
     checkedAt: oldestRead(counts, doorsStore.checkedAt),
     refresh,

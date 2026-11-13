@@ -69,7 +69,15 @@ export const SESSION_ANON = {
   is_admin: false,
 };
 
-export async function serveApi(page: Page, routes: ApiRoute[]) {
+/**
+ * Go-live FM-8 — the club an address serves (`GET /api/v1/auth/club`), read at every boot. Served
+ * by every route table as the sessions' own club unless a spec names another.
+ */
+export const CLUB_ROUTE = "/api/v1/auth/club";
+export const CLUB = { slug: "crusaders", name: "Crusaders Squash Club" };
+
+export async function serveApi(page: Page, given: ApiRoute[]) {
+  const routes = given.some((r) => r.path === CLUB_ROUTE) ? given : [...given, { path: CLUB_ROUTE, body: CLUB }];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method().toUpperCase();

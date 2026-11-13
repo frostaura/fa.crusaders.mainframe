@@ -46,7 +46,7 @@ describe("collapseEarlier", () => {
   it("collapses a real wall and says what is inside it", () => {
     const { rows: hidden, label } = collapseEarlier(all, after(5), false, false, noSlots);
     expect(hidden).toBe(6);
-    expect(label).toMatch(/^Earlier today — 06:00 to 07:30 \(6 slots\)$/);
+    expect(label).toMatch(/^Earlier today — 06:00 until 07:30 \(6 slots\)$/);
   });
 
   it("leaves a wall of one or two rows alone, because two dead rows are not a wall", () => {
@@ -111,7 +111,7 @@ describe("collapseEarlier", () => {
     // 00:00…06:30 are past: 24 closed rows and three open ones (06:00, 06:15, 06:30).
     const { rows: hidden, label } = collapseEarlier(night, Date.parse(night[26].utc), false, false, noSlots);
     expect(hidden).toBe(27);
-    expect(label).toBe("Earlier today — 06:00 to 06:45 (3 slots)");
+    expect(label).toBe("Earlier today — 06:00 until 06:45 (3 slots)");
   });
 
   it("says the club was closed when every hidden row was a closed one", () => {

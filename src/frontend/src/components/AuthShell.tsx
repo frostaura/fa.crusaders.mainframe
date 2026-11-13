@@ -3,6 +3,8 @@ import { cn } from "../lib/utils";
 import { typography } from "../lib/typography";
 import { CrestMark } from "./shell/Crest";
 import { AUTH_BRAND, AUTH_MAKER_LINE } from "../lib/authCopy";
+import { useClubIdentity } from "../lib/clubIdentity";
+import { GENERIC_FACTS, clubProfile } from "../lib/clubProfiles";
 import { Heart, type Icon } from "./ui/icons";
 
 /**
@@ -101,6 +103,13 @@ export type AuthShellProps = {
  */
 const BAND_GUTTER = { paddingInline: "min(var(--band-gutter), var(--band-gutter-px))" } as const;
 
+/** FM-8: the club's own name on the band, and none while it is unknown — never another club's. */
+function BandClubName() {
+  const { club } = useClubIdentity();
+  if (!club) return null;
+  return <p data-auth-club="" className="font-display text-xl font-bold tracking-tight text-brand-ink [@container_band_(max-width:14rem)]:text-lg">{club.name}</p>;
+}
+
 function Band({ subline }: { subline: string }) {
   return (
     <div
@@ -123,7 +132,7 @@ function Band({ subline }: { subline: string }) {
         <CrestMark />
         <div className="min-w-0 flex-1 basis-40 break-words">
           {/* R8 L7-13: a step down when the TEXT is large for the band (a rem query), never a broken word. */}
-          <p className="font-display text-xl font-bold tracking-tight text-brand-ink [@container_band_(max-width:14rem)]:text-lg">Crusaders Squash Club</p>
+          <BandClubName />
           <p data-auth-subline="" className="mt-0.5 text-sm text-brand-ink/85">{subline}</p>
         </div>
       </div>
@@ -248,20 +257,24 @@ function AuthColumns(props: Omit<AuthShellProps, "size" | "className">) {
  * the club's name), and the crest and court are aria-hidden.
  */
 function BrandPanel() {
+  const { club } = useClubIdentity();
+  const profile = clubProfile(club?.slug);
+  const facts = profile?.facts ?? GENERIC_FACTS;
+  const name = club?.name ?? AUTH_BRAND.unnamed;
   return (
     <section
-      aria-label={AUTH_BRAND.club}
+      aria-label={name}
       data-auth-brand=""
       className="relative hidden min-h-96 flex-col justify-between gap-10 overflow-hidden rounded-2xl bg-brand-strong p-10 text-brand-ink shadow-md @[56rem]/authshell:flex @[72rem]/authshell:p-12"
     >
       <div className="relative flex flex-col gap-4">
         <CrestMark className="h-20 w-auto self-start" />
-        <p className="font-display text-4xl font-bold leading-tight tracking-tight">{AUTH_BRAND.club}</p>
-        <p className="text-base text-brand-ink/85">{AUTH_BRAND.place}</p>
+        <p className="font-display text-4xl font-bold leading-tight tracking-tight">{name}</p>
+        {profile ? <p className="text-base text-brand-ink/85">{profile.place}</p> : null}
       </div>
       <CourtPlan className="pointer-events-none mx-auto h-auto w-full max-w-md opacity-80" />
       <ul aria-label={AUTH_BRAND.factsLabel} className="relative flex flex-col gap-3 border-t border-brand-ink/20 pt-6">
-        {AUTH_BRAND.facts.map((fact) => (
+        {facts.map((fact) => (
           <li key={fact} className="flex items-center gap-3 text-base font-medium">
             <span aria-hidden="true" className="h-1 w-6 shrink-0 rounded-full bg-brand-tin" />
             <span className="min-w-0">{fact}</span>

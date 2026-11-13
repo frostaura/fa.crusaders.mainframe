@@ -579,6 +579,16 @@ export function cancelTermsLine(penaltyPct: number, windowMinutes: number): stri
 }
 
 /**
+ * Go-live BM-06 — a slot that already starts inside the late-cancellation window: cancelling it, even
+ * a minute after booking it, keeps the club's share. Said on Confirm, before the booking is made.
+ */
+export function lateStartLine(minutesAway: number, penaltyPct: number, count: number): string {
+  const away = minutesAway <= 0 ? "now" : `in ${minutesSpoken(minutesAway)}`;
+  const which = count > 1 ? "The first of these starts" : "This starts";
+  return `${which} ${away} — already inside the cancellation window, so cancelling it would keep ${penaltyPct}%.`;
+}
+
+/**
  * F1.20 — the Done heading when the list under it has fewer rows than slots (adjacent slots on
  * one court are one booking): "All 3 booked" above two rows read as a slot lost.
  */
@@ -662,8 +672,9 @@ export const BOOK_SEATS = {
   opponent: "Opponent",
   addPartner: "Add your partner",
   addOpponent: "Add an opponent",
-  addToSeat: (seat: number) => (seat <= 2 ? "Add your partner — on your side" : `Add an opponent — seat ${seat}, the other side`),
-  pickerTitle: (seat: number) => (seat <= 2 ? "Your partner" : `Opponent, seat ${seat}`),
+  // Go-live BM-18d — no seat numbers in what a member reads: "Opponent, seat 3" was the wire's word.
+  addToSeat: (seat: number) => (seat <= 2 ? "Add your partner — on your side" : seat === 3 ? "Add an opponent — the other side" : "Add a second opponent — the other side"),
+  pickerTitle: (seat: number) => (seat <= 2 ? "Your partner" : seat === 3 ? "Your opponent" : "Your second opponent"),
   withOthersHint: "Add an opponent, a partner, or both — then split the cost between you.",
 } as const;
 

@@ -314,7 +314,8 @@ export function earlierSummary(rows: number, mine: number, from: string | null, 
   if (from === null || rows === 0) return `Earlier today — closed until ${to}`;
   const slots = `${rows} ${rows === 1 ? "slot" : "slots"}`;
   const yours = mine > 0 ? `, ${mine} of them yours` : "";
-  return `Earlier today — ${from} to ${to} (${slots}${yours})`;
+  // Go-live BM-18a — "until": "06:00 to 20:15" above a 20:15 row read as though 20:15 were hidden too.
+  return `Earlier today — ${from} until ${to} (${slots}${yours})`;
 }
 
 /* ─────────────────────────── helpers ─────────────────────────── */

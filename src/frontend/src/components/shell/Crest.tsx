@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { CREST_NAME_FITS_BOX } from "@/components/ui/layout";
 import { cn } from "@/lib/utils";
+import { useClubShortName } from "@/lib/clubIdentity";
 
 /**
  * The club's crest mark — a shield in crest blue with the red cross of the Crusaders, drawn
@@ -37,16 +38,18 @@ export function CrestMark({ className }: { className?: string }) {
  * accessible name is always the club.
  */
 export function CrestLink({ to }: { to: string }) {
+  // FM-8: the club's own name, from the tenant; "Home" alone while it is unknown.
+  const club = useClubShortName();
   return (
     <Link
       to={to}
       data-crest-link=""
-      aria-label="Crusaders Squash — home"
+      aria-label={club ? `${club} — home` : "Home"}
       className="no-lift flex min-h-touch min-w-touch max-w-full items-center justify-start gap-2.5 rounded-lg"
     >
       <CrestMark />
       <span aria-hidden="true" className={cn("hidden min-w-0 truncate font-display text-lg font-bold tracking-tight text-text-primary @[24rem]/appbar:block @[44rem]/appbar:hidden @[60rem]/appbar:block", CREST_NAME_FITS_BOX)}>
-        Crusaders Squash
+        {club}
       </span>
     </Link>
   );

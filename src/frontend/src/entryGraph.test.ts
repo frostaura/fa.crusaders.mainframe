@@ -63,4 +63,14 @@ describe("the first load's source graph", () => {
   it("does not carry the players copy for the wallet's names or the invite note", () => {
     expect(closure.has("lib/playersCopy.ts"), "lib/playersCopy.ts is statically reachable from main.tsx").toBe(false);
   });
+
+  // Go-live FM-6 — the shell's Admin badge and the shut banner took the doors store, doorsCopy,
+  // gateCopy's device half, deviceActivity and deviceLiveness into every member's first load
+  // (~30 kB minified), and the entry past its 500 kB budget. They are an admin-only chunk now.
+  it.each(["components/doors/useDoorsChrome.ts", "components/doors/ShutDoorsBanner.tsx", "lib/doorsCopy.ts", "lib/deviceActivity.ts", "lib/deviceLiveness.ts"])(
+    "does not carry the admin doors code (%s)",
+    (file) => {
+      expect(closure.has(file), `${file} is statically reachable from main.tsx`).toBe(false);
+    },
+  );
 });

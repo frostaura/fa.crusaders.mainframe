@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useBalance } from "@/lib/useBalance";
 import { UnsureOutcome, outcomeUnknown } from "@/lib/bookingOutcome";
 import { inviteMoney, payWhatYouCan, playersEndpoints, type AcceptAnswer, type Invite, type SeatAnswer } from "@/lib/playersApi";
@@ -121,6 +121,8 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
     failure: (failure) => { void afterRefusal(failure); },
   });
 
+  useRereadOnWalletMove(liveSpendable(balance), unanswered(outcome, acceptAction.pending, declineAction.pending), port);
+
   const money = inviteMoney(invite);
   const blocked: Blocked = rereading ? "rereading" : invite.cap ? "cap" : money.shortBy > 0 ? "short" : null;
   const part = blocked === "short" ? payWhatYouCan(invite.share_minutes, money.toPay, money.spendable) : null;
@@ -158,6 +160,35 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
     partMinutes: part === null ? null : part - (invite.share_minutes - money.toPay), payPart, confirmDecline, keepInvite, keptInvite,
     readingAgain: INVITES_COPY.readingAgain,
   };
+}
+
+/** The figure the chip shows: what may be spent, or the balance where nothing is held. */
+function liveSpendable(balance: { held?: { spendable: number } | null; balance: number | null }): number | null {
+  return balance.held?.spendable ?? balance.balance;
+}
+
+/** Nothing answered and nothing on its way: the only time a wallet move re-reads the invite. */
+function unanswered(outcome: AcceptOutcome, accepting: boolean, declining: boolean): boolean {
+  return outcome === null && !accepting && !declining;
+}
+
+/**
+ * BM-09 — the invite's figures (balance now, balance after, short by) are the club's, read with the
+ * invite. When the live wallet moves under an open invite (a club adjustment, a purchase, another
+ * game's share) the invite is read again, so the pane never says "Balance now 1 h 30 min" beside a
+ * chip that says 10 min. The first figure the wallet reports is the baseline, not a move; nothing is
+ * re-read once this invite has been answered or while an answer is in flight (that path re-reads).
+ */
+function useRereadOnWalletMove(live: number | null, idle: boolean, port: AcceptPort) {
+  const seen = useRef<number | null>(null);
+  const { reread } = port;
+  useEffect(() => {
+    if (live === null) return;
+    const before = seen.current;
+    seen.current = live;
+    if (before === null || before === live || !idle) return;
+    void reread();
+  }, [live, idle, reread]);
 }
 
 /** A yes: the server's own answer, or (`proven`) one read back off the seat after a lost reply. */

@@ -763,7 +763,7 @@ export type WalletResponse = {
   held_until?: string | null;
   /**
    * P11 — owed back to partners whose return waits on this balance; paid first from incoming
-   * credit, no release date. `spendable_minutes` subtracts it too, so it may be negative.
+   * top-ups, no release date. `spendable_minutes` subtracts it too, so it may be negative.
    * Absent from an older API: read as 0.
    */
   owed_back_minutes?: number;
@@ -899,7 +899,7 @@ export type BulkBookResponse = {
   total_charged_minutes?: number;
   payer?: { user_id?: string; name?: string; balance_before_minutes?: number; balance_after_minutes?: number };
   results?: BulkResultRow[];
-  /** D2 §5.3 — the batch stopped here because the payer ran out of credit. */
+  /** D2 §5.3 — the batch stopped here because the payer ran out of minutes. */
   halted_at?: number; halted_reason?: string;
 } & Record<string, unknown>;
 
@@ -928,7 +928,7 @@ export type AdminBookingQuote = {
   spendable_minutes?: number;
   /** D11 §3a — the payer's held minutes. Absent from an older API. */
   held_minutes?: number;
-  /** P11 — what the payer owes back to partners, paid from their next credit. Absent: 0. */
+  /** P11 — what the payer owes back to partners, paid from their next minutes in. Absent: 0. */
   owed_back_minutes?: number;
 };
 
@@ -1155,8 +1155,8 @@ export type AdminSettings = {
    *  for at most this long rather than for the rest of the evening. */
   control_board_resync_seconds?: number;
   /** The symbol this club's REAL MONEY figures wear, default `R`. 1–4 letters or currency
-   *  signs. It is NOT the credit unit — credits convert at `credits_per_zar_*` and keep a
-   *  unit of their own; see `lib/currency.ts`. */
+   *  signs. It never goes on a minute figure: since P13 the unit of account is whole minutes,
+   *  bought in admin-defined packages, and rand is only what a package costs; see `lib/currency.ts`. */
   currency_symbol?: string;
   /** GOAL item 6's kill switch, default true. False makes the trace route answer 404 —
    *  never 403, which would confirm the surface exists and that this member has one. */
@@ -1572,10 +1572,10 @@ export type MyProfile = {
   package_discount_bps?: number | null;
   /** D2: whether their groups give them the peak window at any time. */
   peak_priority?: boolean;
-  /** D11 §3a — credits held for partners, and until when (null when nothing is held). */
+  /** D11 §3a — minutes held for partners, and until when (null when nothing is held). */
   held_minutes?: number;
   held_until?: string | null;
-  /** P11 — credits owed back to partners, paid from the next credit in. Absent before P11. */
+  /** P11 — minutes owed back to partners, paid from the next minutes in. Absent before P11. */
   owed_back_minutes?: number;
   /**
    * The club's IANA zone. Read at every app start, so `lib/clubZone` learns the club's day from
@@ -1594,9 +1594,9 @@ export type MyProfile = {
    * </p>
    *
    * <p>
-   * <b>It is not the credit unit.</b> A member pays R100 and receives
-   * <code>credits_per_zar_regular</code> × 100 credits, which ships at 1.6 — so a credit
-   * figure wearing this symbol overstates what they have by 60%. See `lib/currency.ts`.
+   * <b>It never goes on a minute figure.</b> Since P13 the unit of account is whole minutes,
+   * bought in packages whose price is the only rand a member sees; a minute count wearing this
+   * symbol would read as money. See `lib/currency.ts` and `docs/specs/minutes-and-packages.md`.
    * </p>
    */
   currency_symbol?: string;
@@ -1662,7 +1662,7 @@ export type AdminMember = {
 // Phase 8 — per-member spend drill-down (blueprint C.3).
 export type MemberSpendMonth = {
   month: string;
-  top_ups_minutes: number;   // credits added to the wallet
+  top_ups_minutes: number;   // minutes added to the wallet
   top_ups_zar: number;       // actual rand paid, for reconciliation
   spent_minutes: number;
   refunds_minutes: number;
@@ -1904,9 +1904,9 @@ export type DailyMePoint = {
  * Club revenue over a window, in BOTH units, because they are not interchangeable.
  *
  * The `_zar` fields are what members actually paid, from `LedgerEntry.ZarPaid`. The
- * `_credits` fields are what those payments became at each member's class rate. The API
- * used to send credits under the `_zar` names and this page printed them with a rand sign,
- * so R1000 of income was reported as R1600 (Regular) or R2400 (League).
+ * `_minutes` fields are the whole minutes those packages put in wallets (P13). Before P13 the
+ * API sent the wallet unit under the `_zar` names and this page printed it with a rand sign,
+ * so R1000 of income was reported as R1600 or R2400 — the reason the two units travel apart.
  */
 export type RevenueReport = {
   from: string;
@@ -2267,6 +2267,8 @@ export async function uploadPhoto(file: File): Promise<{ url: string }> {
 
 export const endpoints = {
   whoami: () => api.get<WhoAmI>("/api/v1/whoami"),
+  /** Go-live FM-8 — which club this address serves (anonymous, tenant-resolved). See `lib/clubIdentity`. */
+  club: () => api.get<{ slug: string; name: string }>("/api/v1/auth/club"),
   /**
    * Ends the session on the server as well as in this browser.
    *
@@ -2294,7 +2296,11 @@ export const endpoints = {
       membershipNumber: req.membershipNumber,
       photoUrl: req.photoUrl ?? null,
     }),
-  verifyEmail: (token: string) => api.post<{ verified: boolean }>(`/api/v1/auth/verify-email/${token}`),
+  /**
+   * `approved` (go-live BM-11): whether the club has already approved this account. Absent from an
+   * API that predates it, and the page then says only what it knows.
+   */
+  verifyEmail: (token: string) => api.post<{ verified: boolean; approved?: boolean }>(`/api/v1/auth/verify-email/${token}`),
   login: (email: string, password: string) => api.post<LoginResponse>("/api/v1/auth/login", { email, password }),
   refresh: () => api.post<LoginResponse>("/api/v1/auth/refresh"),
   devAdminLogin: () => api.post<LoginResponse>("/api/v1/auth/dev/admin-login"),

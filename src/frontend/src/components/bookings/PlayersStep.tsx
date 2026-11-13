@@ -50,6 +50,10 @@ export function PlayersStep(props: PlayersStepProps) {
     <div ref={root} className="contents">
       <WhoChoice players={players} />
       {players.withOthers ? <Court players={players} /> : null}
+      {/* Go-live BM-19 — "With other players" and nobody in a seat books as just you: said before Continue, not discovered on Confirm. */}
+      {players.withOthers && players.draft.seats.length === 0 ? (
+        <p data-no-players="" className="px-1 text-sm text-text-secondary">{BOOK_PLAYERS.noneAdded}</p>
+      ) : null}
     </div>
   );
 }

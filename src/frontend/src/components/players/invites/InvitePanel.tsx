@@ -23,6 +23,10 @@ import { useAcceptFlow, type AcceptPort } from "./useAcceptFlow";
 export function InvitePanel({ invite, port }: { invite: Invite; port: AcceptPort }) {
   const reasonId = useId();
   const flow = useAcceptFlow(invite, port);
+  // BM-10 — the accept said the member is already on this game: Accept goes, the way to it stays.
+  if (flow.errorCode === "already_in_booking") {
+    return <InviteGone title={INVITES_COPY.refusedTitle} sentence={INVITES_COPY.linkAlreadyIn} bookingId={invite.booking_id} />;
+  }
   const dismiss = (
     <Button asChild variant="outline">
       <Link to="/bookings">{INVITES_COPY.toBookings}</Link>

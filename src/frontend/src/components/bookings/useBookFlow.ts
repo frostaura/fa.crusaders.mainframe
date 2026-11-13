@@ -393,13 +393,19 @@ export function useBookFlow(input: BookFlowInput) {
     setStepId(id);
   });
 
+  const [splitRefusal, setSplitRefusal] = useState<{ problem: string } | null>(null);
   const next = () => {
     if (step === "slots" && whoProblem(who)) {
       setShowProblem(true);
       return;
     }
-    // A split the phone already knows cannot work is said on the step, not discovered on Book.
-    if (step === "split" && players.problem) return;
+    // A split the phone already knows cannot work is said on the step, not discovered on Book —
+    // and (go-live BM-05) the press takes the reader to it: on a short sheet the sentence sat below
+    // the fold and Continue looked dead. A fresh object per press, so a second press goes again.
+    if (step === "split" && players.problem) {
+      setSplitRefusal({ problem: players.problem });
+      return;
+    }
     moveTo(neighbour(steps, step, 1));
   };
 
@@ -459,6 +465,8 @@ export function useBookFlow(input: BookFlowInput) {
     godMode: ready?.overdraws && !(isAdmin && players.payload) ? { name: memberName, balanceAfter: ready.after, owedBack: ready.owedBack } : null,
     action, run,
     next, back, submit, face, timezone,
+    /** BM-05 — the last Continue refused on the Split step, for `useRefusalInView`. */
+    splitRefusal: step === "split" && players.problem ? splitRefusal : null,
     /** A write is on its way: nothing may leave the sheet or change what it sends (R4 I4-1). */
     busy: gate.busy,
     ignoredTaps: gate.ignoredTaps,

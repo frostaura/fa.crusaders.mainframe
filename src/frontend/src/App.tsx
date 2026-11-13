@@ -1,8 +1,9 @@
-import { Suspense, lazy as reactLazy, type ComponentType, type ReactNode } from "react";
+import { Suspense, lazy as reactLazy, useEffect, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider } from "./lib/auth";
 import AppShell from "./components/shell/AppShell";
 import { ToastProvider } from "./components/Toast";
+import { loadClubIdentity } from "./lib/clubIdentity";
 import { BalanceProvider } from "./lib/balance";
 import { ProfileProvider } from "./lib/profile";
 import { ClubUiProvider } from "./lib/ClubUiProvider";
@@ -143,7 +144,15 @@ function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<RouteSkeleton />}>{children}</Suspense>;
 }
 
+/** Toasts that leave with the page they were raised on (BM-14); see `TOAST_KEEP_ACROSS_NAV_MS`. */
+function RoutedToasts({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  return <ToastProvider routeKey={pathname}>{children}</ToastProvider>;
+}
+
 export default function App() {
+  // FM-8 — which club this address serves: the crest, the sign-in band, the pass and the tab title.
+  useEffect(() => { void loadClubIdentity(); }, []);
   return (
     <BrowserRouter>
       {/*
@@ -159,11 +168,11 @@ export default function App() {
             outside everything that formats money. */}
         <ClubUiProvider>
         <BalanceProvider>
-        <ToastProvider>
+        <RoutedToasts>
           <FirstRunGate />
           <NavPrefetch />
           <AppRoutes />
-        </ToastProvider>
+        </RoutedToasts>
         </BalanceProvider>
         </ClubUiProvider>
         </ProfileProvider>

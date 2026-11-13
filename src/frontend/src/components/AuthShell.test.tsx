@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AuthShell } from "./AuthShell";
-import { AUTH_BRAND } from "../lib/authCopy";
+import { clubProfile } from "../lib/clubProfiles";
 import { composite, contrastRatio, palette, themes, type ThemeName } from "@/lib/tokens";
 
 /**
@@ -63,9 +63,9 @@ describe("AuthShell", () => {
    */
   it("draws the brand panel beside the card when the SHELL is 56rem wide, never by the viewport", () => {
     const { container } = render(<AuthShell subline="Court bookings."><p>form</p></AuthShell>);
-    const brand = screen.getByRole("region", { name: AUTH_BRAND.club });
+    const brand = screen.getByRole("region", { name: "Crusaders Squash Club" });
     expect(brand.className.split(" ")).toEqual(expect.arrayContaining(["hidden", "@[56rem]/authshell:flex"]));
-    for (const fact of AUTH_BRAND.facts) expect(within(brand).getByText(fact)).toBeInTheDocument();
+    for (const fact of clubProfile("crusaders")!.facts) expect(within(brand).getByText(fact)).toBeInTheDocument();
     const shell = container.querySelector("[data-auth-shell]")!;
     const frame = shell.parentElement!;
     expect(frame).toHaveAttribute("data-full-bleed");

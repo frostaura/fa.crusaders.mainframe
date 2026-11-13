@@ -96,7 +96,8 @@ function SheetInner(props: InnerProps) {
       <Button variant="outline">{flow.outcome ? INVITES_COPY.done : INVITES_COPY.cancel}</Button>
     </DialogClose>
   );
-  const heading = answerHeading(invite, INVITES_COPY.sheetTitle, flow.askingDecline);
+  const declined = flow.outcome?.kind === "declined";
+  const heading = answerHeading(invite, INVITES_COPY.sheetTitle, flow.askingDecline, declined);
   return (
     <>
       <DialogHeader>
@@ -104,7 +105,7 @@ function SheetInner(props: InnerProps) {
         <DialogDescription>{heading.line}</DialogDescription>
       </DialogHeader>
       <DialogBody className="pb-4">
-        <AcceptBody flow={flow} reasonId={reasonId} />
+        <AcceptBody flow={flow} reasonId={reasonId} headed={declined} />
       </DialogBody>
       <DialogFooter>
         <SendingNote text={sending ? INVITES_COPY.sending : null} refused={refused} />

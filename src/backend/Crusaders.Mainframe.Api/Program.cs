@@ -839,6 +839,7 @@ app.MapGet("/api/v1/whoami", async (HttpContext ctx, MainframeDbContext db) =>
 
 // ---- Mounted endpoint groups ----
 app.MapAuthEndpoints();
+app.MapClubEndpoints();
 app.MapAdminMemberEndpoints();
 app.MapAdminRoleEndpoints();
 app.MapAdminModeEndpoints();

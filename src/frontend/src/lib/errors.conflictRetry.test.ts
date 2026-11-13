@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ApiError } from "./api";
-import { CONFLICT_RETRY_CAUSE, describeFailure, isDeploymentFault } from "./errors";
+import { CONFLICT_RETRY_CAUSE, describeFailure, isConfigurationFault } from "./errors";
 import { CONFLICT_RETRY_TEXT, describeBookingError, worthRetrying } from "./bookingErrors";
 
 /**
@@ -27,9 +27,9 @@ describe("conflict_retry", () => {
     expect(describeFailure(conflict(), { codes: { conflict_retry: "Screen words." } })).toBe("Screen words.");
   });
 
-  it("is not a deployment fault, so the Try again button stays", () => {
-    expect(isDeploymentFault(conflict())).toBe(false);
-    expect(isDeploymentFault(new ApiError(503, { error: "unavailable" }))).toBe(true);
+  it("is not a configuration fault, so the Try again button stays", () => {
+    expect(isConfigurationFault(conflict())).toBe(false);
+    expect(isConfigurationFault(new ApiError(503, { error: "unavailable" }))).toBe(false);
   });
 
   it("has its own booking sentences — not 'the club's system didn't answer' — and is worth retrying", () => {

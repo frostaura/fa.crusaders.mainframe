@@ -342,23 +342,32 @@ export function useDoorsStore(enabled: boolean, intervalMs = DOORS_CHROME_INTERV
       if (subscribers.size === 0) stopPolling();
       return;
     }
-    subscribers.add(setSnapshot);
-    cadences.set(setSnapshot, intervalMs);
-    startPolling();
-    // Hands the joining reader what the store already knows.
-    setSnapshot(state);
-    // A reader joining moments after a read landed takes that read (perf lane, 2026-09-30): the
-    // admin frame is a lazy chunk now, and its readers can mount just after the chrome's read
-    // finished — the second identical GET E-L6 exists to prevent. Older than that, it reads.
-    if (!justRead()) void refreshDoorsView();
-    return () => {
-      subscribers.delete(setSnapshot);
-      cadences.delete(setSnapshot);
-      if (subscribers.size === 0) stopPolling(); else startPolling();
-    };
+    return subscribeDoorsStore(setSnapshot, intervalMs);
   }, [enabled, intervalMs]);
 
   return snapshot;
+}
+
+/**
+ * The store's subscription without React — what {@link useDoorsStore} runs, and what the shell's
+ * Admin badge (`lib/adminAttention`) calls once this module's chunk has arrived (go-live FM-6: the
+ * doors code is not in a member's first load). Returns the unsubscribe.
+ */
+export function subscribeDoorsStore(listener: (next: DoorsState) => void, intervalMs = DOORS_CHROME_INTERVAL_MS): () => void {
+  subscribers.add(listener);
+  cadences.set(listener, intervalMs);
+  startPolling();
+  // Hands the joining reader what the store already knows.
+  listener(state);
+  // A reader joining moments after a read landed takes that read (perf lane, 2026-09-30): the
+  // admin frame is a lazy chunk now, and its readers can mount just after the chrome's read
+  // finished — the second identical GET E-L6 exists to prevent. Older than that, it reads.
+  if (!justRead()) void refreshDoorsView();
+  return () => {
+    subscribers.delete(listener);
+    cadences.delete(listener);
+    if (subscribers.size === 0) stopPolling(); else startPolling();
+  };
 }
 
 /**
