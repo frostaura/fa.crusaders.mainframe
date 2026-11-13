@@ -17,6 +17,10 @@ import {
 import { clubInstant } from "../lib/clubClock";
 import { rateLimitedSentence } from "../lib/errors";
 
+const V3_ABSENT: StubRoute[] = ["network", "firmware", "member-codes"].map((path) => ({
+  path: `/api/v1/admin/devices/${path}`, status: 404, body: { error: "not_found" },
+}));
+
 /**
  * A Radix Select, found by its name (P3 replaced the native selects — R7). Opened the way a
  * pointer opens it; the option chosen by the words on it, which is what an admin reads.
@@ -91,6 +95,10 @@ describe("AdminDevices", () => {
 
   const baseRoutes = () => [
     { path: "/api/v1/admin/devices/api-key", body: DEVICE_API_KEY_FIXTURE },
+    // The v3 panels' routes, as an API before v3 answers them: 404, so the panels are absent
+    // here (they have their own file, AdminDevices.v3.test.tsx). Longer than the list's prefix,
+    // so a `sequence` on the list is not spent by them.
+    ...V3_ABSENT,
     { path: "/api/v1/admin/devices/", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
     { path: "/api/v1/admin/courts/", body: COURTS_FIXTURE },
@@ -328,9 +336,12 @@ describe("AdminDevices", () => {
     // The OTA channel picker went with the firmware endpoints it drove.
     expect(screen.queryByLabelText(/update channel/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Code on the box/i)).not.toBeInTheDocument();
-    for (const gone of ["discovered", "discovery-status", "claim", "rotate-key", "revoke", "firmware"]) {
+    for (const gone of ["discovered", "discovery-status", "claim", "rotate-key", "revoke", "regenerate"]) {
       expect(stub.calls.some((c) => c.path.includes(gone))).toBe(false);
     }
+    // v3's signed releases (device-api §7) are read, and nothing else under firmware is called.
+    expect(stub.calls.filter((c) => c.path.includes("firmware")).every((c) => c.method === "GET"
+      && c.path === "/api/v1/admin/devices/firmware")).toBe(true);
   });
 
   // --- the fleet ------------------------------------------------------------------
@@ -343,7 +354,8 @@ describe("AdminDevices", () => {
     expect(await screen.findByText("Court 1 box")).toBeInTheDocument();
     // Relay order is the meaning: relay A drives court 1, relay B drives court 3.
     expect(screen.getByText(/A: court 1, B: court 3/)).toBeInTheDocument();
-    expect(screen.getByText(/firmware 1\.0\.0/)).toBeInTheDocument();
+    // FA-12: the firmware is its own line now, not a muted run of versions.
+    expect(screen.getByText(/^Firmware 1\.0\.0/)).toBeInTheDocument();
   });
 
   it("shows a board that has not called in as offline", async () => {

@@ -25,7 +25,11 @@ const BOX_KEYS = [
   "lcd_landing_dwell_seconds", "lcd_after_lights_on_seconds", "lcd_reinit_seconds", "relay_authorisation_cap_minutes",
   "relay_reconcile_min_seconds", "device_power_restore_trust_minutes", "device_net_fallback_minutes",
   "device_ota_probation_minutes", "device_key_grace_hours",
+  // the five hardware facts (§12; HW-1, HW-2, HW-5)
+  "hw_relay_active_level", "hw_lcd_i2c_address", "hw_scanner_baud", "hw_scanner_line_end", "hw_scanner_gap_ms",
 ] as const;
+
+const HW_SELECTS = ["hw_relay_active_level", "hw_lcd_i2c_address", "hw_scanner_baud", "hw_scanner_line_end"] as const;
 
 const BOUNDS = {
   lcd_revert_seconds: { min: 3, max: 60 },
@@ -122,5 +126,50 @@ describe("the API's bounds are the only bounds", () => {
   it("quotes the range a refusal carries, by the field's caption", () => {
     const err = new ApiError(400, { error: "lcd_revert_seconds_out_of_range", min: 3, max: 60 });
     expect(describeSaveFailure(err, "R")).toBe("Screen returns to the start after a result (seconds) has to be from 3 to 60. Nothing was saved.");
+  });
+});
+
+describe("the hardware facts (device-api §12)", () => {
+  it("carries no client enumeration for any of them: the values are the API's", () => {
+    for (const key of HW_SELECTS) {
+      expect(settingDef(key)!.options ?? [], key).toEqual([]);
+      expect(settingDef(key)!.kind).toBe("select");
+    }
+    expect(settingDef("hw_scanner_gap_ms")!.kind).toBe("number");
+  });
+
+  it("offers exactly the served values, named in words, numeric ones held as numbers", () => {
+    const settings = settingsWith({
+      hw_lcd_i2c_address: 0, hw_scanner_baud: 9600, hw_relay_active_level: "high",
+      bounds: {
+        hw_lcd_i2c_address: { values: [0, 39, 63] },
+        hw_scanner_baud: { values: [0, 9600] },
+        hw_relay_active_level: { values: ["high", "low"] },
+        hw_scanner_gap_ms: { min: 50, max: 500 },
+      },
+    });
+    const of = (key: string) => settingsFor(settings).find((d) => d.key === key)!;
+    expect(of("hw_lcd_i2c_address").options).toEqual([
+      { value: "0", label: "Search for it" }, { value: "39", label: "0x27" }, { value: "63", label: "0x3F" },
+    ]);
+    expect(of("hw_lcd_i2c_address").numericChoice).toBe(true);
+    expect(of("hw_scanner_baud").options!.map((o) => o.label)).toEqual(["Auto-detect", "9600 baud"]);
+    expect(of("hw_relay_active_level").options!.map((o) => o.value)).toEqual(["high", "low"]);
+    expect(of("hw_relay_active_level").numericChoice).toBeUndefined();
+    expect([of("hw_scanner_gap_ms").min, of("hw_scanner_gap_ms").max]).toEqual([50, 500]);
+  });
+
+  it("without served values offers only what the club holds, never a made-up list", () => {
+    const settings = settingsWith({ hw_scanner_line_end: "crlf", bounds: { lcd_layout: { values: ["compact"] } } });
+    expect(settingsFor(settings).find((d) => d.key === "hw_scanner_line_end")!.options).toEqual([{ value: "crlf", label: "CR/LF — only the scanner's own line end" }]);
+  });
+});
+
+describe("the levers the box ignores say so (FC-8)", () => {
+  it("labels slice and grace as the club system's rules, and the walk-up cap as the buttons' cap", () => {
+    expect(settingDef("slice_minutes")!.help as string).toMatch(/a box never uses it/);
+    expect(settingDef("grace_window_minutes")!.help as string).toMatch(/court boxes do nothing with it/);
+    expect(settingDef("walk_up_max_minutes")!.description).toMatch(/the most any time button gives/);
+    expect(settingDef("walk_up_max_minutes")!.help as string).toMatch(/caps every time button above it/);
   });
 });

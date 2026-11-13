@@ -321,5 +321,10 @@ export function servedValues(settings: Record<string, unknown>, key: string): re
   const one = (bounds as Record<string, unknown>)[key];
   if (typeof one !== "object" || one === null) return null;
   const values = (one as { values?: unknown }).values;
-  return Array.isArray(values) && values.length > 0 && values.every((v) => typeof v === "string") ? values as string[] : null;
+  // A numeric enumeration (`hw_lcd_i2c_address`, `hw_scanner_baud`) arrives as numbers: read as
+  // the strings a select holds, and turned back into numbers by the row (`numericChoice`).
+  if (!Array.isArray(values) || values.length === 0) return null;
+  if (values.every((v) => typeof v === "string")) return values as string[];
+  if (values.every((v) => typeof v === "number" && Number.isFinite(v))) return values.map((v) => String(v));
+  return null;
 }

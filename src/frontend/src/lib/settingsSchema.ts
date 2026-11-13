@@ -95,6 +95,8 @@ export type SettingDef = {
   /** Rendered only when the API serves the key (an older API omits it; omitted = unchanged). */
   optional?: boolean;
   options?: readonly SettingOption[];
+  /** A select whose values are numbers on the wire (the served `values` are numbers). */
+  numericChoice?: true;
   maxLength?: number;
   placeholder?: string;
   /**
@@ -229,7 +231,9 @@ const BOOKINGS: SettingDef[] = [
   {
     key: "slice_minutes", section: "bookings", label: "Slice length (minutes)", kind: "number", unit: "min",
     description: "The smallest piece of court time a member can book.",
-    help: "5–240. Each booking is one or more slices, e.g. 30 minutes, and costs the minutes it covers.",
+    // FC-8: the heartbeat carries this to the boxes, and no box does anything with it.
+    help: "5–240. Each booking is one or more slices, e.g. 30 minutes, and costs the minutes it covers. A rule of the"
+      + " club's system, not of the court boxes: a box never uses it, so changing it changes nothing at the courts.",
     min: 5, max: 240, step: 5, integer: true, range: true, defaultValue: 15,
   },
   {
@@ -304,7 +308,8 @@ const CANCELLATIONS: SettingDef[] = [
   {
     key: "grace_window_minutes", section: "cancellations", label: "Grace window (minutes)", kind: "number", unit: "min",
     description: "How late a member can arrive before it counts as a no-show.",
-    help: "0–60. After slot start, before a no-show triggers.",
+    help: "0–60. After slot start, before a no-show triggers. The club's system judges it from the check-ins it receives;"
+      + " the court boxes do nothing with it.",
     min: 0, max: 60, integer: true, range: true, defaultValue: 5,
   },
   {
@@ -338,8 +343,9 @@ const SCHEDULES: SettingDef[] = [
 const BOXES: SettingDef[] = [
   {
     key: "walk_up_max_minutes", section: "boxes", label: "Walk-up maximum (minutes)", kind: "number", unit: "min",
-    description: "The most court time a walk-up can buy at the box in one go.",
-    help: "1–90. The most court time a walk-up can buy at the box in one go; 90 is the relay's hard cap.",
+    description: "The most court time a walk-up can buy at the box in one go — and the most any time button gives.",
+    help: "1–90. The most court time a walk-up can buy at the box in one go; 90 is the relay's hard cap. Saving it also caps"
+      + " every time button above it — the club's button map and each box's own — so a button can never offer more.",
     min: 1, max: 90, integer: true, range: true, defaultValue: 90,
   },
   {
@@ -599,6 +605,70 @@ const BOX_V3: SettingDef[] = [
   },
 ];
 
+/**
+ * The five hardware facts the Mega once had compiled in (device-api §5, §12; HW-1, HW-2, HW-5):
+ * the club's values, which a board may override on Boards. Their values and range are the API's
+ * (`bounds`); the labels name each value in words. Advanced: a club sets them once, at
+ * commissioning (`lights-controller.md`), and a wrong one is fixed per board, never by a cable.
+ */
+const HW_VALUE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  hw_relay_active_level: { high: "High — an active-high module", low: "Low — an active-low module" },
+  hw_scanner_line_end: { auto: "Auto — CR, LF or a pause ends a code", crlf: "CR/LF — only the scanner's own line end" },
+  hw_lcd_i2c_address: { 0: "Search for it" },
+  hw_scanner_baud: { 0: "Auto-detect" },
+};
+
+/** A served hardware value in words: an LCD address in hex, a scanner speed in baud. */
+function hwValueLabel(key: string, value: string): string | undefined {
+  const named = HW_VALUE_LABELS[key]?.[value];
+  if (named) return named;
+  const n = Number(value);
+  if (key === "hw_lcd_i2c_address" && Number.isInteger(n)) return `0x${n.toString(16).toUpperCase().padStart(2, "0")}`;
+  if (key === "hw_scanner_baud" && Number.isInteger(n)) return `${n} baud`;
+  return undefined;
+}
+
+const HARDWARE: SettingDef[] = [
+  {
+    ...BOX_KEY, key: "hw_relay_active_level", section: "boxes", kind: "select", label: "Relay drive level", advanced: true,
+    description: "Which level switches a court's relay on. A board can be set on its own on Boards.",
+    help: "Set at commissioning: light a court the normal way; if it stays dark while the box says it is on, the level is"
+      + " the other one. A released relay is never driven, so a wrong level keeps courts dark — it never lights one that"
+      + ` should be off. Changing it re-drives every lit court at the new level. ${ONE_HEARTBEAT}`,
+    defaultValue: "high",
+  },
+  {
+    ...BOX_KEY, key: "hw_lcd_i2c_address", section: "boxes", kind: "select", numericChoice: true, label: "Screen (LCD) address",
+    advanced: true,
+    description: "Where the box looks for its screen. Searching finds every common backpack.",
+    help: "Leave it on search: the box tries every address a character-screen backpack uses and keeps the one that answers,"
+      + " and Boards shows which. Set an address only for a backpack the search cannot find. A board can be set on its own."
+      + ` ${ONE_HEARTBEAT}`,
+    defaultValue: 0,
+  },
+  {
+    ...BOX_KEY, key: "hw_scanner_baud", section: "boxes", kind: "select", numericChoice: true, label: "Scanner speed", advanced: true,
+    description: "How fast the QR scanner talks to the box. Auto finds it while the box is idle.",
+    help: "Auto tries each speed while nobody is scanning and keeps the one a scan arrives on; Boards shows which. Set it only"
+      + ` if scans never arrive. A board can be set on its own. ${ONE_HEARTBEAT}`,
+    defaultValue: 0,
+  },
+  {
+    ...BOX_KEY, key: "hw_scanner_line_end", section: "boxes", kind: "select", label: "Scanner line end", advanced: true,
+    description: "How the box knows a scanned code has ended.",
+    help: "Auto accepts a CR, an LF, or a short pause after the last character, so a scanner with no line end still works."
+      + ` CR/LF waits for the scanner's own line end. A board can be set on its own. ${ONE_HEARTBEAT}`,
+    defaultValue: "auto",
+  },
+  {
+    ...BOX_NUMBER, key: "hw_scanner_gap_ms", section: "boxes", label: "Scanner end-of-code pause (milliseconds)", unit: "ms",
+    advanced: true,
+    description: "With the line end on auto, a pause this long after the last character ends a scanned code.",
+    help: `Too short and a slow scanner's code is cut in two; too long and the box waits after every scan. ${ONE_HEARTBEAT}`,
+    defaultValue: 150,
+  },
+];
+
 /** The two fault switches belong with monitoring: they decide what reaches Faults at all. */
 const MONITORING_DEVICE: SettingDef[] = [
   {
@@ -818,7 +888,7 @@ const PLAY: SettingDef[] = [
 
 /** Every setting on the page, in page order. */
 export const SETTINGS: readonly SettingDef[] = [
-  ...BOOKINGS, ...HOURS, ...CANCELLATIONS, ...MONEY, ...SCHEDULES, ...BOXES, ...BOX_V3, ...SCREENS, ...DOORS, ...RECORDS,
+  ...BOOKINGS, ...HOURS, ...CANCELLATIONS, ...MONEY, ...SCHEDULES, ...BOXES, ...BOX_V3, ...HARDWARE, ...SCREENS, ...DOORS, ...RECORDS,
   ...MONITORING, ...MONITORING_DEVICE, ...ALERTS, ...PLAY,
 ];
 
@@ -882,12 +952,20 @@ function withServedBound(def: SettingDef, settings: AdminSettings): SettingDef {
   }
   if (def.kind === "select") {
     const values = servedValues(held, def.key);
-    if (!values) return def;
+    if (!values) {
+      // A served-bounds select with no served values (a hardware key on an API that lists
+      // none) offers only what it holds: never an enumeration the client made up.
+      const current = held[def.key];
+      if (!def.serverBounds || (def.options ?? []).length > 0 || (typeof current !== "string" && typeof current !== "number")) return def;
+      return { ...def, options: [{ value: String(current), label: hwValueLabel(def.key, String(current)) ?? String(current) }] };
+    }
     const id = `${def.key}|${values.join(",")}`;
     const cached = boundDefs.get(id);
     if (cached) return cached;
     const known = new Map((def.options ?? []).map((option) => [option.value, option.label]));
-    const next: SettingDef = { ...def, options: values.map((value) => ({ value, label: known.get(value) ?? value })) };
+    const next: SettingDef = {
+      ...def, options: values.map((value) => ({ value, label: known.get(value) ?? hwValueLabel(def.key, value) ?? value })),
+    };
     boundDefs.set(id, next);
     return next;
   }

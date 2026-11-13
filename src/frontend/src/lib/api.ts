@@ -1356,11 +1356,56 @@ export type AdminDevice = {
   net_src?: string | null;
   /** The device key id this board last authenticated with. */
   key_id?: string | null;
-  /** The Mega's last reset cause (`MCUSR`, two hex digits) and when it was reported. */
-  mega_reset_cause?: string | null;
-  mega_reset_at?: string | null;
   /** The first beat's `restore` report of the board's current boot: `warm` · `cold` · `none`. */
   restore?: string | null;
+
+  // ---- v3 hardware facts (device-api §5, §12): this board's own overrides, null = the club's. ----
+  hw_relay_active_level?: string | null;
+  hw_lcd_i2c_address?: number | null;
+  hw_scanner_baud?: number | null;
+  hw_scanner_line_end?: string | null;
+  hw_scanner_gap_ms?: number | null;
+
+  // ---- v3 telemetry (device-api §13): the latest the board reported, and when. ----
+  /** What the Mega said about itself this Mega boot (court box only), or null before it was heard. */
+  mega?: DeviceMegaReport | null;
+  /** The board's own health, every beat. */
+  diag?: DeviceDiag | null;
+  /** When `mega` / `diag` were last reported. */
+  telemetry_at?: string | null;
+  /** Names of keys the board could not read in the server's previous answer (§11.2). */
+  drift?: string[] | null;
+};
+
+/** `mega` in a v3 heartbeat (device-api §13). Every member optional: a board reports what it heard. */
+export type DeviceMegaReport = {
+  /** `MCUSR`, two uppercase hex digits: bit0 power-on, bit1 external, bit2 brown-out, bit3 watchdog. */
+  reset?: string | null;
+  /** The LCD backpack address that answered, two uppercase hex digits; `00` none answered. */
+  lcd?: string | null;
+  /** `high` or `low`: the level the Mega drives a relay "on" at. */
+  relay?: string | null;
+  /** The scanner's rate; 0 while auto-detect has not locked. */
+  scan_baud?: number | null;
+  /** `auto` or `crlf`. */
+  scan_end?: string | null;
+  /** The unarmed-forward key mask, two uppercase hex digits. */
+  keys?: string | null;
+  /** `[lcd_errors, lcd_reinits, rx_overruns, ceilings, cap_offs]` since that Mega boot. */
+  diag?: number[] | null;
+};
+
+/** `diag` in a v3 heartbeat (device-api §13). */
+export type DeviceDiag = {
+  reset?: string | null;
+  exc?: number | null;
+  epc1?: number | null;
+  heap?: number | null;
+  heap_min?: number | null;
+  block?: number | null;
+  stack_min?: number | null;
+  sketch_free?: number | null;
+  flash_mb?: number | null;
 };
 
 /**
@@ -1700,6 +1745,21 @@ export type MemberCodeRollout = {
   manual_hold_by: string | null;
   manual_hold_at: string | null;
   unacknowledged: MemberCodeRolloutBoard[];
+  /**
+   * Per acknowledged board: how many member-code keys its last keyed heartbeat carried, how many
+   * the cap or the body budget trimmed, and when (member-code §5.4, MCV1-07). Absent from an API
+   * that does not count them.
+   */
+  keys?: MemberCodeBoardKeys[];
+};
+
+export type MemberCodeBoardKeys = {
+  id: string;
+  device_code?: string | null;
+  name?: string | null;
+  keys_sent: number | null;
+  keys_trimmed: number | null;
+  keys_sent_at: string | null;
 };
 
 /**
@@ -2847,6 +2907,9 @@ export const endpoints = {
       name?: string; enabled?: boolean; court_numbers?: number[]; button_map?: string[] | null; gate_key?: string;
       // v3: three-valued like button_map (absent = unchanged, null = the club's, a value = the board's own).
       lcd_layout?: string | null; lcd_marquee_enabled?: boolean | null;
+      // v3 §12: the hardware facts, three-valued the same way.
+      hw_relay_active_level?: string | null; hw_lcd_i2c_address?: number | null; hw_scanner_baud?: number | null;
+      hw_scanner_line_end?: string | null; hw_scanner_gap_ms?: number | null;
       // v3 §8: push the club's network to a board that was set up at its own portal (`net_src: local`).
       push_network?: true;
     },
@@ -2927,6 +2990,13 @@ export const endpoints = {
 
   /** The member-code rollout (member-code §8): phase, dates, and the boards blocking the cut-over. */
   adminMemberCodeRollout: () => api.get<MemberCodeRollout>("/api/v1/admin/devices/member-codes"),
+  /**
+   * The rollout's two levers, written through the settings PUT with only these keys and the
+   * version they were read at (member-code §8, §13): the hold, and a phase move. The API reads
+   * every absent key as unchanged; a stale version is `409 settings_changed`.
+   */
+  adminMemberCodeRolloutSet: (version: string | null, change: { member_code_manual_hold?: boolean; member_code_phase?: string }) =>
+    api.put<{ saved: true; version?: string }>("/api/v1/admin/settings/", { ...(version ? { version } : {}), ...change }),
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),
