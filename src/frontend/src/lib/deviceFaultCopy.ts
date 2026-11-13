@@ -1,4 +1,5 @@
 import type { DeviceErrorRow, DeviceErrorSeverity } from "./adminApi";
+import { minutesSpoken } from "./minutes";
 import { clubClock, clubShortDate } from "./clubClock";
 
 /**
@@ -254,8 +255,8 @@ function bootUptime(detail: string | null | undefined): string | null {
   if (ms === "" || !Number.isInteger(Number(ms))) return null;
   const minutes = Math.floor(Number(ms) / 60_000);
   if (minutes < 1) return "It reported starting from zero, so it had only just come on.";
-  const h = Math.floor(minutes / 60);
-  return `It had been running for ${h > 0 ? `${h} h ` : ""}${minutes % 60} min when it said so.`;
+  // Spoken words, never "3 h 12 min" (X6-2): a sentence is read whole by a screen reader.
+  return `It had been running for ${minutesSpoken(minutes)} when it said so.`;
 }
 
 /** BA-22: a restart says what it means, with its raw uptime turned into a sentence. */

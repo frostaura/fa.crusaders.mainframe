@@ -66,6 +66,8 @@ const CLIPS_NO_RING: ReadonlyArray<readonly [file: string, fragment: string, why
   ["components/ui/pass-card.tsx", "rounded-b-2xl", "the pass body: the QR button sits in a 20px-padded body and a 12px-padded plate"],
   ["components/ui/progress.tsx", "ProgressPrimitive.Root", "a progress bar, no control"],
   ["pages/Profile.tsx", "relative block size-24 overflow-hidden", "the photo inside the photo button; the button's own ring is outside it"],
+  ["components/devices/LandingPreview.tsx", "data-landing-preview", "a drawn LCD (role=img, its words in the name), no control"],
+  ["pages/monitoring/ControlBoard.tsx", "fixed inset-0 z-overlay", "wall view's overlay is the PageShell itself: its own padding (px-4 to 3xl:px-12, pt-6, pb-10) keeps every control 16px or more inside the scroller's edge"],
 ];
 
 const SRC = __dirname;

@@ -166,7 +166,8 @@ describe("the v3 faults and the door's own words (device-api §4, §13; BA-22)",
     expect(fresh.means).not.toContain("uptime_ms");
     expect(fresh.means).toContain("It reported starting from zero");
     const later = explainFault({ code: "boot", headline: null, detail: "uptime_ms=11520000" });
-    expect(later.means).toContain("It had been running for 3 h 12 min");
+    expect(later.means).toContain("It had been running for 3 hours 12 minutes");
+    expect(later.means).not.toMatch(/\d+ (h|min)\b/);
   });
 
   it("talks about doors, not courts, when a door stops reporting", () => {

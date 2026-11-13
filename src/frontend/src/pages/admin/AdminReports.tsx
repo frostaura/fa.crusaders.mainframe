@@ -104,12 +104,12 @@ function ReportExports({ data, markers }: { data: ClubReport; markers: { from: s
   const name = (what: string) => `report-${what}-${markers.from || "start"}-to-${markers.to || "today"}.csv`;
   return (
     <>
-      <Button variant="outline" size="sm" icon={<DownloadSimple aria-hidden="true" />}
-        onClick={() => saveFile({ blob: csvBlob(dailyCsv(data.days)), filename: name("days") })}>
+      <Button variant="outline" size="sm" onClick={() => saveFile({ blob: csvBlob(dailyCsv(data.days)), filename: name("days") })}
+        icon={<DownloadSimple aria-hidden="true" />}>
         Days (CSV)
       </Button>
-      <Button variant="outline" size="sm" icon={<DownloadSimple aria-hidden="true" />}
-        onClick={() => saveFile({ blob: csvBlob(courtsCsv(data.utilisation)), filename: name("courts") })}>
+      <Button variant="outline" size="sm" onClick={() => saveFile({ blob: csvBlob(courtsCsv(data.utilisation)), filename: name("courts") })}
+        icon={<DownloadSimple aria-hidden="true" />}>
         Courts (CSV)
       </Button>
     </>
