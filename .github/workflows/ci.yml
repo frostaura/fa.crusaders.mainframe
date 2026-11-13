@@ -605,6 +605,21 @@ jobs:
       - name: Build door_gate and the door simulator
         run: pio run -d src/iot/door-gate -e door_gate -e simulator
 
+      # The bridge runs loop() on a 4 KB cont stack whose worst static path was measured at
+      # 3,776-3,968 B before an interrupt adds >= 256 B on top (ESPR-1), and nothing gated it:
+      # one more 320 B local inlined into loop() would close the margin before the last cable
+      # flash. Rebuilt with GCC's own stack reports and held to src/iot/tools/stack_budget.json,
+      # a ratchet that only shrinks. The ESP32's GCC 8 has no -fcallgraph-info, so the gate is
+      # held on frames only. These rebuilds are of the two ESP environments alone; the steps
+      # below use the simulator builds and the Arduino toolchain, never these images.
+      - name: Stack budget (ESP8266 bridge and ESP32 gate)
+        run: |
+          set -euo pipefail
+          PLATFORMIO_BUILD_FLAGS="-fstack-usage -fcallgraph-info=su" pio run -d src/iot/court-box -e court_bridge
+          python3 src/iot/tools/stack_budget.py --build src/iot/court-box/.pio/build/court_bridge --target court_bridge
+          PLATFORMIO_BUILD_FLAGS="-fstack-usage" pio run -d src/iot/door-gate -e door_gate
+          python3 src/iot/tools/stack_budget.py --build src/iot/door-gate/.pio/build/door_gate --target door_gate
+
       # The Arduino IDE is the DEPLOYMENT route for EVERY board here and both
       # arduino/ trees are generated, so a source or platformio.ini change that was
       # not re-exported would leave a technician flashing last week's firmware from a
