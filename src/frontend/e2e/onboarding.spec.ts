@@ -71,7 +71,7 @@ test.describe("the always-reachable guide", () => {
     await page.goto("/how-it-works");
 
     const box = page.getByRole("listitem").filter({ hasText: "Turn the lights on at the court box" });
-    await expect(box).toContainText("SCAN YOUR CODE");
+    await expect(box).toContainText("SCAN YOUR QR CODE");
     // A booked member presses nothing: the panel has no OK button, so there is nothing that
     // "confirm" could map onto. That asymmetry is the whole point of the step.
     await expect(box).toContainText(/lights come on by themselves/);

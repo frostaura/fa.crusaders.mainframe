@@ -237,7 +237,10 @@ export function guideSteps(input: GuideInput = {}): GuideStep[] {
       title: "Turn the lights on at the court box",
       illustration: "box",
       body: [
-        "On the wall by the courts is a box with a small screen. When nobody is using it, it says SCAN YOUR CODE.",
+        // Go-live (device v3): the box's landing screen is the founder's — the call to action and
+        // every court's minutes of light (`docs/specs/device-serial-protocol.md` v3, `display/`).
+        "On the wall by the courts is a box with a small screen. When nobody is using it, it says SCAN YOUR QR CODE "
+          + "and shows every court with the minutes of light it has left.",
         "Hold your phone up to the scanner on the box. The screen says it is checking.",
         "Then it greets you: HI and your name, with what it found underneath.",
         "If you have a court booked, the box knows which one and for how long. The lights come on by themselves — "
