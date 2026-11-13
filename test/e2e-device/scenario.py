@@ -1515,8 +1515,10 @@ def provision_box(w: World) -> None:
     # A body with no usable MAC cannot be answered, and must say so rather than 404 —
     # which would read as "unknown board" to a box that simply wrote the field wrong.
     no_mac = w.box.call("POST", "/api/v1/device/heartbeat", {}, mac="not-a-mac")
-    REPORT.check("C1", "a heartbeat whose mac is not twelve hex characters is 400 mac_required",
-                 no_mac.status == 400 and no_mac.get("error") == "mac_required", f"resp={no_mac.text[:120]}")
+    # BD-13: a MAC that is present but malformed is `mac_invalid`; `mac_required` is for an
+    # absent or blank one (door-gate.md's error table).
+    REPORT.check("C1", "a heartbeat whose mac is not twelve hex characters is 400 mac_invalid",
+                 no_mac.status == 400 and no_mac.get("error") == "mac_invalid", f"resp={no_mac.text[:120]}")
 
 
 def roster_entries(resp: Resp) -> dict[int, tuple[str, int, int]]:
