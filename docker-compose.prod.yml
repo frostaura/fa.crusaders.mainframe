@@ -36,10 +36,22 @@ networks:
       config:
         - subnet: 10.83.29.0/24
 
+# Every service's container log, capped (IO-07). Docker's json-file driver keeps a log forever by
+# default, and the club's machine is a Pi on an SD card: the backend alone wrote ~50 MB a day with
+# nobody using it, and a full disk stops Postgres writes — bookings and the ledger with them. Five
+# files of 10 MB per service is days of history at normal volume. `docker compose logs` and
+# Portainer read the same files, so nothing else changes.
+x-capped-log: &capped-log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *capped-log
     environment:
       POSTGRES_USER: crusaders
       POSTGRES_PASSWORD: CHANGE-ME-strong-database-password
@@ -55,6 +67,7 @@ services:
   backend:
     image: frostaura/crusaders-mainframe-backend:latest
     restart: unless-stopped
+    logging: *capped-log
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5000
@@ -153,7 +166,9 @@ services:
       - media_data:/app/media
       - biometric_data:/app/biometric
     healthcheck:
-      test: [ "CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/healthz >/dev/null || exit 1" ]
+      # /readyz, not /healthz (IO-16): healthy means the API reached its database, so a Postgres
+      # outage shows as an unhealthy backend in Portainer instead of a "healthy" one answering 503.
+      test: [ "CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/readyz >/dev/null || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -165,6 +180,7 @@ services:
   frontend:
     image: frostaura/crusaders-mainframe-frontend:latest
     restart: unless-stopped
+    logging: *capped-log
     depends_on:
       - backend
 
@@ -174,6 +190,7 @@ services:
     # config through every redeploy. CI no longer checks for that — it is on whoever redeploys.
     image: frostaura/crusaders-mainframe-gateway:latest
     restart: unless-stopped
+    logging: *capped-log
     ports:
       # STILL PUBLISHED, even though cloudflared now runs inside this stack and reaches the
       # gateway by service name. Cloudflared carries members in from the internet; it does NOT
@@ -200,6 +217,7 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: always
+    logging: *capped-log
     depends_on:
       - gateway
     command: tunnel run --token "CHANGE-ME-cloudflare-tunnel-token"

@@ -779,23 +779,27 @@ app.UseAuthorization();
 app.UseMiddleware<PasswordChangeGate>();
 
 // ---- Anonymous endpoints ----
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "crusaders.mainframe", time = DateTimeOffset.UtcNow }))
-   .AllowAnonymous();
+// Liveness (/healthz) and readiness (/readyz, which touches the database), each naming its build.
+app.MapHealthEndpoints();
 
 // The session-bootstrap probe. `must_change_password` is here and not only on the login response
 // because the browser reloads: without it a member who refreshes mid-forced-change renders the app
 // and then meets PasswordChangeGate's 403 on every screen instead of the one screen they need.
-app.MapGet("/api/v1/whoami", async (HttpContext ctx, ITenantContext tenant, MainframeDbContext db) =>
+app.MapGet("/api/v1/whoami", async (HttpContext ctx, MainframeDbContext db) =>
 {
     var userId = ctx.User.Id();
     var account = userId is { } id
         ? await db.Users.IgnoreQueryFilters().Where(u => u.Id == id)
             .Select(u => new { u.MustChangePassword, u.DemoMemberView }).FirstOrDefaultAsync(ctx.RequestAborted)
         : null;
+    // BP-17: the route is tenantless, so the resolved context is always empty here; a signed-in
+    // caller's club is the one its token names, and an anonymous caller has none (null, not a
+    // zero id that reads like a club).
+    var tokenTenant = Guid.TryParse(ctx.User.FindFirst("tenant_id")?.Value, out var tid) ? tid : (Guid?)null;
     return Results.Ok(new
     {
-        tenant_slug = tenant.TenantSlug,
-        tenant_id = tenant.TenantId,
+        tenant_slug = ctx.User.FindFirst("tenant_slug")?.Value,
+        tenant_id = tokenTenant,
         user_id = userId,
         is_authenticated = ctx.User.Identity?.IsAuthenticated ?? false,
         is_admin = ctx.User.IsInRole("admin"),

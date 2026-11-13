@@ -11,8 +11,18 @@ networks:
       config:
         - subnet: 172.29.83.0/24
 
+# Every service's container log, capped (IO-07): the json-file driver keeps a log forever by
+# default, and a club running this file with the on-premises overlay is on one small disk that
+# Postgres shares. Same cap as docker-compose.prod.yml.
+x-capped-log: &capped-log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
+    logging: *capped-log
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crusaders}
@@ -29,6 +39,7 @@ services:
       retries: 5
 
   mailhog:
+    logging: *capped-log
     image: jcalonso/mailhog:latest
     ports:
       - "${MAILHOG_SMTP_PORT:-11025}:1025"
@@ -38,6 +49,7 @@ services:
       - "8025"
 
   backend:
+    logging: *capped-log
     build:
       context: .
       dockerfile: ./src/backend/Dockerfile
@@ -122,7 +134,8 @@ services:
     # devices:
     #   - "/dev/bus/usb/001/004:/dev/bus/usb/001/004"
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/healthz >/dev/null || exit 1"]
+      # Readiness (IO-16): healthy means the API reached its database, not merely that it answers.
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/readyz >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -134,6 +147,7 @@ services:
         condition: service_started
 
   frontend:
+    logging: *capped-log
     # No build args. `VITE_SHOW_DEV_LOGIN` used to be passed through here, defaulting to
     # false — which reads as safe and is not, because it made "print the seeded admin's
     # e-mail and password on the sign-in screen" a one-word change in an unreviewed .env
@@ -148,6 +162,7 @@ services:
       - backend
 
   gateway:
+    logging: *capped-log
     # Built and pushed like the other two, NOT stock nginx:alpine with the config
     # bind-mounted. The deploy chain moves images and nothing else, so a bind-mounted
     # nginx.conf is a file the release cannot deliver: a club merging a gateway fix got a
