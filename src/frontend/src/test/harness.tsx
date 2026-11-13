@@ -1,5 +1,5 @@
 import { render, type RenderOptions } from "@testing-library/react";
-import { MemoryRouter, type InitialEntry } from "react-router-dom";
+import { MemoryRouter, useLocation, type InitialEntry } from "react-router-dom";
 import { vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 import { ToastProvider } from "../components/Toast";
@@ -251,6 +251,12 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
  * nothing — {@link signIn} is what turns it on.
  * </p>
  */
+/** As `App` does: toasts leave with the page they were raised on (BM-14). */
+function RoutedToasts({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  return <ToastProvider routeKey={pathname}>{children}</ToastProvider>;
+}
+
 function Providers({ children, entries }: { children: ReactNode; entries?: InitialEntry[] }) {
   return (
     <MemoryRouter initialEntries={entries}>
@@ -262,7 +268,7 @@ function Providers({ children, entries }: { children: ReactNode; entries?: Initi
           /api/v1/wallet, so a test that calls `signIn` stubs that route too.
         */}
         <BalanceProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <RoutedToasts>{children}</RoutedToasts>
         </BalanceProvider>
       </AuthProvider>
     </MemoryRouter>

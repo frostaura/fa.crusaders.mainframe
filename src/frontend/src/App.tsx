@@ -143,6 +143,12 @@ function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<RouteSkeleton />}>{children}</Suspense>;
 }
 
+/** Toasts that leave with the page they were raised on (BM-14); see `TOAST_KEEP_ACROSS_NAV_MS`. */
+function RoutedToasts({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  return <ToastProvider routeKey={pathname}>{children}</ToastProvider>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -159,11 +165,11 @@ export default function App() {
             outside everything that formats money. */}
         <ClubUiProvider>
         <BalanceProvider>
-        <ToastProvider>
+        <RoutedToasts>
           <FirstRunGate />
           <NavPrefetch />
           <AppRoutes />
-        </ToastProvider>
+        </RoutedToasts>
         </BalanceProvider>
         </ClubUiProvider>
         </ProfileProvider>
