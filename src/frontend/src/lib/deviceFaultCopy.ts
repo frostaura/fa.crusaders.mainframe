@@ -233,6 +233,42 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
       + " lights were never affected — they always go first.",
     doThis: "Nothing, if it is rare. If it keeps rising, the link inside the box is slow — power it off and on.",
   },
+  net_fallback: {
+    means: "A door could not reach the club on the network or server address it was sent, so it went back to the settings"
+      + " that last worked. It will not try those new settings again.",
+    doThis: "Open Boards › Network and check the WiFi name, password and server address, then save them again — a new save"
+      + " is a new version, and the door tries it the next time it calls in.",
+  },
+  board_restarted: {
+    means: "The board restarted on its own — a crash, a watchdog or a power dip — rather than because it was switched on.",
+    doThis: "Nothing, if it is rare: it came back by itself. If it keeps happening, check its power supply, and open its"
+      + " Health on Boards for the reason it gives.",
+  },
+  heap_low: {
+    means: "The board is running short of working memory. It still works, but a board that runs out restarts.",
+    doThis: "Nothing straight away. If it keeps being reported, tell whoever maintains the boards: the next firmware update"
+      + " should fix it, and no cable is needed.",
+  },
+  stack_low: {
+    means: "The board came close to running out of the memory its program runs in. It did not crash.",
+    doThis: "Nothing straight away. If it keeps being reported, tell whoever maintains the boards so the next update can fix it.",
+  },
+  answer_drift: {
+    means: "The board could not read part of the club's last answer to it, so it kept what it had for those parts.",
+    doThis: "Nothing at the board. Tell whoever maintains the club's system: the server is sending something this board's"
+      + " firmware does not understand.",
+  },
+  lcd_absent: {
+    means: "The court box's screen did not answer at any of the addresses a screen can have. The lights still work; members"
+      + " see nothing on the box.",
+    doThis: "Check the screen's four wires inside the box. If the screen has an unusual address, set it under the box's"
+      + " Hardware on Boards.",
+  },
+  code_keys_trimmed: {
+    means: "More members are booked than this board can hold codes for, so some of them cannot be checked while it is offline."
+      + " Online, everyone is checked as normal.",
+    doThis: "Nothing while the club's network is up. If the box is often offline, ask whoever maintains it about the key limit.",
+  },
   error_log_overflow: {
     means: "This board is producing faults faster than the club's system will record them, so most of them are being counted rather than kept.",
     doThis: "A board in this state is in real trouble. The count below is how many were suppressed — go and look at the board itself.",

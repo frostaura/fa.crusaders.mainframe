@@ -120,6 +120,12 @@ public static class DeviceErrorCodes
     /// <summary>A door's heartbeat answer named another kind of board; no roster was adopted (door-gate.md §14.4, DG-9).</summary>
     public const string KindMismatch = "kind_mismatch";
 
+    /// <summary>
+    /// A door could not reach the club on a network or server address it was sent, and went back to
+    /// the previous one it knew worked (door-gate.md §14.5); that version is never adopted again.
+    /// </summary>
+    public const string NetFallback = "net_fallback";
+
     // ---- What a v3 board reports about itself (device-api.md §13), raised by the server ----
 
     /// <summary>The board restarted for a reason other than power-on or its own software restart (a crash, a watchdog, a brown-out).</summary>
@@ -192,7 +198,7 @@ public static class DeviceErrorCodes
                 or SeqRegression or OutageOpened or WalkupRefused or ActivationRefused
                 or TooManyUnacknowledgedDevices or QueueNoPush or QueueEventsLost
                 or ErrorLogOverflow or ScreenDropped
-                or HeapLow or StackLow or AnswerDrift or CodeKeysTrimmed => DeviceErrorSeverity.Warning,
+                or HeapLow or StackLow or AnswerDrift or CodeKeysTrimmed or NetFallback => DeviceErrorSeverity.Warning,
 
             // Info — worth counting, not worth waking anybody.
             MegaLinkBack or Boot => DeviceErrorSeverity.Info,
@@ -289,6 +295,7 @@ public static class DeviceErrorCodes
             RelightFailed => "A paid court should be lit and the box could not switch it back on",
             ScreenDropped => "The court box had to skip a screen because too many were waiting",
             KindMismatch => "A door was sent another kind of board's settings and ignored them",
+            NetFallback => "A door could not reach the club on the new network settings and went back to the ones that worked",
             BoardRestarted => "The board restarted on its own (a crash, a watchdog or a power dip), not because it was switched on",
             HeapLow => "The board is running short of working memory",
             StackLow => "The board came close to running out of stack memory",
@@ -316,7 +323,7 @@ public static class DeviceErrorCodes
         SeqRegression, OutageOpened, CourtNotMapped, WalkupRefused, ActivationRefused,
         TooManyUnacknowledgedDevices, QueueNoPush, QueueEventsLost, RestoreNotConfirmed,
         Unknown, ErrorLogOverflow,
-        MegaUnacked, RelightFailed, ScreenDropped, KindMismatch,
+        MegaUnacked, RelightFailed, ScreenDropped, KindMismatch, NetFallback,
         BoardRestarted, HeapLow, StackLow, AnswerDrift, LcdAbsent, CodeKeysTrimmed,
     ];
 
