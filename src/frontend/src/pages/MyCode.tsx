@@ -187,7 +187,6 @@ export default function MyCodePage() {
         focuses it and a screen reader lands on it.
       */}
       <PageHeader title={MY_CODE.title} actions={<CodeHelp doors={facts.doorsClub} signedOut={view.signedOut} />} />
-      {view.signedOut ? null : <UpcomingTicker refreshKey={null} fallbackZone={facts.door?.timezone} />}
 
       <div ref={attachLayout} data-my-code-layout="" className={LAYOUT}>
         <div data-my-code-pass="" className={PASS_COLUMN}>
@@ -207,6 +206,9 @@ export default function MyCodePage() {
 
         <div data-my-code-rest="" className={cn(REST, placed.columns)}>
           <div className={COLUMN}>
+            {/* After the pass, never above it (D8: the code first) — above it, the ticker pushed
+                the QR 28px under the fold of a 320x568 phone. */}
+            {view.signedOut ? null : <UpcomingTicker refreshKey={null} fallbackZone={facts.door?.timezone} />}
             {placed.inRest}
             <DoorBlocks facts={facts} code={code} codeSecondsLeft={codeSecondsLeft} onRefreshCode={view.resync} />
           </div>

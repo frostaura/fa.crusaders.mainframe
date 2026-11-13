@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, singleTap } from "./fixtures";
 import { BOOK_SHEET, BOOKINGS_COPY } from "../src/lib/bookingsCopy";
 
 /**
@@ -42,6 +42,7 @@ async function open(page: Page, options: { isAdmin?: boolean; date?: string } = 
     { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
   ]);
   await page.goto(date ? `/bookings?date=${date}` : "/bookings");
+  await singleTap(page);
   await page.waitForSelector('[role="grid"]');
 }
 

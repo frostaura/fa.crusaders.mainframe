@@ -1,5 +1,5 @@
 import { type Page } from "@playwright/test";
-import { SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { memberShellRoutes, PROFILE_ME } from "./playersKit";
 import { ADMIN_TOUR, ADMIN_TOUR_PATH, REPLAY_ADMIN_TOUR } from "../src/lib/onboardingCopy";
 
@@ -305,6 +305,7 @@ async function openDay(page: Page) {
     } },
   ]);
   await page.goto(`/bookings?date=${date}`);
+  await singleTap(page);
   await page.waitForSelector('[role="grid"]');
 }
 
@@ -371,6 +372,7 @@ test("the page skeleton at 390 and 200 % stays on the screen", async ({ page }) 
   // Hold the Bookings page's code so its skeleton stays up.
   await page.route("**/src/pages/Schedule.tsx*", () => undefined);
   await page.goto("/bookings");
+  await singleTap(page);
   await expect(page.locator('main [aria-busy="true"]').first()).toBeVisible();
   await bigText(page);
   const widest = await page.locator('main [aria-busy="true"] [data-slot="skeleton"], main [aria-busy="true"] .animate-pulse').evaluateAll((els) =>

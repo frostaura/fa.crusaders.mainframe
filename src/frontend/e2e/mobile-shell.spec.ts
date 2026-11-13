@@ -79,10 +79,15 @@ test.describe("the booking grid fills the room and scrolls itself", () => {
       await page.setViewportSize({ width: size.width, height: size.height });
       await open(page, `/bookings?date=${DAY}`);
       await page.waitForSelector('[role="grid"] button[aria-label^="Book "]');
-      // Let the fill measure settle (one frame after the last layout change).
+      // Let the fill measure settle (one frame after the last layout change). The grid fills the
+      // FIRST screen — its foot lands on <main>'s visible foot (above the tab bar). The games
+      // detail lies under the grid since the rail went, so <main> has that much more below it;
+      // what must hold is that the grid is whole on the first screen and scrolls by itself.
       await expect.poll(() => page.evaluate(() => {
         const main = document.querySelector<HTMLElement>("main#main-content")!;
-        return main.scrollHeight - main.clientHeight;
+        const grid = document.querySelector<HTMLElement>("[data-grid-scroller]")!;
+        const foot = main.getBoundingClientRect().top + main.clientHeight - (parseFloat(getComputedStyle(main).paddingBottom) || 0);
+        return Math.round(grid.getBoundingClientRect().bottom - foot);
       })).toBeLessThanOrEqual(1);
       const result = await page.evaluate(async () => {
         const main = document.querySelector<HTMLElement>("main#main-content")!;

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { MEMBER_CODE, SESSION_ANON, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { MEMBER_CODE, SESSION_ANON, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { PROFILE_ME, memberShellRoutes } from "./playersKit";
 import { BOOK_SHEET } from "../src/lib/bookingsCopy";
 import { CONFLICT_UNSURE_TEXT, UNSURE_TEXT } from "../src/lib/bookingErrors";
@@ -52,6 +52,7 @@ for (const o of OUTCOMES) {
       { method: "POST", path: "/api/v1/bookings/", status: 503, respond: () => { posts++; return o.answer; } },
     ]);
     await page.goto("/bookings", { timeout: 90_000 });
+    await singleTap(page);
     await page.getByRole("button", { name: /^Book Court 1 at / }).first().click();
     const sheet = page.getByRole("dialog", { name: BOOK_SHEET.title(1) });
     await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
@@ -98,6 +99,7 @@ for (const width of [320, 1280]) {
       { path: "/api/v1/schedule", body: day() },
     ]);
     await page.goto("/bookings", { timeout: 90_000 });
+    await singleTap(page);
     await page.getByRole("button", { name: /^Book Court 1 at / }).first().click();
     const sheet = page.getByRole("dialog", { name: BOOK_SHEET.title(1) });
     await sheet.getByRole("radio", { name: BOOK_SHEET.asMember }).click();

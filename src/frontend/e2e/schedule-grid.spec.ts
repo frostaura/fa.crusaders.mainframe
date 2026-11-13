@@ -1,4 +1,4 @@
-import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, singleTap } from "./fixtures";
 
 /**
  * The booking grid, in a real browser — what no jsdom assertion can reach: layout in pixels,
@@ -71,6 +71,7 @@ async function openGrid(page: import("@playwright/test").Page, isAdmin = true) {
     { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
   ]);
   await page.goto(`/bookings?date=${tomorrow()}`);
+  await singleTap(page);
   await page.waitForSelector('[role="grid"]');
 }
 
@@ -231,6 +232,7 @@ test("scrolled to the end of the page, the court names still show and the bar co
       { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     ]);
     await page.goto(`/bookings?date=${tomorrow()}`);
+    await singleTap(page);
     await page.waitForSelector('[role="grid"]');
     for (const selecting of [false, true]) {
       if (selecting) await page.getByRole("button", { name: "Select several slots" }).click();

@@ -1,4 +1,4 @@
-import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import { BOOK_SHEET, GOD_MODE } from "../src/lib/bookingsCopy";
 
 /**
@@ -78,6 +78,7 @@ async function pastTheStepGuard(page: import("@playwright/test").Page) {
 
 async function openFirstFreeSlot(page: import("@playwright/test").Page) {
   await page.goto("/bookings");
+  await singleTap(page);
   // P13 §3.12 — a free cell's name carries no price.
   await page.getByRole("button", { name: /^Book Court 1 at / }).first().click();
   const sheet = page.getByRole("dialog", { name: BOOK_SHEET.title(1) });

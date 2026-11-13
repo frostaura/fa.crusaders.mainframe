@@ -1,4 +1,4 @@
-import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute, singleTap } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { BOOK_SHEET, CANCEL_SHEET } from "../src/lib/bookingsCopy";
 import { cancellationOutcome } from "../src/lib/bookingErrors";
@@ -97,6 +97,7 @@ async function openBookingSheet(page: Page) {
     { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-9", balance_after_minutes: 450 } },
   ]);
   await page.goto("/bookings");
+  await singleTap(page);
   await page.getByRole("button", { name: /^Book Court 1 at / }).first().click();
   await expect(page.getByRole("dialog", { name: BOOK_SHEET.title(1) })).toBeVisible();
   await page.getByRole("button", { name: BOOK_SHEET.next }).click();
@@ -197,6 +198,7 @@ test.describe("a destructive confirm", () => {
       { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_minutes: 50, penalty_minutes: 15 } },
     ]);
     await page.goto("/bookings");
+    await singleTap(page);
     await page.getByRole("button", { name: /^Cancel your booking on Court 1/ }).first().click();
     const dialog = page.getByRole("dialog", { name: CANCEL_SHEET.title(1) });
     await expect(dialog.getByText(CANCEL_SHEET.late(30))).toBeVisible();

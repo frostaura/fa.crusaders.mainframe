@@ -1,4 +1,5 @@
-import { test as base, type Page } from "@playwright/test";
+import { test as base, expect as baseExpect, type Page } from "@playwright/test";
+import { BOOKINGS_COPY } from "../src/lib/bookingsCopy";
 
 /**
  * The E2E fixtures.
@@ -111,6 +112,17 @@ export async function signIn(page: Page) {
   await page.addInitScript(() => {
     window.localStorage.setItem("crusaders.mainframe.token", "e2e-token");
   });
+}
+
+/**
+ * Bookings opens in selection mode (a tap ticks a cell). A spec of the one-tap path — tap a slot,
+ * its sheet opens — turns the mode off from the header first, the way a player would. Waits for
+ * the grid, so it can follow a `goto` directly.
+ */
+export async function singleTap(page: Page) {
+  await page.locator('[role="grid"]').first().waitFor();
+  await page.getByRole("button", { name: BOOKINGS_COPY.selectOff }).click();
+  await baseExpect(page.getByRole("button", { name: BOOKINGS_COPY.selectOn })).toHaveAttribute("aria-pressed", "false");
 }
 
 export const test = base;
