@@ -17,6 +17,14 @@ The lint and complexity tooling inside these jobs has its own traps:
 - **A watch that only reports completed jobs cannot tell a hang from a long run.** Silence
   looks identical either way. A CI monitor must emit a heartbeat naming what is still running
   and for how long, or a 40-minute job burns 40 minutes before anybody learns anything.
+- **A red unit shard hides a stale e2e suite, and it grows with every merge.** Frontend shards 1 and 3
+  failed from #6 (2026-11-07) and every UI change merged behind them ran no Playwright at all: PR #12
+  then found ~70 stale or broken specs at once, plus five real layout regressions. Treat a red
+  `frontend` job as blocking merges, not as noise — the cost lands on whoever greens it.
+- **Playwright shards with many failures get CANCELLED, not failed**: every failure retries once and
+  records video, and the shard runs out of its 30 minutes before printing the list. Run the failing
+  files locally (`PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium` in a cloud container) rather than
+  waiting for a cancelled shard to say what broke.
 - **A failing job silently SKIPS every job behind it**, so "the rest was green" can mean "the
   rest never ran". `backend-integration`, `e2e-device` and `security` all sat skipped behind
   two red jobs for several runs, which hid the state of three suites — including the device
