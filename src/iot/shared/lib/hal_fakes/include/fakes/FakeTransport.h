@@ -49,7 +49,7 @@ public:
   /// the same offered length it happens at on the bench.
   static constexpr size_t kTxCapacity = 64U;
   static constexpr uint16_t kRxCapacity = 256U;
-  static constexpr uint8_t kMaxLines = 12U;
+  static constexpr uint8_t kMaxLines = 96U;
   static constexpr uint8_t kMaxLineLen = 48U;
 
   bool connected() override { return connected_; }
@@ -137,6 +137,13 @@ public:
 
   /// Feed a whole frame including its '\n', the way the peer sends one.
   bool feedLine(const char* text) { return feed(text) && feedByte(static_cast<uint8_t>('\n')); }
+
+  /// Forget the captured transcript (not the TX ring), so a long scenario can
+  /// assert on what happened since a point.
+  void clearLines() {
+    lineCount_ = 0U;
+    captureOverflowed_ = false;
+  }
 
   // --- observation ---------------------------------------------------------
 

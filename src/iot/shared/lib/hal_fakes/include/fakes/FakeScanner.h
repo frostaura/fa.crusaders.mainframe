@@ -43,8 +43,25 @@ public:
       return false;
     }
     ++delivered_;
+    if (actualBaud_ != 0U && baud_ != actualBaud_ && out != static_cast<uint8_t>('\r') &&
+        out != static_cast<uint8_t>('\n')) {
+      // A UART at the wrong rate reads framing garbage: bytes outside the
+      // printable set (the Mega's auto-detect counts these, HW-5).
+      out = static_cast<uint8_t>(0x80U | out);
+    }
     return true;
   }
+
+  void setBaud(uint32_t baud) override {
+    baud_ = baud;
+    ++baudChanges_;
+  }
+
+  /// The rate the modelled scanner really transmits at; 0 = whatever the port
+  /// is set to (every byte arrives clean).
+  void setActualBaud(uint32_t baud) { actualBaud_ = baud; }
+  uint32_t baud() const { return baud_; }
+  uint16_t baudChanges() const { return baudChanges_; }
 
   // --- stimulus ------------------------------------------------------------
 
@@ -87,6 +104,9 @@ public:
 private:
   ByteQueue<kCapacity> queue_;
   uint16_t delivered_ = 0U;
+  uint32_t baud_ = 9600U;
+  uint32_t actualBaud_ = 0U;
+  uint16_t baudChanges_ = 0U;
 };
 
 } // namespace fakes

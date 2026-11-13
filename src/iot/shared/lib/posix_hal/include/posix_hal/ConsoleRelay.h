@@ -36,7 +36,13 @@ public:
 
   void allOff() override;
 
+  void setPolarity(hal::RelayPolarity polarity) override;
+
+  hal::RelayPolarity polarity() const override { return polarity_; }
+
 private:
+  void print(uint8_t channel) const;
+
   hal::RelayPolarity polarity_;
   bool state_[hal::kRelayChannelCount];
 };
