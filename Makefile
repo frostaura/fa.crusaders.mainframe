@@ -2,7 +2,7 @@
         sweep-icloud \
         test test-iot test-iot-asan test-integration test-integration-sharded test-classes test-e2e test-e2e-device complexity corpus-check \
         arduino-export arduino-check flash-mega flash-bridge monitor-bridge \
-        virt-up virt-down ci-status up down down-reset clean
+        virt-up virt-down ci-status up down down-reset clean test-infra migrations-pending
 
 # ---------------------------------------------------------------------------
 # IoT — one venv, several PlatformIO projects.
@@ -519,6 +519,29 @@ complexity:
 	  -C 15 -L 200 -a 6 -W whitelizard.txt \
 	  -x '*/Migrations/*' -x '*/node_modules/*' -x '*/.pio/*' -x '*/.venv/*' \
 	  -x '*/bin/*' -x '*/obj/*' -x '*.test.tsx' -x '*.test.ts' -w
+
+# Release & operations tests — test/infra/. The compose files as `docker compose config` reads
+# them, the publish/promote rules of ci.yml (PyYAML), the pending-migrations check, and the
+# backup service run for real: a throwaway compose project from docker-compose.prod.yml, a
+# backup, a simulated total loss, and the runbook's restore. The backup tier needs a Docker
+# daemon and SKIPS without one unless INFRA_REQUIRE_DOCKER=1, which CI sets.
+test-infra:
+	python3 -m unittest discover -s test/infra -v
+
+# Which migrations would a redeploy apply? Read it BEFORE the redeploy — the backend migrates
+# itself on start, forward-only (docs/runbooks/redeploy-and-rollback.md). REF is the commit being
+# deployed; PSQL is any command that runs psql against the target, e.g.
+#
+#   make migrations-pending REF=<commit> \
+#     PSQL="ssh <pi> docker exec -i <stack>-postgres-1 psql -U crusaders -d crusaders_mainframe"
+#
+# Exit 0 nothing pending · 3 pending (listed, data-changing ones flagged) · 4 the database is
+# AHEAD of REF (a downgrade) · 2 usage/connection error.
+REF ?=
+PSQL ?=
+migrations-pending:
+	@test -n "$(PSQL)" || (echo 'Name the database: make migrations-pending PSQL="<command that runs psql>" [REF=<commit>]' && exit 2)
+	python3 src/backend/tools/pending_migrations.py --psql "$(PSQL)" $(if $(REF),--ref "$(REF)")
 
 # CI status (latest workflow run)
 ci-status:
