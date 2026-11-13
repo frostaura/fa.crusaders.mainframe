@@ -174,6 +174,21 @@ function usePurchase(
   const navigate = useNavigate();
   const shelfRef = useRef(shelf);
   useEffect(() => { shelfRef.current = shelf; }, [shelf]);
+  // BM-02 — Back from PayFast restores THIS page from the back-forward cache, frozen as it left:
+  // Continue busy for ever. A restore (`pageshow` persisted) after handing off frees the button and
+  // reads the shelf again, so the checkout just started shows under "Purchases waiting on PayFast".
+  const leftForGateway = useRef(false);
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (!e.persisted || !leftForGateway.current) return;
+      leftForGateway.current = false;
+      inFlight.current = false;
+      setPending(false);
+      reload();
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, [reload]);
 
   const run = useCallback(async (pkg: ShelfPackage) => {
     if (inFlight.current) return;
@@ -187,8 +202,8 @@ function usePurchase(
       rememberTopUpReturn(res.purchase_id, returnTo);
       // The demo club pays nobody: the purchase is already complete, and its result is an app page.
       if (res.simulated) navigate(res.redirect_url);
-      else postToGateway(res.redirect_url, res.form_fields);
-      // Stays pending: the page is leaving for PayFast (or for the result).
+      else { leftForGateway.current = true; postToGateway(res.redirect_url, res.form_fields); }
+      // Stays pending: the page is leaving for PayFast (or for the result) — until a Back restores it.
       return;
     } catch (error) {
       setNotice(await refusalNotice(error, openBefore, setShelf, reload));
