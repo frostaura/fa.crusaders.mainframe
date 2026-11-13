@@ -90,6 +90,13 @@ ArgStatus unescapeInto(const char* s, size_t n, Arg& out) {
         c = ',';
       } else if (s[i + 1] == '2' && s[i + 2] == '5') {
         c = '%';
+      } else if (s[i + 1] == '2' && s[i + 2] == '1') {
+        // v3: '!' is the frame sentinel on both links, so a literal one in
+        // text travels as %21 (a bare '!' restarts the line, see feed()).
+        c = '!';
+      } else if (s[i + 1] == '2' && s[i + 2] == 'A') {
+        // v3: accepted, never required — the checksum is the LAST '*'.
+        c = '*';
       } else {
         return ArgStatus::Malformed;
       }
@@ -181,6 +188,10 @@ public:
         bodyText("%2C");
       } else if (s[i] == '%') {
         bodyText("%25");
+      } else if (s[i] == '!') {
+        // v3 reserves '!' on both links. A 2.1.0 Mega refuses %21, so the
+        // bridge replaces '!' in text before encoding for one (MegaLink).
+        bodyText("%21");
       } else {
         body(s[i]);
       }
@@ -364,6 +375,19 @@ bool Decoder::feed(char c) {
     return alreadyTerminated ? false : endLine();
   }
   lastWasCr_ = false;
+  if (c == '!' && (len_ > 0U || overrun_)) {
+    // v3 resynchronisation (DL-02). A bare '!' can only start a frame — every
+    // text '!' is escaped — so a line still open when one arrives was cut
+    // short by a lost byte. Under v2 the decoder waited for '\n' and the torn
+    // line swallowed the intact `!ON` behind it. Abandon it, say so once, and
+    // start the new frame here.
+    const bool wasOverrun = overrun_;
+    len_ = 0;
+    overrun_ = false;
+    line_[0] = c;
+    len_ = 1U;
+    return pushError(wasOverrun ? DecodeError::Overrun : DecodeError::BadFrame);
+  }
   if (len_ >= kMaxFrameLen) {
     // Stop storing but keep consuming: the line is lost either way, and the
     // only useful thing left to do is find the next terminator.
@@ -450,7 +474,129 @@ DecodeError rowIndexOf(const Arg& a, uint8_t& out) {
 
 } // namespace
 
-DecodeError Decoder::buildFrame(Arg* fields, uint8_t count, Frame& out) {
+namespace {
+
+/// Decimal 0..`highest` with no leading zero (one spelling per number), into `out`.
+bool parseBounded(const Arg& a, uint32_t highest, uint32_t& out) {
+  if (a.empty() || (a.size() > 1U && a.c_str()[0] == '0')) {
+    return false;
+  }
+  uint32_t raw = 0;
+  if (!parseU32(a, raw) || raw > highest) {
+    return false;
+  }
+  out = raw;
+  return true;
+}
+
+bool isUpperHex(const Arg& a, size_t digits) {
+  if (a.size() != digits) {
+    return false;
+  }
+  uint8_t ignored = 0;
+  for (size_t i = 0; i < digits; ++i) {
+    if (!hexValue(a.c_str()[i], ignored)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Saturating decimal parse then clamp into [lowest, highest], rewriting the
+/// argument with the clamped value — the v2 rule for durations.
+bool clampArg(Arg& a, uint32_t lowest, uint32_t highest) {
+  uint32_t raw = 0;
+  if (!parseU32(a, raw)) {
+    return false;
+  }
+  a.setU32(raw < lowest ? lowest : (raw > highest ? highest : raw));
+  return true;
+}
+
+/// "-" (no opinion) or a clamped number; `zeroIsError` refuses a 0 before the
+/// clamp (a `!WANT` of 0 would read as a one-second light once clamped).
+bool opinionArg(Arg& a, uint32_t lowest, uint32_t highest, bool zeroIsError) {
+  if (a.equals("-")) {
+    return true;
+  }
+  uint32_t raw = 0;
+  if (!parseU32(a, raw) || (zeroIsError && raw == 0U)) {
+    return false;
+  }
+  return clampArg(a, lowest, highest);
+}
+
+bool cfgKeyArg(const Arg& a) {
+  if (a.empty() || a.size() > 6U) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (a.c_str()[i] < 'A' || a.c_str()[i] > 'Z') {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ackIdArg(const Arg& a) {
+  uint32_t ignored = 0;
+  if (!a.empty() && a.c_str()[0] == 'S') {
+    Arg seq;
+    static_cast<void>(seq.set(a.c_str() + 1));
+    return parseBounded(seq, 255U, ignored);
+  }
+  return parseBounded(a, 255U, ignored) && ignored != 0U;
+}
+
+/// The tag on a v3 relay frame: 1..255, no leading zero (0 would collide with
+/// "untagged").
+bool tagArg(const Arg& a) {
+  uint32_t tag = 0;
+  return parseBounded(a, 255U, tag) && tag != 0U;
+}
+
+/// One v3 argument by its grammar letter (kVerbSpecs' `grammar`):
+///   s seq 0-255 · r row 0-3 · o column offset 0|24 · X text · m mask 1-15 ·
+///   H hold, clamped [1,120] · f flags 0-255 · h four uppercase hex ·
+///   t tag 1-255 · w '-' or seconds 1-5400 (clamped, 0 refused) ·
+///   k CFG key, 1-6 uppercase letters · v value 0-65535 ·
+///   l '-' or seconds 0-86400 (clamped) · T note TTL [0,3600] · P live [1,120] ·
+///   a ack id (tag or S<seq>) · e ack code 0-4 · b two uppercase hex ·
+///   G held seconds [5,60] · n any decimal.
+bool v3Arg(char letter, Arg& a) {
+  uint32_t value = 0;
+  switch (letter) {
+  case 's': return parseBounded(a, 255U, value);
+  case 'r': return parseBounded(a, kMaxRows - 1U, value);
+  case 'o': return parseBounded(a, kRwSegment, value) && (value == 0U || value == kRwSegment);
+  case 'X': return true;
+  case 'm': return parseBounded(a, 15U, value) && value != 0U;
+  case 'H': return clampArg(a, kShowHoldMinSeconds, kShowHoldMaxSeconds);
+  case 'f': return parseBounded(a, 255U, value);
+  case 'h': return isUpperHex(a, 4U);
+  case 't': return tagArg(a);
+  case 'w': return opinionArg(a, kRelayMinSeconds, kRelayHardCapSeconds, true);
+  case 'k': return cfgKeyArg(a);
+  case 'v': return parseBounded(a, 65535U, value);
+  case 'l': return opinionArg(a, 0U, kLandMaxSeconds, false);
+  case 'T': return clampArg(a, 0U, kNoteMaxSeconds);
+  case 'P': return clampArg(a, kLiveMinSeconds, kLiveMaxSeconds);
+  case 'a': return ackIdArg(a);
+  case 'e': return parseBounded(a, kAckMaxCode, value);
+  case 'b': return isUpperHex(a, 2U);
+  case 'G': return clampArg(a, kHeldMinSeconds, kHeldMaxSeconds);
+  case 'n': return parseU32(a, value);
+  default: return false;
+  }
+}
+
+bool wrongDirection(Link link, Dir dir) {
+  return (dir == Dir::Down && link == Link::Uplink) || (dir == Dir::Up && link == Link::Downlink);
+}
+
+} // namespace
+
+DecodeError Decoder::buildFrame(Link link, Arg* fields, uint8_t count, Frame& out) {
   const Verb v = verbFromName(fields[0].c_str());
   if (v == Verb::Unknown) {
     return DecodeError::BadVerb;
@@ -461,7 +607,25 @@ DecodeError Decoder::buildFrame(Arg* fields, uint8_t count, Frame& out) {
     return DecodeError::BadArg;
   }
 
+  // Direction is part of the v3 grammar: a relay verb echoed back by a wiring
+  // fault is never acted on (see Dir for why v2's verbs stay Any).
+  if (wrongDirection(link, spec.dir)) {
+    return DecodeError::BadVerb;
+  }
+
   Arg* args = fields + 1;
+  if (spec.grammar != nullptr) {
+    for (uint8_t i = 0; i < argc; ++i) {
+      if (!v3Arg(spec.grammar[i], args[i])) {
+        return DecodeError::BadArg;
+      }
+    }
+    out = Frame::fromValidated(spec, args, argc);
+    return DecodeError::None;
+  }
+  if (spec.optionalTag && argc == spec.maxArgs && !tagArg(args[argc - 1U])) {
+    return DecodeError::BadArg;
+  }
   if (v == Verb::Row) {
     uint8_t rowIndex = 0;
     const DecodeError e = rowIndexOf(args[0], rowIndex);
@@ -496,7 +660,7 @@ DecodeError Decoder::buildFrame(Arg* fields, uint8_t count, Frame& out) {
   // ON goes through its own constructor rather than the generic path, so the
   // "no ON without a duration" rule is enforced by the same code on the wire
   // side as on the API side.
-  out = (v == Verb::On) ? Frame::on(court, seconds) : Frame::fromValidated(spec, args, argc);
+  out = (v == Verb::On && argc == spec.minArgs) ? Frame::on(court, seconds) : Frame::fromValidated(spec, args, argc);
   return DecodeError::None;
 }
 
@@ -522,7 +686,7 @@ bool Decoder::parseV2(const char* line, size_t n) {
   DecodeError e = splitBody(line + 1, bodyLen, fields, count);
   Frame f;
   if (e == DecodeError::None) {
-    e = buildFrame(fields, count, f);
+    e = buildFrame(link_, fields, count, f);
   }
   return e == DecodeError::None ? pushFrame(f) : pushError(e);
 }
