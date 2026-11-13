@@ -64,31 +64,12 @@ public static class AdminPaymentEndpoints
 
         await using var tx = await SettingsDocument.LockAsync(db, tenant.TenantId, ct);
         var stored = await secrets.ReadStoredAsync(ct);
-        var next = new StoredPayFast(
-            Clean(req.MerchantId) ?? stored?.MerchantId ?? "",
-            Clean(req.MerchantKey) ?? stored?.MerchantKey ?? "",
-            req.Passphrase ?? stored?.SigningSecret ?? "",
-            Clean(req.Environment)?.ToLowerInvariant() ?? stored?.Environment ?? PayFastEnvironment.Test);
+        var next = Merge(req, stored);
 
         var problems = PayFastCredentialRules.Problems(next.MerchantId, next.MerchantKey, next.Passphrase, next.Environment, secrets.PassphraseRequired);
         if (problems.Count > 0) return Results.BadRequest(new { error = "payfast_credentials_invalid", problems });
 
-        var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
-        if (row is null)
-        {
-            row = new Domain.TenantSettings { TenantId = tenant.TenantId, SettingsJson = "{}" };
-            db.TenantSettings.Add(row);
-        }
-        var doc = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.SettingsJson) ?? [];
-        doc["payfast"] = JsonSerializer.SerializeToElement(new
-        {
-            merchant_id = next.MerchantId,
-            merchant_key = next.MerchantKey,
-            passphrase = next.Passphrase,
-            environment = next.Environment,
-        });
-        row.SettingsJson = JsonSerializer.Serialize(doc);
-        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await WriteAsync(db, tenant.TenantId, next, ct);
 
         if (Diff(stored, next) is { } change)
         {
@@ -110,30 +91,64 @@ public static class AdminPaymentEndpoints
 
     private sealed record StoredPayFast(string MerchantId, string MerchantKey, string Passphrase, string Environment);
 
+    /// <summary>The request over what is stored: each field the request omits keeps its stored value.</summary>
+    private static StoredPayFast Merge(PayFastSettingsRequest req, Payments.PerTenantCredentials? stored)
+    {
+        return new StoredPayFast(
+            Clean(req.MerchantId) ?? stored?.MerchantId ?? "",
+            Clean(req.MerchantKey) ?? stored?.MerchantKey ?? "",
+            req.Passphrase ?? stored?.SigningSecret ?? "",
+            Clean(req.Environment)?.ToLowerInvariant() ?? stored?.Environment ?? PayFastEnvironment.Test);
+    }
+
+    /// <summary>Writes the <c>payfast</c> object into the club's settings document, leaving every other key alone. Does not save.</summary>
+    private static async Task WriteAsync(MainframeDbContext db, Guid tenantId, StoredPayFast next, CancellationToken ct)
+    {
+        var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenantId, ct);
+        if (row is null)
+        {
+            row = new Domain.TenantSettings { TenantId = tenantId, SettingsJson = "{}" };
+            db.TenantSettings.Add(row);
+        }
+        var doc = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.SettingsJson) ?? [];
+        doc["payfast"] = JsonSerializer.SerializeToElement(new
+        {
+            merchant_id = next.MerchantId,
+            merchant_key = next.MerchantKey,
+            passphrase = next.Passphrase,
+            environment = next.Environment,
+        });
+        row.SettingsJson = JsonSerializer.Serialize(doc);
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>The changed fields, with the passphrase reduced to whether it was set — never its value.</summary>
     private static (Dictionary<string, object?> Before, Dictionary<string, object?> After)? Diff(Payments.PerTenantCredentials? stored, StoredPayFast next)
     {
-        var before = new Dictionary<string, object?>();
-        var after = new Dictionary<string, object?>();
-        void Field(string key, string? was, string now)
-        {
-            if (string.Equals(was ?? "", now, StringComparison.Ordinal)) return;
-            before[key] = string.IsNullOrEmpty(was) ? null : was;
-            after[key] = now;
-        }
-        Field("merchant_id", stored?.MerchantId, next.MerchantId);
-        Field("merchant_key", stored?.MerchantKey, next.MerchantKey);
-        Field("environment", stored?.Environment, next.Environment);
+        var change = (Before: new Dictionary<string, object?>(), After: new Dictionary<string, object?>());
+        Field(change, "merchant_id", stored?.MerchantId, next.MerchantId);
+        Field(change, "merchant_key", stored?.MerchantKey, next.MerchantKey);
+        Field(change, "environment", stored?.Environment, next.Environment);
+        PassphraseChange(change, stored?.SigningSecret, next.Passphrase);
+        return change.After.Count == 0 ? null : change;
+    }
 
-        var hadPhrase = !string.IsNullOrEmpty(stored?.SigningSecret);
-        if (!string.Equals(stored?.SigningSecret ?? "", next.Passphrase, StringComparison.Ordinal))
-        {
-            before["passphrase"] = hadPhrase ? "set" : "not set";
-            after["passphrase"] = next.Passphrase.Length == 0 ? "cleared" : hadPhrase ? "changed" : "set";
-        }
-        return after.Count == 0 ? null : (before, after);
+    private static void Field((Dictionary<string, object?> Before, Dictionary<string, object?> After) change, string key, string? was, string now)
+    {
+        if (string.Equals(was ?? "", now, StringComparison.Ordinal)) return;
+        change.Before[key] = string.IsNullOrEmpty(was) ? null : was;
+        change.After[key] = now;
+    }
+
+    /// <summary>Whether the passphrase was set, changed or cleared — the only thing the record may say about it.</summary>
+    private static void PassphraseChange((Dictionary<string, object?> Before, Dictionary<string, object?> After) change, string? was, string now)
+    {
+        if (string.Equals(was ?? "", now, StringComparison.Ordinal)) return;
+        var had = !string.IsNullOrEmpty(was);
+        change.Before["passphrase"] = had ? "set" : "not set";
+        change.After["passphrase"] = now.Length == 0 ? "cleared" : had ? "changed" : "set";
     }
 
     /// <summary>The read: what is stored (no passphrase), whether payments are on, and every reason they are not.</summary>

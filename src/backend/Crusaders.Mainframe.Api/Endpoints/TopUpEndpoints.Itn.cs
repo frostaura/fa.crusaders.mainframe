@@ -154,12 +154,16 @@ public static partial class TopUpEndpoints
             return settled ?? Results.BadRequest(new { error = "amount_mismatch" });
         }
 
-        if (interp.Successful) return await CompleteAsync(itn, pending, ct);
+        return interp.Successful ? await CompleteAsync(itn, pending, ct) : await CloseNotCompletedAsync(itn, pending, ct);
+    }
 
-        // CANCELLED is the member's own decision and a distinct terminal state; FAILED is the card.
-        var cancelled = string.Equals(interp.ResultCode, "CANCELLED", StringComparison.OrdinalIgnoreCase);
+    /// <summary>A confirmed notification that is not a success: CANCELLED is the member's own decision and a distinct terminal state; FAILED is the card.</summary>
+    private static async Task<IResult> CloseNotCompletedAsync(Itn itn, PendingTopup pending, CancellationToken ct)
+    {
+        var code = itn.Interp.ResultCode;
+        var cancelled = string.Equals(code, "CANCELLED", StringComparison.OrdinalIgnoreCase);
         var reason = cancelled ? FailureCodes.Cancelled
-            : string.Equals(interp.ResultCode, "FAILED", StringComparison.OrdinalIgnoreCase) ? FailureCodes.Declined
+            : string.Equals(code, "FAILED", StringComparison.OrdinalIgnoreCase) ? FailureCodes.Declined
             : FailureCodes.GatewayError;
         return await CloseAsync(itn, pending, cancelled ? TopUpStatus.Cancelled : TopUpStatus.Failed, reason, ct)
                ?? Results.Ok(new { ok = false, reason });
@@ -251,7 +255,7 @@ public static partial class TopUpEndpoints
 
         var key = $"{AdminEventCatalogue.TopUpFailed}:{reason}:{paymentId}";
         var raisedBefore = await itn.Db.AdminNotifications.AsNoTracking().AnyAsync(n => n.DedupeKey == key, ct);
-        await TopUpAlerts.RaiseNotAddedAsync(itn.Db, itn.TenantRow.Id, reason, paymentId, itn.Interp.AmountGross, pending, ct);
+        await TopUpAlerts.RaiseNotAddedAsync(itn.Db, itn.TenantRow.Id, new NotAddedPayment(reason, paymentId, itn.Interp.AmountGross), pending, ct);
         if (!raisedBefore) await MailNotAddedAsync(itn, pending, reason == TopUpAlerts.PaidTwice, paymentId, ct);
 
         return Results.Ok(new { ok = false, reason, purchase_id = pending.Id });
@@ -290,13 +294,31 @@ public static partial class TopUpEndpoints
         return null;
     }
 
-    private static PendingTopup Closed(PendingTopup p, TopUpStatus status, string reason, DateTimeOffset at) => new()
+    // Block body, not an expression body: lizard's C# parser reads the `{` of an object initialiser
+    // in an expression body as the end of the function (memory/gotchas-gates.md).
+    private static PendingTopup Closed(PendingTopup p, TopUpStatus status, string reason, DateTimeOffset at)
     {
-        Id = p.Id, TenantId = p.TenantId, UserId = p.UserId, AmountZar = p.AmountZar, PackageId = p.PackageId,
-        PackageName = p.PackageName, Minutes = p.Minutes, ListPriceZar = p.ListPriceZar, DiscountBps = p.DiscountBps,
-        GroupId = p.GroupId, IdempotencyKey = p.IdempotencyKey, GatewayCheckoutId = p.GatewayCheckoutId,
-        ExternalReference = p.ExternalReference, Status = status, FailureReason = reason, CreatedAt = p.CreatedAt, CompletedAt = at,
-    };
+        return new PendingTopup
+        {
+            Id = p.Id,
+            TenantId = p.TenantId,
+            UserId = p.UserId,
+            AmountZar = p.AmountZar,
+            PackageId = p.PackageId,
+            PackageName = p.PackageName,
+            Minutes = p.Minutes,
+            ListPriceZar = p.ListPriceZar,
+            DiscountBps = p.DiscountBps,
+            GroupId = p.GroupId,
+            IdempotencyKey = p.IdempotencyKey,
+            GatewayCheckoutId = p.GatewayCheckoutId,
+            ExternalReference = p.ExternalReference,
+            Status = status,
+            FailureReason = reason,
+            CreatedAt = p.CreatedAt,
+            CompletedAt = at,
+        };
+    }
 
     /// <summary>The purchase row while it is still open to the gateway: Pending, or closed on our word (M4-1).</summary>
     private static IQueryable<PendingTopup> OpenRow(MainframeDbContext db, Guid id) =>
@@ -333,7 +355,8 @@ public static partial class TopUpEndpoints
 
         var completion = new TopUpCompletion(
             itn.Db, itn.Service<LedgerService>(), itn.Service<TenantSettingsAccessor>(), itn.Service<IEmailService>(),
-            itn.Service<IEventBus>(), itn.Logger) { Club = itn.Service<ClubIdentityResolver>() };
+            itn.Service<IEventBus>(), itn.Logger)
+        { Club = itn.Service<ClubIdentityResolver>() };
         var symbol = CurrencySymbol.For(await completion.Settings.GetAsync(ct));
         await AnnounceAsync(completion, pending, itn.TenantRow, paymentId, symbol, ct);
         return Results.Ok(new { ok = true, minutes = pending.Minutes, package_id = pending.PackageId });

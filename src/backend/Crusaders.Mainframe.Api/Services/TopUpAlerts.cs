@@ -98,10 +98,10 @@ public static class TopUpAlerts
     /// money the desk has to find. Once per payment id.
     /// </summary>
     public static async Task RaiseNotAddedAsync(
-        MainframeDbContext db, Guid tenantId, string reason, string paymentId, decimal? amountGross, PendingTopup pending, CancellationToken ct)
+        MainframeDbContext db, Guid tenantId, NotAddedPayment payment, PendingTopup pending, CancellationToken ct)
     {
         var name = await NameOfAsync(db, pending.UserId, ct);
-        var notice = AdminNotices.TopUpNotAdded(reason, paymentId, amountGross, name, pending);
+        var notice = AdminNotices.TopUpNotAdded(payment.Reason, payment.PaymentId, payment.AmountGross, name, pending);
         await AdminNotices.RaiseAsync(db, tenantId, notice, DateTimeOffset.UtcNow, ct);
     }
 
@@ -112,3 +112,6 @@ public static class TopUpAlerts
     private static async Task<string?> NameOfAsync(MainframeDbContext db, Guid userId, CancellationToken ct) =>
         await db.Memberships.AsNoTracking().Where(m => m.UserId == userId).Select(m => m.FullName).FirstOrDefaultAsync(ct);
 }
+
+/// <summary>A PayFast payment that was received and not added as minutes: why, its PayFast id, and the rand it reports.</summary>
+public sealed record NotAddedPayment(string Reason, string PaymentId, decimal? AmountGross);

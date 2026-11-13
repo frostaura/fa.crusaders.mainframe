@@ -642,7 +642,7 @@ public sealed class ShareLedger
             Joined = why.Joined,
         },
             move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, why with { Scan = partnerScan }), settings,
-            Own(move.PartnerUserId));
+            new Told(Own(move.PartnerUserId)));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended,
                 ClubRefund: refund, KeptMinutes: kept, Withdrew: seat.Withdrew)
@@ -654,7 +654,7 @@ public sealed class ShareLedger
             Joined = why.Joined,
         },
             move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, why with { Scan = organiserScan }), settings,
-            Own(move.OrganiserUserId), mail: !who.PartOfShare);
+            new Told(Own(move.OrganiserUserId), Mail: !who.PartOfShare));
         return new ShareWhy(cause, kept, f.Scanner)
         {
             ActorUserId = actor,
@@ -824,13 +824,16 @@ public sealed class ShareLedger
     /// somebody else made on their money (the partner's payment to the organiser, the club's
     /// collect) is news and arrives unread.
     /// </param>
-    private void Stage(SharePayload payload, Guid userId, string key, string headline, TenantSettingsView settings, bool ownAction, bool mail = true)
+    /// <summary>How one receipt reaches its reader: born read for their own act, and whether it is mailed (BM-21).</summary>
+    private readonly record struct Told(bool OwnAction, bool Mail = true);
+
+    private void Stage(SharePayload payload, Guid userId, string key, string headline, TenantSettingsView settings, Told told)
     {
         MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
             userId, MemberEventCatalogue.ShareMoved, key, payload, headline, BookingPath(payload.BookingId, payload.OffGameSeatId), payload.BookingId)
         {
-            BornRead = ownAction,
-            Email = mail,
+            BornRead = told.OwnAction,
+            Email = told.Mail,
         }, settings);
     }
 

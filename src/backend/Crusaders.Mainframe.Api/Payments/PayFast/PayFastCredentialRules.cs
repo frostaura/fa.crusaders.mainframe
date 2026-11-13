@@ -63,15 +63,19 @@ public static partial class PayFastCredentialRules
         if (merchantId is null || IsPlaceholder(merchantId) || !MerchantIdShape().IsMatch(merchantId)) problems.Add(MerchantIdInvalid);
         if (merchantKey is null || IsPlaceholder(merchantKey) || !MerchantKeyShape().IsMatch(merchantKey)) problems.Add(MerchantKeyInvalid);
 
-        var phrase = passphrase ?? "";
-        if (IsPlaceholder(phrase)) problems.Add(PassphraseInvalid);
-        else if (phrase.Length == 0) { if (requirePassphrase) problems.Add(PassphraseRequired); }
-        else if (phrase.Length < MinPassphraseLength) problems.Add(PassphraseTooShort);
-        else if (phrase.Length > MaxPassphraseLength) problems.Add(PassphraseTooLong);
-        else if (phrase.Any(char.IsControl) || phrase != phrase.Trim()) problems.Add(PassphraseInvalid);
-
+        if (PassphraseProblem(passphrase ?? "", requirePassphrase) is { } phraseProblem) problems.Add(phraseProblem);
         if (!PayFastEnvironment.IsRecognised(environment)) problems.Add(EnvironmentInvalid);
         return problems;
+    }
+
+    /// <summary>What is wrong with a passphrase, or null when nothing is.</summary>
+    private static string? PassphraseProblem(string phrase, bool requirePassphrase)
+    {
+        if (IsPlaceholder(phrase)) return PassphraseInvalid;
+        if (phrase.Length == 0) return requirePassphrase ? PassphraseRequired : null;
+        if (phrase.Length < MinPassphraseLength) return PassphraseTooShort;
+        if (phrase.Length > MaxPassphraseLength) return PassphraseTooLong;
+        return phrase.Any(char.IsControl) || phrase != phrase.Trim() ? PassphraseInvalid : null;
     }
 
     private static bool IsPlaceholder(string value) =>

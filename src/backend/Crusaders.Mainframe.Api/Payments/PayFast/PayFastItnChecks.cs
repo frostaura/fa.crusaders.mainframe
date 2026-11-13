@@ -201,14 +201,18 @@ public sealed class PayFastSourceCheck
     }
 
     /// <summary>An unrecognised mode is refused at startup rather than read as "off".</summary>
-    public static SourceCheckMode ParseMode(string? value) => value?.Trim().ToLowerInvariant() switch
+    public static SourceCheckMode ParseMode(string? value)
     {
-        null or "" or "advisory" => SourceCheckMode.Advisory,
-        "enforce" => SourceCheckMode.Enforce,
-        "off" => SourceCheckMode.Off,
-        _ => throw new InvalidOperationException(
-            $"{ModeConfigKey} '{value}' is not one of advisory, enforce, off."),
-    };
+        // Block body for the lizard reason in memory/gotchas-gates.md (a switch in an expression body).
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "advisory" => SourceCheckMode.Advisory,
+            "enforce" => SourceCheckMode.Enforce,
+            "off" => SourceCheckMode.Off,
+            _ => throw new InvalidOperationException(
+                $"{ModeConfigKey} '{value}' is not one of advisory, enforce, off."),
+        };
+    }
 
     public async Task<SourceVerdict> JudgeAsync(IPAddress? peer, CancellationToken ct)
     {
