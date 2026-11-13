@@ -11,7 +11,8 @@ import { renderPage, signIn, signOut, stubFetch, type StubRoute } from "@/test/h
  * Go-live member pass, lane frontend-member.
  * - FM-1: a transient 5xx on Register keeps the submit button (only a club that does not resolve hides it).
  * - FM-4: the photo is uploaded once across retries; an unanswered application says it may have
- *   arrived, and a later "email in use" is said as the first try having landed.
+ *   arrived, and a resend lands (BP-14 answers every well-formed application alike). A photo the
+ *   API refuses (BP-06) is uploaded afresh on the next try.
  * - FM-2: dismissing the browser's passkey sheet (NotAllowedError / AbortError) is not a failure.
  */
 vi.setConfig({ testTimeout: 15_000 });
@@ -58,33 +59,34 @@ describe("Register after a failure (FM-1)", () => {
 });
 
 describe("Register when the reply goes missing (FM-4)", () => {
-  it("uploads the photo once across retries and says an unanswered application may have arrived", async () => {
-    const stub = register({ status: [504, 409], sequence: [{}, { error: "email_in_use" }] });
+  it("uploads the photo once across retries, says an unanswered application may have arrived, and a resend lands", async () => {
+    // BP-14: every well-formed application is answered alike, so the resend after a lost reply is
+    // the same 200 whether or not the first one arrived — and the mailbox says which it was.
+    const stub = register({ status: [504, 200], sequence: [{}, { status: "pending_email_verification" }] });
     await fillAndSubmit();
     expect(await screen.findByText(new RegExp(REGISTER_UNSURE.mayHaveArrived.slice(0, 30)))).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
-    expect(await screen.findByText(REGISTER_UNSURE.probablyArrived)).toBeInTheDocument();
-    // Not the field's "that email is taken" sentence: it is very likely their own first try.
-    expect(screen.queryByText(REGISTER_MESSAGES.email_in_use)).toBeNull();
+    expect(await screen.findByText(/Check your inbox/i)).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.path === "/api/v1/uploads/photo")).toHaveLength(1);
     expect(stub.calls.filter((c) => c.path === "/api/v1/auth/register")).toHaveLength(2);
   });
 
-  it("an ANSWERED 500 is not 'may have arrived', and a later email_in_use is the plain field refusal", async () => {
-    register({ status: [500, 409], sequence: [{}, { error: "email_in_use" }] });
+  it("an ANSWERED 500 is not 'may have arrived'", async () => {
+    register({ status: 500, body: {} });
     await fillAndSubmit();
     await screen.findByText(/try again/i);
     expect(screen.queryByText(new RegExp(REGISTER_UNSURE.mayHaveArrived.slice(0, 30)))).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
-    expect(await screen.findByText(REGISTER_MESSAGES.email_in_use)).toBeInTheDocument();
-    expect(screen.queryByText(REGISTER_UNSURE.probablyArrived)).toBeNull();
   });
 
-  it("a fresh email_in_use with no lost reply before it is still the field's refusal", async () => {
-    register({ status: 409, body: { error: "email_in_use" } });
-    await fillAndSubmit();
-    expect(await screen.findByText(REGISTER_MESSAGES.email_in_use)).toBeInTheDocument();
-  });
+  it.each(["photo_required", "photo_url_invalid", "photo_missing"])(
+    "a refused photo (%s) lands on the photo, and the next try uploads it again", async (code) => {
+      const stub = register({ status: [400, 200], sequence: [{ error: code }, { status: "pending_email_verification" }] });
+      await fillAndSubmit();
+      expect(await screen.findByText(REGISTER_MESSAGES[code])).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+      expect(await screen.findByText(/Check your inbox/i)).toBeInTheDocument();
+      expect(stub.calls.filter((c) => c.path === "/api/v1/uploads/photo")).toHaveLength(2);
+    });
 });
 
 function browserSheet(get: () => Promise<unknown>, create: () => Promise<unknown> = () => Promise.resolve(null)) {

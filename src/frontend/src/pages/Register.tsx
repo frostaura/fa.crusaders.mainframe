@@ -32,9 +32,11 @@ const ORDER: Key[] = ["fullName", "email", "membershipNumber", "password", "phot
 
 /** Which field an API refusal is about. Anything not listed is about the application as a whole. */
 const FIELD_OF_CODE: Record<string, Key> = {
-  email_in_use: "email",
-  membership_number_in_use: "membershipNumber",
   password_too_short: "password",
+  photo_required: "photo",
+  photo_url_invalid: "photo",
+  photo_missing: "photo",
+  uploads_paused: "photo",
   unsupported_content_type: "photo",
   file_too_large: "photo",
   file_missing: "photo",
@@ -142,13 +144,14 @@ function useRegisterForm(refs: () => FieldRefs) {
  * can go missing after it landed. Nothing unauthenticated can read an application back (that would
  * say whether an address is registered), so the screen remembers instead: the photo uploaded once is
  * reused by every retry of the same file (no orphan per press), and a register request that went
- * unanswered (`answerReasonOf` "silent": a timeout, a torn connection, a 502/503/504) is remembered
- * so a later `email_in_use` is said as "your first try probably arrived", not "that email is taken".
+ * unanswered (`answerReasonOf` "silent": a timeout, a torn connection, a 502/503/504) is said to have
+ * maybe arrived. Sending it again is safe: the API answers every well-formed application alike
+ * (BP-14) and tells the mailbox what really happened, so a second try can never be "that email is
+ * taken".
  */
 function useLostRegistration() {
   const uploaded = useRef<{ file: File; url: string } | null>(null);
   const stage = useRef<"photo" | "register">("photo");
-  const unsure = useRef(false);
   return {
     photoUrlFor: async (photo: File): Promise<string> => {
       stage.current = "photo";
@@ -159,13 +162,11 @@ function useLostRegistration() {
       return url;
     },
     sending: () => { stage.current = "register"; },
-    /** True when this failure may hide an application that arrived; remembered for the next try. */
-    failed: (err: unknown): boolean => {
-      const maybe = stage.current === "register" && outcomeUnknown(err) && answerReasonOf(err) === "silent";
-      if (maybe) unsure.current = true;
-      return maybe;
-    },
-    wasUnsure: () => unsure.current,
+    /** True when this failure may hide an application that arrived. */
+    failed: (err: unknown): boolean =>
+      stage.current === "register" && outcomeUnknown(err) && answerReasonOf(err) === "silent",
+    /** The API refused the photo it was handed (BP-06): the next try uploads it afresh. */
+    forgetPhoto: () => { uploaded.current = null; },
   };
 }
 
@@ -195,13 +196,9 @@ export default function RegisterPage() {
     success: () => setSubmitted(true),
     failure: (err) => {
       const code = errorCode(err) ?? "";
-      // FM-4 — an earlier try's reply went missing and THIS one says the address is taken: that is
-      // almost certainly the first try having landed, not somebody else's account.
-      if (code === "email_in_use" && lost.wasUnsure()) {
-        setFailure(REGISTER_UNSURE.probablyArrived);
-        setBlocked(false);
-        return;
-      }
+      // A refused photo is forgotten, so the next submit uploads it again rather than naming the
+      // same refused file (BP-06: only a photo this club issued, still on file, is accepted).
+      if (FIELD_OF_CODE[code] === "photo") lost.forgetPhoto();
       const field = FIELD_OF_CODE[code];
       const message = describeFailure(err, { codes: REGISTER_MESSAGES, action: "submit your application" });
       if (field) form.refuse({ [field]: message });

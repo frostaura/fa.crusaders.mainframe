@@ -423,7 +423,7 @@ describe("Register — one message per mistake", () => {
   it("says why it will not send an application with no photo, on the field, once", async () => {
     const stub = stubFetch([
       { method: "POST", path: "/api/v1/uploads/photo", body: { url: "/uploads/crusaders/photos/x.png" } },
-      { method: "POST", path: "/api/v1/auth/register", body: { user_id: "u1", status: "pending_email_verification" } },
+      { method: "POST", path: "/api/v1/auth/register", body: { status: "pending_email_verification" } },
     ]);
     renderAt(<RegisterPage />);
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Ada Lovelace" } });
@@ -473,20 +473,19 @@ describe("Register — one message per mistake", () => {
   });
 
   /** A refusal that is about one field lands ON that field, not in a banner at the foot. */
-  it("puts a taken email address on the Email field", async () => {
+  it("puts a refused photo on the photo field", async () => {
     stubFetch([
       { method: "POST", path: "/api/v1/uploads/photo", body: { url: "/uploads/crusaders/photos/x.png" } },
-      err("/api/v1/auth/register", 409, { error: "email_in_use" }),
+      err("/api/v1/auth/register", 400, { error: "photo_missing" }),
     ]);
     renderAt(<RegisterPage />);
     await fill();
     submit();
 
-    const message = await screen.findByText(REGISTER_MESSAGES.email_in_use);
-    const email = screen.getByLabelText(REGISTER.email);
-    expect(email).toHaveAttribute("aria-invalid", "true");
-    expect(email.getAttribute("aria-describedby")).toContain(message.closest("p")!.id);
-    expect(document.activeElement).toBe(email);
+    const message = await screen.findByText(REGISTER_MESSAGES.photo_missing);
+    const photo = screen.getByLabelText("Photo of yourself");
+    expect(photo).toHaveAttribute("aria-invalid", "true");
+    expect(photo.getAttribute("aria-describedby")).toContain(message.closest("p")!.id);
   });
 
   it("lets the applicant see the password they typed", async () => {
@@ -536,7 +535,7 @@ describe("Register — one message per mistake", () => {
   it("tells an applicant how long approval takes, on the screen they land on", async () => {
     stubFetch([
       { method: "POST", path: "/api/v1/uploads/photo", body: { url: "/uploads/crusaders/photos/x.png" } },
-      { method: "POST", path: "/api/v1/auth/register", body: { user_id: "u1", status: "pending_email_verification" } },
+      { method: "POST", path: "/api/v1/auth/register", body: { status: "pending_email_verification" } },
     ]);
     renderAt(<RegisterPage />);
     await fill();
@@ -544,19 +543,6 @@ describe("Register — one message per mistake", () => {
 
     expect(await screen.findByText(/Check your inbox/i)).toBeInTheDocument();
     expect(screen.getByText(/day or two/i)).toBeInTheDocument();
-  });
-
-  it("names a taken membership number instead of telling the applicant to try again", async () => {
-    stubFetch([
-      { method: "POST", path: "/api/v1/uploads/photo", body: { url: "/uploads/crusaders/photos/x.png" } },
-      err("/api/v1/auth/register", 409, { error: "membership_number_in_use" }),
-    ]);
-    renderAt(<RegisterPage />);
-    await fill();
-    submit();
-
-    expect(await screen.findByText(/membership number is already registered/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Try again\./i)).not.toBeInTheDocument();
   });
 
   it("does not blame the password for a missing field", async () => {

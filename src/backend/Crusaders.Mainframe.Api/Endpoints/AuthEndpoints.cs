@@ -148,8 +148,10 @@ public static class AuthEndpoints
     private static async Task<IResult> VerifyAsync(string? token, AuthService auth, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(token)) return Results.BadRequest(new { error = "invalid_or_expired" });
-        var ok = await auth.VerifyEmailAsync(token, ct);
-        return ok ? Results.Ok(new { verified = true }) : Results.BadRequest(new { error = "invalid_or_expired" });
+        var verified = await auth.VerifyEmailAsync(token, ct);
+        return verified is null
+            ? Results.BadRequest(new { error = "invalid_or_expired" })
+            : Results.Ok(new { verified = true, approved = verified.Approved });
     }
 
     /// <summary>

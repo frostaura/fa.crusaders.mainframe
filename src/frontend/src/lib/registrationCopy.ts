@@ -61,9 +61,15 @@ export const REGISTER_FIELD = {
 export const REGISTER_MESSAGES: Record<string, string> = {
   missing_fields: "Please fill in every field — name, email, membership number and password.",
   password_too_short: "Your password must be at least 8 characters.",
-  email_in_use: "An account with that email already exists. Sign in instead, or reset your password.",
-  membership_number_in_use:
-    "That membership number is already registered. Check the number on your card — if it's right, contact the club committee.",
+
+  // BP-06: the application names a photo the club's own upload issued, still on file and nobody
+  // else's. Reaching one of these means the upload a moment ago was lost or refused — choosing the
+  // photo again uploads it again.
+  photo_required: "Add a photo of yourself — the club's booking grid shows it beside your name.",
+  photo_url_invalid: "The club's system didn't recognise that photo. Pick it again and resubmit.",
+  photo_missing: "The club's system no longer has that photo. Pick it again and resubmit.",
+  // BP-04: the club's uploads are paused for a while because too much has been uploaded recently.
+  uploads_paused: "The club's system isn't taking photos for a little while. Try again in an hour.",
 
   // The upload endpoint's own refusals. They were absent, and that absence is what made a
   // rejected photo read as a network fault: uploadPhoto throws before register() is ever
@@ -80,13 +86,12 @@ export const REGISTER_MESSAGES: Record<string, string> = {
 
 /**
  * FM-4 — the application's reply went missing (a timeout, a dropped connection, the gateway saying
- * the club's system did not answer): it may have arrived. Said beside the failure, and — when the
- * next try is told the address is taken — instead of "an account with that email already exists".
+ * the club's system did not answer): it may have arrived. Said beside the failure. Sending it again
+ * is safe: every well-formed application is answered the same way (BP-14), and what actually
+ * happened — a confirmation link, or "you already have an account" — goes to the mailbox.
  */
 export const REGISTER_UNSURE = {
   mayHaveArrived: "It may have arrived anyway — check your email for a confirmation link before sending it again.",
-  probablyArrived:
-    "Your first try probably arrived: an application with this email is already in. Check your email for the confirmation link — if nothing came, use Forgot password on the sign-in page.",
 } as const;
 
 /**

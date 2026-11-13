@@ -375,13 +375,19 @@ public sealed class AuthService
         return roles;
     }
 
-    public async Task<bool> VerifyEmailAsync(string token, CancellationToken ct)
+    /// <summary>
+    /// Confirms the address a verification link was mailed to. Null when the link is unknown,
+    /// used or expired; otherwise whether the membership is already approved, so the page can say
+    /// "you can sign in" rather than "wait for the committee" (BM-11). Telling the link's holder is
+    /// no oracle: only the mailbox the link went to holds it.
+    /// </summary>
+    public async Task<EmailVerification?> VerifyEmailAsync(string token, CancellationToken ct)
     {
         var hash = TokenHashing.Hash(token);
         var record = await _db.AuthTokens
             .Where(t => t.TokenHash == hash && t.Kind == TokenKind.EmailVerification && t.UsedAt == null)
             .FirstOrDefaultAsync(ct);
-        if (record is null || record.ExpiresAt < DateTimeOffset.UtcNow) return false;
+        if (record is null || record.ExpiresAt < DateTimeOffset.UtcNow) return null;
 
         var user = await _db.Users.FirstAsync(u => u.Id == record.UserId, ct);
         user.EmailVerified = true;
@@ -389,7 +395,8 @@ public sealed class AuthService
         // BM-01: member notices that waited for this address go now, in this save.
         await MemberNoticeHold.ReleaseAsync(_db, user.Id, DateTimeOffset.UtcNow, ct);
         await _db.SaveChangesAsync(ct);
-        return true;
+        var active = await _db.Memberships.AnyAsync(m => m.UserId == user.Id && m.Status == MembershipStatus.Active, ct);
+        return new EmailVerification(user.IsAdmin || active);
     }
 
     public async Task<LoginResult> LoginAsync(string email, string password, CancellationToken ct)
@@ -726,3 +733,6 @@ public abstract record LoginResult
     public sealed record EmailNotVerified : LoginResult;
     public sealed record NotApproved(MembershipStatus Status) : LoginResult;
 }
+
+/// <summary>A confirmed address, and whether its membership is already approved (BM-11).</summary>
+public sealed record EmailVerification(bool Approved);
