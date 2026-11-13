@@ -87,10 +87,6 @@ void text(const char* object, const char* name, char* out, size_t cap) {
   TEST_ASSERT_TRUE_MESSAGE(corpus::stringValue(v, out, cap, nullptr), name);
 }
 
-bool isNull(const char* v) {
-  return corpus::skipWs(v)[0] == 'n';
-}
-
 void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t len, const char* expect) {
   TEST_ASSERT_TRUE_MESSAGE(len * 5U <= gatelogic::kGateHeartbeatResponseCap * 4U, file);
   gatelogic::GateBoardState state;
@@ -140,23 +136,20 @@ void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t 
       if (reporting != nullptr) {
         TEST_ASSERT_EQUAL_MESSAGE(flag(reporting), s.faultReporting, file);
       }
-    } else if (strcmp(name, "ota_version") == 0) {
-      if (isNull(value)) {
-        TEST_ASSERT_FALSE_MESSAGE(read.ota.present(), file);
-        continue;
-      }
+    } else if (strcmp(name, "ota") == 0) {
+      // The emitter names each lifeline object by what identifies it (device-api §11.5).
+      TEST_ASSERT_TRUE_MESSAGE(read.ota.present(), file);
       devota::Offer offer;
       TEST_ASSERT_TRUE_MESSAGE(devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate,
                                                   offer) == devota::Refusal::Ok,
                                file);
-      char want[16] = {};
-      TEST_ASSERT_TRUE(corpus::stringValue(value, want, sizeof(want), nullptr));
+      char want[devota::kPathCap] = {};
+      TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(value, "version"), want, sizeof(want), nullptr));
       TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.version, file);
-    } else if (strcmp(name, "key_next_id") == 0) {
-      if (isNull(value)) {
-        TEST_ASSERT_FALSE_MESSAGE(read.keyNext.present(), file);
-        continue;
-      }
+      TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(value, "path"), want, sizeof(want), nullptr));
+      TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.path, file);
+    } else if (strcmp(name, "key_next") == 0) {
+      TEST_ASSERT_TRUE_MESSAGE(read.keyNext.present(), file);
       devnet::KeyRing ring;
       memcpy(ring.currentId, "k0", 3U);
       ring.currentKey[0] = '-';
@@ -164,16 +157,13 @@ void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t 
       TEST_ASSERT_TRUE_MESSAGE(
           devnet::adoptKeyNext(read.keyNext.at, read.keyNext.len, ring, next) == devnet::Refusal::Ok, file);
       char want[16] = {};
-      TEST_ASSERT_TRUE(corpus::stringValue(value, want, sizeof(want), nullptr));
+      TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(value, "id"), want, sizeof(want), nullptr));
       TEST_ASSERT_EQUAL_STRING_MESSAGE(want, next.currentId, file);
-    } else if (strcmp(name, "net_ver") == 0) {
-      if (isNull(value)) {
-        TEST_ASSERT_FALSE_MESSAGE(read.net.present(), file);
-        continue;
-      }
+    } else if (strcmp(name, "net") == 0) {
+      TEST_ASSERT_TRUE_MESSAGE(read.net.present(), file);
       devnet::NetSet net;
       TEST_ASSERT_TRUE_MESSAGE(devnet::adoptNet(read.net.at, read.net.len, 0U, net).adopted(), file);
-      TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(value), net.ver, file);
+      TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(value, "ver")), net.ver, file);
     } else {
       TEST_FAIL_MESSAGE("a heartbeat expectation this gate does not know how to check");
     }

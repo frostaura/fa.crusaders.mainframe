@@ -79,7 +79,7 @@ class PublishTests(unittest.TestCase):
         self.assertIn("pull_request.number", concurrency["group"])
 
     def test_every_build_waits_for_every_gate_including_this_one(self):
-        gates = {"backend", "frontend", "e2e", "e2e-device", "backend-integration", "iot", "iot-build", "security", "infra"}
+        gates = {"backend", "frontend", "e2e", "e2e-device", "backend-integration", "device-replay", "iot", "iot-build", "security", "infra"}
         for name in BUILD_JOBS:
             with self.subTest(job=name):
                 self.assertEqual(set(self.jobs[name]["needs"]), gates)

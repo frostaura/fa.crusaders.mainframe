@@ -398,6 +398,66 @@ jobs:
           exit 1
 
   # ============================================================================
+  # The server's REAL device replies through the frozen firmware's REAL parsers
+  # (docs/specs/device-api.md section 11.5, FC-9). The corpus pins bytes somebody
+  # wrote down; this pins the bytes the server actually serialises today, for
+  # every heartbeat, activate, walk-up, extend, events and gate reply the
+  # emitter's scenario matrix produces. A server change a box in the field could
+  # not read goes red HERE, before it reaches a club whose Mega can never be
+  # reflashed. A release waits for it like every other gate.
+  # ============================================================================
+  device-replay:
+    name: Device replay (server replies through firmware parsers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crusaders
+          POSTGRES_PASSWORD: crusaders_test_pw
+          POSTGRES_DB: crusaders_mainframe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crusaders"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/iot/requirements.txt
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('src/iot/*/platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install pinned toolchain
+        run: pip install -r src/iot/requirements.txt
+
+      - name: Replay the server's replies through the bridge and the gate
+        env:
+          API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
+          REQUIRE_BOUNDARY_TESTS: "true"
+        run: make device-replay-check PIO=pio TEST_DOTNET=dotnet
+
+  # ============================================================================
   # IoT firmware — host-compiled unit tests, no hardware required.
   #
   # Deliberately has no `needs:`. The backend job carries pre-existing failures,
@@ -582,6 +642,11 @@ jobs:
       # credentials a change to the other's. The court box has no such guard and
       # is unaffected by the values; it gets the same file because one loop is
       # easier to keep true than two.
+      #
+      # Gate 2.0.0 also needs the release key's modulus and the setup portal's
+      # password, and refuses the contract corpus's TEST keys at compile time. The
+      # modulus here is 512 hex characters of nothing (c1 repeated): no image built
+      # from it can ever verify a signature, which is exactly right for a compile check.
       - name: Write a throwaway secrets.h for each board project
         run: |
           set -euo pipefail
@@ -592,6 +657,8 @@ jobs:
           #define WIFI_PASSWORD "ci-build-only"
           #define API_BASE_URL "http://192.0.2.10:8088"
           #define DEVICE_API_KEY "ci-build-only-not-a-real-key"
+          #define OTA_PUBLIC_KEY_N "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"
+          #define SETUP_AP_PASSWORD "ci-build-only"
           SECRETS
           done
 
@@ -972,7 +1039,7 @@ jobs:
     name: Build Backend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security, infra]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -1006,7 +1073,7 @@ jobs:
     name: Build Backend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security, infra]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -1040,7 +1107,7 @@ jobs:
     name: Build Frontend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security, infra]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -1074,7 +1141,7 @@ jobs:
     name: Build Frontend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security, infra]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -1108,7 +1175,7 @@ jobs:
     name: Build Gateway (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security, infra]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -1142,7 +1209,7 @@ jobs:
     name: Build Gateway (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security, infra]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
