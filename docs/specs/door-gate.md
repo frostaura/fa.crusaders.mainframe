@@ -2070,3 +2070,33 @@ cue.
 | **setup portal open** | long-short, repeating |
 | **downloading an update** | 2 Hz |
 | **probation** (new image not yet committed) | one double-blip every 5 s |
+
+### 14.6 Forward compatibility, budgets and telemetry (addendum, 2026-11-13)
+
+[`device-api.md`](device-api.md) §11 and §13 apply to the gate exactly as to the court box; the
+gate-specific consequences:
+
+- **The `gate` object holds scalars only, for the life of the frozen readers** (FC-12). A v3 gate
+  reads its settings as scalars at the top level of `gate` and never searches a nested object, so
+  a later server's `"gate":{"lamp":{"unlock_seconds":30},…}` cannot drive the lock for thirty
+  seconds. The server's test asserts the object has no nested value.
+- **`device_fault_reporting` and `device_fault_max_per_hour` are sent at last** (FC-8), inside
+  `gate` after the three v3 settings, from the tenant settings of the same names. Every gate image
+  has read them from there; no server sent them, so the fault channel ran on compiled defaults.
+- **Budgets** (`compat/` `budgets`): heartbeat 6144 of 8192, the scan decision **110 of 256** (1.x
+  read it into 128 and turned anything longer into status 0, which taught the breaker the server
+  was down, FC-6), events 96 of 192, the heartbeat request rendered into 1536. Every 2xx is a
+  success; an unreadable 2xx scan decision is decided offline.
+- **Telemetry**: the request carries `diag` every beat and `drift` after an answer the gate could
+  not fully read (`gate/` `gate-heartbeat-request-v3-telemetry`). `stack_min` is the loop task's
+  high-water mark; the CI gate holds its worst path under 6000 of 8192 bytes (ESPR-4).
+- **The stall watchdog** of [`device-api.md`](device-api.md) §8: link up, no accepted heartbeat for
+  six hours, restart when idle (lock engaged, nothing waiting).
+- **The gate's hardware facts stay compiled** — the lock relay's level, the lamp pin, the scanner's
+  baud. Unlike the Mega, the gate has no frozen half: an OTA image corrects any of them, so a
+  runtime setting would be code with no case to serve. The scanner already ends a suffix-less line
+  at the idle gap (§14.4, DG-5).
+- **A replay refused locally while online is uploaded as `replayed`**, with the board's link state
+  as it was, not as an offline `unknown_scan` (MCV1-10).
+- **Keys reach a door with a `gate_key` in every phase** ([`member-code.md`](member-code.md) §5.2,
+  MCV1-04), so the phone's v1 code opens it offline before the club's cut-over too.

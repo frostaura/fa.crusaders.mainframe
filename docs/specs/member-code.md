@@ -157,6 +157,11 @@ a door's heartbeat body fitting its 4096-byte contract with headroom and not (§
   characters (`AccessCode.Length`). Nothing can be read both ways.
 - **Parse**: exactly 19 characters; the first is `1` exactly (never normalised); the REF decodes
   per §3.3 and is not `0000`; the last 14 are ASCII digits. Anything else is malformed.
+- **"v1-shaped" means the same thing on every side**: exactly 19 characters **and** a leading `1`
+  — `memcode::looksLikeV1`'s rule. The server's `MemberCodeMath.IsV1Shaped` tested the length
+  only, and 1,981 of 3,006 generated 19-character strings were classified differently; both ended
+  in a refusal, so no access differed, but a forgery re-check and an audit row must not depend on
+  which side looked (MCV1-11).
 - It uses only `[0-9A-Z]`, so it sits in `roster::isTokenChar` and in QR alphanumeric mode, and it
   fits every buffer between the scanner and the server: the Mega's scan line and `!SCAN`
   argument (24), the door's assembler and the roster token cap (20), an event subject (32).
@@ -293,9 +298,12 @@ Four more **top-level** keys, after `roster`:
   when some roster entry's window runs into it. Array position is the slot number.
 - **`code_keys`** — each element exactly 21 characters, no separator:
   `REF (4, canonical) + slot ('0' | '1') + K_day (16 base64url characters = 12 bytes, unpadded)`.
-- **`code_keys` and `code_days` carry keys only when** the tenant's phase is `v1` or `v1_only`
-  (§8) **and** the device is acknowledged — a court box an admin has acknowledged, a door with a
-  `gate_key`. **Every other `codes:m1` device is sent both arrays EMPTY, never omitted**: an absent
+- **`code_keys` and `code_days` carry keys whenever the device is acknowledged** — a court box an
+  admin has acknowledged, a door with a `gate_key` — **in every phase** (2026-11-13, MCV1-04). Until
+  then keys went only to phase `v1`/`v1_only`, while the phone has shown nothing but v1 codes since
+  `42d3990d`: before cut-over no member held a code any board could check offline. Keys do not
+  depend on the phase; only what a legacy code is still accepted for does. **Every other
+  `codes:m1` device is sent both arrays EMPTY, never omitted**: an absent
   `code_keys` means "this server does not do member codes" and a device keeps whatever ring it had
   (§5.5), so omitting them from a board that lost its entitlement — un-acknowledged, a door whose
   `gate_key` was cleared, a club that rolled back — would leave it verifying members until its day
@@ -312,14 +320,21 @@ four REFs**, organiser first, then accepted partners whose membership is active,
 
 5 to 17 characters (4 × 4 + 1 ≤ 20). A lower-case `m` cannot begin a legacy code. A device refuses
 an element whose REF list is not whole, canonical, non-reserved REFs. **One element per booking**:
-a v1 element to a `codes:m1` device in phase `v1`/`v1_only`, the legacy element otherwise. The
+a v1 element to an acknowledged `codes:m1` device in **every** phase (MCV1-04, as §5.2), the legacy
+element otherwise. A v3 board reads the first four fields and ignores any it is later given after
+them ([`device-api.md`](device-api.md) §11.2). The
 roster's source, ordering, cap (16 / 48) and window rules are otherwise exactly as today.
 
 ### 5.4 Which keys, and the budget
 
-For each roster entry in roster order, for each REF in the entry, for each slot whose day range
-intersects the entry's window: add `(REF, slot)` once. Stop at **24** keys (court box) / **72**
-(door); a REF whose key did not fit cannot be verified offline and that is all. The widest bodies
+For each roster entry, for each REF in the entry, for each slot whose day range intersects the
+entry's window: add `(REF, slot)` once, **in priority order** — slot-0 keys of entries whose window
+is already open first, then by window start, slot-1 keys last — so the server's last-first shedding
+drops the least-needed. Stop at **24** keys (a 2.x court box), **64** (a v3 court box, `hb:3`) or
+**72** (door), and wherever the body budget ends first; a REF whose key did not fit cannot be
+verified offline. **Every trimmed key is counted** on the board's device view and the first trim
+raises a device notice (MCV1-07: 12 of 633 booked, in-window offline scans in a generated sample
+were refused only because the 24-key cap had trimmed them). The widest bodies
 the contract allows, generated and asserted in the corpus:
 
 | Device | Widest body (corpus id) | Bytes | Contract | Board buffer |
@@ -398,7 +413,8 @@ server still sees both uploads.
 | replayed | `CODE USED` / `WAIT 30 SECONDS` (arms nothing) | `replayed` | `unknown_scan` |
 | throttled | `TOO MANY TRIES` / `TRY IN A MINUTE` (arms nothing) | `too_fast` | `unknown_scan` |
 | no_clock | the stale roster's screen | `roster_stale` | `unknown_scan` |
-| malformed / no_key / wrong_code | the unknown-token screen | `not_recognised` | `unknown_scan` |
+| no_key, or a verified code with no roster booking for it here, **while offline** | `NO CONNECTION` / `BOOKINGS ONLY` (MCV1-08: a member with nothing booked, or whose key was trimmed, is not an unknown code) | `not_recognised` | `unknown_scan` |
+| malformed / wrong_code | the unknown-token screen | `not_recognised` | `unknown_scan` |
 
 Both lines fit the 16-column safe subset. Offline, a v1 code never buys anything: walk-ups and
 pay-for need the network whatever code is presented.
@@ -469,10 +485,16 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    step, below. Each board then reports `codes:m1`.
 3. **Cut-over, automatic**: the first time **every enabled device** of the tenant reports
    `codes:m1` on its latest heartbeat (and at least one does), the phase becomes `v1` and
-   `member_code_cutover_at` is stamped. Phones switch to v1 codes; `codes:m1` devices get v1 roster
-   elements and keys. Legacy codes are still accepted **online**; offline they stop, because
-   rosters no longer carry them — the stated trade. The console lists the devices blocking
-   cut-over; a dead board blocks it until an admin disables it.
+   `member_code_cutover_at` is stamped, starting the cut-off's clock. Acknowledged `codes:m1`
+   devices already carry v1 roster elements and keys in every phase (§5.2). Legacy codes are still
+   accepted **online**. The console lists the devices blocking cut-over; a dead board blocks it
+   until an admin disables it. **An enabled court box nobody has acknowledged blocks it too while
+   it has been heard in the last seven days** (MCV1-03: one named door cut a club over while all
+   nine of its court boxes were unacknowledged and so held no keys). It can block, never decide —
+   an unacknowledged board still casts no vote towards cut-over — so a stranger's board cannot
+   move the club, and a bench spare that is unplugged stops blocking after a week. Cut-over also
+   waits until every acknowledged court box has accepted a heartbeat carrying keys in the last
+   hour.
 4. **Cut-off, no sooner than 14 days later**: phase `v1_only`, legacy codes refused everywhere;
    then `access_codes` can be dropped.
 
@@ -481,8 +503,10 @@ with old firmware) raises an admin notice; online it still works.
 
 ### 8.1 Flashing, which only Dean can do
 
-**The Mega is not touched** — not reflashed, its sketch unchanged, its DIP positions for a Mega
-upload never used. Only the ESP8266 half of the court box and the door ESP32s.
+**Superseded for the v3 flash** ([`device-api.md`](device-api.md), the preamble): the next USB
+flash is the last and **the Mega is flashed too** — Mega 3.0.0 first, then bridge 3.0.0, then each
+door at 2.0.0; after that every ESP update is a signed OTA. What follows is the 2.x procedure,
+kept because its DIP positions and its *proof it landed* check still apply to the bridge half.
 
 - **Court box bridge (ESP8266)**: Arduino IDE, sketch `src/iot/court-box/arduino/court_bridge/`
   with its `secrets.h` beside the `.ino` (never committed). DIP for an ESP8266 upload:
@@ -700,9 +724,11 @@ row and a row left unstaged showed the previous screen's words. When a paid conf
 
 ## 11. Residuals, stated
 
-- The court box's widest body has 64 bytes of headroom inside its 2048-byte contract.
-- A key that did not fit the cap (24/72) is a member refused offline; the server orders keys by
-  booking start so it is the latest-starting players who lose offline access.
+- A 2.x court box's widest body has 64 bytes of headroom inside its 2048-byte contract; a v3 box's
+  contract is 4096 in a 5120-byte buffer.
+- A key that did not fit the cap (24 on 2.x, 64 on v3, 72 on a door) or the body budget is a
+  member refused offline; the server writes keys in priority order (§5.4) so it is the
+  latest-starting players who lose offline access, and every trim is counted.
 - After cut-over, legacy codes work online only.
 - A device replay ring can evict inside a window (§6.4); the server catches the second use.
 - OFF can be guessed offline at 3 in a million a try; the guess guard bounds the rate and a lock
@@ -890,9 +916,27 @@ Each is a server behaviour; none changes a byte the corpus holds.
   cut-off (the fourteen days restart); back to `legacy` clears both. `GET
   /admin/devices/member-codes` carries `manual_hold`, `manual_hold_by`, `manual_hold_at`.
 - **Only acknowledged boards vote on the cut-over** (a court box an admin acknowledged, a door with
-  a `gate_key` — the test that decides who gets keys). An auto-registered board is any MAC that
+  a `gate_key` — the test that decides who gets keys); from 2026-11-13 an unacknowledged court box
+  heard in the last seven days **blocks** without voting (§8 step 3, MCV1-03). An auto-registered board is any MAC that
   presented the club's key: counted, a bench spare on old firmware blocked the club for ever, and a
   stranger's board could cast the deciding vote. The rollout view lists them as `unacknowledged`.
+- **A repeat activation of the session already in play claims no court use** (MCV1-02). A member
+  whose own court is lit, rescanning to extend it, used to spend the code's court use on a re-grant
+  — and `/extend` then answered `409 code_used`, so extending your own lit court with a v1 code was
+  impossible. An `/activate` from the device and court where that member's checked-in session is
+  already lit is answered as before (a re-grant) but writes no `court` use. *Why it is safe:* the
+  rule it relaxes exists so that a photo of a code that lit a court cannot buy on the victim
+  elsewhere; at the victim's own lit court an unused step can already buy an extension directly,
+  so the relaxation adds no purchase a photo could not already make. A 3.0.0 bridge also skips
+  `/activate` entirely for a proved REF that holds the lit court at this box and goes straight to
+  the extend prompt with the scan kept (FSF-06).
+- **The courtside kiosk accepts v1 codes** (`/court/{n}/qr/match`; MCV1-04). It took legacy codes
+  only while the phone showed v1 only.
+- **A placeholder master key refuses to start** outside Development (MCV1-09): the production
+  compose held `CHANGE-ME`, and a master key changed after members enrol rotates every secret
+  (§3.1). Set it once, before the first member's code is derived.
+- **A door's local replay refusal made while online is uploaded as `replayed`**, not as an offline
+  `unknown_scan`, and the activity view says so (MCV1-10).
 - **One cue window.** The pay-for's search, its activate-or-reassign choice and the activation
   gate all read `BookingCodeWindow.CueMinutes` (clamped), so a hand-edited value cannot make them
   disagree.

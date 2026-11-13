@@ -1331,6 +1331,69 @@
       },
       "cap": 4096,
       "bytes": ""
+    },
+    {
+      "id": "v3-enc-hw",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Uplink: the hardware facts the Mega is actually running with - the LCD address that answered (00 = none), relay level (0 active-high, 1 active-low), scanner baud code (0 auto not yet locked, 1 9600, 2 19200, 3 38400, 4 57600, 5 115200), scanner line end (0 auto, 1 CR/LF only), and the unarmed-forward key mask. Sent after the LCD is initialised, after every !DIAG, and whenever one of them changes.",
+      "frame": {
+        "verb": "HW",
+        "args": [
+          "27",
+          "0",
+          "1",
+          "0",
+          "0F"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!HW,27,0,1,0,0F*71\n"
+    },
+    {
+      "id": "v3-enc-cfg-rpol",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Relay drive level 1 = active-low. Applied at once: every closed relay is re-driven at the new level; an open relay stays an input, which is off for either module type.",
+      "frame": {
+        "verb": "CFG",
+        "args": [
+          "9",
+          "RPOL",
+          "1"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!CFG,9,RPOL,1*67\n"
+    },
+    {
+      "id": "v3-enc-cfg-keys",
+      "kind": "encode_v2",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). The keys forwarded as !BTN while the button window is shut: a mask the bridge derives from button_map (here keys 0-3, the 2.1.0 split), replacing the compiled court/duration split (HW-7).",
+      "frame": {
+        "verb": "CFG",
+        "args": [
+          "10",
+          "KEYS",
+          "15"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!CFG,10,KEYS,15*6F\n"
+    },
+    {
+      "id": "v3-encl-hw-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "HW",
+        "args": [
+          "27",
+          "0",
+          "1",
+          "0",
+          "0F"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
     }
   ],
   "decode": [
@@ -3639,6 +3702,129 @@
       "expect": [
         {
           "error": "BADVERB"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-hw",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
+      "link": "uplink",
+      "chunks": [
+        "!HW,3F,1,0,1,FF*76\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "HW",
+            "args": [
+              "3F",
+              "1",
+              "0",
+              "1",
+              "FF"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-hw-no-lcd",
+      "kind": "decode",
+      "note": "00: no backpack answered at any probed address - the console shows a dead glass instead of a blank one nobody reports (HW-2)",
+      "link": "uplink",
+      "chunks": [
+        "!HW,00,0,1,0,0F*74\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "HW",
+            "args": [
+              "00",
+              "0",
+              "1",
+              "0",
+              "0F"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-hw-lowercase-hex",
+      "kind": "decode",
+      "note": "hex fields are two uppercase digits, as in !BOOT",
+      "link": "uplink",
+      "chunks": [
+        "!HW,3f,1,0,1,FF*56\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-hw-level-out-of-set",
+      "kind": "decode",
+      "note": "the relay level is 0 or 1",
+      "link": "uplink",
+      "chunks": [
+        "!HW,27,2,1,0,0F*73\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-hw-baud-out-of-set",
+      "kind": "decode",
+      "note": "the baud code is 0-5",
+      "link": "uplink",
+      "chunks": [
+        "!HW,27,0,6,0,0F*76\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-downlink-refuses-hw",
+      "kind": "decode",
+      "note": "HW is uplink only",
+      "link": "downlink",
+      "chunks": [
+        "!HW,27,0,1,0,0F*71\n"
+      ],
+      "expect": [
+        {
+          "error": "BADVERB"
+        }
+      ]
+    },
+    {
+      "id": "v3-dec-cfg-sbaud",
+      "kind": "decode",
+      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). a hardware key is an ordinary !CFG key to the decoder",
+      "link": "downlink",
+      "chunks": [
+        "!CFG,11,SBAUD,5*1A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "CFG",
+            "args": [
+              "11",
+              "SBAUD",
+              "5"
+            ]
+          }
         }
       ]
     }
