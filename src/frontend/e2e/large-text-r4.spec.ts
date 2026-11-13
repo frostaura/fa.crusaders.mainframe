@@ -372,7 +372,6 @@ test("the page skeleton at 390 and 200 % stays on the screen", async ({ page }) 
   // Hold the Bookings page's code so its skeleton stays up.
   await page.route("**/src/pages/Schedule.tsx*", () => undefined);
   await page.goto("/bookings");
-  await singleTap(page);
   await expect(page.locator('main [aria-busy="true"]').first()).toBeVisible();
   await bigText(page);
   const widest = await page.locator('main [aria-busy="true"] [data-slot="skeleton"], main [aria-busy="true"] .animate-pulse').evaluateAll((els) =>

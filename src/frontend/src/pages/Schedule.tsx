@@ -232,6 +232,9 @@ export default function BookingsPage() {
             </StateBlock>
           )}
         </div>
+        {/* The floating bar comes next in reading order, before the detail below the grid: Tab out
+            of the grid lands on its actions. It is `fixed`, so where it sits here moves nothing. */}
+        <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
         {/* The detail behind the ticker, under the grid so it never costs the grid its width:
             what the member can spend, then the games in full and the finished ones. */}
         {expanded ? null : (
@@ -250,7 +253,6 @@ export default function BookingsPage() {
           </div>
         )}
       </div>
-      <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
       <BookSheet
         open={sheets.bookOpen} onOpenChange={sheets.setBookOpen} slots={sheets.bookSlots}
         timezone={day?.timezone ?? "UTC"} sliceMinutes={day?.sliceMinutes ?? 15}

@@ -199,30 +199,23 @@ async function openBookings(page: Page, width: Width) {
 
 test.describe("Bookings (SPEC 3.1)", () => {
   for (const width of WIDTHS) {
-    test(`${width}px: games strip on a phone, cards in rows, then a rail beside the grid from a 72rem page`, async ({ page }, info) => {
+    // The rail went (0c8fdc0): the games drift in a ticker above the grid, which owns the page's
+    // width, and their detail — what the member can spend, the games in full — lies under it.
+    test(`${width}px: the ticker above the grid, the games detail under it, cards in rows by its width`, async ({ page }, info) => {
       test.skip(info.project.name !== "desktop", "one project sweeps the widths");
       await openBookings(page, width);
       await healthy(page);
-      const host = (await box(page, "[data-with-aside]"))!;
-      const rail = (await box(page, "aside[data-aside]"))!;
-      const grid = (await box(page, '[role="grid"]'))!;
-      const cards = await page.locator("[data-upcoming] li").evaluateAll((els) => els.map((el) => {
-        const r = el.getBoundingClientRect();
-        return { x: Math.round(r.x), y: Math.round(r.y), height: r.height };
-      }));
-      if (host.width >= 72 * 16) {
-        expect(rail.x, "the rail stands beside the grid").toBeGreaterThanOrEqual(grid.right);
-        expect(new Set(cards.map((c) => c.x)).size, "a vertical list in the rail").toBe(1);
-        await expect(page.getByRole("group", { name: "Your wallet" })).toBeVisible();
-        expect(await widthUsed(page)).toBeGreaterThanOrEqual(0.85);
-      } else {
-        expect(rail.bottom, "stacked: the games come first").toBeLessThanOrEqual(grid.y);
-        await expect(page.getByRole("group", { name: "Your wallet" })).toBeHidden();
-        if (host.width < 40 * 16) {
-          expect(new Set(cards.map((c) => c.y)).size, "a sideways strip").toBe(1);
-          for (const c of cards) expect(c.height).toBeLessThan(96);
-        }
-      }
+      const ticker = (await box(page, "[data-upcoming-ticker]"))!;
+      // The scroller, not the grid: the grid is the full day, scrolled inside it.
+      const grid = (await box(page, "[data-grid-scroller]"))!;
+      const games = (await box(page, "[data-upcoming]"))!;
+      expect(ticker.bottom, "the ticker sits above the grid").toBeLessThanOrEqual(grid.y);
+      expect(games.y, "the games detail lies under the grid").toBeGreaterThanOrEqual(grid.bottom);
+      await expect(page.getByRole("group", { name: "Your wallet" })).toBeVisible();
+      const room = await page.locator("[data-upcoming]").evaluate((el) => el.parentElement!.getBoundingClientRect().width);
+      const cards = await page.locator("[data-upcoming] li").evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().x)));
+      const columns = room < 40 * 16 ? 1 : room < 56 * 16 ? 2 : 3;
+      expect(new Set(cards).size, `cards a row at a ${Math.round(room)}px detail`).toBe(Math.min(columns, cards.length));
       if (width >= 1800) {
         // Four courts are not stretched to 300px each: a court column stops at 18rem.
         const head = await page.locator('[role="columnheader"]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width));

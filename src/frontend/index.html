@@ -9,7 +9,10 @@
     -->
     <link rel="icon" href="/favicon.ico?v=2" sizes="48x48" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- No maximum-scale / user-scalable=no: pinch zoom is how a low-vision member reads the grid
+         (WCAG 1.4.4; axe meta-viewport). The accidental zoom those stopped is the double-tap,
+         which `touch-action: manipulation` in index.css ends, and inputs are 16px on a phone. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <!--
       Two themes (D7). `color-scheme` tells the browser both exist, so native controls,
       scrollbars and the canvas follow whichever is active. The two `theme-color` metas tint the

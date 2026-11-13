@@ -93,11 +93,14 @@ test.describe("the booking grid fills the room and scrolls itself", () => {
         const main = document.querySelector<HTMLElement>("main#main-content")!;
         const grid = document.querySelector<HTMLElement>("[data-grid-scroller]")!;
         const before = { grid: grid.scrollHeight > grid.clientHeight, gridHeight: grid.clientHeight };
+        // From where the page opened: on a phone that is the week at the top (useOpenAtWeek, R7),
+        // which now has room to act with the games detail under the grid.
+        const opened = main.scrollTop + window.scrollY;
         const pageScroll: number[] = [];
         for (let i = 0; i < 4; i++) {
           grid.scrollTop += 200;
           await new Promise((r) => setTimeout(r, 50));
-          pageScroll.push(main.scrollTop + window.scrollY);
+          pageScroll.push(main.scrollTop + window.scrollY - opened);
         }
         return {
           ...before, pageScroll, overscroll: getComputedStyle(grid).overscrollBehaviorY,
