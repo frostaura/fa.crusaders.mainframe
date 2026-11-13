@@ -633,6 +633,12 @@ public static class TraceKinds
         MemberCodeRollout.PhaseChangedAction,
         // The retention sweep's own record — its actor is the anonymised sentinel, never a person.
         "retention.anonymised",
+        // The platform pass (BP-07, BP-10): the operator CLI creating a club has no member as its
+        // subject, and a member adding or removing a passkey is an account change — mailed to them
+        // and on the audit trail — not something that happened at the club on anybody's night.
+        "tenant.created_by_operator",
+        "user.passkey_added",
+        "user.passkey_removed",
         // An extension bought at the box: the extension IS a walk-up-shaped booking, whose own
         // `booking.walk_up_created` row (written by CommitAsync, same actor and subject) already puts
         // the purchase on the scanner's Night and its LightsPurchase row on the wallet strand. This

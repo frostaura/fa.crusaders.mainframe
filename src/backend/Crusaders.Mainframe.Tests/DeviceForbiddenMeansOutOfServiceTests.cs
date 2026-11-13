@@ -190,7 +190,6 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<Postgr
             Path.Combine("Endpoints", "DeviceEventEndpoints.cs"),
             Path.Combine("Endpoints", "DeviceGateEndpoint.cs"),
             Path.Combine("Endpoints", "DeviceActivateEndpoint.cs"),
-            Path.Combine("Security", "DeviceAuth", "DeviceAuthenticationHandler.cs"),
             Path.Combine("Security", "DeviceAuth", "DeviceKeyResolver.cs"),
         ];
 
@@ -227,15 +226,27 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<Postgr
         Assert.Equal(2, Regex.Matches(identity, @"await RefuseShutAsync\(").Count);
         Assert.Contains("private static async Task<IResult> RefuseShutAsync(", identity, StringComparison.Ordinal);
 
+        // THE ONE OTHER SOURCE, declared (BP-07): a club the operator suspended. Its 403 means
+        // what the disabled check's does — this board must not serve — for every board of that
+        // club at once, so the firmware's reading is the right one. It is reachable only from the
+        // tenant-status check: one 403 in the handler, inside the suspended branch.
+        var handler = StripComments(File.ReadAllText(Path.Combine(ApiSourceRoot(), "Security", "DeviceAuth", "DeviceAuthenticationHandler.cs")));
+        Assert.Single(forbidden.Matches(handler));
+        Assert.Contains("if (Context.Items.ContainsKey(SuspendedItem))", handler, StringComparison.Ordinal);
+        Assert.Contains("if (!Domain.TenantStatus.IsOpen(tenant.Status))", handler, StringComparison.Ordinal);
+
         // The two middlewares that run before routing.
         var passwordGate = File.ReadAllText(Path.Combine(ApiSourceRoot(), "Security", "PasswordChangeGate.cs"));
         Assert.Contains("\"/api/v1/device/\"", passwordGate, StringComparison.Ordinal);
 
         var tenants = StripComments(File.ReadAllText(Path.Combine(
             ApiSourceRoot(), "Multitenancy", "TenantResolutionMiddleware.cs")));
+        // Two 403s there now — the token-for-another-club check and a suspended club (BP-07) —
+        // and neither reaches a board: the middleware skips the device surface entirely.
         var forbids = Regex.Matches(tenants, @"Status403Forbidden");
-        Assert.Single(forbids);
+        Assert.Equal(2, forbids.Count);
         Assert.Contains("jwtSlug is not null && hostSlug is not null", tenants, StringComparison.Ordinal);
+        Assert.Contains("\"/api/v1/device/\"", tenants, StringComparison.Ordinal);
     }
 
     // ---- 3. What a board can actually provoke -------------------------------

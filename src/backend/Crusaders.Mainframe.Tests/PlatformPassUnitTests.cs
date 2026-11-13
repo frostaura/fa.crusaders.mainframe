@@ -320,6 +320,15 @@ public sealed class PlatformPassUnitTests
     {
         Assert.Contains("SourceRevisionId=$BUILD_SHA", Repo("src", "backend", "Dockerfile"), StringComparison.Ordinal);
         var ci = Repo(".github", "workflows", "ci.yml");
-        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(ci, @"build-args: BUILD_SHA=\$\{\{ github\.sha \}\}").Count);
+        // Both backend image builds pass the commit (the release-ops pass moved every image to a
+        // multi-line build-args block, beside the revision label).
+        foreach (var job in new[] { "build-backend-amd64:", "build-backend-arm64:" })
+        {
+            var start = ci.IndexOf("  " + job, StringComparison.Ordinal);
+            Assert.True(start >= 0, job);
+            var next = System.Text.RegularExpressions.Regex.Match(ci[(start + job.Length + 2)..], @"\n  [a-z][a-z0-9-]*:\n");
+            var section = next.Success ? ci.Substring(start, job.Length + 2 + next.Index) : ci[start..];
+            Assert.Matches(@"BUILD_SHA=\$\{\{ github\.sha \}\}", section);
+        }
     }
 }

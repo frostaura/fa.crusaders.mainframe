@@ -80,8 +80,11 @@ public sealed class DeviceAuthenticationHandler : AuthenticationHandler<DeviceAu
 
         // BP-07: a club the operator suspended is closed to its boards too, exactly as the tenant
         // middleware closes it to members (unknown statuses fail closed). The board hears 403
-        // club_suspended — a decided refusal, so it keeps its own roster and asks again later —
-        // never a 401, which a v3 board would read as "try my other key".
+        // club_suspended, which the firmware reads as "this board is out of service": the door
+        // commits an empty roster and denies, the court box stops selling — the same effect as
+        // an admin taking every board out of service, which is what suspending the club means.
+        // Never a 401, which a v3 board would answer by trying its other key and keeping its
+        // roster. DeviceForbiddenMeansOutOfServiceTests declares this the one other source.
         if (!Domain.TenantStatus.IsOpen(tenant.Status))
         {
             Context.Items[SuspendedItem] = true;

@@ -114,6 +114,13 @@ internal static class EmailCatalogue
             ("PasswordReset", EmailTemplates.PasswordReset(club, to, LinkUrl)),
             ("AdminPasswordReset", EmailTemplates.AdminPasswordReset(club, to, "Thandi Mokoena", "Qm7-42xw")),
             ("PasswordChanged", EmailTemplates.PasswordChanged(club, to)),
+            // The platform pass's account mail (BP-02, BP-07, BP-10, BP-11, BP-14).
+            ("RegistrationForExistingAccount", EmailTemplates.RegistrationForExistingAccount(club, to, LinkUrl)),
+            ("RegistrationNumberTaken", EmailTemplates.RegistrationNumberTaken(club, to, "RR-0412")),
+            ("PasskeyAdded", EmailTemplates.PasskeyAdded(club, to, "Thandi's iPhone")),
+            ("PasskeyRemoved", EmailTemplates.PasskeyRemoved(club, to, "Thandi's iPhone")),
+            ("PinSetByClub", EmailTemplates.PinSetByClub(club, to, "Thandi Mokoena")),
+            ("ClubReady", EmailTemplates.ClubReady(club, to, LinkUrl, 72)),
             ("BookingConfirmation", EmailTemplates.BookingConfirmation(club, to, booking)),
             ("BookingConfirmationWalkUp", EmailTemplates.BookingConfirmation(club, to, booking with { IsWalkUp = true })),
             ("BookingConfirmationOverdrawn", EmailTemplates.BookingConfirmation(club, to, booking with { BalanceAfterMinutes = -40, MadeByClub = true })),
