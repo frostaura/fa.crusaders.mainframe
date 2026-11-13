@@ -573,7 +573,10 @@ builder.Services.AddSingleton<AdminNotificationSweep>();
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.AdminNotificationWorker>();
 
 // Phase 5 — biometric abstraction
-builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
+// BP-09: the simulator (which matches the first candidate) only in Development and Testing, and
+// only when Biometric:Driver asks for it; every other deployment gets a device that matches nobody.
+builder.Services.AddSingleton<IBiometricDevice>(sp => BiometricDrivers.For(
+    builder.Configuration[BiometricDrivers.Key], sp.GetRequiredService<IHostEnvironment>()));
 
 // IRelayClient is deliberately NOT registered. The court box is pull-only — it decides
 // scans against its cached roster and drives its own relays — so nothing in the container

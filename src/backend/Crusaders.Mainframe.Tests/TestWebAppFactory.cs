@@ -166,6 +166,9 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         // EnvironmentName = "Production" must start: Production refuses the development key and
         // every placeholder.
         builder.UseSetting("MemberCodes:MasterKey", TestMemberCodeMasterKey);
+        // The biometric simulator, which the suite's courtside tests drive. The base file says
+        // "None" (BP-09); the simulator is honoured in Testing, never in Production.
+        builder.UseSetting("Biometric:Driver", "Null");
 
         if (ConnectionString is not null)
         {
