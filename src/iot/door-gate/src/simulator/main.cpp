@@ -73,6 +73,7 @@
 //   scan <code>     present <code> at the reader, as a line of scanner bytes
 //   rxerror         raise the UART's receive-error flag, as an overrun does
 //   wifi up|down    the radio associates or goes away
+//   wifi authfail   the link drops and the core never reconnects (DG-3)
 //   status          one line of everything observable
 //   quit            stop, locking the door on the way out
 
@@ -215,7 +216,7 @@ void usage() {
          "  --warm        a warm boot: the RTC memory the last run left in --store is\n"
          "                believed, as after a watchdog or software reset. Without it\n"
          "                every launch is a power-on (the flash records alone)\n"
-         "console: 'scan <code>', 'rxerror', 'wifi up|down', 'status', 'quit'\n");
+         "console: 'scan <code>', 'rxerror', 'wifi up|down|authfail', 'status', 'quit'\n");
 }
 
 /// `--name VALUE`, consumed. Advances `i` past the value on a match.
@@ -406,6 +407,12 @@ public:
   void run() {
     while (gStopRequested == 0 && !system_.requested()) {
       app_.pass();
+      if (rejoinPending_ && tb::since(clock_.nowMs(), rejoinAtMs_) >= 1000U) {
+        // The join the supervisor asked for has associated.
+        rejoinPending_ = false;
+        authStuck_ = false;
+        link_.set(true);
+      }
       saveWarm();
       reportChanges();
       while (console_.poll()) {
@@ -502,7 +509,7 @@ private:
     ports.compiledSsid = "SIMULATOR";
     ports.compiledPsk = "simulator-pass";
     ports.compiledBase = options_.apiBase;
-    ports.radio = &radio_;
+    ports.radio = &supervisedRadio_;
     ports.system = &system_;
     ports.diag = &diag_;
     return ports;
@@ -526,7 +533,7 @@ private:
       printf("[sim] header phase uses the BOARD's INTER-BYTE timeout: a dribbling peer can hold a "
              "call past the watchdog, and the breach is reported rather than resetting\n");
     }
-    printf("[sim] console: scan <code> | rxerror | wifi up|down | status | quit\n");
+    printf("[sim] console: scan <code> | rxerror | wifi up|down|authfail | status | quit\n");
     static_cast<void>(fflush(stdout));
   }
 
@@ -581,7 +588,7 @@ private:
         "[status] link=%d released=%d relocking_ms=%lu capped=%lu roster=%u age_ms=%lu unlock_ms=%lu "
         "queued=%u lost=%lu no_push=%lu calls=%lu worst_call_ms=%lu worst_gap_ms=%lu wdt_breaches=%lu "
         "dropped_scan_bytes=%lu fault_report=%d fault_per_hour=%u fault_window_ms=%lu fault_codes=%u "
-        "fault_overflow=%lu t=%lums\n",
+        "fault_overflow=%lu carried=%u restore=%s net_src=%s fw_state=%s degraded=%d t=%lums\n",
         app_.linkUp() ? 1 : 0, lock_.released() ? 1 : 0,
         static_cast<unsigned long>(unlockTimer_.relockingForMs(clock_.nowMs())),
         static_cast<unsigned long>(app_.capForcedCloses()), static_cast<unsigned>(roster_.size()),
@@ -593,7 +600,9 @@ private:
         static_cast<unsigned long>(scanner_.droppedBytes()), faults_.reporting() ? 1 : 0,
         static_cast<unsigned>(faults_.maxPerHour()), static_cast<unsigned long>(faults_.windowMs()),
         static_cast<unsigned>(faults_.tracked()), static_cast<unsigned long>(faults_.overflowPending()),
-        static_cast<unsigned long>(clock_.nowMs()));
+        static_cast<unsigned>(app_.carriedEvents()),
+        app_.restoreReport() == nullptr ? "reported" : app_.restoreReport(), netSourceName(net_.source()),
+        fwStateName(app_.ota().state()), app_.degraded() ? 1 : 0, static_cast<unsigned long>(clock_.nowMs()));
     static_cast<void>(fflush(stdout));
   }
 
@@ -607,6 +616,15 @@ private:
       scanner_.feedLine(line + 5);
     } else if (strcmp(line, "rxerror") == 0) {
       scanner_.injectRxError();
+    } else if (strcmp(line, "wifi authfail") == 0) {
+      // DG-3: Arduino-ESP32 2.0.17 stops reconnecting for good after AUTH_FAIL.
+      // The link drops and `wifi up` no longer brings it back — only a join the
+      // firmware's own supervisor issues does.
+      authStuck_ = true;
+      link_.set(false);
+    } else if (strcmp(line, "wifi up") == 0 && authStuck_) {
+      printf("[sim] the core does not reconnect after AUTH_FAIL; only the supervisor's join can\n");
+      static_cast<void>(fflush(stdout));
     } else if (strcmp(line, "wifi up") == 0) {
       link_.set(true);
     } else if (strcmp(line, "wifi down") == 0) {
@@ -629,6 +647,28 @@ private:
   posix_gate_hal::FileBlobs blobs_;
   posix_gate_hal::MonotonicRtc rtc_;
   posix_gate_hal::ConsoleRadio radio_;
+
+  /// The console radio, plus what a join does to a link the core gave up on.
+  class SupervisedRadio final : public IRadio {
+  public:
+    explicit SupervisedRadio(Board& board) : board_(board) {}
+
+    void join(const char* ssid, const char* psk) override {
+      board_.radio_.join(ssid, psk);
+      if (board_.authStuck_) {
+        board_.rejoinPending_ = true;
+        board_.rejoinAtMs_ = board_.clock_.nowMs();
+      }
+    }
+
+  private:
+    Board& board_;
+  };
+
+  SupervisedRadio supervisedRadio_{*this};
+  bool authStuck_ = false;
+  bool rejoinPending_ = false;
+  uint32_t rejoinAtMs_ = 0U;
   posix_gate_hal::ConsoleSystem system_;
   posix_gate_hal::SimDiag diag_{options_.warm};
   uint8_t warm_[sizeof(WarmImage)] = {};

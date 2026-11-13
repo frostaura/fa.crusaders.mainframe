@@ -67,6 +67,18 @@ REPORT = sc.REPORT
 
 #: The binary `make test-e2e-device` builds before `door_evening.py` runs.
 GATE_SIM = ROOT / "src" / "iot" / "door-gate" / ".pio" / "build" / "simulator" / "program"
+
+# The version the compiled simulator reports, as [env:simulator] in
+# src/iot/door-gate/platformio.ini sets it — read from there rather than
+# repeated here, so a version bump is one edit.
+def _gate_firmware_version() -> str:
+    ini = (ROOT / "src" / "iot" / "door-gate" / "platformio.ini").read_text(encoding="utf-8")
+    section = ini.split("[env:simulator]", 1)[1]
+    parts = [re.search(rf"-DFW_VERSION_{p}=(\d+)", section).group(1) for p in ("MAJOR", "MINOR", "PATCH")]
+    return ".".join(parts)
+
+
+GATE_FIRMWARE_VERSION = _gate_firmware_version()
 GATE_PROJECT = ROOT / "src" / "iot" / "door-gate"
 
 #: How long a start-up line may take to appear. Generous: the first heartbeat is a
@@ -190,13 +202,15 @@ class GateSim:
     when to start waiting."""
 
     def __init__(self, api_base: str, device_key: str, mac: str, workdir: Path,
-                 name: str = "dsim") -> None:
+                 name: str = "dsim", store: Optional[Path] = None) -> None:
         self.api_base = api_base
         self.device_key = device_key
         self.mac = mac
         self.name = name
         self.workdir = workdir
-        self.store = workdir / f"{name}-store"
+        # A later boot of the SAME board passes the first one's store: that
+        # directory is the board's flash, and a power cut leaves nothing else.
+        self.store = store if store is not None else workdir / f"{name}-store"
         self.log = workdir / f"{name}.log"
         self.proc: Optional[subprocess.Popen] = None
         self.lines: list[Line] = []
@@ -843,6 +857,99 @@ def _dsim_clock_bases(door: Any, live_code: str) -> None:
             sim.stop()
 
 
+def _dsim_power_cut(door: Any, live_code: str) -> None:
+    """DSIM-V3 — gate 2.0.0's flash records, in the COMPILED firmware (DG-2, DG-11).
+
+    1.1.2 kept the roster, the keys and the event ring in RAM only, so a power cut
+    with the server still down left a door that admitted nobody and an evening of
+    offline entries that never reached the server (both reproduced by the
+    analysis). Here: a board loads its roster, loses power, comes back to a server
+    that does not answer (a closed port), admits a rostered booking from its flash
+    roster and queues the record; loses power again; and the next boot, with the
+    server back, uploads that record under the boot that made it — exactly once.
+    Each launch is a separate process over the same store directory, which is what
+    a power cut leaves behind: flash, and nothing else."""
+    mac = ("02d3" + secrets.token_hex(4))[:12]
+    device_code = f"gate-{mac[-6:]}"
+    workdir = door.api.log.parent
+    api_base = getattr(door.api, "base", "")
+    first = GateSim(api_base, door.key, mac, workdir, name="dsim-powercut")
+    try:
+        first.start()
+        hb = first.expect(lambda l: l.channel == "hb", 30.0, "the first heartbeat")
+        devices = sc.expect_status(door.w.http.get("/api/v1/admin/devices/", token=door.w.admin_token),
+                                   200, "devices").json
+        row = next((x for x in devices if x.get("mac_address") == mac), None)
+        if not row:
+            raise StepFailed(f"the power-cut board did not register: {hb.raw}")
+        sc.expect_status(door.w.http.patch(f"/api/v1/admin/devices/{row['id']}", {"gate_key": "sim-door-powercut"},
+                                           token=door.w.admin_token), 200, "name the door")
+        pushed = first.force_heartbeat()
+        chk("DSIM-V3", "a 2.0.0 board loads its roster before the power cut",
+            int(pushed.get("roster", "0")) >= 1, pushed.raw)
+        # Past the board's top-of-pass flash write.
+        time.sleep(0.5)
+    finally:
+        first.stop()
+
+    # THE POWER COMES BACK; THE SERVER DOES NOT. Port 9 on loopback is closed, so
+    # every call is refused at once — the board's breaker opens and it decides
+    # from what flash gave it.
+    dark = GateSim("http://127.0.0.1:9", door.key, mac, workdir, name="dsim-powercut-dark", store=first.store)
+    try:
+        dark.start()
+        restored = dark.status()
+        chk("DSIM-V3", "after a power cut with the server down the board has its roster back from flash "
+                       "(1.1.2 came back with none)",
+            int(restored.get("roster", "0")) >= 1, restored.raw)
+        allowed = dark.scan(live_code)
+        chk("DSIM-V3", "and admits a rostered booking from it, queuing the record",
+            allowed.flag("released") and allowed.flag("queued"), allowed.raw)
+        time.sleep(0.5)
+    finally:
+        dark.stop()
+
+    back = GateSim(api_base, door.key, mac, workdir, name="dsim-powercut-back", store=first.store)
+    try:
+        back.start()
+        back.expect(lambda l: l.channel == "evq" and l.get("held") == "0", 60.0,
+                    "the carried record drained")
+        time.sleep(1.0)
+        opens = _audit_count(door, "device.gate_open", device_code)
+        chk("DSIM-V3", "THE OFFLINE ENTRY FROM BEFORE THE SECOND CUT REACHES THE SERVER, exactly once "
+                       "(1.1.2's RAM-only ring lost it)",
+            opens == 1, f"gate_open={opens}")
+    finally:
+        back.stop()
+
+
+def _dsim_supervisor(door: Any) -> None:
+    """DSIM-V3 — the link supervisor, in the COMPILED firmware (DG-3).
+
+    Arduino-ESP32 2.0.17 stops reconnecting for good after AUTH_FAIL, and 1.1.2
+    trusted the core alone: a router that refused one association left the door on
+    its roster until somebody power-cycled it. The simulator's `wifi authfail`
+    models exactly that (a `wifi up` is ignored; only a join recovers), and 2.0.0's
+    supervisor must issue the join itself after its 30-second grace."""
+    mac = ("02d4" + secrets.token_hex(4))[:12]
+    sim = GateSim(getattr(door.api, "base", ""), door.key, mac, door.api.log.parent, name="dsim-authfail")
+    try:
+        sim.start()
+        sim.expect(lambda l: l.channel == "hb", 30.0, "the first heartbeat")
+        mark = sim.mark()
+        sim.send("wifi authfail")
+        sim.expect(lambda l: l.channel == "link" and l.state == "down", 5.0, "the link dropping", mark)
+        sim.send("wifi up")
+        joined = sim.expect(lambda l: l.channel == "radio" and l.state == "join", 45.0,
+                            "the supervisor's own join", mark)
+        back = sim.expect(lambda l: l.channel == "link" and l.state == "up", 10.0, "the link coming back", mark)
+        chk("DSIM-V3", "after AUTH_FAIL the board re-joins by itself and the link returns (1.1.2 stayed "
+                       "down until a power cycle)",
+            bool(joined) and bool(back), f"{joined.raw} / {back.raw}")
+    finally:
+        sim.stop()
+
+
 def dsim_firmware(door: Any) -> None:
     """DSIM — the compiled door firmware, in the chain, against this run's own API.
 
@@ -929,7 +1036,7 @@ def dsim_firmware(door: Any) -> None:
                     "row for the binary's MAC, auto-registered as a Gate, running the version the "
                     "image reports, with a last_seen_at only a real request can set",
             bool(row) and row.get("kind") == "Gate" and row.get("auto_registered") is True
-            and row.get("running_version") == "1.1.2" and bool(row.get("last_seen_at")),
+            and row.get("running_version") == GATE_FIRMWARE_VERSION and bool(row.get("last_seen_at")),
             f"row={row} first_hb={first.raw}")
         if not sim_id:
             raise StepFailed("the simulator's board did not register — nothing below can run")
@@ -1324,6 +1431,10 @@ def dsim_firmware(door: Any) -> None:
 
     # -- D S 7 b : the same evening at clock bases that are not zero ---------
     _dsim_clock_bases(door, live_code)
+
+    # -- D S 7 c : 2.0.0 — a power cut with the server down, and AUTH_FAIL ----
+    _dsim_power_cut(door, live_code)
+    _dsim_supervisor(door)
 
     # -- D S 8 : the release-overrun bound, MEASURED ------------------------
     numbers = measure_worst_case_release(workdir, door.key)
