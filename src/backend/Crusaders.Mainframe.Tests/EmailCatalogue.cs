@@ -133,6 +133,8 @@ internal static class EmailCatalogue
                 "5 hours", 300, 550m, 1000, "League members", 495m, 1530, "pf-2026-09-22-0041", symbol))),
             ("PurchaseConfirmationNoDiscount", EmailTemplates.PurchaseConfirmation(club, to, new PackagePurchaseReceipt(
                 "1 hour", 60, 120m, 0, null, 120m, 105, "pf-2026-09-22-0046", symbol))),
+            ("PartnerNotComing", EmailTemplates.PartnerNotComing(club, to, new PartnerNotComingNotice("Sam Partner", "Court 2", "Sat 14 Nov, 07:00", false, ConsoleUrl))),
+            ("PartnerNotComingWithdrew", EmailTemplates.PartnerNotComing(club, to, new PartnerNotComingNotice("Sam Partner", "Court 2", "Sat 14 Nov, 07:00", true, ConsoleUrl))),
             ("PaymentNotAddedMail", EmailTemplates.PaymentNotAddedMail(club, to, new PaymentNotAdded("5 hours", 495m, "pf-2026-11-13-0101", true, symbol))),
             ("PaymentNotAddedAfterClose", EmailTemplates.PaymentNotAddedMail(club, to, new PaymentNotAdded("5 hours", null, "pf-2026-11-13-0102", false, symbol))),
             ("PaymentReversed", EmailTemplates.PaymentReversed(club, to, new ReversedPayment($"PayFast purchase: 5 hours for {symbol}495.00", 495m, 300, 0, false, symbol))),

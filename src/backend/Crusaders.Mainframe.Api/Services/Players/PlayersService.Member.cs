@@ -186,7 +186,7 @@ public sealed partial class PlayersService
                 _db.ChangeTracker.Clear();
                 return PlayerOutcome.Refuse(402, PlayerErrors.InsufficientBalance, new { current_minutes = balance, required_minutes = delta });
             }
-            postings = await _p.Shares.StageCollectionAsync(game.Booking, seat, delta, me, ct);
+            postings = await _p.Shares.StageCollectionAsync(game.Booking, seat, delta, me, ct, partOfShare: shortfall > 0);
         }
         if (fresh)
         {
