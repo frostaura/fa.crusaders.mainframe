@@ -59,8 +59,10 @@ export function inviteHeading(invite: Invite, invitedTitle: string): { title: st
  * R12 J12-3 — while "decline for good?" is being asked the heading is the question's own; the line
  * under it (who invited them) stays. Otherwise `inviteHeading`.
  */
-export function answerHeading(invite: Invite, invitedTitle: string, askingDecline: boolean): { title: string; line: string } {
+export function answerHeading(invite: Invite, invitedTitle: string, askingDecline: boolean, declined = false): { title: string; line: string } {
   const heading = inviteHeading(invite, invitedTitle);
+  // Go-live BM-18f — once declined, "Join this game?" over "You said no" asked a question already answered.
+  if (declined) return { ...heading, title: INVITES_COPY.declinedTitle };
   return askingDecline ? { ...heading, title: INVITES_COPY.declineSheetTitle } : heading;
 }
 

@@ -12,6 +12,9 @@ import { playersEndpoints } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
 import { minutesSpoken } from "@/lib/minutes";
 import { clearPendingInvite, pendingInvite, savePendingInvite } from "@/lib/playersPending";
+import { bookingsApi } from "@/lib/bookingsApi";
+import { memberReads } from "@/lib/offline/memberReads";
+import { useGamesRead } from "@/components/bookings/useGamesRead";
 
 /**
  * `/j/:token` — a shared invite link (WhatsApp, a message). Opening it reads the seat the token
@@ -74,12 +77,31 @@ function InviteLinkFor({ token, userId }: { token: string; userId: string }) {
     else if (opened) savePendingInvite(token, userId);
   }, [refused, opened, token, userId]);
 
+  const onGame = useAlreadyOnGame(snapshot.invite?.booking_id ?? null);
   const notOpen = notOpenPage(code, closedGame, errorBooking, openedBefore);
   if (notOpen) return notOpen;
-  if (!snapshot.invite) {
-    return <InvitePanelSkeleton loading={snapshot.loading} error={snapshot.error} onRetry={snapshot.retry} />;
+  if (!snapshot.invite || onGame === "reading") {
+    return <InvitePanelSkeleton loading={snapshot.loading || onGame === "reading"} error={snapshot.error} onRetry={snapshot.retry} />;
+  }
+  // BM-10 — an open seat on a game the member already plays in: said before Accept is offered, as
+  // the accept's own refusal would say it (the link's read cannot know who opened it).
+  if (onGame === "yes") {
+    return <InviteGone title={INVITES_COPY.refusedTitle} sentence={INVITES_COPY.linkAlreadyIn} bookingId={snapshot.invite.booking_id} />;
   }
   return <InvitePanel invite={snapshot.invite} port={port} />;
+}
+
+/**
+ * BM-10 — whether the signed-in member already holds a seat on the link's game, read off their own
+ * upcoming games (organiser or partner; a box payer holds no seat). A failed read is "no": the
+ * accept's `already_in_booking` refusal still guards it, and a link must never be held behind it.
+ */
+function useAlreadyOnGame(bookingId: string | null): "reading" | "yes" | "no" {
+  const { state } = useGamesRead(bookingsApi.upcoming, 0, memberReads.upcoming.key);
+  if (bookingId === null) return "no";
+  if (state.status === "loading") return "reading";
+  if (state.status === "error") return "no";
+  return state.items.some((g) => g.booking_id === bookingId && g.role !== "payer") ? "yes" : "no";
 }
 
 function openedBy(token: string, userId: string): boolean {

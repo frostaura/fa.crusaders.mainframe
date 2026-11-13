@@ -119,3 +119,31 @@ describe("the inbox invite pane follows the live wallet (BM-09)", () => {
     expect(stub.calls.filter((c) => c.path === "/api/v1/me/invites").length).toBe(before);
   });
 });
+
+describe("the inbox invite pane after a decline (BM-18f)", () => {
+  it("heads the pane 'You said no', not 'Join this game?', and says it once", async () => {
+    splitBox();
+    let declined = false;
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_minutes: 90, held_minutes: 0, spendable_minutes: 90, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
+      { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 1 } },
+      { method: "POST", path: "/api/v1/me/notifications/n1/read", body: { id: "n1", read: true } },
+      { path: "/api/v1/me/notifications", body: { items: [NOTICE], unread_count: 1, next_cursor: null } },
+      { path: "/api/v1/me/invites", respond: () => (declined ? { items: [], count: 0 } : { items: [invite(90)], count: 1 }) },
+      { method: "POST", path: `/api/v1/bookings/${BOOKING}/players/${SEAT}/decline`, respond: () => {
+        declined = true;
+        return { participant_id: SEAT, booking_id: BOOKING, status: "declined" };
+      } },
+    ]);
+    renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
+    await pick();
+    const pane = await screen.findByRole("region", { name: new RegExp(INVITES_COPY.sheetTitle) }, { timeout: 4000 });
+    fireEvent.click(within(pane).getByRole("button", { name: INVITES_COPY.decline }));
+    fireEvent.click(await within(pane).findByRole("button", { name: INVITES_COPY.declineConfirm }));
+    expect(await within(pane).findByRole("heading", { name: INVITES_COPY.declinedTitle }, { timeout: 4000 })).toBeInTheDocument();
+    expect(within(pane).queryByText(INVITES_COPY.sheetTitle)).toBeNull();
+    expect(within(pane).getAllByText(INVITES_COPY.declinedTitle)).toHaveLength(1);
+  });
+});
