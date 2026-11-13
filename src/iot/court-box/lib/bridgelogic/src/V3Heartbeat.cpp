@@ -347,7 +347,7 @@ uint8_t keysFromButtonMap(const court::ButtonMap& map) {
 // --- the reconcile ------------------------------------------------------------
 
 Reconciler::Reconciler()
-    : lastAtMs_(), tried_(), attempts_(), failed_(), suppressed_(), suppressRef_(), suppressAtMs_() {
+    : lastAtMs_(), tried_(), attempts_(), failed_(), suppressed_(), suppressRef_(), suppressAtMs_(), sawLit_() {
 }
 
 int32_t Reconciler::paidSeconds(const Snapshot& snap, uint8_t relay, uint32_t nowMs) {
@@ -392,6 +392,11 @@ bool Reconciler::plan(const Snapshot& snap, const RelayView view[kSnapshotRelays
   for (uint8_t r = 0U; r < kSnapshotRelays; ++r) {
     out[r] = proto::kNoOpinion;
   }
+  bool wentDark[kSnapshotRelays];
+  for (uint8_t r = 0U; r < kSnapshotRelays; ++r) {
+    wentDark[r] = sawLit_[r] && !view[r].lit;
+    sawLit_[r] = view[r].lit;
+  }
   if (!snap.valid || !settings.restoreEnabled) {
     return false;
   }
@@ -417,19 +422,18 @@ bool Reconciler::plan(const Snapshot& snap, const RelayView view[kSnapshotRelays
       attempts_[r] = 0U;
       continue;
     }
-    if (!force && tried_[r] && tb::since(nowMs, lastAtMs_[r]) < kRelightEveryMs) {
+    if (!force && !wentDark[r] && tried_[r] && tb::since(nowMs, lastAtMs_[r]) < kRelightEveryMs) {
       continue;
     }
-    if (attempts_[r] >= kMaxAttempts) {
+    if (attempts_[r] == kMaxAttempts) {
       // Three !WANTs and the relay is still not lit as owed: relight_failed,
-      // once, and no further attempts until a !STATE confirms it.
-      if (attempts_[r] == kMaxAttempts) {
-        failed_[r] = true;
-        attempts_[r] = static_cast<uint8_t>(kMaxAttempts + 1U);
-      }
-      continue;
+      // once. It keeps being re-tried at the same pace — a relay the snapshot
+      // owes is never given up on.
+      failed_[r] = true;
     }
-    ++attempts_[r];
+    if (attempts_[r] < UINT8_MAX) {
+      ++attempts_[r];
+    }
     tried_[r] = true;
     lastAtMs_[r] = nowMs;
     out[r] = static_cast<int32_t>(wanted);

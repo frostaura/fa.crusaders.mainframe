@@ -386,9 +386,13 @@ void test_each_relay_is_relit_at_most_once_a_minute_and_three_failures_are_repor
   TEST_ASSERT_TRUE(r.plan(snap, view, set, 120000U, false, want));
   uint8_t relay = 9U;
   TEST_ASSERT_FALSE(r.takeFailed(relay));
-  TEST_ASSERT_FALSE(r.plan(snap, view, set, 180000U, false, want));
+  // The fourth need reports relight_failed once — and is still tried: a relay
+  // the snapshot owes is never given up on.
+  TEST_ASSERT_TRUE(r.plan(snap, view, set, 180000U, false, want));
   TEST_ASSERT_TRUE(r.takeFailed(relay));
   TEST_ASSERT_EQUAL_UINT8(0U, relay);
+  TEST_ASSERT_FALSE(r.takeFailed(relay));
+  TEST_ASSERT_TRUE(r.plan(snap, view, set, 240000U, false, want));
   TEST_ASSERT_FALSE(r.takeFailed(relay));
 }
 

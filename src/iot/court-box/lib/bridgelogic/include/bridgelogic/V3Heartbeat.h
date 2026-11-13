@@ -170,6 +170,10 @@ private:
   bool suppressed_[kSnapshotRelays];
   char suppressRef_[kSnapshotRelays][9];
   uint32_t suppressAtMs_[kSnapshotRelays];
+  /// What the previous plan() saw: a relay that went from lit to dark under
+  /// an owed snapshot (a Mega reset whose !BOOT was lost, or its own
+  /// deadline under a longer booking) is re-lit at once, not after the pace.
+  bool sawLit_[kSnapshotRelays];
 };
 
 } // namespace bridgelogic
