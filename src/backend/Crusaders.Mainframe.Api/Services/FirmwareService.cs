@@ -125,7 +125,7 @@ public sealed class FirmwareService
             ActorUserId: actorUserId,
             SubjectKind: AdminChangeSubjects.Device,
             SubjectId: release.Id,
-            SubjectLabel: $"{release.Target} {release.Version}",
+            SubjectLabel: $"{TargetWords(release.Target)} {release.Version}",
             After: new { target = release.Target, version = release.Version, size = release.Size, sha256 = sha }), ct);
         await _db.SaveChangesAsync(ct);
         return (release, null);
@@ -146,6 +146,17 @@ public sealed class FirmwareService
         if (manifest.Size != image.Length) return SizeMismatch;
         return image.Length > max ? SizeTooLarge : null;
     }
+
+    /// <summary>
+    /// A target as the change record says it: the board, in words, never the wire code
+    /// (<c>court_bridge</c> reached the console's change log raw).
+    /// </summary>
+    public static string TargetWords(string target) => target switch
+    {
+        DeviceOta.CourtBridge => "Court box bridge",
+        DeviceOta.DoorGate => "Door gate",
+        _ => "Board",
+    };
 
     /// <summary><c>GET …/firmware</c>: every release, newest first, with its rollout and the boards of its target by state.</summary>
     public async Task<object> ListAsync(CancellationToken ct)
@@ -233,7 +244,7 @@ public sealed class FirmwareService
             ActorUserId: actorUserId,
             SubjectKind: AdminChangeSubjects.Device,
             SubjectId: release.Id,
-            SubjectLabel: $"{release.Target} {release.Version}",
+            SubjectLabel: $"{TargetWords(release.Target)} {release.Version}",
             Before: before,
             After: new { rollout = release.Rollout, device_id = release.RolloutDeviceId, paused = release.Paused }), ct);
         await _db.SaveChangesAsync(ct);

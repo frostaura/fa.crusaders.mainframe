@@ -240,7 +240,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
   <div class="eyebrow">FrostAura Technologies · Crusaders Mainframe</div>
   <h1>Every path from a booking to a lit court</h1>
   <p class="lead">One box, four courts, no moving parts you have to babysit. Every flow the system runs, drawn lane by lane; what happens when the network is down; and how to put the whole thing in service with the Arduino IDE and one Docker command.</p>
-  <div class="stamp"><i></i> Bridge 2.2.9 · Mega 2.0.0 · one code per member · one API key · box polls, backend answers · wiring unchanged from Carl's schematic</div>
+  <div class="stamp"><i></i> Mega 3.0.0 · bridge 3.0.0 · gate 2.0.0 · one code per member · rotating device keys · the backend's snapshot is the truth · wiring unchanged from Carl's schematic</div>
 </div>
 
 <section id="how">
@@ -346,7 +346,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
         <li>Within a few seconds the glass shows <span class="lcd">CONNECTED
 SCAN TO START</span>.</li>
         <li>Within a minute the box is on the <b>Devices</b> page as <code>box-xxxxxx</code>. Rename it; check that court 1 is on relay A and so on; save.</li>
-        <li>Book a court a few minutes ahead on a phone, scan <b>My Code</b> at the box, watch the light. Press OFF. Check the wallet. The Devices page shows the bridge as <b>2.2.9</b>; the Mega is never reflashed and stays 2.0.0.</li>
+        <li>Book a court a few minutes ahead on a phone, scan <b>My Code</b> at the box, watch the light. Press OFF. Check the wallet. The Boards page shows the Mega as <b>3.0.0</b> and the bridge as <b>3.0.0</b>. The Mega 3.0.0 flash is its last: from then on it is a renderer and relay guard the bridge steers within the Mega's own bounds.</li>
       </ol>
     </li>
   </ol>
@@ -407,7 +407,7 @@ SCAN TO START</span>.</li>
   <div class="panel" style="margin-bottom:18px">
     <div class="k">The glass is four rows now, and no screen can get stuck on it</div>
     <table>
-      <tr><td><b>Four rows, not two</b></td><td>The panel always was a 20×4; the firmware used to drive it as 16×2, so four columns of every line and two whole rows were unreachable. <b>No wire changed</b> — two build flags did. Row 0 is the title, row 1 the detail, row 2 the <i>live</i> state of the four courts, row 3 what to press plus a clock or a countdown. The zones never swap meaning, so you learn where to look once.</td></tr>
+      <tr><td><b>Compact or expanded, chosen remotely</b></td><td>Nobody has recorded whether the fitted panel is a 16×2 or a 20×4, so the layout is a club setting with a per-board override (<code>lcd_layout</code>): the Mega boots compact, falls back to compact on any doubt, and an admin can switch a board back to compact from the console. A row too long for the panel scrolls as a software marquee on one row. <b>No wire changed.</b> The landing screen says <b>SCAN YOUR QR</b> (compact) or <b>SCAN YOUR QR CODE</b> (expanded) with every court's minutes of light left; every other screen has a ceiling and returns to it.</td></tr>
       <tr><td><b>Fit a 1602 by mistake and it still reads</b></td><td>Rows 0 and 1, cut at column 16, are a complete sentence on every screen — never half of one. A smaller panel degrades to exactly the old behaviour rather than to nonsense. Somebody still has to <i>look</i> at the panel before a club box is flashed; that is on the go-live list.</td></tr>
       <tr><td><b>Every screen expires</b></td><td>The landing screen and the revert timer live on the <b>Mega</b>, for the same reason its lights-off timer does: the ESP is the half that goes away, and a timer that rescues you from a stuck screen is useless if it lives on the thing whose crash caused it. Every screen the bridge paints is an overlay with a deadline, clamped by the Mega into <b>1 to 120 seconds</b> on the way in — so nothing can leave a refusal on the glass all evening with the buttons dead behind it, which is a failure this box has actually had.</td></tr>
       <tr><td><b>Plain digits, no bar</b></td><td>The countdown counts in numerals on purpose. A progress bar costs custom characters the display has to be given back after every bus hiccup, and tells you nothing the digits do not.</td></tr>
@@ -474,7 +474,7 @@ Please wait</span> then back to the landing screen</td><td>The Mega painted this
 <div class="sig">
   <div class="mark" aria-hidden="true"></div>
   <div><div class="who">FrostAura Technologies</div><div class="line">We build the future of human capability.</div></div>
-  <div class="meta">CRUSADERS MAINFRAME · COURT LIGHTS<br>BRIDGE 2.2.9 · MEGA 2.0.0 · OCTOBER 2026</div>
+  <div class="meta">CRUSADERS MAINFRAME · COURT LIGHTS<br>MEGA 3.0.0 · BRIDGE 3.0.0 · GATE 2.0.0 · NOVEMBER 2026</div>
 </div>
 
 </div>

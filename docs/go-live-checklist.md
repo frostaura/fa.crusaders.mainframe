@@ -176,6 +176,9 @@ told by. Settle these before §5.
       `OTA_PUBLIC_KEY_N` and into the stack as `DeviceOta__PublicKeyModulus` — the two must
       match, or no ESP will ever accept an update.
 - [ ] **`SETUP_AP_PASSWORD`** chosen, compiled in, and printed on a label inside each enclosure.
+- [ ] **A bridge image that can be updated over the air.** The integrated bridge 3.0.0 cannot
+      (§5). Either wait for the phase-B bridge before the court boxes' last flash, or flash the
+      Mega 3.0.0 now (its last) with bridge 3.0.0 and plan one more bridge cable flash.
 - [ ] **`MemberCodes__MasterKey` set once, before members enrol** (MCV1-09): a key changed later
       rotates every member's code. Then, from the Devices page, every board's running version and
       capabilities recorded, the court boxes acknowledged, and `member_code_manual_hold` set until
@@ -229,9 +232,20 @@ Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pa
 the whole procedure is the **Arduino IDE 2**: open the sketch, pick the board and the port,
 press Upload. `src/iot/court-box/arduino/README.md` is the page, and it needs no terminal, no
 `make` and nothing from the Library Manager. The `make flash-*` targets do the same two
-uploads from PlatformIO and are the developer alternative. **This is the last cable flash**:
-both halves are flashed this once (the Mega cannot be updated over WiFi; the bridge can, by
-signed OTA, from here on). Door gates get 2.0.0 the same way (§12).
+uploads from PlatformIO and are the developer alternative.
+
+**What is and is not the last cable flash, as of `fix/ironclad`:**
+
+- **The Mega 3.0.0 flash is its last.** It is complete against the v3 serial protocol: a generic
+  renderer and relay guard whose behaviour the bridge steers within the Mega's own bounds, with
+  every timeout bounded on the Mega itself. Flash it with confidence.
+- **Gate 2.0.0 is updatable over the air** (signed OTA, key rotation, runtime network, setup
+  portal). Its flash is its last cable flash.
+- **Bridge 3.0.0 is NOT yet updatable over the air.** Its caps are `codes:m1 hb:3 lcd:2` only: the
+  signed OTA, `key_next`, runtime network, setup portal, link supervisor and flash persistence
+  (device-api.md §4, §6–§8 — "phase B") are still owed. A box flashed with this bridge needs the
+  cable once more when phase B lands. **Do not seal an enclosure, and do not call this the last
+  flash, until the bridge on it reports `ota:1 key:1 net:1` on the Boards page.**
 
 **`secrets.h` holds the first-boot values.** It is gitignored and lives on the flashing
 machine only; the build `#error`s on a missing value and refuses a placeholder or the test

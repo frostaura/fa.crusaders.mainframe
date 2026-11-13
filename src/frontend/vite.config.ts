@@ -241,6 +241,7 @@ export default defineConfig({
     proxy: {
       "/api": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
       "/healthz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
+      "/readyz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
 
       // Uploaded member photos. The API stores a relative path
       // (/uploads/<tenant>/photos/<hash>.png) and the browser resolves it against the WEB
@@ -267,6 +268,7 @@ export default defineConfig({
     proxy: {
       "/api": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
       "/healthz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
+      "/readyz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
       "/uploads": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
     },
   },

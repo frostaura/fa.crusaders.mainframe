@@ -504,7 +504,11 @@ def selftest_serial_codec() -> None:
         # (ON,D,60000 -> the 90-minute relay cap). That is the court box's rule,
         # not the wire format's, so pin only the vectors whose arguments reach
         # the wire verbatim. The checksum compared is still the corpus's own.
-        if "".join(args) not in expected:
+        # Compared as the whole framed body, not as a substring of the bytes:
+        # `"0" in "!LIVE,1*0B"` is true (the checksum holds a 0), which is how the
+        # v3 clamp vectors slipped past this filter as "verbatim".
+        verbatim = "!" + ",".join([frame["verb"], *args]) + "*"
+        if not expected.startswith(verbatim):
             continue
         got = serial_frame(frame["verb"], *args).decode()
         if got != expected:

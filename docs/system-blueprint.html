@@ -310,7 +310,7 @@ ul.tight li{margin:5px 0}
 
       <rect x="902" y="356" width="140" height="46" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.6"/>
       <text x="972" y="375" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Relay board ×4</text>
-      <text x="972" y="391" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">pins 2·3·4·5 — active LOW</text>
+      <text x="972" y="391" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">pins 2·3·4·5 — released as input</text>
 
       <rect x="1088" y="356" width="120" height="46" rx="8" fill="var(--card2)" stroke="var(--red)" stroke-width="1.8"/>
       <text x="1148" y="375" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Court lights</text>
@@ -442,7 +442,7 @@ ul.tight li{margin:5px 0}
 <section id="pins">
   <div class="eyebrow">Hardware · GPIO map</div>
   <h2>GPIO &amp; wiring</h2>
-  <p class="lede">Every peripheral hangs off fixed Mega pins. Relays are <b>active LOW</b> — driving the pin low energises the coil — and all buttons use <code>INPUT_PULLUP</code>, so a press reads low.</p>
+  <p class="lede">Every peripheral hangs off fixed Mega pins. A relay is <b>released by making its pin an input</b> — off for a low- and a high-trigger module alike — and only "on" is driven, at the level the club sets (<code>hw_relay_active_level</code>, re-sent to the Mega after every boot), so a wrong level fails dark. All buttons use <code>INPUT_PULLUP</code>, so a press reads low.</p>
 
   <div class="card pad scroll">
   <figure style="margin:0">
@@ -508,7 +508,7 @@ ul.tight li{margin:5px 0}
       <text x="112" y="318">A ← D2</text><text x="258" y="318">B ← D3</text>
       <text x="112" y="340">C ← D4</text><text x="258" y="340">D ← D5</text>
     </g>
-    <text x="185" y="368" text-anchor="middle" font-size="10.5" fill="var(--red)" font-weight="700">ACTIVE LOW · 10 A @ 250 VAC · contactor TBC</text>
+    <text x="185" y="368" text-anchor="middle" font-size="10.5" fill="var(--red)" font-weight="700">RELEASED = INPUT · module rating TBC · contactor TBC</text>
     <text x="185" y="386" text-anchor="middle" font-size="9.5" class="m" fill="currentColor" opacity=".6">coil driven via on-board transistors</text>
 
     <rect x="40" y="412" width="290" height="40" rx="10" fill="var(--card)" stroke="currentColor" stroke-opacity=".4" stroke-width="1.3"/>
@@ -561,7 +561,7 @@ ul.tight li{margin:5px 0}
       <table>
         <thead><tr><th>Function</th><th>Connection</th></tr></thead>
         <tbody>
-          <tr><td>Court relays A–D</td><td><span class="pin">2</span><span class="pin">3</span><span class="pin">4</span><span class="pin">5</span> — <b>active LOW</b></td></tr>
+          <tr><td>Court relays A–D</td><td><span class="pin">2</span><span class="pin">3</span><span class="pin">4</span><span class="pin">5</span> — released as input; "on" at the club's level</td></tr>
           <tr><td>Court buttons A–D (green)</td><td><span class="pin">22</span><span class="pin">24</span><span class="pin">26</span><span class="pin">28</span> <code>INPUT_PULLUP</code></td></tr>
           <tr><td>Duration buttons 15/30/45/60 m (black)</td><td><span class="pin">30</span><span class="pin">32</span><span class="pin">34</span><span class="pin">36</span> <code>INPUT_PULLUP</code></td></tr>
           <tr><td>Status LED</td><td><span class="pin">13</span></td></tr>
