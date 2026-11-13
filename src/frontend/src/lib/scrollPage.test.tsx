@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { describe, expect, it } from "vitest";
 import { act, render } from "@testing-library/react";
 import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
@@ -14,10 +15,11 @@ describe("which page a path is", () => {
   });
 });
 
-let go: NavigateFunction = () => undefined;
+const nav: { go: NavigateFunction } = { go: () => undefined };
 function Probe() {
   const { pathname, hash } = useLocation();
-  go = useNavigate();
+  const navigate = useNavigate();
+  useEffect(() => { nav.go = navigate; }, [navigate]);
   useScrollResetOnPage(pathname, hash);
   return <main id="main-content" />;
 }
@@ -27,13 +29,13 @@ describe("the scroll reset", () => {
     render(<MemoryRouter initialEntries={["/admin/settings"]}><Probe /></MemoryRouter>);
     const main = document.getElementById("main-content")!;
     main.scrollTop = 683;
-    act(() => { go("/admin/reports"); });
+    act(() => { nav.go("/admin/reports"); });
     expect(main.scrollTop).toBe(0);
-    act(() => { go("/admin/members"); });
+    act(() => { nav.go("/admin/members"); });
     main.scrollTop = 300;
-    act(() => { go("/admin/members/u1/wallet"); });
+    act(() => { nav.go("/admin/members/u1/wallet"); });
     expect(main.scrollTop).toBe(300);
-    act(() => { go("/admin/settings#screens"); });
+    act(() => { nav.go("/admin/settings#screens"); });
     expect(main.scrollTop).toBe(300);
   });
 });
