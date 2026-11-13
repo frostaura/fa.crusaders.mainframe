@@ -298,7 +298,10 @@ reflash (BA-01, BD-3, IO-02). v3 replaces it:
 5. **Restore a known key.** After a database loss the club must be able to put back the key the
    boards already hold: an owner-only, typed-confirmation *Restore a key* that sets a specific
    43-character key as current, and `Bootstrap:DeviceApiKey` for a rebuilt production stack
-   (BD-3, IO-01). The value is never shown again after it is saved, and never logged.
+   (BD-3, IO-01). The value is never shown again after it is saved, and never logged. "Owner" is
+   a deployment's inherent administrator (`Admins:Emails`) — the person who holds the club's secret
+   backup; the key that was current stays valid as a previous key until retired.
+   `Bootstrap:DeviceApiKey` applies only to a club that has no key yet, never over a live one.
 
 The key travels in plain HTTP on the club LAN, as every request's bearer key already does; v3
 changes how a key is replaced, not the threat model. Pinned: `http/`
