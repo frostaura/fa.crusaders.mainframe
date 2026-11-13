@@ -108,6 +108,10 @@ public sealed class OutboundAddressGuard : IOutboundAddressGuard
         // Unwrap ::ffff:10.0.0.1 before classifying. An IPv4-mapped IPv6 literal is the
         // standard way past a guard that only knows how to read IPv4.
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        // BP-19: and the other IPv6 spellings of an IPv4 address — NAT64, 6to4 and the
+        // deprecated IPv4-compatible form — which a host with that routing delivers to the
+        // embedded IPv4 address. Judged as that address, allow-list included.
+        else if (EmbeddedIPv4(address) is { } embedded) address = embedded;
 
         if (!IsRestricted(address)) return null;
         if (honourAllowList && IsAllowListed(address)) return null;
@@ -193,16 +197,49 @@ public sealed class OutboundAddressGuard : IOutboundAddressGuard
             return (IPAddress.Parse(r.Cidr[..slash]), int.Parse(r.Cidr[(slash + 1)..]));
         }).ToArray();
 
+    /// <summary>
+    /// The IPv4 address an IPv6 address carries inside it, for the three forms that are routed
+    /// to it: NAT64's well-known prefix <c>64:ff9b::/96</c> (RFC 6052), 6to4 <c>2002::/16</c>
+    /// (RFC 3056, the IPv4 in bytes 2-5) and IPv4-compatible <c>::a.b.c.d</c> (RFC 4291 §2.5.5.1,
+    /// deprecated but still parsed). Null for every other address, <c>::</c> and <c>::1</c> included.
+    /// </summary>
+    internal static IPAddress? EmbeddedIPv4(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return null;
+        var b = address.GetAddressBytes();
+
+        if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b && b.AsSpan(4, 8).IndexOfAnyExcept((byte)0) < 0)
+        {
+            return new IPAddress(b.AsSpan(12, 4));
+        }
+
+        if (b[0] == 0x20 && b[1] == 0x02) return new IPAddress(b.AsSpan(2, 4));
+
+        // ::a.b.c.d — but :: and ::1 are their own things (any, loopback) and handled as such.
+        if (b.AsSpan(0, 12).IndexOfAnyExcept((byte)0) < 0 && (b[12] | b[13]) != 0)
+        {
+            return new IPAddress(b.AsSpan(12, 4));
+        }
+
+        return null;
+    }
+
     private static bool IsRestricted(IPAddress address)
     {
         if (address.AddressFamily == AddressFamily.InterNetworkV6)
         {
+            var b = address.GetAddressBytes();
             return IPAddress.IsLoopback(address)
                    || address.Equals(IPAddress.IPv6Any)
                    || address.IsIPv6LinkLocal
                    || address.IsIPv6SiteLocal
                    || address.IsIPv6Multicast
-                   || address.IsIPv6UniqueLocal;
+                   || address.IsIPv6UniqueLocal
+                   // Teredo (2001::/32) hides its client's IPv4 address, and NAT64's local-use
+                   // prefix (64:ff9b:1::/48, RFC 8215) is translated by the operator's own gateway:
+                   // neither can be judged by what it carries, so neither is a webhook destination.
+                   || address.IsIPv6Teredo
+                   || (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b && b[4] == 0x00 && b[5] == 0x01);
         }
 
         return RestrictedNetworks.Any(n => InNetwork(address, n.Network, n.Prefix));

@@ -93,6 +93,51 @@ public class OutboundGuardTests
     }
 
     /// <summary>
+    /// BP-19: the IPv6 spellings of an IPv4 address that a host with NAT64 or 6to4 routing
+    /// delivers to that address. Only IPv4-mapped was unwrapped, so <c>64:ff9b::a9fe:a9fe</c>
+    /// reached the metadata endpoint on such a host. Teredo and NAT64's local-use prefix cannot be
+    /// judged by what they carry and are refused outright.
+    /// </summary>
+    [Theory]
+    [InlineData("64:ff9b::a9fe:a9fe")]     // NAT64 of 169.254.169.254
+    [InlineData("64:ff9b::10.0.0.1")]
+    [InlineData("64:ff9b::127.0.0.1")]
+    [InlineData("2002:0a00:0001::1")]      // 6to4 of 10.0.0.1
+    [InlineData("2002:c0a8:4401::")]       // 6to4 of 192.168.68.1
+    [InlineData("::10.0.0.1")]             // IPv4-compatible
+    [InlineData("::169.254.169.254")]
+    [InlineData("2001:0:4136:e378:8000:63bf:3fff:fdd2")]  // Teredo
+    [InlineData("64:ff9b:1::808:808")]     // NAT64 local-use, even of a public address
+    public void IPv6_forms_of_a_restricted_IPv4_address_are_refused(string address)
+    {
+        Assert.NotNull(Guard().Check(IPAddress.Parse(address)));
+    }
+
+    /// <summary>
+    /// The same forms carrying a PUBLIC IPv4 address are that address, and permitted — a guard that
+    /// refused every NAT64 destination would break webhooks on an IPv6-only host.
+    /// </summary>
+    [Theory]
+    [InlineData("64:ff9b::808:808")]       // NAT64 of 8.8.8.8
+    [InlineData("2002:0808:0808::1")]      // 6to4 of 8.8.8.8
+    [InlineData("::8.8.8.8")]
+    public void IPv6_forms_of_a_public_IPv4_address_are_that_address(string address)
+    {
+        Assert.Null(Guard().Check(IPAddress.Parse(address)));
+    }
+
+    /// <summary>The allow-list judges the embedded address too: a listed board is reachable however it is spelled.</summary>
+    [Fact]
+    public void An_allow_listed_board_reached_through_NAT64_is_still_allowed()
+    {
+        var guard = Guard(allowList: ["192.168.68.150/32"]);
+        Assert.Null(guard.Check(IPAddress.Parse("64:ff9b::192.168.68.150")));
+        Assert.NotNull(guard.Check(IPAddress.Parse("64:ff9b::192.168.68.151")));
+        Assert.Null(OutboundAddressGuard.EmbeddedIPv4(IPAddress.Parse("::1")));
+        Assert.Null(OutboundAddressGuard.EmbeddedIPv4(IPAddress.Parse("::")));
+    }
+
+    /// <summary>
     /// The other half. A guard that blocks everything is not a guard, it is an outage —
     /// and the webhook feature exists to reach real receivers.
     /// </summary>
