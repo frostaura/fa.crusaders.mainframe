@@ -58,7 +58,10 @@ v3 response field on the caps of **this** request:
 - **Body budgets.** Court box: **2048** bytes for a 2.x box (unchanged; bridge 2.3.0 reads into
   2560), **4096** for a `hb:3` box (a 3.0.0 bridge reads into 5120; widest vector
   `v3-heartbeat-response-widest`, 3522 bytes). Gate: **4096** for a 1.x gate (unchanged), **6144**
-  for a v3 gate (a 2.0.0 gate reads into 8192). The server keeps every body inside its contract by
+  for a v3 gate (a 2.0.0 gate reads into 8192; the widest — `membercode/gate.json`'s
+  `gate-heartbeat-response-codes-full` plus every v3 object at its bound — measures 5022 bytes, and
+  the backend lane pins it with a server-side size test because the gate family's vectors must be
+  byte-identical to what the server serialises). The server keeps every body inside its contract by
   dropping `code_keys` last-first, then `net`, then `ota` — never `courts`, `roster` or `config`.
 
 ---
