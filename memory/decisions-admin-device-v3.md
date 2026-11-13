@@ -15,7 +15,8 @@ after that flash is on Boards or in Settings — never a cable, never a raw API 
   reading, failed (a failure, never an empty answer), data — and a `404` means "this API has no
   such route", so the panel is absent rather than empty. A reply of the wrong shape is a failed
   read. *Why:* the console ships ahead of the backend lane; a panel bound to nothing would invent
-  a board's state.
+  a board's state. A board with nothing v3 to say keeps its versions in its identity line (dense
+  cards at 390, `e2e/admin-r5`).
 - **Bounds and enumerations are the API's alone** (`bounds` on the settings GET, FA-2/BA-05): no
   box/device row carries a client range, and the `hw_*` selects carry no client values — without
   served values a select offers only what the club holds. Numeric enumerations (LCD address,
