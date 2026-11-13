@@ -103,8 +103,14 @@ export type AuthShellProps = {
  */
 const BAND_GUTTER = { paddingInline: "min(var(--band-gutter), var(--band-gutter-px))" } as const;
 
-function Band({ subline }: { subline: string }) {
+/** FM-8: the club's own name on the band, and none while it is unknown — never another club's. */
+function BandClubName() {
   const { club } = useClubIdentity();
+  if (!club) return null;
+  return <p data-auth-club="" className="font-display text-xl font-bold tracking-tight text-brand-ink [@container_band_(max-width:14rem)]:text-lg">{club.name}</p>;
+}
+
+function Band({ subline }: { subline: string }) {
   return (
     <div
       className="@container/band relative overflow-hidden bg-brand-strong py-5 [--band-gutter-px:20px] [--band-gutter:1.25rem] sm:py-6 sm:[--band-gutter-px:32px] sm:[--band-gutter:2rem]"
@@ -126,8 +132,7 @@ function Band({ subline }: { subline: string }) {
         <CrestMark />
         <div className="min-w-0 flex-1 basis-40 break-words">
           {/* R8 L7-13: a step down when the TEXT is large for the band (a rem query), never a broken word. */}
-          {/* FM-8: the club's own name, and none while it is unknown — never another club's. */}
-          {club ? <p data-auth-club="" className="font-display text-xl font-bold tracking-tight text-brand-ink [@container_band_(max-width:14rem)]:text-lg">{club.name}</p> : null}
+          <BandClubName />
           <p data-auth-subline="" className="mt-0.5 text-sm text-brand-ink/85">{subline}</p>
         </div>
       </div>

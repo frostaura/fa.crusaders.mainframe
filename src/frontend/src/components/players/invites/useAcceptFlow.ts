@@ -121,7 +121,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
     failure: (failure) => { void afterRefusal(failure); },
   });
 
-  useRereadOnWalletMove(balance.held?.spendable ?? balance.balance, outcome === null && !acceptAction.pending && !declineAction.pending, port);
+  useRereadOnWalletMove(liveSpendable(balance), unanswered(outcome, acceptAction.pending, declineAction.pending), port);
 
   const money = inviteMoney(invite);
   const blocked: Blocked = rereading ? "rereading" : invite.cap ? "cap" : money.shortBy > 0 ? "short" : null;
@@ -160,6 +160,16 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
     partMinutes: part === null ? null : part - (invite.share_minutes - money.toPay), payPart, confirmDecline, keepInvite, keptInvite,
     readingAgain: INVITES_COPY.readingAgain,
   };
+}
+
+/** The figure the chip shows: what may be spent, or the balance where nothing is held. */
+function liveSpendable(balance: { held?: { spendable: number } | null; balance: number | null }): number | null {
+  return balance.held?.spendable ?? balance.balance;
+}
+
+/** Nothing answered and nothing on its way: the only time a wallet move re-reads the invite. */
+function unanswered(outcome: AcceptOutcome, accepting: boolean, declining: boolean): boolean {
+  return outcome === null && !accepting && !declining;
 }
 
 /**
