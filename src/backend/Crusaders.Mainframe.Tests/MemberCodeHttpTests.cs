@@ -308,8 +308,11 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<Post
         Assert.True(door.GetProperty("opened").GetBoolean());
         Assert.True(court.GetProperty("activated").GetBoolean());
         Assert.Equal(2, court.GetProperty("court_number").GetInt32());
-        Assert.False(again.GetProperty("activated").GetBoolean());
-        Assert.Equal("code_used", again.GetProperty("reason").GetString());
+        // MCV1-02 (member-code §13, 2026-11-13): the same code again at the box and court it just
+        // lit is a repeat activation of the session already lit there — a re-grant, writing no
+        // second court use (until then it answered code_used, and extending your own lit court
+        // with a v1 code was impossible). The use count is what holds: one per class.
+        Assert.True(again.GetProperty("activated").GetBoolean());
         Assert.Equal(1, await club.UsesAsync(app, MemberCodeUseClass.Door));
         Assert.Equal(1, await club.UsesAsync(app, MemberCodeUseClass.Court));
     }

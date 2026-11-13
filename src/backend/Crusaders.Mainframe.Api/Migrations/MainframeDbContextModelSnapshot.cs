@@ -877,6 +877,18 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("CapabilitiesReportedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("CodeKeysAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CodeKeysSent")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CodeKeysTrimNoticedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CodeKeysTrimmed")
+                        .HasColumnType("integer");
+
                     b.PrimitiveCollection<List<int>>("CourtNumbers")
                         .IsRequired()
                         .HasColumnType("integer[]");
@@ -889,6 +901,15 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<string>("DiagJson")
+                        .HasColumnType("jsonb");
+
+                    b.PrimitiveCollection<List<string>>("Drift")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
@@ -898,12 +919,50 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("EventsLostReportedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("FwError")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("FwFailed")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.PrimitiveCollection<List<string>>("FwFailedVersions")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<string>("FwState")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset?>("FwStateChangedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("GateKey")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
                     b.Property<int>("Hardware")
                         .HasColumnType("integer");
+
+                    b.Property<int?>("HwLcdI2cAddress")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("HwRelayActiveLevel")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<int?>("HwScannerBaud")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("HwScannerGapMs")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("HwScannerLineEnd")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
 
                     b.Property<int>("Kind")
                         .HasColumnType("integer");
@@ -912,8 +971,28 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<DateTimeOffset?>("LastKeyAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("LastKeyId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LcdLayoutAcknowledged")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset?>("LcdLayoutAcknowledgedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LcdLayoutOverride")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<bool?>("LcdMarqueeOverride")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("LocationNote")
                         .HasMaxLength(200)
@@ -924,6 +1003,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(12)
                         .HasColumnType("character varying(12)");
 
+                    b.Property<string>("MegaJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("MegaVersion")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -932,6 +1014,16 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("NetPushRequested")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("NetSrc")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<long?>("NetVer")
+                        .HasColumnType("bigint");
 
                     b.Property<int>("NoPush")
                         .HasColumnType("integer");
@@ -944,6 +1036,19 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.Property<int>("PowerLossBehaviour")
                         .HasColumnType("integer");
+
+                    b.PrimitiveCollection<List<int>>("RelayDarkStreak")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer[]")
+                        .HasDefaultValueSql("'{}'::integer[]");
+
+                    b.Property<string>("RestoreReport")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset?>("RestoreReportedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("RestoreServedAt")
                         .HasColumnType("timestamp with time zone");
@@ -965,6 +1070,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("ShutHeardAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("TelemetryAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("TenantId")
@@ -1077,6 +1185,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<long>("BootId")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("Cause")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<int?>("Court")
                         .HasColumnType("integer");
 
@@ -1112,6 +1224,46 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("TenantId", "DeviceId", "Court", "OccurredAt");
 
                     b.ToTable("device_event_receipts", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.DeviceNetwork", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BaseUrl")
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Wifi0PskCipher")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Wifi0Ssid")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Wifi1PskCipher")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Wifi1Ssid")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("device_networks", (string)null);
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.DeviceOutage", b =>
@@ -1239,6 +1391,40 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("device_pay_for_quotes", (string)null);
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.DevicePreviousKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("KeyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("RetiredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RetiredByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("SupersededAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "KeyId")
+                        .IsUnique();
+
+                    b.ToTable("device_previous_keys", (string)null);
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.EmailOutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1340,6 +1526,70 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("TenantId", "UserId");
 
                     b.ToTable("enrolled_templates", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.FirmwareRelease", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Image")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<bool>("Paused")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Rollout")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<Guid?>("RolloutDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Signature")
+                        .IsRequired()
+                        .HasMaxLength(342)
+                        .HasColumnType("character varying(342)");
+
+                    b.Property<int>("Size")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Target", "Version")
+                        .IsUnique();
+
+                    b.ToTable("firmware_releases", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_firmware_releases_rollout", "\"Rollout\" IN ('off', 'one', 'all')");
+                        });
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.LedgerEntry", b =>
@@ -2308,7 +2558,13 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<string>("DeviceApiKey")
                         .HasColumnType("text");
 
+                    b.Property<int>("DeviceApiKeyId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset?>("DeviceApiKeyRegeneratedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DeviceKeyRotationStartedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DisplayName")

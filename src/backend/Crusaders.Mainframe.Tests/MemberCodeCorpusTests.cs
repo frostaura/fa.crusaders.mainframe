@@ -68,7 +68,7 @@ public partial class MemberCodeCorpusTests
 
         Assert.Equal(
             new[] { "clubday.json", "codesync.json", "derivation.json", "gate.json", "hkdf.json", "hmac.json",
-                    "http.json", "roster.json", "sha256.json", "token.json", "totp.json" },
+                    "http.json", "payfor.json", "roster.json", "sha256.json", "token.json", "totp.json" },
             mine);
     }
 

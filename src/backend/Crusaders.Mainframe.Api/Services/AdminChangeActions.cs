@@ -198,6 +198,18 @@ public static class AdminChangeActions
     public const string DeviceUpdated = "device.updated";
     public const string DeviceDeleted = "device.deleted";
     public const string DeviceApiKeyRegenerated = "device.api_key_regenerated";
+    /// <summary>Device contract v3 §6: a key rotation started; the old key stays valid until retired.</summary>
+    public const string DeviceApiKeyRotated = "device.api_key_rotated";
+    public const string DeviceApiKeyRetired = "device.api_key_retired";
+    /// <summary>§6: a known key put back as the current one (an owner, after a database loss).</summary>
+    public const string DeviceApiKeyRestored = "device.api_key_restored";
+    /// <summary>§8: the club's device network (WiFi profiles, server base URL) saved — passwords never recorded.</summary>
+    public const string DeviceNetworkUpdated = "device.network_updated";
+    /// <summary>§8: the club's network pushed to a board whose own configuration came from its setup portal.</summary>
+    public const string DeviceNetworkPushed = "device.network_pushed";
+    /// <summary>§7: a signed firmware image accepted, and a rollout changed.</summary>
+    public const string FirmwareUploaded = "firmware.uploaded";
+    public const string FirmwareRolloutChanged = "firmware.rollout_changed";
     public const string DoorsShutAll = "doors.shut_all";
     public const string DoorsReopenedAll = "doors.reopened_all";
     public const string MonitoringErrorResolved = "monitoring.error_resolved";
@@ -227,7 +239,9 @@ public static class AdminChangeActions
         MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported, WebhookCreated, WebhookDeleted,
         DemoEntered, DemoLeft, DemoReset, DemoMemberViewEntered, DemoMemberViewLeft,
-        DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
+        DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DeviceApiKeyRotated, DeviceApiKeyRetired, DeviceApiKeyRestored,
+        DeviceNetworkUpdated, DeviceNetworkPushed, FirmwareUploaded, FirmwareRolloutChanged,
+        DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
         PlayResultVoided, PlayResultUpheld,
     ];
 
@@ -273,6 +287,8 @@ public static class AdminChangeActions
                 or ChangesExported or WebhookCreated or WebhookDeleted
                 or DemoEntered or DemoLeft or DemoReset or DemoMemberViewEntered or DemoMemberViewLeft => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
+                or DeviceApiKeyRotated or DeviceApiKeyRetired or DeviceApiKeyRestored
+                or DeviceNetworkUpdated or DeviceNetworkPushed or FirmwareUploaded or FirmwareRolloutChanged
                 or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
             PlayResultVoided or PlayResultUpheld => AdminChangeAreas.Play,
             _ => null,
@@ -354,6 +370,13 @@ public static class AdminChangeActions
             DeviceUpdated => $"Changed a device{of}",
             DeviceDeleted => $"Removed a device{of}",
             DeviceApiKeyRegenerated => "Regenerated the club's device key",
+            DeviceApiKeyRotated => "Started a device key rotation",
+            DeviceApiKeyRetired => "Retired the club's old device key",
+            DeviceApiKeyRestored => "Restored a known device key",
+            DeviceNetworkUpdated => "Changed the club's device network",
+            DeviceNetworkPushed => $"Sent the club's network to a board{of}",
+            FirmwareUploaded => $"Uploaded a firmware release{of}",
+            FirmwareRolloutChanged => $"Changed a firmware rollout{of}",
             DoorsShutAll => "Shut every door at once",
             DoorsReopenedAll => "Reopened the doors",
             MonitoringErrorResolved => $"Marked a device fault as resolved{of}",

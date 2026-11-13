@@ -43,7 +43,19 @@ public sealed class DeviceKeyResolver
     /// The club whose device key this is, with the tenant context set to it — or null.
     /// The caller learns nothing about <i>why</i> a key failed; that is for the log.
     /// </summary>
-    public async Task<Tenant?> ResolveAsync(string key, CancellationToken ct = default)
+    /// <summary>
+    /// The club whose key — current or still-valid previous (device-api.md §6) — this is, with the
+    /// key's id number; null when no club holds it. Sets the tenant context on a match.
+    /// </summary>
+    public async Task<Tenant?> ResolveAsync(string key, CancellationToken ct = default) =>
+        (await ResolveKeyAsync(key, ct))?.Tenant;
+
+    /// <summary>
+    /// <see cref="ResolveAsync"/> with the id of the key that matched. Every unretired key of a club
+    /// authenticates (§6), so a board that has not yet heard <c>key_next</c> keeps working through a
+    /// rotation; the id is how the heartbeat records which key each board is on.
+    /// </summary>
+    public async Task<(Tenant Tenant, int KeyId)?> ResolveKeyAsync(string key, CancellationToken ct = default)
     {
         var candidates = await _db.Tenants
             // A demo club is never a box's club, whatever key it may hold (demo mode).
@@ -51,17 +63,38 @@ public sealed class DeviceKeyResolver
             .OrderBy(t => t.Id)
             .ToListAsync(ct);
 
+        // Previous keys are read across every club: nothing is resolved yet, so the tenant filter
+        // would match nothing. A demo club never has one (it never has a current key to rotate).
+        var previous = await _db.DevicePreviousKeys.IgnoreQueryFilters()
+            .Where(k => k.RetiredAt == null)
+            .OrderBy(k => k.TenantId).ThenBy(k => k.KeyId)
+            .ToListAsync(ct);
+
         Tenant? matched = null;
+        var matchedId = 0;
         foreach (var candidate in candidates)
         {
             // No `break`: a short-circuit here would make the number of comparisons — and
             // so the response time — depend on which club matched.
-            if (DeviceApiKey.Matches(candidate.DeviceApiKey, key)) matched = candidate;
+            if (DeviceApiKey.Matches(candidate.DeviceApiKey, key))
+            {
+                matched = candidate;
+                matchedId = candidate.DeviceApiKeyId;
+            }
+        }
+
+        foreach (var old in previous)
+        {
+            if (!DeviceApiKey.Matches(old.Key, key)) continue;
+            var owner = candidates.FirstOrDefault(t => t.Id == old.TenantId);
+            if (owner is null) continue;
+            matched = owner;
+            matchedId = old.KeyId;
         }
 
         if (matched is null) return null;
 
         _tenant.Set(matched.Id, matched.Slug);
-        return matched;
+        return (matched, matchedId);
     }
 }

@@ -101,6 +101,17 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         {
             OnMessageReceived = ctx =>
             {
+                // BD-10: a device request's bearer is the club's device key — 43 characters with no
+                // dots, never a JWT — and the Device scheme is the only one that can authenticate it.
+                // Without this the JWT handler tried every one, logged "IDX14100: JWT is not well
+                // formed" with a stack trace, then "Bearer was not authenticated", on every
+                // heartbeat of every board (about 717k lines in five minutes on the shared stack).
+                if (DeviceAuthenticationHandler.IsDeviceKeyRequest(ctx.HttpContext.Request))
+                {
+                    ctx.NoResult();
+                    return Task.CompletedTask;
+                }
+
                 if (string.IsNullOrEmpty(ctx.Token)
                     && TokenPurposes.AcceptsTicketInQuery(ctx.HttpContext.Request.Path))
                 {
@@ -428,6 +439,15 @@ builder.Services.AddScoped<IBookingPlayers, ParticipantBookingPlayers>();
 builder.Services.AddScoped<IdentificationResolver>();
 builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddScoped<DeviceKeyResolver>();
+// Device contract v3 (docs/specs/device-api.md §6–§8): key rotation, the club's device network
+// (passwords encrypted under a key derived from the member-code master key), and signed OTA. The
+// OTA verification key is resolved at start, so a malformed modulus or the corpus TEST key outside
+// Development refuses to boot rather than accepting images signed by a key in the repository.
+builder.Services.AddScoped<DeviceKeyRing>();
+builder.Services.AddSingleton<DeviceNetworkCipher>();
+builder.Services.AddScoped<DeviceNetworkService>();
+builder.Services.AddSingleton(DeviceOtaKey.Resolve(builder.Configuration, builder.Environment));
+builder.Services.AddScoped<FirmwareService>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
 // The fan-out behind every SSE stream — the member's wallet, the admin control board and the

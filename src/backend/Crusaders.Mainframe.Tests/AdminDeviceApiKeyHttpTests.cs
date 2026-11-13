@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -30,7 +31,9 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
     public AdminDeviceApiKeyHttpTests(PostgresFixture pg) => _pg = pg;
 
     private const string KeyPath = "/api/v1/admin/devices/api-key";
-    private const string RegeneratePath = "/api/v1/admin/devices/api-key/regenerate";
+    private const string RotatePath = "/api/v1/admin/devices/api-key/rotate";
+    private const string RetirePath = "/api/v1/admin/devices/api-key/retire";
+    private const string RestorePath = "/api/v1/admin/devices/api-key/restore";
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
@@ -109,8 +112,13 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(key, (await BodyAsync(await client.GetAsync(KeyPath))).GetProperty("api_key").GetString());
     }
 
+    /// <summary>
+    /// Device contract v3 §6 (BA-01, BD-3): v2's Regenerate is gone — it killed the old key on the
+    /// next request and every board needed a cable. A rotation mints the next key and keeps the old
+    /// one valid; the route that used to regenerate no longer exists.
+    /// </summary>
     [SkippableFact]
-    public async Task Regenerating_returns_a_different_key_and_a_later_timestamp()
+    public async Task Rotating_mints_the_next_key_and_keeps_the_old_one_and_regenerate_is_gone()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -119,18 +127,29 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
         var client = ClientFor(factory, seeded, seeded.AdminUserId, admin: true);
 
         var before = await BodyAsync(await client.GetAsync(KeyPath));
+        Assert.Equal("k1", before.GetProperty("key_id").GetString());
+        Assert.Equal(JsonValueKind.Null, before.GetProperty("rotation").ValueKind);
 
-        var regenerated = await client.PostAsync(RegeneratePath, null);
-        Assert.Equal(HttpStatusCode.OK, regenerated.StatusCode);
-        var after = await BodyAsync(regenerated);
-
+        var rotated = await client.PostAsync(RotatePath, null);
+        Assert.Equal(HttpStatusCode.OK, rotated.StatusCode);
+        var after = await BodyAsync(rotated);
         Assert.NotEqual(before.GetProperty("api_key").GetString(), after.GetProperty("api_key").GetString());
-        Assert.True(after.GetProperty("regenerated_at").GetDateTimeOffset() >= before.GetProperty("regenerated_at").GetDateTimeOffset());
+        Assert.Equal("k2", after.GetProperty("key_id").GetString());
+        Assert.Equal("k2", after.GetProperty("rotation").GetProperty("next_id").GetString());
 
-        // And the read route now agrees, rather than serving a cached previous key.
-        Assert.Equal(
-            after.GetProperty("api_key").GetString(),
-            (await BodyAsync(await client.GetAsync(KeyPath))).GetProperty("api_key").GetString());
+        // A second rotation while one is in progress is refused: two old keys alive at once is
+        // a board that can hold neither of them.
+        var again = await client.PostAsync(RotatePath, null);
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal("rotation_in_progress", (await BodyAsync(again)).GetProperty("error").GetString());
+
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/api/v1/admin/devices/api-key/regenerate", null)).StatusCode);
+
+        // The old key still resolves to the club, as k1; the new one as k2.
+        using var scope = factory.Services.CreateScope();
+        var resolver = scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyResolver>();
+        Assert.Equal(1, (await resolver.ResolveKeyAsync(before.GetProperty("api_key").GetString()!))?.KeyId);
+        Assert.Equal(2, (await resolver.ResolveKeyAsync(after.GetProperty("api_key").GetString()!))?.KeyId);
     }
 
     /// <summary>
@@ -138,7 +157,7 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
     /// the audit details — a trail an admin can read is not a place to put a live key.
     /// </summary>
     [SkippableFact]
-    public async Task Regenerating_is_audited_without_the_key_in_it()
+    public async Task Minting_and_rotating_are_audited_without_a_key_in_them()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -146,24 +165,24 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = ClientFor(factory, seeded, seeded.AdminUserId, admin: true);
 
-        // The lazy mint on the first read, then the explicit regeneration.
-        await client.GetAsync(KeyPath);
-        var key = (await BodyAsync(await client.PostAsync(RegeneratePath, null))).GetProperty("api_key").GetString()!;
+        var first = (await BodyAsync(await client.GetAsync(KeyPath))).GetProperty("api_key").GetString()!;
+        var key = (await BodyAsync(await client.PostAsync(RotatePath, null))).GetProperty("api_key").GetString()!;
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var rows = await db.AuditLogs.IgnoreQueryFilters()
-            .Where(a => a.TenantId == seeded.TenantId && a.Action == "device.api_key_regenerated")
+            .Where(a => a.TenantId == seeded.TenantId && (a.Action == "device.api_key_regenerated" || a.Action == "device.api_key_rotated"))
             .ToListAsync();
 
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(["device.api_key_regenerated", "device.api_key_rotated"], rows.Select(r => r.Action).Order());
         Assert.All(rows, r => Assert.Equal(seeded.AdminUserId, r.ActorUserId));
         Assert.All(rows, r => Assert.DoesNotContain(key, r.DetailsJson));
+        Assert.All(rows, r => Assert.DoesNotContain(first, r.DetailsJson));
     }
 
     /// <summary>A member is not an admin, and the key is what opens every court in the club.</summary>
     [SkippableFact]
-    public async Task A_member_cannot_read_or_regenerate_the_key()
+    public async Task A_member_cannot_read_rotate_retire_or_restore_the_key()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -172,7 +191,9 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
         var client = ClientFor(factory, seeded, seeded.MemberUserId, admin: false);
 
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(KeyPath)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync(RegeneratePath, null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync(RotatePath, null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(RetirePath, new { confirm = "retire the old key" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(RestorePath, new { key = new string('A', 43), confirm = "restore this key" })).StatusCode);
     }
 
     [SkippableFact]

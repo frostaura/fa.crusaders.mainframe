@@ -74,6 +74,14 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<Postgr
         $"{Prefix}/extend",
     ];
 
+    /// <summary>
+    /// Device contract v3 §7: the signed OTA image a board's offer points at — an eighth route,
+    /// under the same one policy. A GET naming no MAC, so it is not among the bodies the
+    /// out-of-service loops below provoke; its tenant scoping is pinned by
+    /// <c>DeviceContractV3HttpTests</c>.
+    /// </summary>
+    private const string DownloadRoute = $"{Prefix}/firmware/{{id}}";
+
     // ---- 1. The group's own metadata ----------------------------------------
 
     /// <summary>
@@ -89,7 +97,7 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<Postgr
     /// </para>
     /// </summary>
     [SkippableFact]
-    public void The_device_group_is_seven_routes_under_one_policy()
+    public void The_device_group_is_eight_routes_under_one_policy()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -102,7 +110,7 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<Postgr
             .ToList();
 
         Assert.Equal(
-            Routes.Order(),
+            Routes.Append(DownloadRoute).Order(),
             endpoints.Select(e => e.RoutePattern.RawText!).Order());
 
         foreach (var endpoint in endpoints)

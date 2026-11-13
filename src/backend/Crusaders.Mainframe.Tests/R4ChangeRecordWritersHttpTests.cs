@@ -94,9 +94,10 @@ public sealed class R4ChangeRecordWritersHttpTests(PostgresFixture pg) : IClassF
         Assert.Equal("box-a1", Diff(removed)["device_code"].Before);
         Assert.Null(removed.AfterJson);
 
-        var key = (await (await admin.PostAsync("/api/v1/admin/devices/api-key/regenerate", null)).Content.ReadFromJsonAsync<JsonElement>())
+        // Device contract v3 §6: Regenerate became a rotation (the old key stays valid until retired).
+        var key = (await (await admin.PostAsync("/api/v1/admin/devices/api-key/rotate", null)).Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("api_key").GetString()!;
-        var rotated = Assert.Single(await RowsAsync(club.TenantId, AdminChangeActions.DeviceApiKeyRegenerated));
+        var rotated = Assert.Single(await RowsAsync(club.TenantId, AdminChangeActions.DeviceApiKeyRotated));
         Assert.DoesNotContain(key, (rotated.BeforeJson ?? "") + (rotated.AfterJson ?? ""));
         Assert.DoesNotContain(club.DeviceKey, (rotated.BeforeJson ?? "") + (rotated.AfterJson ?? ""));
     }

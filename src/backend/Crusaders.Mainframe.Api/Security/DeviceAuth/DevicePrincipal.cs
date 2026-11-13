@@ -23,4 +23,9 @@ public static class DevicePrincipal
 {
     public static Guid? DeviceTenantId(this ClaimsPrincipal? principal)
         => Guid.TryParse(principal?.FindFirstValue("tenant_id"), out var id) ? id : null;
+
+    /// <summary>The id number of the club key this device request authenticated with, or null.</summary>
+    public static int? DeviceKeyId(this ClaimsPrincipal? principal)
+        => int.TryParse(principal?.FindFirstValue(DeviceAuthenticationHandler.DeviceKeyIdClaim),
+            System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : null;
 }

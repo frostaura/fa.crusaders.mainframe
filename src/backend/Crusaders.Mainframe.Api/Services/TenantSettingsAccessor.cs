@@ -188,7 +188,11 @@ public sealed class TenantSettingsAccessor
         // Two blocks added by later lanes, each in a helper of its own so this method stays
         // under the complexity gate's length bound (-L 200) — the rule is unchanged: raw here,
         // bounded at each reader.
-        return WithPlay(WithMemberCodes(WithPlayers(view, root), root), root);
+        return WithPlay(WithMemberCodes(WithPlayers(view, root), root), root) with
+        {
+            // Device contract v3 (device-api.md §5, §6). Raw here, clamped by DeviceSettings at each reader.
+            Device = DeviceSettings.Read(root),
+        };
     }
 
     private static TenantSettingsView WithPlayers(TenantSettingsView view, JsonElement root)
@@ -575,6 +579,12 @@ public sealed record TenantSettingsView(
 
     /// <summary>Distinct fault reports one board may emit per hour. Read via <see cref="BoxSettings.DeviceFaultMaxPerHour"/>.</summary>
     public int DeviceFaultMaxPerHour { get; init; } = BoxSettings.DefaultDeviceFaultMaxPerHour;
+
+    /// <summary>
+    /// The device contract v3 settings (device-api.md §5, §6), raw as stored. Read through
+    /// <see cref="DeviceSettings"/>, which clamps each one independently.
+    /// </summary>
+    public DeviceSettingsRaw Device { get; init; } = DeviceSettingsRaw.Defaults;
 
     // ---- The IoT error log's three bounds ----
 

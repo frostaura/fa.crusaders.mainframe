@@ -34,6 +34,21 @@ public sealed class DeviceAuthenticationHandler : AuthenticationHandler<DeviceAu
     public const string SchemeName = "Device";
     public const string DeviceRole = "device";
 
+    /// <summary>
+    /// A request on the device surface whose bearer cannot be a JWT (no dots): the device key. The
+    /// JWT handler skips these (BD-10), so it no longer logs a malformed-token failure per beat.
+    /// </summary>
+    public static bool IsDeviceKeyRequest(HttpRequest request)
+    {
+        if (!request.Path.StartsWithSegments("/api/v1/device")) return false;
+        var header = request.Headers.Authorization.ToString();
+        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return false;
+        return header.AsSpan(7).Trim().IndexOf('.') < 0;
+    }
+
+    /// <summary>The claim carrying the id number of the key the request authenticated with.</summary>
+    public const string DeviceKeyIdClaim = "device_key_id";
+
     private readonly DeviceKeyResolver _resolver;
 
     public DeviceAuthenticationHandler(
@@ -54,8 +69,8 @@ public sealed class DeviceAuthenticationHandler : AuthenticationHandler<DeviceAu
         // scheme still gets its turn on endpoints both schemes can serve.
         if (key is null) return AuthenticateResult.NoResult();
 
-        var tenant = await _resolver.ResolveAsync(key, Context.RequestAborted);
-        if (tenant is null)
+        var resolved = await _resolver.ResolveKeyAsync(key, Context.RequestAborted);
+        if (resolved is not { Tenant: var tenant, KeyId: var keyId })
         {
             // A JWT is also a bearer token, so an unrecognised one lands here on every
             // browser request. NoResult, not Fail — failing would turn every member's
@@ -70,6 +85,9 @@ public sealed class DeviceAuthenticationHandler : AuthenticationHandler<DeviceAu
             new Claim("tenant_id", tenant.Id.ToString()),
             new Claim("tenant_slug", tenant.Slug),
             new Claim("purpose", "device"),
+            // Which of the club's keys this was (device-api.md §6): the heartbeat records it per
+            // board, which is how a rotation knows who still needs `key_next`.
+            new Claim(DeviceKeyIdClaim, keyId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
         ], SchemeName);
 
         return AuthenticateResult.Success(

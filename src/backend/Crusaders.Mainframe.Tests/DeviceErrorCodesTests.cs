@@ -92,6 +92,18 @@ public sealed class DeviceErrorCodesTests
         [DeviceErrorCodes.QueueEventsLost] = DeviceErrorSeverity.Warning,
         [DeviceErrorCodes.ErrorLogOverflow] = DeviceErrorSeverity.Warning,
 
+        // Device contract v3 (device-api.md §4, §13; serial v3; door-gate §14).
+        [DeviceErrorCodes.RelightFailed] = DeviceErrorSeverity.Critical,
+        [DeviceErrorCodes.MegaUnacked] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.KindMismatch] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.BoardRestarted] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.LcdAbsent] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.ScreenDropped] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.HeapLow] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.StackLow] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.AnswerDrift] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.CodeKeysTrimmed] = DeviceErrorSeverity.Warning,
+
         // Info — worth counting, not worth waking anybody.
         [DeviceErrorCodes.MegaLinkBack] = DeviceErrorSeverity.Info,
         [DeviceErrorCodes.Boot] = DeviceErrorSeverity.Info,

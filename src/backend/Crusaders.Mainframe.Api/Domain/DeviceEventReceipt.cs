@@ -103,13 +103,25 @@ public sealed class DeviceEventReceipt : ITenantScoped
     public string? Outcome { get; set; }
 
     /// <summary>
+    /// Why a <c>release</c> opened the relay (device-api.md §9): <c>member</c> (the OFF button),
+    /// <c>autooff</c>, <c>cap</c>, <c>mega_reset</c>, <c>reconcile</c> — or whatever a later image
+    /// sends, stored as given and never a 400. Null on every other kind, and on a release from a
+    /// 2.x box, which means <c>member</c>. Only a member's release takes a booking out of the
+    /// heartbeat snapshot (§3): v2 treated a Mega watchdog reset as the member leaving (BD-2).
+    /// </summary>
+    public string? Cause { get; set; }
+
+    /// <summary>The widest <see cref="Cause"/> kept; a longer one is cut to this, never refused.</summary>
+    public const int CauseMaxLength = 32;
+
+    /// <summary>
     /// <see cref="Outcome"/>s that are NOT evidence of the receipt's booking's court being lit or
     /// measured: a relay wired to another court, a booking whose court is gone, a release the server
     /// could not pair. The member's night leaves them out (E7-1), and a release never pairs with one
     /// (review round 8, D8-4) — a refused receipt keeps its booking on the row (the legacy path), and
     /// paired it settled that booking's court from a relay this box never lit for it.
     /// </summary>
-    public static readonly string[] RefusedOutcomes = ["wrong_court", "unresolved", "unpaired"];
+    public static readonly string[] RefusedOutcomes = ["wrong_court", "unresolved", "unpaired", "implausible"];
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

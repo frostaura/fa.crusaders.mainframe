@@ -342,6 +342,16 @@ public sealed class DeviceRegistryService
 
         ApplyCourts(device, cmd, changes);
         ApplyCard(device, cmd, changes);
+        changes.AddRange(DeviceBoardOverrides.Apply(device, cmd.Board));
+
+        // §8: an explicit push of the club's network to a board whose configuration came from its
+        // setup portal — the one way the server's `net` may overwrite a `local` one. Cleared by the
+        // heartbeat once the board reports the club's version from the server.
+        if (cmd.Board.PushNetwork && !device.NetPushRequested)
+        {
+            device.NetPushRequested = true;
+            changes.Add(DeviceBoardOverrides.PushNetworkKey);
+        }
 
         // An admin has now looked at this row, so it stops reading as "appeared by itself,
         // nobody has checked the courts it guessed". Deleting the row and letting the box
@@ -772,8 +782,6 @@ public sealed class DeviceRegistryService
     /// there is no cache and no grace window — so every box has to be reflashed. That is
     /// the point: a regeneration that left the old key alive for a while would not be one.
     /// </summary>
-    public async Task<Tenant> RegenerateApiKeyAsync(Guid actorUserId, CancellationToken ct)
-        => await IssueApiKeyAsync(await CurrentTenantAsync(ct), actorUserId, firstIssue: false, ct);
 
     private async Task<Tenant> IssueApiKeyAsync(Tenant tenant, Guid actorUserId, bool firstIssue, CancellationToken ct)
     {
@@ -867,6 +875,9 @@ public sealed record UpdateDeviceCommand(
     /// is one, and it is a real instruction rather than an absence.
     /// </summary>
     public DoorPowerLossBehaviour? PowerLossBehaviour { get; init; }
+
+    /// <summary>The board's own display and hardware settings and the network push (device contract v3).</summary>
+    public DeviceBoardOverrides.Patch Board { get; init; } = DeviceBoardOverrides.Patch.Empty;
 }
 
 /// <summary>A value that is explicitly present, so "absent" and "present but null" can be told apart on a PATCH.</summary>

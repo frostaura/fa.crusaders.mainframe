@@ -74,7 +74,8 @@ deliberately *not* the 200 a decision gets, because none of them is a decision:
 
 | Condition | Answer |
 |---|---|
-| `mac` not twelve hex characters | `400 {"error":"mac_required"}` |
+| `mac` absent or blank | `400 {"error":"mac_required"}` |
+| `mac` present but not twelve hex characters | `400 {"error":"mac_invalid"}` (BD-13) |
 | unknown MAC (any route but `/heartbeat`) | `404` |
 | the board is disabled | `403` |
 | unknown or missing bearer key | `401` |
@@ -2097,6 +2098,8 @@ gate-specific consequences:
   runtime setting would be code with no case to serve. The scanner already ends a suffix-less line
   at the idle gap (§14.4, DG-5).
 - **A replay refused locally while online is uploaded as `replayed`**, with the board's link state
-  as it was, not as an offline `unknown_scan` (MCV1-10).
+  as it was, not as an offline `unknown_scan` (MCV1-10). On the wire it is the `unknown_scan`
+  event with the v3 event field `cause: "replayed"`; the server re-checks the code as for any
+  offline refusal and records the outcome `replayed` instead of `refused_offline`.
 - **Keys reach a door with a `gate_key` in every phase** ([`member-code.md`](member-code.md) §5.2,
   MCV1-04), so the phone's v1 code opens it offline before the club's cut-over too.

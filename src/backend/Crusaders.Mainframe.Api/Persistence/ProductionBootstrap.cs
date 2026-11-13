@@ -119,12 +119,49 @@ public static class ProductionBootstrap
         tenantContext.Set(tenant.Id, tenant.Slug);
         await EnsureAdminAsync(db, hasher, tenant, plan, logger, created);
         await EnsureCourtsAsync(db, tenant, plan, created);
+        await EnsureDeviceKeyAsync(db, tenant, config["Bootstrap:DeviceApiKey"], logger, created);
         // P13 §4.6: a new club's buy screen is never empty. Only for a club that has never had a
         // package, so an admin's own shelf is never touched. The system is the author.
         if (await MinutePackageSeeder.EnsureAsync(db, tenant.Id, Guid.Empty))
             created.Add("the opening minutes packages (1, 5 and 10 hours)");
 
         Report(plan, created, logger);
+    }
+
+    /// <summary>
+    /// <c>Bootstrap:DeviceApiKey</c> (device-api.md §6, BD-3, IO-01): the key every board already
+    /// holds, put back on a REBUILT stack so a lost database is not a reflash of every court box and
+    /// door. Applied only to a club that has no device key yet — never over a live one, which an
+    /// owner replaces with the console's typed <i>Restore a key</i> — and refused at start unless it
+    /// is exactly 43 base64url characters, the only shape a board accepts. Never logged.
+    /// </summary>
+    private static async Task EnsureDeviceKeyAsync(
+        MainframeDbContext db, Tenant tenant, string? configured, ILogger logger, List<string> created)
+    {
+        var key = configured?.Trim();
+        if (string.IsNullOrEmpty(key)) return;
+        if (!Services.DeviceProvision.IsKey(key))
+        {
+            throw new InvalidOperationException(
+                "Bootstrap:DeviceApiKey is set but is not a device key (exactly 43 base64url characters). " +
+                "Copy it from the club's secret backup, or remove it.");
+        }
+
+        if (!string.IsNullOrEmpty(tenant.DeviceApiKey))
+        {
+            if (!Security.DeviceAuth.DeviceApiKey.Matches(tenant.DeviceApiKey, key))
+            {
+                logger.LogWarning(
+                    "Bootstrap: Bootstrap__DeviceApiKey differs from the club's current device key and was NOT applied; " +
+                    "an owner restores a key from the console (Boards › Device key › Restore a key).");
+            }
+            return;
+        }
+
+        tenant.DeviceApiKey = key;
+        tenant.DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        created.Add("the club's device key, from Bootstrap:DeviceApiKey");
     }
 
     /// <summary>

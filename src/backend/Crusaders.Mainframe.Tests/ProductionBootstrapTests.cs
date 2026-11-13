@@ -101,6 +101,41 @@ public class ProductionBootstrapTests
         await RunAsync(sp, Config(("Bootstrap:Enabled", "false"), ("Bootstrap:AdminPassword", null)));
     }
 
+    // ---- Bootstrap:DeviceApiKey (device-api.md §6, BD-3, IO-01) ----
+
+    /// <summary>A rebuilt stack puts back the key every board already holds, so a lost database is not a reflash.</summary>
+    [Fact]
+    public async Task A_rebuilt_stack_puts_back_the_device_key_the_boards_hold()
+    {
+        var sp = await EmptyAsync();
+        var key = Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceApiKey.Generate();
+
+        await RunAsync(sp, Config(("Bootstrap:DeviceApiKey", key)));
+
+        Assert.Equal(key, (await Db(sp).Tenants.IgnoreQueryFilters().SingleAsync()).DeviceApiKey);
+    }
+
+    /// <summary>Never over a live key: a club that already has one keeps it (an owner restores from the console).</summary>
+    [Fact]
+    public async Task The_bootstrap_key_never_replaces_a_live_one()
+    {
+        var sp = await EmptyAsync();
+        var first = Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceApiKey.Generate();
+        await RunAsync(sp, Config(("Bootstrap:DeviceApiKey", first)));
+
+        await RunAsync(sp, Config(("Bootstrap:DeviceApiKey", Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceApiKey.Generate())));
+
+        Assert.Equal(first, (await Db(sp).Tenants.IgnoreQueryFilters().SingleAsync()).DeviceApiKey);
+    }
+
+    /// <summary>A value no board would accept refuses to start rather than being saved and refusing every board.</summary>
+    [Fact]
+    public async Task A_malformed_bootstrap_key_refuses_to_start()
+    {
+        var sp = await EmptyAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(sp, Config(("Bootstrap:DeviceApiKey", "not-a-43-character-key"))));
+    }
+
     // ---- Idempotence ----
 
     [Fact]
