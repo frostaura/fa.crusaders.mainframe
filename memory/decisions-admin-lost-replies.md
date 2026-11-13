@@ -31,7 +31,7 @@ A 5xx, a timeout or a dropped connection is an UNKNOWN outcome, never "didn't go
   delete (id gone), group archive/restore/delete (list), court add/edit (list). **R4 closed the
   rest:** group sheet save (the list reads as sent; a create = a NEW group of that name), group add
   (anybody asked for newly in the group — one save adds all or none), a member's groups (their
-  detail holds the set sent), board edit/delete (the row as asked, or gone). No admin write is direct.
+  detail holds the set sent), board edit/delete (the row as asked, or gone). Five direct writes survived (FA-11, closed 2026-11-13: `decisions-admin-golive-pass`).
 - **`ConfirmDialog` takes `describe(error)`** before `describeFailure`: how a dialog says an `UnsureOutcome`.
 - **The desk top-up's live region speaks the caller's line** (`{ said }`), never "didn't go
   through" over an unknown; a 409 `idempotency_key_reused` re-reads the balance (R3 I-6). **R5

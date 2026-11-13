@@ -35,3 +35,6 @@ Code: `Services/ControlBoardReader.cs`. Tests: `ControlBoardHttpTests`, `R3Contr
 - **R7 L7-2 (console, 320 / 200 %):** the tile is `@container/tile`; the state word and countdown
   are capped by their band's width (`min(…, 18cqi / 22cqi)` — only a narrow band shrinks them),
   and Booked by / Next stack under their terms below a 14rem tile. `e2e/admin-r7.spec.ts`.
+- **v3 (2026-11-13, console):** a lit court counts the LIGHTS' time (`lights.until`), the two
+  booking-vs-box disagreements are tile states, the offline banner says when the boxes were last
+  heard, wall view covers the app's chrome — `decisions-admin-device-v3`.
