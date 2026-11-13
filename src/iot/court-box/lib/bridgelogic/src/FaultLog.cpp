@@ -16,7 +16,8 @@ constexpr const char* kFaultNames[kFaultCount] = {
     "lcd_i2c_timeout",  "lcd_resync",         "wdt_reset",          "queue_overflow",
     "queue_no_push",    "queue_events_lost",  "store_write_failed", "clock_corrected",
     "roster_rejected",  "http_4xx",           "http_5xx",           "http_timeout",
-    "api_breaker_open", "heartbeat_rejected", "fault_overflow",
+    "api_breaker_open", "heartbeat_rejected", "mega_unacked",       "relight_failed",
+    "screen_dropped",   "fault_overflow",
 };
 
 /// One return statement and recursion, not a loop: the generated sketches

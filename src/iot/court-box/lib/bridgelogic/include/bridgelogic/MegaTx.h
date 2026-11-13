@@ -108,12 +108,23 @@ public:
   int8_t ackedLayout() const { return ackedLayout_; }
 
 private:
+  /// The widest tagged command (`!WANT,255,5400,5400,5400,5400*CC` and
+  /// `!CFG,255,REINIT,65535*CC`) with its terminator.
+  static constexpr uint8_t kPendingLineMax = 48U;
+
+  /// A tagged frame awaiting its `!ACK`, kept ENCODED (the retry re-sends the
+  /// same bytes, same tag) rather than as a proto::Frame, which is five
+  /// 25-byte arguments: 8 slots of encoded lines are 640 bytes less of the
+  /// bridge's static RAM.
   struct Pending {
     bool used;
     uint8_t tag;
     uint8_t attempts;
+    proto::Verb verb;
+    uint8_t court;
+    uint8_t len;
     uint32_t sentAtMs;
-    proto::Frame frame;
+    char line[kPendingLineMax];
   };
 
   bool enqueue(const char* bytes, size_t len, bool priority);

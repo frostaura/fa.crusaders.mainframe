@@ -208,14 +208,23 @@ bool MegaTx::command(const proto::Frame& frame, uint32_t nowMs) {
   }
   const uint8_t tag = nextTag();
   const proto::Frame t = tagged(frame, tag);
-  if (t.empty() || !encodeAndQueue(t, true)) {
+  char line[proto::kMaxFrameLen];
+  const size_t len = t.empty() ? 0U : proto::encode(t, line, sizeof(line));
+  if (len == 0U || len > kPendingLineMax || !enqueue(line, len, true)) {
     return false;
   }
-  pending_[slot].used = true;
-  pending_[slot].tag = tag;
-  pending_[slot].attempts = 1U;
-  pending_[slot].sentAtMs = nowMs;
-  pending_[slot].frame = t;
+  Pending& p = pending_[slot];
+  p.used = true;
+  p.tag = tag;
+  p.attempts = 1U;
+  p.sentAtMs = nowMs;
+  p.verb = t.verb();
+  proto::Court c = proto::Court::A;
+  p.court = (p.verb == proto::Verb::On || p.verb == proto::Verb::Off || p.verb == proto::Verb::Ext) && courtOf(t, c)
+                ? static_cast<uint8_t>(c)
+                : 0xFFU;
+  p.len = static_cast<uint8_t>(len);
+  memcpy(p.line, line, len);
   if (frame.verb() == proto::Verb::Cfg && strcmp(frame.arg(1U), "LAYOUT") == 0) {
     pendingLayout_ = static_cast<int8_t>(argU32(frame, 2U) == 1U ? 1 : 0);
     layoutTag_ = tag;
@@ -350,19 +359,15 @@ void MegaTx::pump(hal::ITransport& link, uint32_t nowMs) {
       p.used = false;
       if (unackedCount_ < kPendingSlots) {
         UnackedFrame& u = unacked_[unackedCount_];
-        u.verb = p.frame.verb();
+        u.verb = p.verb;
         u.tag = p.tag;
-        proto::Court c = proto::Court::A;
-        u.court = (u.verb == proto::Verb::On || u.verb == proto::Verb::Off || u.verb == proto::Verb::Ext) &&
-                          courtOf(p.frame, c)
-                      ? static_cast<uint8_t>(c)
-                      : 0xFFU;
+        u.court = p.court;
         ++unackedCount_;
       }
       continue;
     }
     // The SAME tag: a retry whose first copy did arrive is answered duplicate.
-    if (encodeAndQueue(p.frame, true)) {
+    if (enqueue(p.line, p.len, true)) {
       ++p.attempts;
       p.sentAtMs = nowMs;
     }

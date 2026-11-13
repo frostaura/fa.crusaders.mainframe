@@ -91,7 +91,7 @@ struct MegaConfig {
 /// Drift: the names this answer had that could not be read.
 struct Drift {
   static constexpr uint8_t kMax = 8U;
-  static constexpr uint8_t kNameLen = 48U;
+  static constexpr uint8_t kNameLen = 44U; // "config.device_power_restore_trust_minutes" is 41
   char names[kMax][kNameLen];
   uint8_t count = 0U;
   void add(const char* name);
