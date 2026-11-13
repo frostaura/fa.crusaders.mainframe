@@ -74,7 +74,7 @@ export async function readLedgerForExport(
 /** A CSV text as a file the browser can save. */
 export function csvBlob(text: string): Blob {
   // A BOM so a spreadsheet opens a name with an accent as the name, not as mojibake.
-  return new Blob(["﻿", text], { type: "text/csv;charset=utf-8" });
+  return new Blob(["\uFEFF", text], { type: "text/csv;charset=utf-8" });
 }
 
 export const DAILY_CSV_HEADER = [

@@ -32,7 +32,7 @@ describe("Transactions › Export CSV", () => {
     expect(await screen.findByText("2 movements downloaded.")).toBeInTheDocument();
     await waitFor(() => expect(saved).toHaveLength(1));
     const text = await saved[0].text();
-    expect(text.replace(/^﻿/, "").split("\r\n")[0]).toBe("When (UTC),Type,Minutes,Member,By,Reason,From,To,Booking,Movement id");
+    expect(text.replace(/^\uFEFF/, "").split("\r\n")[0]).toBe("When (UTC),Type,Minutes,Member,By,Reason,From,To,Booking,Movement id");
     expect(text).toContain(",-24,");
     expect(text).toContain(",40,");
     // The second page was read for the file — the screen alone held only the first.
