@@ -1414,7 +1414,9 @@ export type DeviceDiag = {
  */
 export function deviceCaps(device: Pick<AdminDevice, "capabilities">): Set<string> {
   const raw = device.capabilities;
-  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[\s,]+/) : [];
+  // Split without a regex literal: lizard's TypeScript lexer reads `/[\s,]+/` as the start of a
+  // division and swallowed the rest of this file into this one function.
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.replaceAll(",", " ").split(" ") : [];
   return new Set(list.map((cap) => cap.trim()).filter((cap) => cap !== ""));
 }
 

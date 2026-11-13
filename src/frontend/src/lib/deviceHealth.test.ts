@@ -77,6 +77,7 @@ describe("the planning floors", () => {
   it("shows only what was sent", () => {
     expect(diagLines({ heap: 20480 }).map((l) => l.text)).toEqual(["Free memory 20 KB."]);
     expect(diagLines({ heap: 20480, heap_min: 9000 })[0].text).toBe("Free memory 20 KB, lowest 8.8 KB since it started.");
+    expect(diagLines({ block: 3000 })[0].text).toBe("Largest free block 2.9 KB, and it needs at least 4.0 KB.");
     expect(diagLines(null)).toEqual([]);
     expect(diagLines({})).toEqual([]);
   });

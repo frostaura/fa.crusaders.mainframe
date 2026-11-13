@@ -249,12 +249,31 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
  */
 /** `uptime_ms=<n>` (the boot fault's detail) as "after 3 h 12 min", or null. */
 function bootUptime(detail: string | null | undefined): string | null {
-  const ms = /^uptime_ms=(\d+)$/.exec((detail ?? "").trim())?.[1];
-  if (ms === undefined) return null;
+  const said = (detail ?? "").trim();
+  const ms = said.startsWith("uptime_ms=") ? said.slice("uptime_ms=".length) : "";
+  if (ms === "" || !Number.isInteger(Number(ms))) return null;
   const minutes = Math.floor(Number(ms) / 60_000);
   if (minutes < 1) return "It reported starting from zero, so it had only just come on.";
   const h = Math.floor(minutes / 60);
   return `It had been running for ${h > 0 ? `${h} h ` : ""}${minutes % 60} min when it said so.`;
+}
+
+/** BA-22: a restart says what it means, with its raw uptime turned into a sentence. */
+function bootExplanation(row: Pick<DeviceErrorRow, "headline" | "detail">) {
+  const known = EXPLANATIONS.boot;
+  const uptime = bootUptime(row.detail);
+  return {
+    title: (row.headline ?? "").trim() || "The board restarted",
+    means: uptime ? `${known.means} ${uptime}` : known.means,
+    doThis: known.doThis,
+    unrecognised: false,
+  };
+}
+
+/** The table's entry for a code — a door's "stopped reporting" talks about doors (BA-22). */
+function explanationFor(row: { code: string; device_kind?: string | null }): FaultExplanation | undefined {
+  if (row.code === "outage_opened" && row.device_kind === "Gate") return EXPLANATIONS.outage_opened_gate;
+  return EXPLANATIONS[row.code];
 }
 
 export function explainFault(
@@ -279,13 +298,8 @@ export function explainFault(
       return { title: headline || kind.title, means: kind.means, doThis: kind.doThis, unrecognised: false };
     }
   }
-  if (row.code === "boot") {
-    const known = EXPLANATIONS.boot;
-    const uptime = bootUptime(row.detail);
-    return { title: (row.headline ?? "").trim() || "The board restarted", means: uptime ? `${known.means} ${uptime}` : known.means,
-      doThis: known.doThis, unrecognised: false };
-  }
-  const known = row.code === "outage_opened" && row.device_kind === "Gate" ? EXPLANATIONS.outage_opened_gate : EXPLANATIONS[row.code];
+  if (row.code === "boot") return bootExplanation(row);
+  const known = explanationFor(row);
   const headline = (row.headline ?? "").trim();
   const title = headline
     || (known ? row.code.replace(/_/g, " ") : `An error the club's software does not have a name for (${row.code})`);

@@ -5,7 +5,7 @@ import { CaretDown, CaretUp, Warning } from "../ui/icons";
 import { cn } from "../../lib/utils";
 import {
   COUNTDOWN_LABEL, EXPECTATION_WORD, LIGHTS_MISMATCH_WORDS, courtAnnouncement, courtExpectation, expectationMeaning,
-  healthLine, lightsLine, lightsMismatch, lightsSecondsLeft, nextLine, startedLine, type CourtExpectation,
+  healthLine, lightsLine, lightsMismatch, lightsSecondsLeft, nextLine, startedLine, type CountdownSource, type CourtExpectation,
   DUPLICATE_BOXES_BOARDS, DUPLICATE_BOXES_HIDE, DUPLICATE_BOXES_OTHERS, DUPLICATE_BOXES_REVIEW, duplicateBoxesParts,
 } from "../../lib/monitoringCopy";
 import { type ControlBoardCourt } from "../../lib/adminApi";
@@ -79,6 +79,20 @@ function countdownFace(seconds: number): string {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
+/**
+ * FA-8: while the lights are on, the big number is the LIGHTS' time left; the booking's end is
+ * said apart from it when the two differ by more than a minute.
+ */
+function tileCountdown(court: ControlBoardCourt, now: number, generatedAt: string | null | undefined): {
+  left: number | null; source: CountdownSource; bookingApart: number | null;
+} {
+  const lightsLeft = lightsSecondsLeft(court.lights, now, generatedAt);
+  const bookingLeft = secondsLeft(court.current?.ends_at, now);
+  if (lightsLeft === null) return { left: bookingLeft, source: "booking", bookingApart: null };
+  const apart = bookingLeft !== null && Math.abs(lightsLeft - bookingLeft) > 60;
+  return { left: lightsLeft, source: "lights", bookingApart: apart ? bookingLeft : null };
+}
+
 export function CourtTile({ court, now, timezone, graceMinutes, generatedAt }: {
   court: ControlBoardCourt;
   /** One instant per paint, from the page's `useTicker`. Three tiles must not print two moments. */
@@ -90,13 +104,7 @@ export function CourtTile({ court, now, timezone, graceMinutes, generatedAt }: {
   generatedAt?: string | null;
 }) {
   const state = courtExpectation(court);
-  // FA-8: while the lights are on, the big number is the LIGHTS' time left; the booking's end
-  // is said apart from it when the two differ by more than a minute.
-  const lightsLeft = lightsSecondsLeft(court.lights, now, generatedAt);
-  const bookingLeft = secondsLeft(court.current?.ends_at, now);
-  const left = lightsLeft ?? bookingLeft;
-  const source = lightsLeft !== null ? "lights" : "booking";
-  const bookingApart = lightsLeft !== null && bookingLeft !== null && Math.abs(lightsLeft - bookingLeft) > 60 ? bookingLeft : null;
+  const { left, source, bookingApart } = tileCountdown(court, now, generatedAt);
   const mismatch = lightsMismatch(court, now, graceMinutes);
   const lights = lightsLine(court.lights, timezone);
   const started = startedLine(court.current, court.lights, timezone);

@@ -170,21 +170,28 @@ export const LIGHTS_MISMATCH_WORDS: Record<LightsMismatch, string> = {
  */
 export function lightsMismatch(court: ControlBoardCourt, now: number, graceMinutes: number | null): LightsMismatch | null {
   const lights = court.lights;
-  if (!lights?.confirmed_state || !lights.confirmed_at) return null;
-  if (courtExpectation(court) === "unknown") return null;
-  const graceMs = Math.max(0, graceMinutes ?? 0) * 60_000;
+  if (!lights?.confirmed_state || !lights.confirmed_at || courtExpectation(court) === "unknown") return null;
   const confirmed = Date.parse(lights.confirmed_at);
   if (!Number.isFinite(confirmed)) return null;
-  const current = court.current;
-  if (lights.confirmed_state === "on" && !current) {
-    const since = lights.since ? Date.parse(lights.since) : confirmed;
-    return Number.isFinite(since) && now - since > graceMs ? "lit_nothing_booked" : null;
-  }
-  if (lights.confirmed_state === "off" && current?.checked_in_at) {
-    const checkedIn = Date.parse(current.checked_in_at);
-    return Number.isFinite(checkedIn) && confirmed > checkedIn && now - checkedIn > graceMs ? "checked_in_dark" : null;
-  }
+  const graceMs = Math.max(0, graceMinutes ?? 0) * 60_000;
+  if (lights.confirmed_state === "on") return litNothingBooked(court, lights, confirmed, now - graceMs);
+  if (lights.confirmed_state === "off") return checkedInDark(court, confirmed, now - graceMs);
   return null;
+}
+
+/** Lit by the box's word, nothing current, and lit since before the grace window began. */
+function litNothingBooked(court: ControlBoardCourt, lights: ControlBoardLights, confirmed: number, graceStart: number): LightsMismatch | null {
+  if (court.current) return null;
+  const since = lights.since ? Date.parse(lights.since) : confirmed;
+  return Number.isFinite(since) && since < graceStart ? "lit_nothing_booked" : null;
+}
+
+/** Checked in before the grace window began, and the box said "off" AFTER the check-in. */
+function checkedInDark(court: ControlBoardCourt, confirmed: number, graceStart: number): LightsMismatch | null {
+  const at = court.current?.checked_in_at;
+  if (!at) return null;
+  const checkedIn = Date.parse(at);
+  return Number.isFinite(checkedIn) && confirmed > checkedIn && checkedIn < graceStart ? "checked_in_dark" : null;
 }
 
 // ---------------------------------------------------------------------------------------

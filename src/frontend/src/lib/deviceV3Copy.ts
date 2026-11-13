@@ -143,20 +143,32 @@ const FW_ERROR_WORDS: Readonly<Record<string, string>> = {
   busy: "the box was busy",
 };
 
+/** A refused or rolled-back version, and why, in words. */
+function refusedPart(device: AdminDevice): string | null {
+  if (!device.fw_failed) return null;
+  const why = device.fw_error ? FW_ERROR_WORDS[device.fw_error] ?? device.fw_error : null;
+  const reason = why ? " — " + why : "";
+  return `${device.fw_failed} was refused${reason}, and will not be tried again`;
+}
+
+/** Against the latest release of its target: newer available, or up to date. */
+function releasePart(running: string | null | undefined, latest: FirmwareRelease | null): string | null {
+  if (!latest || !running) return null;
+  return compareVersions(latest.version, running) > 0 ? `${latest.version} is available` : "up to date";
+}
+
+/** The board's own `fw_state`, unless it is simply running what it has. */
+function statePart(state: string | null | undefined): string | null {
+  if (!state || state === "committed") return null;
+  return FW_STATE_WORDS[state] ?? `reports “${state}”`;
+}
+
 /** The firmware line: running version, what state it is in, and whether a newer release exists. */
 export function firmwareLine(device: AdminDevice, latest: FirmwareRelease | null): string | null {
   const running = device.running_version;
   if (!running && !device.fw_state) return null;
-  const state = device.fw_state ? FW_STATE_WORDS[device.fw_state] ?? `reports “${device.fw_state}”` : null;
-  const parts = [running ? `Firmware ${running}` : "Firmware"];
-  if (state && device.fw_state !== "committed") parts.push(state);
-  if (device.fw_failed) {
-    const why = device.fw_error ? FW_ERROR_WORDS[device.fw_error] ?? device.fw_error : null;
-    parts.push(`${device.fw_failed} was refused${why ? ` — ${why}` : ""}, and will not be tried again`);
-  }
-  if (latest && running && compareVersions(latest.version, running) > 0) parts.push(`${latest.version} is available`);
-  if (latest && running && compareVersions(latest.version, running) <= 0) parts.push("up to date");
-  return parts.join(" · ");
+  const parts = [running ? `Firmware ${running}` : "Firmware", statePart(device.fw_state), refusedPart(device), releasePart(running, latest)];
+  return parts.filter((part): part is string => part !== null).join(" · ");
 }
 
 /** The Mega's version and its last reset cause (`mega.reset`, the `MCUSR` it sent in `!BOOT`). */
@@ -169,16 +181,24 @@ export function megaLine(device: AdminDevice): string | null {
   return parts.join(" · ");
 }
 
+const NET_SRC_WORDS: Readonly<Record<string, string>> = {
+  local: "set at the box itself", compiled: "what it was flashed with", server: "from the club",
+};
+
+/** Whether this board is behind the club's network version (a `local` board keeps its own). */
+function networkBehind(device: AdminDevice, clubVer: number | null): boolean {
+  if (clubVer === null || typeof device.net_ver !== "number" || device.net_src === "local") return false;
+  return device.net_ver < clubVer;
+}
+
 /** The network line: the version applied and where it came from. */
 export function networkLine(device: AdminDevice, clubVer: number | null): string | null {
   if (device.net_ver === undefined && device.net_src === undefined) return null;
-  const src = device.net_src === "local" ? "set at the box itself"
-    : device.net_src === "compiled" ? "what it was flashed with"
-      : device.net_src === "server" ? "from the club" : null;
+  const src = device.net_src ? NET_SRC_WORDS[device.net_src] ?? null : null;
   const ver = typeof device.net_ver === "number" ? `network version ${device.net_ver}` : "network";
-  const behind = clubVer !== null && typeof device.net_ver === "number" && device.net_src !== "local" && device.net_ver < clubVer
-    ? `, the club's is ${clubVer} — it updates the next time it calls in` : "";
-  return `${ver}${src ? ` (${src})` : ""}${behind}`;
+  const from = src ? " (" + src + ")" : "";
+  const behind = networkBehind(device, clubVer) ? `, the club's is ${clubVer} — it updates the next time it calls in` : "";
+  return ver + from + behind;
 }
 
 /** Numeric `a.b.c` compare: positive when `a` is newer. A malformed part counts as 0. */

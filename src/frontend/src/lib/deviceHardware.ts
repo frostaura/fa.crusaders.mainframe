@@ -36,20 +36,28 @@ export const HW_DESCRIPTIONS: Readonly<Record<HwKey, string>> = {
   hw_scanner_gap_ms: "With auto, a pause this long ends a scanned code.",
 };
 
+const hex = (n: number) => `0x${n.toString(16).toUpperCase().padStart(2, "0")}`;
+
+const LEVEL_WORDS: Readonly<Record<string, string>> = { low: "low (active-low module)", high: "high (active-high module)" };
+const LINE_END_WORDS: Readonly<Record<string, string>> = { crlf: "CR/LF only", auto: "auto (CR, LF or a pause)" };
+
+/** Each key's value in words; anything a formatter does not know reads as itself. */
+const HW_WORDS: Readonly<Record<HwKey, (value: string | number) => string>> = {
+  hw_relay_active_level: (v) => LEVEL_WORDS[String(v)] ?? String(v),
+  hw_lcd_i2c_address: (v) => {
+    const n = Number(v);
+    if (!Number.isInteger(n)) return String(v);
+    return n === 0 ? "search for it" : hex(n);
+  },
+  hw_scanner_baud: (v) => (Number(v) === 0 ? "auto-detect" : `${v} baud`),
+  hw_scanner_line_end: (v) => LINE_END_WORDS[String(v)] ?? String(v),
+  hw_scanner_gap_ms: (v) => `${v} ms`,
+};
+
 /** One value, in words. */
 export function hwValueWords(key: HwKey, value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "not set";
-  switch (key) {
-    case "hw_relay_active_level": return value === "low" ? "low (active-low module)" : value === "high" ? "high (active-high module)" : String(value);
-    case "hw_lcd_i2c_address": {
-      const n = Number(value);
-      return n === 0 ? "search for it" : Number.isInteger(n) ? `0x${n.toString(16).toUpperCase().padStart(2, "0")}` : String(value);
-    }
-    case "hw_scanner_baud": return Number(value) === 0 ? "auto-detect" : `${value} baud`;
-    case "hw_scanner_line_end": return value === "crlf" ? "CR/LF only" : value === "auto" ? "auto (CR, LF or a pause)" : String(value);
-    case "hw_scanner_gap_ms": return `${value} ms`;
-    default: return String(value);
-  }
+  return HW_WORDS[key](value);
 }
 
 /** The values the API offers for an enumerated key, as strings for a select; null when it serves none. */
@@ -78,21 +86,23 @@ export function hwEffective(device: AdminDevice, settings: AdminSettings | null,
 }
 
 /** What the Mega reports it is running with, per key (`mega` in the heartbeat, from `!HW`). */
+const HW_REPORTED: Readonly<Record<HwKey, (mega: NonNullable<AdminDevice["mega"]>) => string | null>> = {
+  hw_relay_active_level: (m) => (m.relay ? hwValueWords("hw_relay_active_level", m.relay) : null),
+  hw_lcd_i2c_address: (m) => {
+    if (!m.lcd) return null;
+    return m.lcd === "00" ? "no screen answered" : `0x${m.lcd.toUpperCase()}`;
+  },
+  hw_scanner_baud: (m) => {
+    if (typeof m.scan_baud !== "number") return null;
+    return m.scan_baud === 0 ? "still detecting" : `${m.scan_baud} baud`;
+  },
+  hw_scanner_line_end: (m) => (m.scan_end ? hwValueWords("hw_scanner_line_end", m.scan_end) : null),
+  // The gap is not in `!HW`: the Mega applies it and reports nothing back about it.
+  hw_scanner_gap_ms: () => null,
+};
+
 export function hwReported(device: AdminDevice, key: HwKey): string | null {
-  const mega = device.mega;
-  if (!mega) return null;
-  switch (key) {
-    case "hw_relay_active_level": return mega.relay ? hwValueWords(key, mega.relay) : null;
-    case "hw_lcd_i2c_address":
-      if (!mega.lcd) return null;
-      return mega.lcd === "00" ? "no screen answered" : `0x${mega.lcd.toUpperCase()}`;
-    case "hw_scanner_baud":
-      if (typeof mega.scan_baud !== "number") return null;
-      return mega.scan_baud === 0 ? "still detecting" : `${mega.scan_baud} baud`;
-    case "hw_scanner_line_end": return mega.scan_end ? hwValueWords(key, mega.scan_end) : null;
-    case "hw_scanner_gap_ms": return null;
-    default: return null;
-  }
+  return device.mega ? HW_REPORTED[key](device.mega) : null;
 }
 
 /** Does this board's reported hardware need attention? `00` — no screen answered — always does (HW-2). */

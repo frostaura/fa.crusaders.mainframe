@@ -1103,6 +1103,14 @@ function sameCourts(a: number[] | undefined, b: number[]): boolean {
   return (a ?? []).length === b.length && (a ?? []).every((n, i) => n === b[i]);
 }
 
+/** The out-of-service consequence for one board, as its own row's confirm says it. */
+function outOfServiceWordsFor(id: string, devices: AdminDevice[], tenantHeartbeat: number | null, now: number): string {
+  const board = devices.find((d) => d.id === id);
+  if (!board) return "The box stops switching lights on.";
+  const coverage = coverageWithout(board, devices, (d) => isOnline(d, offlineAfterSecondsFor(d, tenantHeartbeat), now));
+  return outOfServiceConfirm(coverage).replace(/^Out of service\? /, "");
+}
+
 export function AdminDevicesPage() {
   const toast = useToast();
   const [devices, setDevices] = useState<AdminDevice[]>([]);
@@ -1113,21 +1121,12 @@ export function AdminDevicesPage() {
   const [loadError, setLoadError] = useState<unknown>(null);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  /**
-   * One instant per paint, from one timer (A2.7's extraction).
-   *
-   * Every age on this page used to read `Date.now()` for itself, so three rows rendered
-   * across a second boundary could print two different numbers for one moment — and the page
-   * only re-rendered on a poll, so the ages stepped in fifteen-second jumps.
-   */
+  /** One instant per paint, from one timer (A2.7): every age read `Date.now()` for itself, so rows
+   * across a second boundary printed two moments, and the ages stepped in fifteen-second jumps. */
   const now = useTicker(true);
 
-  /**
-   * Re-reads the boxes and nothing else — this is the only thing on the page that goes
-   * stale on its own. Settings and courts change when an admin changes them, and
-   * re-fetching them on a timer would fight the club button map an admin is editing
-   * below.
-   */
+  /** Re-reads the boxes and nothing else — the only thing here that goes stale on its own. Settings
+   * and courts change when an admin changes them; a timer on them would fight the map being edited. */
   const refreshDevices = useCallback(async () => {
     setDevices(await endpoints.adminDevicesList());
     setCheckedAt(new Date().toISOString());
@@ -1224,9 +1223,7 @@ export function AdminDevicesPage() {
   }
 
   const actionsFor = useDeviceActions(load);
-  // v3: firmware, network, keys and lights beside the list — each read on its own (useBoardsContext).
-  const boardsContext = useBoardsContext(settings, devices, now);
-
+  const boardsContext = useBoardsContext(settings, devices, now); // v3: each read on its own
   // The bound a minute button is actually held to: the club's own walk-up maximum, never
   // above the relay's hard cap. The editor already refuses anything past the hard cap; the
   // club's cap is the half nothing on this page knew about.
@@ -1307,16 +1304,8 @@ export function AdminDevicesPage() {
       />
 
       {/* v3 (device-api §7, §8; member-code §8): what reaches the boards without a cable. */}
-      <RemoteFixes
-        devices={devices} settings={settings}
-        outOfServiceWords={(id) => {
-          const board = devices.find((d) => d.id === id);
-          if (!board) return "The box stops switching lights on.";
-          const coverage = coverageWithout(board, devices, (d) => isOnline(d, offlineAfterSecondsFor(d, tenantHeartbeat), now));
-          return outOfServiceConfirm(coverage).replace(/^Out of service\? /, "");
-        }}
-        onChanged={() => { boardsContext.reload(); void load().catch(() => undefined); }}
-      />
+      <RemoteFixes devices={devices} settings={settings} outOfServiceWords={(id) => outOfServiceWordsFor(id, devices, tenantHeartbeat, now)}
+        onChanged={() => { boardsContext.reload(); void load().catch(() => undefined); }} />
     </PageShell>
   );
 }

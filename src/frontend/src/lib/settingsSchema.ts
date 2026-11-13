@@ -939,37 +939,46 @@ const boundDefs = new Map<string, SettingDef>();
 
 function withServedBound(def: SettingDef, settings: AdminSettings): SettingDef {
   const held = settings as unknown as Record<string, unknown>;
-  if (def.kind === "number") {
-    const bound = servedBound(held, def.key);
-    if (!bound) return def;
-    if (def.min === bound.min && def.max === bound.max) return def;
-    const id = `${def.key}|${bound.min}|${bound.max}`;
-    const cached = boundDefs.get(id);
-    if (cached) return cached;
-    const next: SettingDef = { ...def, min: bound.min, max: bound.max, range: true };
-    boundDefs.set(id, next);
-    return next;
-  }
-  if (def.kind === "select") {
-    const values = servedValues(held, def.key);
-    if (!values) {
-      // A served-bounds select with no served values (a hardware key on an API that lists
-      // none) offers only what it holds: never an enumeration the client made up.
-      const current = held[def.key];
-      if (!def.serverBounds || (def.options ?? []).length > 0 || (typeof current !== "string" && typeof current !== "number")) return def;
-      return { ...def, options: [{ value: String(current), label: hwValueLabel(def.key, String(current)) ?? String(current) }] };
-    }
-    const id = `${def.key}|${values.join(",")}`;
-    const cached = boundDefs.get(id);
-    if (cached) return cached;
-    const known = new Map((def.options ?? []).map((option) => [option.value, option.label]));
-    const next: SettingDef = {
-      ...def, options: values.map((value) => ({ value, label: known.get(value) ?? hwValueLabel(def.key, value) ?? value })),
-    };
-    boundDefs.set(id, next);
-    return next;
-  }
+  if (def.kind === "number") return withServedRange(def, held);
+  if (def.kind === "select") return withServedChoices(def, held);
   return def;
+}
+
+function withServedRange(def: SettingDef, held: Record<string, unknown>): SettingDef {
+  const bound = servedBound(held, def.key);
+  if (!bound) return def;
+  if (def.min === bound.min && def.max === bound.max) return def;
+  const id = `${def.key}|${bound.min}|${bound.max}`;
+  const cached = boundDefs.get(id);
+  if (cached) return cached;
+  const next: SettingDef = { ...def, min: bound.min, max: bound.max, range: true };
+  boundDefs.set(id, next);
+  return next;
+}
+
+function withServedChoices(def: SettingDef, held: Record<string, unknown>): SettingDef {
+  const values = servedValues(held, def.key);
+  if (!values) return heldChoiceOnly(def, held);
+  const id = `${def.key}|${values.join(",")}`;
+  const cached = boundDefs.get(id);
+  if (cached) return cached;
+  const known = new Map((def.options ?? []).map((option) => [option.value, option.label]));
+  const next: SettingDef = {
+    ...def, options: values.map((value) => ({ value, label: known.get(value) ?? hwValueLabel(def.key, value) ?? value })),
+  };
+  boundDefs.set(id, next);
+  return next;
+}
+
+/**
+ * A served-bounds select with no served values (a hardware key on an API that lists none)
+ * offers only what it holds: never an enumeration the client made up.
+ */
+function heldChoiceOnly(def: SettingDef, held: Record<string, unknown>): SettingDef {
+  const current = held[def.key];
+  if (!def.serverBounds || (def.options ?? []).length > 0) return def;
+  if (typeof current !== "string" && typeof current !== "number") return def;
+  return { ...def, options: [{ value: String(current), label: hwValueLabel(def.key, String(current)) ?? String(current) }] };
 }
 
 /** Whether the API serves a range (or value list) for any key at all. */

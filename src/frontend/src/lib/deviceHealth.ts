@@ -112,31 +112,51 @@ const kb = (bytes: number) => `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} 
 
 export type HealthLine = { text: string; attention: boolean };
 
+type DiagLine = (diag: DeviceDiag) => HealthLine | null;
+
+function resetLine(d: DeviceDiag): HealthLine | null {
+  const reset = resetWords(d.reset, d);
+  if (!reset) return null;
+  return { text: `Last restart: ${reset}.`, attention: !!d.reset && !ORDINARY_RESETS.has(d.reset) };
+}
+
+function heapLine(d: DeviceDiag): HealthLine | null {
+  if (typeof d.heap !== "number") return null;
+  const low = typeof d.heap_min === "number" ? `, lowest ${kb(d.heap_min)} since it started` : "";
+  return { text: `Free memory ${kb(d.heap)}${low}.`, attention: false };
+}
+
+function blockLine(d: DeviceDiag): HealthLine | null {
+  if (typeof d.block !== "number") return null;
+  // The comparison is named first: lizard's lexer reads a bare `<` inside an object literal as a
+  // generic and loses the function (memory: crusaders-mainframe-build-environment).
+  const short = d.block < HEALTH_FLOORS.block;
+  return { text: `Largest free block ${kb(d.block)}, and it needs at least ${kb(HEALTH_FLOORS.block)}.`, attention: short };
+}
+
+function stackLine(d: DeviceDiag): HealthLine | null {
+  if (typeof d.stack_min !== "number") return null;
+  const short = d.stack_min < HEALTH_FLOORS.stackMin;
+  return { text: `Stack headroom at its lowest: ${d.stack_min} bytes, and it needs at least ${HEALTH_FLOORS.stackMin}.`, attention: short };
+}
+
+function otaSpaceLine(d: DeviceDiag): HealthLine | null {
+  if (typeof d.sketch_free !== "number") return null;
+  return { text: `Room for an update: ${kb(d.sketch_free)}.`, attention: d.sketch_free === 0 };
+}
+
+function flashLine(d: DeviceDiag): HealthLine | null {
+  if (typeof d.flash_mb !== "number") return null;
+  return { text: `Flash: ${d.flash_mb} MB.`, attention: false };
+}
+
+/** One builder per `diag` field, in the order the panel reads them; each returns null when unsent. */
+const DIAG_LINES: readonly DiagLine[] = [resetLine, heapLine, blockLine, stackLine, otaSpaceLine, flashLine];
+
 /** The board's own `diag`, line by line, each marked when it needs attention. */
 export function diagLines(diag: DeviceDiag | null | undefined): HealthLine[] {
   if (!diag) return [];
-  const lines: HealthLine[] = [];
-  const reset = resetWords(diag.reset, diag);
-  if (reset) lines.push({ text: `Last restart: ${reset}.`, attention: !!diag.reset && !ORDINARY_RESETS.has(diag.reset) });
-  if (typeof diag.heap === "number") {
-    const low = typeof diag.heap_min === "number" ? `, lowest ${kb(diag.heap_min)} since it started` : "";
-    lines.push({ text: `Free memory ${kb(diag.heap)}${low}.`, attention: false });
-  }
-  if (typeof diag.block === "number") {
-    lines.push({
-      text: `Largest free block ${kb(diag.block)} (needs at least ${kb(HEALTH_FLOORS.block)}).`,
-      attention: diag.block < HEALTH_FLOORS.block,
-    });
-  }
-  if (typeof diag.stack_min === "number") {
-    lines.push({
-      text: `Stack headroom at its lowest: ${diag.stack_min} bytes (needs at least ${HEALTH_FLOORS.stackMin}).`,
-      attention: diag.stack_min < HEALTH_FLOORS.stackMin,
-    });
-  }
-  if (typeof diag.sketch_free === "number") lines.push({ text: `Room for an update: ${kb(diag.sketch_free)}.`, attention: diag.sketch_free === 0 });
-  if (typeof diag.flash_mb === "number") lines.push({ text: `Flash: ${diag.flash_mb} MB.`, attention: false });
-  return lines;
+  return DIAG_LINES.map((line) => line(diag)).filter((line): line is HealthLine => line !== null);
 }
 
 /** The Mega's own report: its last restart, and its counters with their rises since the page opened. */
