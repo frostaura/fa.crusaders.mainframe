@@ -44,6 +44,10 @@
 #include "gatelogic/GateConfig.h"
 #include "gatelogic/GateFlow.h"
 #include "gatelogic/GateHeartbeat.h"
+#include "gatelogic/GateReply.h"
+#include "gatelogic/JsonView.h"
+#include "devnet/Net.h"
+#include "devota/Ota.h"
 #include "roster/Roster.h"
 #include "support/CorpusJson.h"
 
@@ -187,6 +191,81 @@ void executeOutOfRangeCountersRequest(const char* expected, size_t expectedLen, 
 }
 
 /// The scan body: the same three fields as `/device/activate` minus `court`.
+/// A 2.0.0 heartbeat request: every v3 field read back out of the vector into
+/// the board's own report, rendered, and compared byte for byte.
+void executeV3HeartbeatRequest(const char* id, const char* expected, size_t expectedLen, const char* mac) {
+  gatelogic::jv::Value object;
+  TEST_ASSERT_TRUE_MESSAGE(gatelogic::jv::completeObject(expected, expectedLen, object), id);
+  char version[16] = {};
+  size_t n = 0U;
+  TEST_ASSERT_TRUE(gatelogic::jv::asString(gatelogic::jv::member(object, "firmware_version"), version,
+                                           sizeof(version), n));
+  uint32_t uptime = 0U;
+  TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(object, "uptime_ms"), uptime));
+
+  gatelogic::GateDiagnostics counters = gatelogic::quietDiagnostics();
+  counters.codesCapability = true;
+  static_cast<void>(gatelogic::jv::asUint32(gatelogic::jv::member(object, "no_push"), counters.noPush));
+  static_cast<void>(gatelogic::jv::asUint32(gatelogic::jv::member(object, "events_lost"), counters.eventsLost));
+
+  static char fwState[16];
+  static char fwFailed[16];
+  static char fwError[16];
+  static char netSrc[16];
+  static char restore[16];
+  gatelogic::GateReport report;
+  TEST_ASSERT_TRUE(gatelogic::jv::asString(gatelogic::jv::member(object, "fw_state"), fwState, sizeof(fwState), n));
+  report.fwState = fwState;
+  if (gatelogic::jv::asString(gatelogic::jv::member(object, "fw_failed"), fwFailed, sizeof(fwFailed), n)) {
+    report.fwFailed = fwFailed;
+  }
+  if (gatelogic::jv::asString(gatelogic::jv::member(object, "fw_error"), fwError, sizeof(fwError), n)) {
+    report.fwError = fwError;
+  }
+  TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(object, "net_ver"), report.netVer));
+  TEST_ASSERT_TRUE(gatelogic::jv::asString(gatelogic::jv::member(object, "net_src"), netSrc, sizeof(netSrc), n));
+  report.netSrc = netSrc;
+  if (gatelogic::jv::asString(gatelogic::jv::member(object, "restore"), restore, sizeof(restore), n)) {
+    report.restore = restore;
+  }
+  static char reset[16];
+  gatelogic::GateDiag diag;
+  const gatelogic::jv::Value d = gatelogic::jv::member(object, "diag");
+  if (d.present()) {
+    TEST_ASSERT_TRUE(gatelogic::jv::asString(gatelogic::jv::member(d, "reset"), reset, sizeof(reset), n));
+    diag.reset = reset;
+    TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(d, "exc"), diag.exc));
+    TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(d, "epc1"), diag.epc1));
+    TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(d, "heap"), diag.heap));
+    TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(d, "heap_min"), diag.heapMin));
+    TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(d, "block"), diag.block));
+    TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(d, "stack_min"), diag.stackMin));
+    TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(d, "sketch_free"), diag.sketchFree));
+    TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(d, "flash_mb"), diag.flashMb));
+    report.diag = &diag;
+  }
+  gatelogic::Drift drift;
+  const gatelogic::jv::Value names = gatelogic::jv::member(object, "drift");
+  if (names.present()) {
+    gatelogic::jv::ArrayIter it(names);
+    gatelogic::jv::Value name;
+    while (it.next(name)) {
+      char one[gatelogic::kDriftNameCap] = {};
+      TEST_ASSERT_TRUE(gatelogic::jv::asString(name, one, sizeof(one), n));
+      drift.add(one);
+    }
+    report.drift = &drift;
+  }
+
+  static char rendered[gatelogic::kGateHeartbeatRequestCap];
+  const size_t written =
+      gatelogic::renderGateHeartbeatV3(rendered, sizeof(rendered), mac, version, uptime, counters, report);
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(expectedLen, written, id);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE(expected, rendered, id);
+  // And inside its budget with room to spare (compat/ `budgets`).
+  TEST_ASSERT_TRUE_MESSAGE(written * 5U <= gatelogic::kGateHeartbeatRequestCap * 4U, id);
+}
+
 void executeScanRequest(const char* expected, size_t expectedLen, const char* mac) {
   char token[roster::kMaxTokenLen + 1U] = {};
   TEST_ASSERT_TRUE(devapi::json::stringField(expected, expectedLen, "token", token, sizeof(token)));
@@ -320,6 +399,9 @@ void test_every_request_vector_is_rendered_byte_for_byte() {
         strcmp(id, "gate-heartbeat-request-events-lost") == 0) {
       TEST_ASSERT_EQUAL_STRING(gatelogic::kPathHeartbeat, path);
       executeHeartbeatRequest(expected, expectedLen, mac);
+    } else if (strncmp(id, "gate-heartbeat-request-v3", 25) == 0) {
+      TEST_ASSERT_EQUAL_STRING(gatelogic::kPathHeartbeat, path);
+      executeV3HeartbeatRequest(id, expected, expectedLen, mac);
     } else if (strcmp(id, "gate-heartbeat-request-counters-out-of-range") == 0) {
       TEST_ASSERT_EQUAL_STRING(gatelogic::kPathHeartbeat, path);
       executeOutOfRangeCountersRequest(expected, expectedLen, mac);
@@ -371,7 +453,85 @@ bool elementWindowIsAlreadyOpen(const char* element) {
   return *p == '-';
 }
 
+/// The same answer through the 2.0.0 reader (GateReply.h) the board actually
+/// runs: accepted, nothing drifted, the gate settings and roster adopted, and
+/// every lifeline object the vector carries read by its own reader.
+void executeV3Read(const char* id, const char* payload, size_t len, const char* expect) {
+  gatelogic::GateBoardState state;
+  const gatelogic::HeartbeatRead read = gatelogic::readHeartbeat(200U, payload, len, kNow, state);
+  TEST_ASSERT_TRUE_MESSAGE(read.accepted, id);
+  TEST_ASSERT_FALSE_MESSAGE(read.kindMismatch, id);
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, read.drift.count, id);
+  TEST_ASSERT_TRUE_MESSAGE(read.roster == gatelogic::ArrayRead::Adopted, id);
+  TEST_ASSERT_TRUE_MESSAGE(len < gatelogic::kGateHeartbeatResponseCap, id);
+
+  const char* gate = corpus::member(expect, "gate");
+  if (gate != nullptr) {
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(gate, "unlock_seconds")),
+                                     state.settings.unlockSeconds, id);
+    const char* trust = corpus::member(gate, "power_restore_trust_minutes");
+    if (trust != nullptr) {
+      TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(trust), state.settings.powerRestoreTrustMinutes, id);
+      TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(gate, "net_fallback_minutes")),
+                                       state.settings.netFallbackMinutes, id);
+      TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(gate, "ota_probation_minutes")),
+                                       state.settings.otaProbationMinutes, id);
+      TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(gate, "device_fault_max_per_hour")),
+                                       state.settings.faultMaxPerHour, id);
+    }
+  }
+
+  const char* ota = corpus::member(expect, "ota");
+  TEST_ASSERT_EQUAL_MESSAGE(ota != nullptr, read.ota.present(), id);
+  if (ota != nullptr) {
+    devota::Offer offer;
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(
+        "ok", devota::refusalName(devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate, offer)), id);
+    char want[400] = {};
+    text(ota, "version", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.version, id);
+    text(ota, "path", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.path, id);
+    text(ota, "sig", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.sig, id);
+  }
+  const char* keyNext = corpus::member(expect, "key_next");
+  TEST_ASSERT_EQUAL_MESSAGE(keyNext != nullptr, read.keyNext.present(), id);
+  if (keyNext != nullptr) {
+    devnet::KeyRing ring;
+    memcpy(ring.currentId, "k1", 3U);
+    memset(ring.currentKey, 'K', devnet::kKeyLen);
+    devnet::KeyRing next;
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(
+        "ok", devnet::refusalName(devnet::adoptKeyNext(read.keyNext.at, read.keyNext.len, ring, next)), id);
+    char want[64] = {};
+    text(keyNext, "id", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, next.currentId, id);
+    text(keyNext, "key", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, next.currentKey, id);
+  }
+  const char* net = corpus::member(expect, "net");
+  TEST_ASSERT_EQUAL_MESSAGE(net != nullptr, read.net.present(), id);
+  if (net != nullptr) {
+    devnet::NetSet set;
+    TEST_ASSERT_TRUE_MESSAGE(devnet::adoptNet(read.net.at, read.net.len, 0U, set).adopted(), id);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(net, "ver")), set.ver, id);
+    char want[128] = {};
+    text(net, "base", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, set.base, id);
+    text(net, "wifi0_ssid", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, set.wifi[0].ssid, id);
+    text(net, "wifi0_psk", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, set.wifi[0].psk, id);
+    text(net, "wifi1_ssid", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, set.wifi[1].ssid, id);
+    text(net, "wifi1_psk", want, sizeof(want));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, set.wifi[1].psk, id);
+  }
+}
+
 void executeHeartbeatResponse(const char* id, const char* payload, size_t len, const char* expect) {
+  executeV3Read(id, payload, len, expect);
   // `kind` is what tells a board which shape it is looking at. A gate that
   // adopted a court box's answer would drive a lock off a court roster.
   char kind[16] = {};

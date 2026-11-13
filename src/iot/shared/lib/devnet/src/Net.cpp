@@ -102,9 +102,27 @@ Refusal prefixed(Refusal base) {
     return Refusal::BaseHost;
   case Refusal::Port:
     return Refusal::BasePort;
-  default:
-    return base;
+  case Refusal::Ok:
+  case Refusal::Ver:
+  case Refusal::NotNewer:
+  case Refusal::BaseEmpty:
+  case Refusal::BaseTooLong:
+  case Refusal::BaseHttps:
+  case Refusal::BaseGrammar:
+  case Refusal::BaseHost:
+  case Refusal::BasePort:
+  case Refusal::Wifi0Ssid:
+  case Refusal::Wifi0Psk:
+  case Refusal::Wifi1Ssid:
+  case Refusal::Wifi1Psk:
+  case Refusal::NetEmpty:
+  case Refusal::Id:
+  case Refusal::Key:
+  case Refusal::Current:
+  case Refusal::Held:
+    break;
   }
+  return base;
 }
 
 bool printableAscii(const char* s, size_t n) {

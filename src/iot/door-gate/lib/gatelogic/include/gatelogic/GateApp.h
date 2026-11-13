@@ -123,7 +123,12 @@
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateConfig.h"
 #include "gatelogic/GateFlow.h"
+#include "gatelogic/GateKeys.h"
+#include "gatelogic/GateNet.h"
+#include "gatelogic/GateOta.h"
 #include "gatelogic/GatePorts.h"
+#include "gatelogic/GateReply.h"
+#include "gatelogic/GateStore.h"
 #include "gatelogic/LedPattern.h"
 #include "gatelogic/LockDriver.h"
 #include "gatelogic/PinOut.h"
@@ -238,6 +243,43 @@ public:
     /// blocking HTTP call is a crash that reads as a random reset.
     char* heartbeatBody = nullptr;
     size_t heartbeatBodyCap = 0U;
+
+    // --- 2.0.0 (door-gate.md §14). Every one optional: left null, that concern
+    // behaves as 1.x did, which is how the 1.x scenarios still prove 1.x rules.
+
+    /// Flash records (§14.1): settings, roster, keys, network, OTA, events.
+    IBlobStore* blobs = nullptr;
+    /// RTC_NOINIT storage of at least sizeof(WarmImage) bytes, and the RTC
+    /// counter that dates it across a warm reset.
+    void* warmBytes = nullptr;
+    size_t warmBytesCap = 0U;
+    IWarmClock* warmClock = nullptr;
+    /// A power-on reset: RTC memory and the RTC counter mean nothing.
+    bool coldBoot = true;
+
+    /// The device keys and the network, owned by the composition root because
+    /// the HTTP port holds their header and base-URL buffers.
+    GateKeys* keys = nullptr;
+    GateNet* net = nullptr;
+    /// The compiled defaults: k0, the first WiFi profile, the first base URL.
+    const char* compiledKey = nullptr;
+    const char* compiledSsid = nullptr;
+    const char* compiledPsk = nullptr;
+    const char* compiledBase = nullptr;
+
+    IRadio* radio = nullptr;
+    ISystem* system = nullptr;
+    IDiagSource* diag = nullptr;
+
+    /// Signed OTA (§14.2): the other app slot, the download, and the release
+    /// key's modulus (256 bytes, from secrets.h's OTA_PUBLIC_KEY_N).
+    IOtaSlot* otaSlot = nullptr;
+    IDownload* download = nullptr;
+    const uint8_t* otaModulus = nullptr;
+
+    /// The setup gesture's button and the portal it opens (§14.3).
+    IButton* setupButton = nullptr;
+    ISetupPortal* portal = nullptr;
   };
 
   explicit GateApp(const Ports& ports);
@@ -260,6 +302,12 @@ public:
   /// Seeds the uptime, empties the assembler, arms the first heartbeat, opens
   /// the event queue and puts a `boot` event in it.
   void begin();
+
+  /// FIRST THING AFTER beginOutputs(), before anything else is opened: an image
+  /// on probation counts this boot and, on its fourth, is rolled back to the
+  /// other slot (§14.2). True when it restarted the part (a host test's
+  /// ISystem returns; the board's does not).
+  bool checkFirmwareAtBoot();
 
   /// One pass of the loop.
   void pass();
@@ -327,6 +375,23 @@ public:
 
   uint8_t codeKeys() const { return codeKeys_.size(); }
 
+  // --- 2.0.0 observation --------------------------------------------------
+
+  /// warm / cold / none: what this boot ran on before its first accepted
+  /// heartbeat. Null once one has been accepted.
+  const char* restoreReport() const { return restoreReported_ ? nullptr : restore_; }
+  /// Names not read in the last answer, reported in the next request.
+  const Drift& drift() const { return drift_; }
+  const GateBoardState& boardState() const { return state_; }
+  const GateOta& ota() const { return ota_; }
+  bool setupOpen() const { return setupOpen_; }
+  bool degraded() const { return degraded_; }
+  /// Undelivered events carried over from earlier boots.
+  uint16_t carriedEvents() const { return carriedCount_; }
+  /// Times the supervisor re-joined the radio, and asked for a restart.
+  uint32_t radioRejoins() const { return rejoins_; }
+  uint32_t restartsAsked() const { return restartsAsked_; }
+
   /// The fault aggregator, for the host suite and the simulator's console.
   /// Non-const because a console prints a drain in the simulator's own loop.
   FaultLog& faults() { return faults_; }
@@ -373,11 +438,6 @@ private:
 
   void applyEventReaction(uint16_t status, const char* response);
 
-  /// Applies whatever the heartbeat's `gate` object carried — the release time,
-  /// whether the board's own clamp had to change it, and the two fault
-  /// settings. Separate from `adoptHeartbeat` so that one keeps a shape a
-  /// reader can hold, and so the complexity gate stays satisfied.
-  void adoptGateSettings(const char* body, size_t len);
 
   /// Arms or clears the drain's backoff, from whether the post that just
   /// finished actually MOVED the queue. Not from its status: a 200 that
@@ -405,6 +465,60 @@ private:
 
   void pumpHeartbeat();
   void adoptHeartbeat(const HttpOutcome& outcome);
+
+  // --- 2.0.0 (GateAppV3.cpp) ----------------------------------------------
+  class Between final : public GateApi::IBetweenCalls {
+  public:
+    explicit Between(GateApp& app) : app_(app) {}
+    void betweenCalls() override;
+
+  private:
+    GateApp& app_;
+  };
+  class DownloadHooks final : public GateOta::Hooks {
+  public:
+    explicit DownloadHooks(GateApp& app) : app_(app) {}
+    void duringDownload() override;
+
+  private:
+    GateApp& app_;
+  };
+
+  /// What the board kept across the reset (§14.1), restored in begin().
+  void restoreState(uint32_t nowMs);
+  void restoreWarm(uint32_t nowMs);
+  void restoreCold(uint32_t nowMs);
+  /// The shared structures rebuilt from the images.
+  void applyState(uint32_t nowMs);
+  /// Writes what changed: the warm image always, the flash records only on a
+  /// content change. Top of every pass (ESPR-1's rule, kept here too).
+  void persistDirty(uint32_t nowMs);
+  void persistColdRoster(uint32_t nowMs);
+  void persistEvents();
+  void loadCarriedEvents();
+  /// The settings the heartbeat delivered, applied to the release time, the
+  /// fault channel and the cadence.
+  void applySettings(const HeartbeatRead& read);
+  void adoptLifeline(const HeartbeatRead& read, uint32_t nowMs);
+  void heartbeatAccepted(uint32_t nowMs);
+  GateReport report(GateDiag& diag) const;
+
+  /// Lock engaged, no window, nothing in the assembler, nothing scanned for a
+  /// minute, no portal (device-api.md §7 step 2 as it reads on a door).
+  bool idle(uint32_t nowMs) const;
+  void pumpSupervisor(uint32_t nowMs);
+  void pumpSetup(uint32_t nowMs);
+  void pumpOta();
+  void pumpStall(uint32_t nowMs);
+  void updateDegraded(uint32_t nowMs);
+  void restart();
+
+  /// A carried event from an earlier boot is uploaded first, one per call.
+  bool pumpCarried(uint32_t nowMs);
+  /// Whether this boot's event `seq` was a replay refusal, and the link then.
+  bool replayTagged(uint32_t seq, bool& online) const;
+  /// Adds `"reason":"replayed","online":<bool>` to a rendered one-event body.
+  static bool tagReplay(char* body, size_t cap, bool online);
 
   /// The club took this board out of service. A roster committed EMPTY rather
   /// than abandoned, so `everLoaded()` stays true and the refusal is
@@ -579,7 +693,90 @@ private:
   /// Wrong OFF codes presented here lately. A REF is public, so a door in its
   /// offline fallback is a door that could be guessed open. GuessGuard.h.
   memcode::GuessGuard codeGuard_;
+
+  // --- 2.0.0 state ---------------------------------------------------------
+  IBlobStore* blobs_;
+  void* warmBytes_;
+  size_t warmBytesCap_;
+  IWarmClock* warmClock_;
+  bool coldBoot_;
+  GateKeys* keys_;
+  GateNet* net_;
+  const char* compiledKey_;
+  const char* compiledSsid_;
+  const char* compiledPsk_;
+  const char* compiledBase_;
+  IRadio* radio_;
+  ISystem* system_;
+  IDiagSource* diag_;
+  IOtaSlot* otaSlot_;
+  IDownload* download_;
+  const uint8_t* otaModulus_;
+  IButton* setupButton_;
+  ISetupPortal* portal_;
+
+  Between between_{*this};
+  DownloadHooks downloadHooks_{*this};
+
+  GateBoardState state_;
+  Drift drift_;
+  GateOta ota_;
+  devnet::Supervisor supervisor_;
+  SetupGesture gesture_;
+
+  const char* restore_ = "none";
+  bool restoreReported_ = false;
+  bool lastHeartbeatOk_ = false;
+  bool degraded_ = false;
+  bool setupOpen_ = false;
+  tb::Deadline setupCloseAt_;
+  /// The power-on trust window of a cold-restored roster (§14.1).
+  tb::Deadline coldTrustUntil_;
+  /// No accepted heartbeat for six hours with the link up: restart when idle
+  /// (HW-8). Latched, so it cannot read pending again after 2^31 ms.
+  tb::Deadline stallAt_;
+  bool stallDue_ = false;
+  bool supervisorRestartDue_ = false;
+  uint32_t lastInputMs_ = 0U;
+  bool anyInput_ = false;
+  uint32_t rejoins_ = 0U;
+  uint32_t restartsAsked_ = 0U;
+
+  // Persistence bookkeeping.
+  bool warmDirty_ = false;
+  bool settingsDirty_ = false;
+  bool rosterDirty_ = false;
+  GateSettings settingsWritten_;
+  bool settingsWrittenValid_ = false;
+  ColdRoster rosterWritten_;
+  uint32_t rosterWrittenAnchorMs_ = 0U;
+  bool rosterWrittenValid_ = false;
+  tb::Deadline rosterCheckpointAt_;
+  uint32_t eventsSignature_ = 0U;
+
+  /// Events carried from earlier boots, oldest first.
+  StoredEvent carried_[kStoredEventSlots];
+  uint16_t carriedCount_ = 0U;
+  /// MCV1-10: this boot's queued refusals that were replays, and whether the
+  /// link was up when they were refused. By sequence number.
+  struct ReplayTag {
+    uint32_t seq;
+    bool online;
+  };
+  static constexpr uint8_t kReplayTags = 16U;
+  ReplayTag replayTags_[kReplayTags] = {};
+  uint8_t replayTagNext_ = 0U;
+  /// The last decision queued was a replay refusal; tagged once its seq exists.
+  bool tagNextReplay_ = false;
+  bool tagNextOnline_ = false;
 };
+
+/// The stall watchdog's bound (device-api.md §8): a contract constant.
+constexpr uint32_t kStallRestartMs = 6UL * 60UL * 60UL * 1000UL;
+/// The setup portal closes after this, whatever happened (§8).
+constexpr uint32_t kSetupPortalMs = 10UL * 60UL * 1000UL;
+/// "No member input in the last 60 s" (§7 step 2).
+constexpr uint32_t kIdleAfterInputMs = 60000UL;
 
 } // namespace gatelogic
 

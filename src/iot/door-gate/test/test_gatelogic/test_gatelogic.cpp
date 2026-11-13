@@ -936,7 +936,6 @@ void test_flow_the_status_table_says_which_statuses_are_answers() {
       // Everything else. A transport failure, a key the tenant does not know, a
       // proxy's 404, a rate limit, a restarting container.
       {0U, false, "0"},
-      {204U, false, "204"},
       {301U, false, "301"},
       {400U, false, "400"},
       {401U, false, "401"},
@@ -961,6 +960,21 @@ void test_flow_the_status_table_says_which_statuses_are_answers() {
     TEST_ASSERT_FALSE_MESSAGE(decision.released, row.why);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, decision.unlockMs, row.why);
     TEST_ASSERT_FALSE_MESSAGE(decision.queueEvent, row.why);
+  }
+
+  // EVERY 2xx IS AN ANSWER (device-api.md §11.2, FC-4): 1.x read a 201 from a
+  // proxy or a later framework as an outage. A readable body decides; an empty
+  // 2xx — a 204 carries no body — is unreadable and decided offline.
+  const uint16_t successes[] = {200U, 201U, 202U, 204U, 299U};
+  for (size_t i = 0U; i < sizeof(successes) / sizeof(successes[0]); ++i) {
+    const gatelogic::ScanDecision decided =
+        gatelogic::onGateResponse(successes[i], answer, strlen(answer), kDefaultMs, kCapMs);
+    TEST_ASSERT_FALSE(decided.fallbackToRoster);
+    TEST_ASSERT_TRUE(decided.released);
+    TEST_ASSERT_EQUAL_UINT32(3000U, decided.unlockMs);
+    const gatelogic::ScanDecision empty = gatelogic::onGateResponse(successes[i], "", 0U, kDefaultMs, kCapMs);
+    TEST_ASSERT_TRUE(empty.fallbackToRoster);
+    TEST_ASSERT_FALSE(empty.released);
   }
 }
 
@@ -1048,8 +1062,6 @@ void test_flow_an_open_carries_the_servers_seconds_clamped_at_both_ends() {
       {"{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":31}", 30000U},
       {"{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":4000000}", 30000U},
       {"{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":4300000}", 30000U},
-      // No duration at all: the one the last heartbeat established.
-      {"{\"opened\":true,\"reason\":\"ok\"}", kDefaultMs},
   };
 
   for (const Row& row : rows) {
@@ -1060,6 +1072,20 @@ void test_flow_an_open_carries_the_servers_seconds_clamped_at_both_ends() {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(row.expectedMs, decision.unlockMs, row.body);
     TEST_ASSERT_EQUAL_STRING("ok", decision.reason);
     TEST_ASSERT_FALSE(decision.queueEvent);
+  }
+
+  // AN OPEN WITH NO DURATION, OR ONE OF THE WRONG KIND, IS UNREADABLE (§11.2):
+  // 1.x filled in the heartbeat's release time; 2.0.0 decides it offline, so a
+  // later server whose field moved cannot hold a door for the wrong time.
+  const char* unreadable[] = {"{\"opened\":true,\"reason\":\"ok\"}",
+                              "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3.5}",
+                              "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":\"3\"}",
+                              "{\"opened\":\"true\",\"unlock_seconds\":3}"};
+  for (size_t i = 0U; i < sizeof(unreadable) / sizeof(unreadable[0]); ++i) {
+    const gatelogic::ScanDecision decision =
+        gatelogic::onGateResponse(200U, unreadable[i], strlen(unreadable[i]), kDefaultMs, kCapMs);
+    TEST_ASSERT_TRUE_MESSAGE(decision.fallbackToRoster, unreadable[i]);
+    TEST_ASSERT_FALSE_MESSAGE(decision.released, unreadable[i]);
   }
 }
 
@@ -2435,7 +2461,7 @@ void test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_sc
     // The board SAID it speaks the code: the server keys what it sends, and the
     // club's cut-over, on this suffix.
     TEST_ASSERT_EQUAL_STRING(gatelogic::kPathHeartbeat, rig.http.lastPath());
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rig.http.lastBody(), "\"caps\":[\"codes:m1\"]"), rig.http.lastBody());
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rig.http.lastBody(), "\"caps\":[\"codes:m1\","), rig.http.lastBody());
     TEST_ASSERT_EQUAL_UINT8(1U, rig.app.codeKeys());
     TEST_ASSERT_TRUE(rig.app.stepClock().trusted(rig.clock.value()));
 
@@ -3760,12 +3786,13 @@ void test_gate_response_takes_its_duration_and_reason_from_the_top_level_too() {
   TEST_ASSERT_EQUAL_UINT32_MESSAGE(3000U, decision.unlockMs, decoyFirst);
   TEST_ASSERT_EQUAL_STRING_MESSAGE("ok", decision.reason, decoyFirst);
 
-  // And a 200 that opens with NO top-level duration still falls back to the
-  // adopted one rather than to a nested number.
+  // And a 200 that opens with NO top-level duration never takes the nested
+  // number: 2.0.0 reads it as unreadable and decides it offline (§11.2).
   const char* noDuration = "{\"opened\":true,\"reason\":\"ok\",\"x\":{\"unlock_seconds\":30}}";
   decision = gatelogic::onGateResponse(200U, noDuration, strlen(noDuration), kDefaultMs, kCapMs);
-  TEST_ASSERT_TRUE(decision.released);
-  TEST_ASSERT_EQUAL_UINT32_MESSAGE(kDefaultMs, decision.unlockMs, noDuration);
+  TEST_ASSERT_TRUE_MESSAGE(decision.fallbackToRoster, noDuration);
+  TEST_ASSERT_FALSE(decision.released);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, decision.unlockMs, noDuration);
 }
 
 // ---------------------------------------------------------------------------

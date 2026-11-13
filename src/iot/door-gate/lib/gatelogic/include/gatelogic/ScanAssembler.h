@@ -117,6 +117,28 @@ public:
   /// cap, and it is not what anybody scanned.
   void markCorrupt();
 
+  /// `markCorrupt`, stamped now: the rest of a holed line is still arriving,
+  /// and the idle gap is measured from the hole, not from the last clean byte.
+  void markCorrupt(uint32_t nowMs) {
+    lastByteMs_ = nowMs;
+    markCorrupt();
+  }
+
+  /// `feed`, remembering when the byte arrived, for `idle` (DG-5).
+  ScanEvent feed(uint8_t byte, uint32_t nowMs);
+
+  /// Called on a pass that found the UART EMPTY — never across a blocking call
+  /// whose bytes are still waiting to be read. A line that has had no byte for
+  /// kScanIdleGapMs is ended: a whole token of at least kIdleTokenMinLen
+  /// characters is a scan from a scanner with no CR/LF suffix; an over-long one
+  /// is refused as any over-long line is; anything shorter or holed is a stray
+  /// byte (a scanner powering up, noise on the line) and is dropped silently so
+  /// it cannot spoil the next member's scan.
+  ScanEvent idle(uint32_t nowMs);
+
+  /// Some part of a line is held. The board is not idle while one is (§14.2).
+  bool partial() const { return len_ > 0U || overflow_ || corrupt_; }
+
 private:
   char line_[roster::kMaxTokenLen + 1U] = {};
   char token_[roster::kMaxTokenLen + 1U] = {};
@@ -126,7 +148,16 @@ private:
   uint8_t len_ = 0U;
   bool overflow_ = false;
   bool corrupt_ = false;
+  uint32_t lastByteMs_ = 0U;
 };
+
+/// The gap that ends a line on this hardware (device-api.md §5's
+/// `hw_scanner_gap_ms` default). A 12-character code takes 13 ms at 9600 baud.
+inline constexpr uint32_t kScanIdleGapMs = 150UL;
+
+/// The shortest line an idle gap ends as a token: the Mega's rule, so both
+/// devices treat a suffix-less scanner the same way. No real code is shorter.
+inline constexpr uint8_t kIdleTokenMinLen = 8U;
 
 } // namespace gatelogic
 

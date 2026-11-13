@@ -1,0 +1,107 @@
+// Crusaders Mainframe — a strict, heapless view over one JSON body, the way a
+// frozen v3 reader must see it (docs/specs/device-api.md §11.2).
+//
+// WHY THE GATE HAS ITS OWN, rather than more calls into devapi::json
+// -------------------------------------------------------------------
+// devapi's scanner answers "is there a key called X with a value I can coerce",
+// and the late analysis (FC-11, FC-12) showed what that costs a reader that
+// must outlive every server it will ever meet: 45.9 read as 45, a quoted "30"
+// read as 30, and a `unlock_seconds` nested inside some later object drove the
+// lock. Rule 3 of §11.2 is "kinds are exact" and rule 2 is "known keys are read
+// only where they live", and neither can be expressed by a coercing finder.
+// So this file classifies every value it returns — integer literal, any other
+// number, string, bool, null, object, array — and only ever looks one level
+// into the object it is handed. devapi stays as it is for the court box.
+//
+// THE GRAMMAR IS THE COMPAT REFERENCE'S (src/contracts/device-protocol/compat/
+// gen_cases.py `read_object`): an optional UTF-8 BOM and whitespace, exactly
+// one object, nothing after it but whitespace, containers nested at most 32
+// deep. Duplicate keys resolve first-wins. Anything else is "not an object",
+// and a body that is not one complete object adopts nothing at all.
+//
+// No heap, no Arduino headers, valid C++11.
+
+#ifndef CRUSADERS_GATELOGIC_JSONVIEW_H
+#define CRUSADERS_GATELOGIC_JSONVIEW_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+namespace gatelogic {
+namespace jv {
+
+/// Containers nested deeper than this make the whole body unreadable — the
+/// firmware's half of §11.2 rule 1 (the server sends at most 3).
+constexpr uint8_t kMaxDepth = 32U;
+
+enum class Kind : uint8_t {
+  Missing = 0U,
+  String = 1U,
+  /// `-?(0|[1-9][0-9]*)` and nothing else: no fraction, no exponent.
+  Integer = 2U,
+  /// Any other JSON number. Never a setting (§11.2 rule 3).
+  Number = 3U,
+  True = 4U,
+  False = 5U,
+  Null = 6U,
+  Object = 7U,
+  Array = 8U,
+};
+
+/// One value: its kind and the exact span of its text in the body.
+struct Value {
+  Kind kind = Kind::Missing;
+  const char* at = nullptr;
+  size_t len = 0U;
+
+  bool present() const { return kind != Kind::Missing; }
+  bool isObject() const { return kind == Kind::Object; }
+  bool isArray() const { return kind == Kind::Array; }
+};
+
+/// `body` as exactly one complete object, or false. `object` spans the braces.
+bool completeObject(const char* body, size_t len, Value& object);
+
+/// The first member called `key` at the TOP LEVEL of `object` — never inside a
+/// nested value. Missing when absent or when `object` is not an object.
+Value member(const Value& object, const char* key);
+
+/// An Integer within [0, 2^32 − 1]. False for any other kind, a negative or an
+/// overflow — the caller keeps its previous value and reports drift.
+bool asUint32(const Value& value, uint32_t& out);
+
+/// An Integer within int32. Roster seconds are signed.
+bool asInt32(const Value& value, int32_t& out);
+
+/// `true` or `false` only.
+bool asBool(const Value& value, bool& out);
+
+/// A String, escapes decoded, NUL-terminated. False for any other kind, an
+/// escape that decodes outside ASCII, or a value that does not fit `cap`.
+bool asString(const Value& value, char* out, size_t cap, size_t& outLen);
+
+/// Whether `value` is a String equal to `text` byte for byte (no escapes).
+bool stringEquals(const Value& value, const char* text);
+
+/// A String's raw contents (between the quotes) when it carries no escape at
+/// all — what every element grammar on this wire is. False otherwise.
+bool rawString(const Value& value, const char*& text, size_t& len);
+
+/// The elements of one array, in order.
+class ArrayIter {
+public:
+  explicit ArrayIter(const Value& array);
+  bool next(Value& element);
+  /// Elements the array holds, counted without consuming the iterator.
+  size_t count() const;
+
+private:
+  const char* p_;
+  const char* end_;
+  bool valid_;
+};
+
+} // namespace jv
+} // namespace gatelogic
+
+#endif // CRUSADERS_GATELOGIC_JSONVIEW_H

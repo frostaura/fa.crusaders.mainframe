@@ -1,0 +1,171 @@
+// Crusaders Mainframe — what gate 2.0.0 keeps across a reset (door-gate.md
+// §14.1), and the check digits that make a damaged record read as absent.
+//
+// TWO PLACES, FOR TWO KINDS OF RESET
+// ----------------------------------
+//   * WARM (watchdog, panic, brown-out, software restart): RTC_NOINIT memory
+//     survives and the RTC counter keeps counting, so the roster, the member-code
+//     keys and step clock, the gate settings and the replay ring are carried in
+//     `WarmImage` with every age continuing.
+//   * COLD (power-on): only flash survives. The records below are written to NVS
+//     when their CONTENT changes — never on a timer that would wear the flash —
+//     and a power-on boot trusts them for `power_restore_trust_minutes`.
+//
+// Every record is sealed: a magic number, a layout version, its length and a
+// CRC-32 over the payload. A torn write, an old layout or a blank part reads as
+// absent, never as a roster.
+//
+// No heap, no Arduino headers, valid C++11.
+
+#ifndef CRUSADERS_GATELOGIC_GATESTORE_H
+#define CRUSADERS_GATELOGIC_GATESTORE_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "eventq/Event.h"
+#include "gatelogic/GateConfig.h"
+#include "gatelogic/GateReply.h"
+
+namespace gatelogic {
+
+/// Flash records of any length (the shared hal::IStore holds at most 128
+/// bytes, and a roster is about 1.7 KB). NVS blobs on the board, files in the
+/// simulator, RAM in a test.
+class IBlobStore {
+public:
+  virtual ~IBlobStore() = default;
+
+  /// Whole-record write. False when it did not complete.
+  virtual bool put(const char* key, const void* data, size_t len) = 0;
+
+  /// The stored length, copied into `out`; 0 when absent or larger than `cap`.
+  virtual size_t get(const char* key, void* out, size_t cap) = 0;
+
+  virtual void erase(const char* key) = 0;
+};
+
+uint32_t crc32(const void* data, size_t len, uint32_t seed = 0U);
+
+constexpr uint32_t kRecordMagic = 0x43524731UL; // "CRG1"
+
+/// The header in front of every sealed record.
+struct RecordHeader {
+  uint32_t magic;
+  uint16_t layout;
+  uint16_t reserved;
+  uint32_t length;
+  uint32_t crc;
+};
+
+/// Writes `value` sealed under `key`, staged through `scratch` (at least
+/// sizeof(RecordHeader) + sizeof(T) bytes, static at the call site).
+template <class T>
+bool sealedPut(IBlobStore& store, const char* key, uint16_t layout, const T& value, uint8_t* scratch,
+               size_t scratchCap) {
+  const size_t total = sizeof(RecordHeader) + sizeof(T);
+  if (scratchCap < total) {
+    return false;
+  }
+  RecordHeader header = {kRecordMagic, layout, 0U, static_cast<uint32_t>(sizeof(T)), 0U};
+  header.crc = crc32(&value, sizeof(T));
+  memcpy(scratch, &header, sizeof(header));
+  memcpy(scratch + sizeof(header), &value, sizeof(T));
+  return store.put(key, scratch, total);
+}
+
+/// Reads a sealed record. False — and `out` untouched — when it is absent,
+/// another layout, another size, or its CRC does not match.
+template <class T>
+bool sealedGet(IBlobStore& store, const char* key, uint16_t layout, T& out, uint8_t* scratch, size_t scratchCap) {
+  const size_t total = sizeof(RecordHeader) + sizeof(T);
+  if (scratchCap < total || store.get(key, scratch, scratchCap) != total) {
+    return false;
+  }
+  RecordHeader header;
+  memcpy(&header, scratch, sizeof(header));
+  if (header.magic != kRecordMagic || header.layout != layout || header.length != sizeof(T) ||
+      header.crc != crc32(scratch + sizeof(header), sizeof(T))) {
+    return false;
+  }
+  memcpy(&out, scratch + sizeof(header), sizeof(T));
+  return true;
+}
+
+// --- record names (NVS keys are at most 15 characters) -----------------------
+
+constexpr char kRecSettings[] = "g_settings";
+constexpr char kRecRoster[] = "g_roster";
+constexpr char kRecRosterAge[] = "g_rage";
+constexpr char kRecKeys[] = "g_keys";
+constexpr char kRecNet[] = "g_net";
+constexpr char kRecOta[] = "g_ota";
+constexpr char kRecEvents[] = "g_events";
+
+/// How often the roster's age is checkpointed while one is loaded, so a
+/// power-on boot reads its windows as of at most this long before the cut.
+/// 144 small writes a day.
+constexpr uint32_t kRosterAgeCheckpointMs = 600000UL;
+
+/// The cold roster: what was adopted, and how old it was at the last
+/// checkpoint. Its windows are relative to that adoption.
+struct ColdRoster {
+  roster::Entry entries[kGateRosterEntries];
+  uint8_t count = 0U;
+};
+
+/// Undelivered events, from this boot and any before it. Each keeps the boot
+/// it was queued in, so the server's (device, boot_id, seq) key deduplicates a
+/// re-upload of one whose receipt was lost.
+struct StoredEvent {
+  uint32_t bootId = 0U;
+  /// The queuing boot's uptime when this record was last written.
+  uint32_t savedUptimeMs = 0U;
+  /// 0 none; 1 a replay refused offline; 2 a replay refused online (MCV1-10).
+  uint8_t tag = 0U;
+  eventq::Event event;
+};
+
+constexpr uint16_t kStoredEventSlots = static_cast<uint16_t>(kGateEventSlots);
+
+struct EventsRecord {
+  uint16_t count = 0U;
+  StoredEvent events[kStoredEventSlots];
+};
+
+// --- the warm image ----------------------------------------------------------
+
+/// The RTC counter, which keeps counting across every reset but a power-on.
+class IWarmClock {
+public:
+  virtual ~IWarmClock() = default;
+  virtual uint64_t nowUs() = 0;
+};
+
+/// Everything carried across a warm reset, sealed as a whole. Lives in
+/// RTC_NOINIT memory on the board (about 3.5 KB of the 8 KB RTC slow memory).
+struct WarmImage {
+  uint32_t magic;
+  uint32_t length;
+  uint32_t crc;
+  /// RTC microseconds at the instant each image was adopted.
+  uint64_t rosterAtUs;
+  uint64_t stepAtUs;
+  GateSettings settings;
+  RosterImage roster;
+  CodeImage codes;
+  StepImage step;
+  uint32_t heartbeatMs;
+  /// The replay ring, verbatim (it holds no time).
+  uint8_t uses[8U * kGateReplaySlots + 8U];
+};
+
+constexpr uint32_t kWarmMagic = 0x57524731UL; // "WRG1"
+
+void sealWarm(WarmImage& image);
+bool warmValid(const WarmImage& image);
+
+} // namespace gatelogic
+
+#endif // CRUSADERS_GATELOGIC_GATESTORE_H
