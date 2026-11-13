@@ -181,6 +181,12 @@ const EVENTS: EventDef[] = [
     vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
   },
   {
+    name: "minutes.payment_reversed",
+    label: "Payment refunded or charged back",
+    description: "The club gave rand back for a purchase — a refund at the desk or a card chargeback it recorded. Names the purchase; amount_minutes is the minutes taken back with it (0 when the member keeps them).",
+    vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason", "zar_reversed", "reverses_entry_id"],
+  },
+  {
     name: "minutes.adjusted",
     label: "Minutes adjusted by hand",
     description: "An admin added minutes to a member or took them back from the console — a goodwill gesture, a correction, or a refund made outside the system. NOT money the club took: that is minutes.sold_at_desk.",

@@ -270,6 +270,7 @@ See `webhooks.md` for delivery mechanics. Player- or admin-configurable per tena
 - `minutes.penalty_applied`
 - `minutes.adjusted`
 - `minutes.refund_reversed` / `minutes.penalty_returned` — a refund taken back, a penalty given back (the no-show reversal's legs; review round 6, E6-11).
+- `minutes.payment_reversed` — rand the club gave back for a purchase: a desk refund or a recorded card chargeback (a `PaymentReversal` row naming the purchase; money lane BM-6). Carries `zar_reversed` and `reverses_entry_id`; `amount_minutes` is the minutes taken back, 0 when the member keeps them.
 - `peripheral.unhealthy` — a court box has stopped heart-beating for longer than `offline_after_seconds` (`HeartbeatCadence`, derived from the club's own `heartbeat_seconds`). Fires **once per outage**, not once per sweep, and carries the box, its MAC, the courts it drives and how long it has been silent. `PeripheralHealthWorker`.
 - `peripheral.recovered` — the same box called in again. Carries the outage's length.
 

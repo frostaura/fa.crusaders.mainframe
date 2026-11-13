@@ -143,6 +143,8 @@ describe("AdminWebhooks", () => {
       "booking.payer_changed", "minutes.refund_reversed", "minutes.penalty_returned",
       // P13 §5: the money events are named for minutes; the old unit's names are gone.
       "minutes.purchased", "minutes.refunded", "minutes.penalty_applied", "minutes.adjusted", "minutes.sold_at_desk",
+      // Money lane BM-6: rand given back for a purchase.
+      "minutes.payment_reversed",
       "member.registered", "member.approved", "member.rejected",
       "member.suspended", "member.reactivated",
       // The last of the nine, reinstated. It was absent because §9 asserted no liveness
