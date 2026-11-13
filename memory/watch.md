@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-watch
-description: "Unpaid debts, worst first: .env holds live JWT, database, SMTP and device secrets unencrypted and unbacked-up; the redeploy is manual and nothing checks the stack before it; charge-at-booking is unsigned-off."
+description: "Unpaid debts, worst first: .env holds live JWT, database and SMTP secrets unencrypted and unbacked-up; the redeploy is a manual runbook nothing enforces; charge-at-booking is unsigned-off."
 type: watch
 last_verified: 2026-09-29
 ---
@@ -9,32 +9,25 @@ last_verified: 2026-09-29
 
 Ordered by risk. [`safety-relays.md`](safety-relays.md) outranks all of these; the doors have
 their own list, [`watch-doors.md`](watch-doors.md). Each item is expanded, with the consequence
-of skipping it, in `docs/go-live-checklist.md`. Item 2 was re-checked against `ci.yml` on
-2026-09-19 and item 6 on 2026-09-29; the rest carry the dates written into them.
+of skipping it, in `docs/go-live-checklist.md`. Items 1 and 2 were re-checked on 2026-11-13
+(key names; `ci.yml` and the compose files) and item 6 on 2026-09-29; the rest carry their dates.
 
 1. **`.env` holds several classes of live secret, not just the mailbox password.** Re-read
-   2026-09-16, **variable names only** — never transcribe a value into a file, a report or a
-   commit message. Alongside `SMTP_USER`/`SMTP_PASSWORD` (a real `@frostaura.net` mailbox, not a
-   test fixture) it populates `JWT_SECRET` — the token-signing key this checkout actually boots
-   on, via compose's `Jwt__Secret` — and `POSTGRES_PASSWORD`. `MASTER_SECRETS_ENCRYPTION_KEY` and
-   `LIGHTS_CONTROLLER_DEFAULT_SECRET` are there too and **do not reach the API at all**: the
-   compose `backend.environment` block is an allow-list of `Section__Key` names and neither flat
-   name appears in it. Do not read the master key's presence as evidence that tenant secrets are
-   encrypted — PayFast merchant credentials sit **in clear** in the `tenant_settings` JSON
-   document (`Services/TenantSecretsAccessor.cs`), whose comment defers the master KEK to unbuilt
-   Phase-7 work. The file is gitignored and **not tracked**, which closes the commit risk and
-   nothing else: it is unencrypted on disk and backed up nowhere, so losing this Mac loses it all.
-2. **The redeploy is manual, and nothing checks the stack before it.** `deploy-portainer` was
-   removed 2026-09-19 on Dean's instruction; CI stops at the Docker Hub push, and `ci.yml` and
-   `README.md` now say so. The publish half is not a debt ([`state.md`](state.md)). What the
-   removal **cost** is the only check anyone had: that job **refused to deploy** a stack that did
-   not name `<user>/crusaders-mainframe-gateway`, or that still bind-mounted `./nginx/nginx.conf`.
-   A redeploy re-pulls the images the stack *names*, so a stack in either state keeps its **old
-   gateway config** — every LAN member back in one rate-limit bucket — while looking deployed, and
-   **nothing else in the system can see it**. Whoever redeploys checks both by hand, every time
-   (`docs/go-live-checklist.md` §2). The four `PORTAINER_*` secrets are now read by nothing and
-   should be deleted. Image jobs stay gated on `push` to `main`, so a green PR run still says
-   nothing about the release half.
+   2026-11-13, **variable names only**. It populates `JWT_SECRET`, `POSTGRES_PASSWORD` and a real
+   mailbox in both spellings (`SMTP_*` and `Smtp__*`; the flat names win). The retired
+   `BOOTSTRAP_SLICE_PRICE_CREDITS` is still in it (read by nothing; Dean deletes it). The
+   2026-09-16 entries `MASTER_SECRETS_ENCRYPTION_KEY` and `LIGHTS_CONTROLLER_DEFAULT_SECRET` are
+   gone. PayFast merchant credentials sit **in clear** in `tenant_settings`
+   (`Services/TenantSecretsAccessor.cs`). Gitignored and untracked; unencrypted and backed up
+   nowhere, so losing this Mac loses it. Production's secrets are in the Portainer stack file
+   only — the password-manager list is `docs/go-live-checklist.md` §2b.
+2. **The redeploy is manual.** Since 2026-11-13 it has a runbook
+   (`docs/runbooks/redeploy-and-rollback.md`): backup, `make migrations-pending` against the club's
+   database, the stored stack file read for `CHANGE-ME`, the gateway image and no `nginx.conf`
+   bind, deploy by `sha-<commit>`. Those checks are still made **by a person** — nothing refuses a
+   bad stack — and the backup's offsite copy is a host cron nobody has installed yet. The repository
+   is public and `main` unprotected; both are Dean's settings
+   ([`decisions-release-ops.md`](decisions-release-ops.md)).
 3. **Charge-at-booking has not been signed off by the committee.** The build debits at booking;
    blueprint A.9 says lights-on. Deviation **D-1** in `docs/specs/client-blueprint-deltas.md`.
    The blueprint is the customer's own word and outranks internal specs on economics, so
