@@ -181,5 +181,13 @@ public sealed class LedgerEntry : ITenantScoped
     /// </summary>
     public Guid? PurchaseId { get; set; }
 
+    /// <summary>
+    /// On a <see cref="LedgerEntryType.PaymentReversal"/>: the funding row (<see cref="LedgerEntryType.TopUp"/>
+    /// or <see cref="LedgerEntryType.AdminTopUp"/>) whose rand it gives back — a refund the club made
+    /// or a chargeback it recorded (money lane BM-6). What lets the desk refuse to give back more
+    /// rand, or take back more minutes, than that purchase carried. Null on every other row.
+    /// </summary>
+    public Guid? ReversesEntryId { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

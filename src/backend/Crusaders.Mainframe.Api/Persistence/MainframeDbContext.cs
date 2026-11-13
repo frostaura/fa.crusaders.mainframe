@@ -728,6 +728,8 @@ public partial class MainframeDbContext : DbContext
             e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
             // One credit per PayFast checkout (money lane BM-2): see LedgerEntry.PurchaseId.
             e.HasIndex(l => new { l.TenantId, l.PurchaseId }).IsUnique().HasFilter("\"PurchaseId\" IS NOT NULL");
+            // BM-6: the reversals of one funding row, summed under the payer lock before another is posted.
+            e.HasIndex(l => new { l.TenantId, l.ReversesEntryId }).HasFilter("\"ReversesEntryId\" IS NOT NULL");
             e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
             e.Property(l => l.Type).HasConversion<int>();
 

@@ -1371,6 +1371,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid?>("RelatedBookingId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ReversesEntryId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
@@ -1392,6 +1395,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("TenantId", "PurchaseId")
                         .IsUnique()
                         .HasFilter("\"PurchaseId\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ReversesEntryId")
+                        .HasFilter("\"ReversesEntryId\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "ActorUserId", "CreatedAt");
 

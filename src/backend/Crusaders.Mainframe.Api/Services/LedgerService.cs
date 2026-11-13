@@ -455,6 +455,7 @@ public sealed class LedgerService
             LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => MinutesEvents.PenaltyApplied,
             LedgerEntryType.AdminAdjustment => MinutesEvents.Adjusted,
             LedgerEntryType.AdminTopUp => MinutesEvents.SoldAtDesk,
+            LedgerEntryType.PaymentReversal => MinutesEvents.PaymentReversed,
             _ => null,
         };
     }
@@ -487,6 +488,12 @@ public sealed class LedgerService
         {
             data["zar_received"] = entry.ZarPaid ?? 0m;
             data["given"] = GivenMinutes.IsGiven(entry.Type, entry.ZarPaid);
+        }
+        // BM-6: rand given back says how much, and which purchase it came off.
+        if (type == MinutesEvents.PaymentReversed)
+        {
+            data["zar_reversed"] = Math.Abs(entry.ZarPaid ?? 0m);
+            data["reverses_entry_id"] = entry.ReversesEntryId;
         }
 
         await _outbox.EnqueueAsync(async token => await _bus.EmitAsync(new DomainEvent(
@@ -564,6 +571,7 @@ public sealed class LedgerService
             Reason = posting.Reason,
             ExternalReference = posting.ExternalReference,
             PurchaseId = posting.PurchaseId,
+            ReversesEntryId = posting.ReversesEntryId,
             CreatedAt = posting.At ?? DateTimeOffset.UtcNow,
         };
     }
@@ -582,6 +590,7 @@ public sealed class LedgerService
             Reason = posting.Reason,
             ExternalReference = posting.ExternalReference,
             PurchaseId = posting.PurchaseId,
+            ReversesEntryId = posting.ReversesEntryId,
             CreatedAt = posting.At ?? DateTimeOffset.UtcNow,
         };
         _db.LedgerEntries.Add(entry);
@@ -638,6 +647,9 @@ public sealed record LedgerPosting(
 
     /// <summary>On a PayFast purchase's <see cref="LedgerEntryType.TopUp"/>: the purchase it credits, stored and unique per club (<see cref="LedgerEntry.PurchaseId"/>).</summary>
     public Guid? PurchaseId { get; init; }
+
+    /// <summary>On a <see cref="LedgerEntryType.PaymentReversal"/>: the funding row it gives rand back for (<see cref="LedgerEntry.ReversesEntryId"/>).</summary>
+    public Guid? ReversesEntryId { get; init; }
 
     /// <summary>Review round 12, C1: on a cancellation's refund and penalty, who cancelled (<see cref="WalletCancelledBy"/>). Never stored.</summary>
     public string? CancelledBy { get; init; }
