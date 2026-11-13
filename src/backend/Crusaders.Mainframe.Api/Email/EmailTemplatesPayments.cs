@@ -2,16 +2,16 @@ namespace Crusaders.Mainframe.Api.Email;
 
 /// <summary>
 /// A PayFast payment the club received and did NOT turn into minutes, for
-/// <see cref="EmailTemplates.PaymentNotCredited"/>: a second payment for a checkout already
+/// <see cref="EmailTemplates.PaymentNotAddedMail"/>: a second payment for a checkout already
 /// credited, or a payment for one the gateway had already closed.
 /// </summary>
 /// <param name="AmountZar">What PayFast reports for THIS payment; null when it reported none.</param>
 /// <param name="Reference">THIS payment's PayFast id — what the member quotes to the club.</param>
-public sealed record UncreditedPayment(
+public sealed record PaymentNotAdded(
     string PackageName,
     decimal? AmountZar,
     string Reference,
-    bool AlreadyCredited,
+    bool AlreadyAdded,
     string CurrencySymbol);
 
 /// <summary>Rand the club gave back, for <see cref="EmailTemplates.PaymentReversed"/>.</summary>
@@ -33,16 +33,16 @@ public sealed record ReversedPayment(
 public static partial class EmailTemplates
 {
     /// <summary>To a member PayFast took a payment from that was not added as minutes.</summary>
-    public static EmailMessage PaymentNotCredited(ClubIdentity club, string to, UncreditedPayment p) =>
+    public static EmailMessage PaymentNotAddedMail(ClubIdentity club, string to, PaymentNotAdded p) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: p.AlreadyCredited
+            Subject: p.AlreadyAdded
                 ? $"A second payment for {p.PackageName} was received"
                 : $"A payment for {p.PackageName} arrived after the purchase closed",
             Preheader: "No minutes were added for it. The club has been told and will refund it or add it by hand.",
-            Heading: p.AlreadyCredited ? "You paid twice for one purchase" : "A payment arrived after the purchase closed",
+            Heading: p.AlreadyAdded ? "You paid twice for one purchase" : "A payment arrived after the purchase closed",
             Blocks:
             [
-                new Paragraph(p.AlreadyCredited
+                new Paragraph(p.AlreadyAdded
                     ? $"PayFast reported a second payment for your {p.PackageName} purchase. Your first payment's minutes are already in your wallet; this one has not been added, so you are not charged twice for the same minutes."
                     : $"PayFast reported a payment for your {p.PackageName} purchase after it had been closed. No minutes were added for it."),
                 new Facts(

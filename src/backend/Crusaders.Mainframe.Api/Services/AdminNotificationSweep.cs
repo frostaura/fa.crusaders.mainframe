@@ -69,6 +69,7 @@ public sealed class AdminNotificationSweep
         var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(ct);
 
         await RemindAboutApplicationsAsync(db, tenant.Id, settings, now, ct);
+        await RemindAboutUnsettledBookingsAsync(db, tenant.Id, settings, now, ct);
         await DetectRefusalSpikesAsync(db, tenant.Id, settings, now, ct);
         await DetectFaultSpikeAsync(db, tenant.Id, settings, now, ct);
         await PruneAsync(db, settings, now, ct);
@@ -98,6 +99,31 @@ public sealed class AdminNotificationSweep
         var oldest = waiting[0];
         var hours = (int)Math.Floor((now - oldest.CreatedAt).TotalHours);
         var notice = AdminNotices.ApplicationsPending(DateOnly.FromDateTime(local.DateTime), waiting.Count, oldest.FullName, hours);
+        await AdminNotices.RaiseAsync(db, tenantId, notice, now, ct);
+    }
+
+    /// <summary>
+    /// Money lane BM-11: bookings the no-show sweep can no longer reach (older than the club's
+    /// <c>no_show_lookback_days</c>), still <c>Booked</c>, never checked in, with a payer — each one a
+    /// full charge nobody settled. The sweep's floor is deliberate (a backlog must not mass-post
+    /// penalties), so the club is told daily instead, once its day has begun.
+    /// </summary>
+    internal static async Task RemindAboutUnsettledBookingsAsync(
+        MainframeDbContext db, Guid tenantId, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
+        var zone = ClubClock.ZoneOf(settings);
+        var local = TimeZoneInfo.ConvertTime(now, zone);
+        if (local.Hour * 60 + local.Minute < settings.DayStartMinute) return;
+
+        var floor = now.AddDays(-settings.NoShowLookbackDays);
+        var stranded = db.Bookings.AsNoTracking()
+            .Where(b => b.Status == BookingStatus.Booked && b.CheckedInAt == null && b.UserId != null && b.StartsAt < floor);
+        var count = await stranded.CountAsync(ct);
+        if (count == 0) return;
+
+        var oldest = await stranded.MinAsync(b => b.StartsAt, ct);
+        var oldestLocal = TimeZoneInfo.ConvertTime(oldest, zone).ToString("ddd d MMM yyyy, HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        var notice = AdminNotices.BookingsUnsettled(DateOnly.FromDateTime(local.DateTime), count, oldestLocal, settings.NoShowLookbackDays);
         await AdminNotices.RaiseAsync(db, tenantId, notice, now, ct);
     }
 

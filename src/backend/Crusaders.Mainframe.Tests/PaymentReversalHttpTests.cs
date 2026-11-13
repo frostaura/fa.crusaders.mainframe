@@ -77,7 +77,7 @@ public sealed class PaymentReversalHttpTests(PostgresFixture pg) : IClassFixture
         Assert.Equal(0, revenue.GetProperty("net_minutes").GetInt32());
 
         var change = await ReadAsync(f, db => db.AdminChangeLogs.IgnoreQueryFilters()
-            .SingleAsync(c => c.TenantId == club.TenantId && c.Action == "credit.payment_reversed"));
+            .SingleAsync(c => c.TenantId == club.TenantId && c.Action == "payment.reversed"));
         Assert.Equal("Member moved away", change.Reason);
 
         var deadline = DateTime.UtcNow.AddSeconds(5);

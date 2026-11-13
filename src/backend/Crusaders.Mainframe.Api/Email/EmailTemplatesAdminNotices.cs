@@ -3,6 +3,9 @@ namespace Crusaders.Mainframe.Api.Email;
 /// <summary>Applications that have waited past the club's reminder threshold.</summary>
 public sealed record ApplicationsWaiting(int Count, string OldestName, int OldestHours, string ConsoleUrl);
 
+/// <summary>Bookings the no-show sweep can no longer reach, still charged (money lane BM-11).</summary>
+public sealed record UnsettledBookings(int Count, string OldestLocal, int LookbackDays, string ConsoleUrl);
+
 /// <summary>Several different faults open across the club's boards at once.</summary>
 public sealed record FaultSpike(int Faults, int Minutes, IReadOnlyList<string> Boards, string ConsoleUrl);
 
@@ -76,6 +79,30 @@ public static partial class EmailTemplates
                 ]),
                 new Paragraph("Each applicant was told this takes a day or two. You'll get this reminder at most once a day while any application is waiting."),
                 new CallToAction("Review the applications", w.ConsoleUrl),
+            ],
+            WhyThis: WhyAdmin));
+
+    /// <summary>
+    /// A daily nudge while bookings older than the no-show sweep's reach were never settled (BM-11):
+    /// nobody checked in and nothing refunded or penalised them, so each member still carries its
+    /// full charge. The sweep does not settle them on its own — after that long it cannot know
+    /// whether the court was played — so an administrator decides, booking by booking.
+    /// </summary>
+    public static EmailMessage AdminBookingsUnsettled(ClubIdentity club, string to, UnsettledBookings u) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: u.Count == 1 ? "1 past booking was never settled" : $"{u.Count} past bookings were never settled",
+            Preheader: $"The oldest is from {u.OldestLocal}. Each member still carries its full charge.",
+            Heading: "Past bookings need a decision",
+            Blocks:
+            [
+                new Paragraph($"{Plural(u.Count, "booking at", "bookings at")} {club.Name} started more than {u.LookbackDays} days ago and {(u.Count == 1 ? "was" : "were")} never settled: nobody checked in, and no refund or no-show penalty was posted. That happens when the system was down for longer than the no-show sweep reaches back."),
+                new Facts(
+                [
+                    new FactRow("Never settled", u.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                    new FactRow("Oldest", u.OldestLocal),
+                ]),
+                new Paragraph("Cancelling one gives its member the whole charge back. Leaving it keeps the charge. You'll get this reminder at most once a day while any is left."),
+                new CallToAction("Review the bookings", u.ConsoleUrl),
             ],
             WhyThis: WhyAdmin));
 

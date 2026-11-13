@@ -133,6 +133,10 @@ internal static class EmailCatalogue
                 "5 hours", 300, 550m, 1000, "League members", 495m, 1530, "pf-2026-09-22-0041", symbol))),
             ("PurchaseConfirmationNoDiscount", EmailTemplates.PurchaseConfirmation(club, to, new PackagePurchaseReceipt(
                 "1 hour", 60, 120m, 0, null, 120m, 105, "pf-2026-09-22-0046", symbol))),
+            ("PaymentNotAddedMail", EmailTemplates.PaymentNotAddedMail(club, to, new PaymentNotAdded("5 hours", 495m, "pf-2026-11-13-0101", true, symbol))),
+            ("PaymentNotAddedAfterClose", EmailTemplates.PaymentNotAddedMail(club, to, new PaymentNotAdded("5 hours", null, "pf-2026-11-13-0102", false, symbol))),
+            ("PaymentReversed", EmailTemplates.PaymentReversed(club, to, new ReversedPayment($"PayFast purchase: 5 hours for {symbol}495.00", 495m, 300, 0, false, symbol))),
+            ("PaymentChargedBackKept", EmailTemplates.PaymentReversed(club, to, new ReversedPayment("EFT — 1 hour", 120m, 0, 45, true, symbol))),
             ("PurchaseNotCompleted", EmailTemplates.PurchaseNotCompleted(club, to, new PackagePurchaseAttempt("5 hours", 300, 495m, "declined", "pf-2026-09-22-0042", symbol))),
             ("PurchaseCancelled", EmailTemplates.PurchaseNotCompleted(club, to, new PackagePurchaseAttempt("5 hours", 300, 495m, "cancelled", "pf-2026-09-22-0043", symbol))),
             ("PurchaseMismatched", EmailTemplates.PurchaseNotCompleted(club, to, new PackagePurchaseAttempt("5 hours", 300, 495m, "amount_mismatch", "pf-2026-09-22-0044", symbol))),
@@ -160,6 +164,8 @@ internal static class EmailCatalogue
             // R23's admin notices — everything the notifier sends that nothing sent before it.
             ("AdminApplicationsWaiting", EmailTemplates.AdminApplicationsWaiting(club, to, new ApplicationsWaiting(3, "Jason Fourie", 31, ConsoleUrl))),
             ("AdminApplicationsWaitingOne", EmailTemplates.AdminApplicationsWaiting(club, to, new ApplicationsWaiting(1, "Jason Fourie", 26, ConsoleUrl))),
+            ("AdminBookingsUnsettled", EmailTemplates.AdminBookingsUnsettled(club, to, new UnsettledBookings(3, "Mon 2 Nov 2026, 18:00", 7, ConsoleUrl))),
+            ("AdminBookingsUnsettledOne", EmailTemplates.AdminBookingsUnsettled(club, to, new UnsettledBookings(1, "Mon 2 Nov 2026, 18:00", 7, ConsoleUrl))),
             ("AdminFaultSpike", EmailTemplates.AdminFaultSpike(club, to, new FaultSpike(6, 15, ["box-2ad001", "gate-44c101"], ConsoleUrl))),
             ("AdminDoorRefusalSpike", EmailTemplates.AdminDoorRefusalSpike(club, to, new DoorRefusalSpike("Front door", "gate-44c101", "front-door", 9, 20, ConsoleUrl))),
             ("AdminTopUpFailed", EmailTemplates.AdminTopUpFailed(club, to, new TopUpFailure("amount_mismatch", 495m, "Thandi Mokoena", "pf-2026-09-22-0045", symbol, ConsoleUrl, "5 hours", 300))),

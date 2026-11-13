@@ -204,7 +204,7 @@ public static partial class TopUpEndpoints
     {
         if (!IsAnotherPayment(itn.Interp, pending.ExternalReference)) return Results.Ok(new { ok = true, idempotent = true });
         if (await ConfirmWithPayFastAsync(itn, ct) is { } unconfirmed) return unconfirmed;
-        return await FlagUncreditedAsync(itn, pending, TopUpAlerts.PaidTwice, ct);
+        return await FlagNotAddedAsync(itn, pending, TopUpAlerts.PaidTwice, ct);
     }
 
     /// <summary>
@@ -229,44 +229,44 @@ public static partial class TopUpEndpoints
                         && pending.FailureReason != FailureCodes.AmountMismatch;
         if (!paidLater) return settled;
         if (await ConfirmWithPayFastAsync(itn, ct) is { } unconfirmed) return unconfirmed;
-        await FlagUncreditedAsync(itn, pending, TopUpAlerts.PaidAfterClose, ct);
+        await FlagNotAddedAsync(itn, pending, TopUpAlerts.PaidAfterClose, ct);
         return settled;
     }
 
-    private static bool IsAnotherPayment(CallbackInterpretation interp, string? creditedPaymentId) =>
+    private static bool IsAnotherPayment(CallbackInterpretation interp, string? addedPaymentId) =>
         interp.Successful
         && !string.IsNullOrWhiteSpace(interp.PaymentId)
-        && !string.Equals(interp.PaymentId.Trim(), creditedPaymentId?.Trim(), StringComparison.Ordinal);
+        && !string.Equals(interp.PaymentId.Trim(), addedPaymentId?.Trim(), StringComparison.Ordinal);
 
     /// <summary>
     /// A payment PayFast took that this checkout cannot credit: raised to the admins once per
     /// PayFast id, mailed to the member once (the notice's dedupe decides both), acknowledged 200.
     /// </summary>
-    private static async Task<IResult> FlagUncreditedAsync(Itn itn, PendingTopup pending, string reason, CancellationToken ct)
+    private static async Task<IResult> FlagNotAddedAsync(Itn itn, PendingTopup pending, string reason, CancellationToken ct)
     {
         var paymentId = itn.Interp.PaymentId!.Trim();
         itn.Logger.LogError(
-            "topup {Key}: PayFast payment {PaymentId} ({Reason}) was received and NOT credited — raised for the desk",
+            "topup {Key}: PayFast payment {PaymentId} ({Reason}) was received and NOT added as minutes — raised for the desk",
             pending.IdempotencyKey, paymentId, reason);
 
         var key = $"{AdminEventCatalogue.TopUpFailed}:{reason}:{paymentId}";
         var raisedBefore = await itn.Db.AdminNotifications.AsNoTracking().AnyAsync(n => n.DedupeKey == key, ct);
-        await TopUpAlerts.RaiseUncreditedAsync(itn.Db, itn.TenantRow.Id, reason, paymentId, itn.Interp.AmountGross, pending, ct);
-        if (!raisedBefore) await MailUncreditedAsync(itn, pending, reason == TopUpAlerts.PaidTwice, paymentId, ct);
+        await TopUpAlerts.RaiseNotAddedAsync(itn.Db, itn.TenantRow.Id, reason, paymentId, itn.Interp.AmountGross, pending, ct);
+        if (!raisedBefore) await MailNotAddedAsync(itn, pending, reason == TopUpAlerts.PaidTwice, paymentId, ct);
 
         return Results.Ok(new { ok = false, reason, purchase_id = pending.Id });
     }
 
-    private static async Task MailUncreditedAsync(Itn itn, PendingTopup pending, bool alreadyCredited, string paymentId, CancellationToken ct)
+    private static async Task MailNotAddedAsync(Itn itn, PendingTopup pending, bool alreadyAdded, string paymentId, CancellationToken ct)
     {
         var recipient = await itn.Db.Users.AsNoTracking().Where(u => u.Id == pending.UserId).Select(u => u.Email).FirstOrDefaultAsync(ct);
         if (string.IsNullOrEmpty(recipient)) return;
         var symbol = CurrencySymbol.For(await itn.Service<TenantSettingsAccessor>().GetAsync(ct));
         await EmailDispatch.QueueAsync(
             itn.Service<IEmailService>(), itn.Logger,
-            EmailTemplates.PaymentNotCredited(await itn.Service<ClubIdentityResolver>().GetAsync(ct), recipient,
-                new UncreditedPayment(pending.PackageName, itn.Interp.AmountGross, paymentId, alreadyCredited, symbol)),
-            $"uncredited payment notice for {pending.Id}");
+            EmailTemplates.PaymentNotAddedMail(await itn.Service<ClubIdentityResolver>().GetAsync(ct), recipient,
+                new PaymentNotAdded(pending.PackageName, itn.Interp.AmountGross, paymentId, alreadyAdded, symbol)),
+            $"not-added payment notice for {pending.Id}");
     }
 
     /// <summary>
@@ -313,7 +313,7 @@ public static partial class TopUpEndpoints
         var now = await itn.Db.PendingTopups.AsNoTracking().FirstAsync(p => p.Id == pending.Id, ct);
         if (now.Status != TopUpStatus.Completed) return await AlreadyClosedAsync(itn, now, ct);
         return IsAnotherPayment(itn.Interp, now.ExternalReference)
-            ? await FlagUncreditedAsync(itn, now, TopUpAlerts.PaidTwice, ct)
+            ? await FlagNotAddedAsync(itn, now, TopUpAlerts.PaidTwice, ct)
             : Results.Ok(new { ok = true, idempotent = true });
     }
 

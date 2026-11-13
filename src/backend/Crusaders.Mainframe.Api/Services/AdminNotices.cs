@@ -130,6 +130,23 @@ public static class AdminNotices
 
     private static string Hours(int n) => n == 1 ? "1 hour" : $"{n} hours";
 
+    /// <summary>
+    /// Money lane BM-11: the daily reminder while any booking is older than the no-show sweep's
+    /// lookback and was never settled. Keyed on the club's own date, so daily at most.
+    /// </summary>
+    public static AdminNotice BookingsUnsettled(DateOnly clubDate, int count, string oldestLocal, int lookbackDays)
+    {
+        var headline = count == 1
+            ? $"1 past booking was never settled — from {oldestLocal}"
+            : $"{count} past bookings were never settled — the oldest from {oldestLocal}";
+        return new AdminNotice(
+            AdminEventCatalogue.BookingsUnsettled,
+            $"{AdminEventCatalogue.BookingsUnsettled}:{Iso(clubDate)}",
+            new BookingsUnsettledPayload(count, oldestLocal, lookbackDays),
+            headline,
+            "/admin/bookings");
+    }
+
     /// <summary>An outage opening or closing. Keyed on the outage row, so each row announces each edge once.</summary>
     public static AdminNotice DeviceOutage(Guid outageId, Device device, int minutes, bool recovered)
     {
@@ -200,7 +217,7 @@ public static class AdminNotices
     /// <c>PaidAfterClose</c>). The payload's reference and amount are THAT payment's, and the
     /// member is the subject so the desk lands on them.
     /// </summary>
-    public static AdminNotice TopUpUncredited(string reason, string paymentId, decimal? amountZar, string? memberName, PendingTopup pending)
+    public static AdminNotice TopUpNotAdded(string reason, string paymentId, decimal? amountZar, string? memberName, PendingTopup pending)
     {
         var notice = PurchaseFailed(reason, paymentId, memberName, new TopUpFailedPayload(
             reason, amountZar, memberName, paymentId, pending.PackageName, pending.Minutes));

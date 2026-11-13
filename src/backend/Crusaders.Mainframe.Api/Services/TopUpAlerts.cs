@@ -97,11 +97,11 @@ public static class TopUpAlerts
     /// its PayFast id and the rand it reports — not the purchase's first one, because it is the
     /// money the desk has to find. Once per payment id.
     /// </summary>
-    public static async Task RaiseUncreditedAsync(
+    public static async Task RaiseNotAddedAsync(
         MainframeDbContext db, Guid tenantId, string reason, string paymentId, decimal? amountGross, PendingTopup pending, CancellationToken ct)
     {
         var name = await NameOfAsync(db, pending.UserId, ct);
-        var notice = AdminNotices.TopUpUncredited(reason, paymentId, amountGross, name, pending);
+        var notice = AdminNotices.TopUpNotAdded(reason, paymentId, amountGross, name, pending);
         await AdminNotices.RaiseAsync(db, tenantId, notice, DateTimeOffset.UtcNow, ct);
     }
 

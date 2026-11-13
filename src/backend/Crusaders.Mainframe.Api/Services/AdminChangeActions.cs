@@ -78,7 +78,7 @@ public static class AdminChangeActions
     /// Rand the club gave back — a refund it made, or a card chargeback it recorded — posted as a
     /// <c>PaymentReversal</c> naming the purchase (money lane BM-6). Reason-required: somebody's money moved.
     /// </summary>
-    public const string PaymentReversed = "credit.payment_reversed";
+    public const string PaymentReversed = "payment.reversed";
 
     // P13 §4.5: the club's minutes packages. Area credit, subject kind package, none reason-required.
     public const string PackageCreated = "package.created";
