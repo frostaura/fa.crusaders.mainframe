@@ -10,7 +10,8 @@
 # Baking the config makes the config a build artifact with the same delivery guarantee as
 # the code it belongs to, and makes the trap non-recurring: every future nginx.conf edit
 # ships by the same path as every backend edit.
-FROM nginx:alpine
+# Pinned rather than nginx:alpine, so a rebuild changes only what this repository changed.
+FROM nginx:1.31.8-alpine
 
 # The upstream image runs /docker-entrypoint.d/20-envsubst-on-templates.sh at start, which
 # expands ${NGINX_BACKEND_PORT} and friends from the environment into /etc/nginx/conf.d.
@@ -26,3 +27,8 @@ ENV NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d \
     NGINX_CLIENT_MAX_BODY_SIZE=10m
 
 EXPOSE 80
+
+# The commit this image was built from (CI passes it; a local build says "unknown").
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision=$BUILD_SHA
+ENV BUILD_SHA=$BUILD_SHA
