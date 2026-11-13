@@ -1,0 +1,30 @@
+{
+  "description": "Forward compatibility for the frozen firmware: budgets both sides hold every device body to, and what a v3 court box and a v3 door gate adopt from bodies a later server might send.",
+  "authority": "docs/specs/device-api.md section 11; gen_cases.py beside this file is the reference implementation.",
+  "generator": "src/contracts/device-protocol/compat/gen_cases.py",
+  "read_by": {
+    "budgets": [
+      "csharp",
+      "fw-court-box",
+      "fw-door-gate"
+    ],
+    "court_box": [
+      "fw-court-box"
+    ],
+    "door_gate": [
+      "fw-door-gate"
+    ],
+    "scan": [
+      "fw-court-box",
+      "fw-door-gate"
+    ]
+  },
+  "case_count": {
+    "budgets": 19,
+    "court_box": 41,
+    "door_gate": 13,
+    "scan": 24,
+    "scan_court_box": 19,
+    "scan_door_gate": 5
+  }
+}
