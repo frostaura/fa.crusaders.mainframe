@@ -12,7 +12,7 @@ These hold across every phase:
 
 1. **Spec-driven.** Every behaviour change has a spec change. If a spec describes a feature, it must exist in code. If code changes behaviour, the spec must update in the same commit. Drift is blocking.
 2. **Tenant isolation is structural.** Every persisted entity carries `tenant_id`. Every API endpoint resolves the tenant first. Cross-tenant injection tests are mandatory before any merge that touches a tenant-scoped table.
-3. **Money is ledger-only.** Balance is the sum of immutable ledger entries — never a stored field. Every credit movement has `actor`, `subject`, `reason`, `external_reference`. Disputes are resolved by replaying the ledger.
+3. **Money is ledger-only.** Balance is the sum of immutable ledger entries — never a stored field. Every minute movement has `actor`, `subject`, `reason`, `external_reference`. Disputes are resolved by replaying the ledger.
 4. **Email is the contractual comms channel.** Every player-affecting event sends an email. Webhooks mirror the same event stream programmatically — they never replace email.
 5. **Public + free defaults for external data.** No paid data feeds, no proprietary geocoders, no premium phone-validation services. We use IANA tzdb (built-in), libphonenumber (OSS), Gravatar's public URL pattern for avatar fallback, public IP-based locale detection only if free-tier suffices. SMTP and **PayFast** are the only third-party paid dependencies; both are tenant-controlled (per-tenant accounts). *(This said PeachPayments until 2026-08-23; the provider changed, and `docs/specs/payments-peachpayments.md` is superseded.)*
 6. **Hardware abstractions ship before drivers.** `IBiometricDevice` and the lights webhook contract exist before any vendor SDK is integrated. `NullBiometricDevice` and `MockSimulatorBiometricDevice` are first-class implementations — CI must pass without touching real hardware.
@@ -58,7 +58,7 @@ Anything that becomes load-bearing later goes through this same test before adop
 | --- | --- | --- |
 | Members, auth, email verification, admin approval | `Endpoints/AuthEndpoints.cs`, `Services/MemberApprovalService.cs` | backend suite |
 | WebAuthn passkeys | `Endpoints/WebAuthnEndpoints.cs` | backend suite |
-| Credit ledger, balance as a sum | `Services/LedgerService.cs` | backend suite + cross-tenant tests |
+| Minutes ledger, balance as a sum | `Services/LedgerService.cs` | backend suite + cross-tenant tests |
 | **Charge at booking**, cancellation refund, late penalty | `Services/BookingService.cs` | mutation-proven; **deviates from blueprint A.9 — see D-1** |
 | Walk-ups: truncated at the next booking, charged pro rata | `BookingService.CreateWalkUpAsync` | `WalkUpBookingTests` |
 | Double-booking made unrepresentable | GiST exclusion constraint, `AddBookingOverlapExclusion` | Postgres boundary suite |
@@ -120,7 +120,7 @@ Repo skeleton. The runnable shell.
 - Project directory + `CLAUDE.md` (Technologies project schema)
 - All specs in `docs/specs/*`
 - Root files: `.gitignore`, `.dockerignore`, `.editorconfig`, `LICENSE`, `README.md`, `Makefile`, `.env`/`.env.example`, `docker-compose.yml`, `nginx/nginx.conf`
-- `.github/workflows/ci.yml` mirroring fa.startup's pipeline (lint/build/test/security/multi-arch image build/Portainer redeploy)
+- `.github/workflows/ci.yml` mirroring fa.startup's pipeline (lint/build/test/security/multi-arch image build; the Portainer redeploy job was removed 2026-09-19 — CI publishes and stops)
 - `src/backend/` — solution, `Crusaders.Mainframe.Api` (minimal API + EF Core/Npgsql + JWT + tenant resolution middleware + auto-migrate), `Crusaders.Mainframe.Tests` (xUnit + WebApplicationFactory smoke test), Dockerfile
 - `src/frontend/` — React 19 + Vite + Tailwind (soft-palette tokens) + Figtree + vitest, App shell with API health probe, Dockerfile + nginx SPA config
 - Gaia agents/skills bootstrapped under `.claude/` and `.github/`
@@ -179,10 +179,11 @@ The flow that lets any human exist in the system. Spec: [`feature-spec.md`](./sp
 
 ---
 
-## Phase 2 — Credit Ledger & PayFast (M)
+## Phase 2 — Ledger & PayFast (M)
 
-> Written before the provider changed. `PeachPayments` below reads `PayFast`; the shape of the
-> work was the same and the implementation is under `Payments/PayFast/`.
+> Written before the provider changed and before whole minutes replaced credits (P13,
+> `specs/minutes-and-packages.md`). `PeachPayments` below reads `PayFast` and `credit` reads
+> `minutes`; the shape of the work was the same and the implementation is under `Payments/PayFast/`.
 
 Money. Spec: [`feature-spec.md`](./specs/feature-spec.md) §4 + [`payments-peachpayments.md`](./specs/payments-peachpayments.md).
 
@@ -367,12 +368,12 @@ The "ready to put real money through it" pass. No new product surface; everythin
 - [ ] All emails snapshot-tested; previewable in admin tooling
 - [ ] Receipt PDF generation in production (Puppeteer container deployed)
 - [ ] Observability — structured logs (`Serilog` → JSON to stdout), metrics (`prometheus-net`), `/healthz` rich enough to drive uptime checks
-- [ ] Backup job — `pg_dump` nightly to encrypted offsite (Backblaze B2 or similar)
-- [ ] Restore drill — documented and run once; recovery time recorded
+- [x] Backup job — the production stack's `backup` service, daily `pg_dump` + photos with retention (2026-11-13). The encrypted offsite copy is a host-level step still owed: `runbooks/backup-and-restore.md`
+- [ ] Restore drill — documented and run once against a throwaway copy of the stack (2026-11-13, 18 s); the drill with a real production dump is still owed
 - [ ] SSRF and webhook abuse tests
 - [ ] Load test of booking grid at peak (Tuesday 6pm thundering-herd simulation via k6)
 - [ ] Real GoDaddy SMTP swapped for per-tenant production SMTP — deliverability checks (SPF/DKIM/DMARC)
-- [ ] PeachPayments swapped from sandbox to live for Crusaders tenant; first real R50 transaction roundtrips
+- [ ] PayFast swapped from sandbox to live for Crusaders tenant; first real R50 transaction roundtrips
 - [ ] Cloudflared tunnel set up on the Crusaders machine; domain points at it
 - [ ] Crusaders members invited en masse via an admin batch-invite tool
 - [ ] First weekend of pilot use; daily review of issues; hot-fix capacity
@@ -412,7 +413,7 @@ Decisions still pending. Unblock these as they become load-bearing.
 
 ## Phase 8 — Client deltas (blueprint Rev 2, 2026-05-09) (XL)
 
-The client returned a written blueprint that introduces a credits-as-unit-of-account model, member classes, and a "charge on lights-on" timing rule that changes the ledger flow. Full reconciliation in [`./specs/client-blueprint-deltas.md`](./specs/client-blueprint-deltas.md).
+The client returned a written blueprint that introduces a credits-as-unit-of-account model (since replaced by whole minutes, P13 — the 8.2 text below is history), member classes, and a "charge on lights-on" timing rule that changes the ledger flow. Full reconciliation in [`./specs/client-blueprint-deltas.md`](./specs/client-blueprint-deltas.md).
 
 **Sub-deliverables (mergeable independently, suggested order):**
 

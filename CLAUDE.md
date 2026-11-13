@@ -33,7 +33,7 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
 - **`src/contracts/device-protocol`** — the wire-protocol fixture corpus, consumed by *both* the C++ and the
   .NET tests. Neutral ground: neither side may drift from the other without a test going red.
 
-Repository: `https://github.com/frostaura/fa.crusaders.mainframe.git` (private).
+Repository: `https://github.com/frostaura/fa.crusaders.mainframe.git`. Its visibility is a founder decision and a status, not a rule — read it with `gh repo view`, never from a context file (it was public while every file here called it private).
 
 ### Known deviations from the FrostAura mandate
 
@@ -65,7 +65,8 @@ State these honestly rather than repeating the aspiration:
 - **SSRF guard with a deliberate carve-out:** production rejects RFC1918 webhook destinations *unless* the endpoint is on an internal-LAN allow-list. That carve-out exists for legitimate LAN consumers a club points a webhook at — the court box itself is pull-only and never a webhook destination — do not close it.
 - **Webhook delivery:** HMAC-SHA256 in `X-Crusaders-Signature`, timestamp in `X-Crusaders-Timestamp`, per-endpoint queue, backoff 1m/5m/30m/2h/12h/24h, auto-disable after 6 failures plus an email to the owner. A missing template variable is a **config error, not a retryable failure**.
 - **Docker device passthrough:** the .NET service runs in a container but must reach a USB/serial biometric device on the host — needs `--device` passthrough or `privileged: true` with the specific device path.
-- **CI publishes; it does not deploy.** `.github/workflows/ci.yml` carries the chain as far as multi-arch images on Docker Hub and stops there — there is no redeploy job, by decision. Redeploying the club stack is a manual step against the published `:latest` manifests. This repo's workflow is the reference to keep in sync, not `fa.startup`'s.
+- **CI publishes; it does not deploy.** `.github/workflows/ci.yml` carries the chain as far as multi-arch images on Docker Hub and stops there — there is no redeploy job, by decision. Every image is pushed under an immutable `sha-<commit>` tag and labelled with its commit; only `promote-latest` writes `:latest`, for all three images at once and only forward. Redeploying the club stack is a manual step that pins `CRUSADERS_IMAGE_TAG=sha-<commit>` in Portainer, by `docs/runbooks/redeploy-and-rollback.md` (backup first, `make migrations-pending` against the club's database, the stored stack file read for placeholders). This repo's workflow is the reference to keep in sync, not `fa.startup`'s.
+- **The production stack backs itself up, and a change to it keeps that true.** `docker-compose.prod.yml`'s `backup` service (daily dump + photos, retention, restore) is exercised for real by `make test-infra`; every service rotates its log; third-party images are pinned, never `:latest`; the backend image runs as uid 1654 and `volume-init` hands the volumes over. `docs/runbooks/backup-and-restore.md` is the procedure.
 
 ## Build / test / run
 
@@ -77,6 +78,8 @@ make test           # unit
 make test-integration # needs API_BOUNDARY_TEST_CONNECTION_STRING (a server; each class clones its own DB)
 make arduino-export # regenerate every firmware project's arduino/ from the PlatformIO sources
 make arduino-check  # regenerate and fail if the committed sketches are stale
+make test-infra     # compose files, the publish/promote rules, the backup service run for real (needs Docker for that tier)
+make migrations-pending REF=<commit> PSQL="<command that runs psql>"  # what a redeploy would migrate
 make up / make down / make down-reset / make clean
 ```
 
@@ -90,6 +93,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 - `docs/specs/client-blueprints/` — the verbatim client artifact plus its `.md` transcription. **The blueprint is the customer's word and outranks internal specs on economics.**
 - `docs/specs/client-blueprint-deltas.md` — line-by-line reconciliation of blueprint requirements against the build. The most reliable economics reference in the repo.
 - `docs/development-plan.md` — phased build sequence and parking-lot decisions. **Its status column understates reality; trust code over the plan** — see `MEMORY.md`.
+- `docs/runbooks/` — `local-walk.md` (the real stack in a real browser), `redeploy-and-rollback.md` and `backup-and-restore.md` (the club stack). Procedures that are this repository's own; a generic one belongs upstream in a plugin.
 - `docs/go-live-checklist.md` — everything between the code and a lit court at Crusaders, ordered by what stops go-live first, each item carrying the consequence of skipping it. None of it is code.
 - `docs/court-lights-flows.html` — "Every path from a booking to a lit court": the founder-facing walkthrough of the lighting flows, from booking to commissioning to what the LCD is saying. It and the blueprint below are the two founder-facing pages and are kept true as a pair — regenerate both when a spec or decision changes.
 - `docs/system-blueprint.html` — a self-contained interactive one-page design of the whole system (topology, wiring and DIP modes, firmware split, serial protocol with a live frame builder, the device API, backend invariants, ERD, deploy chain). Regenerate it when specs or decisions change and republish to the same hosted artifact URL so the link stays stable — the URL itself is recorded in `MEMORY.md`'s state topic.
@@ -111,7 +115,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 - **The JWT + WebAuthn auth pattern was lifted from `fa.startup`** — a lineage, not a link. This repo pins the **base `Fido2` package, not `Fido2.AspNet`**, which is what makes controller code non-portable in either direction; the division rule to check both pins before lifting identity code applies. Do not refactor the similarity into a shared library.
 - **The court-box hardware lives here in `src/iot`, not in `Industries/`.** Nothing about it is sourced from another division.
 
-External paid third parties are SMTP and PayFast, both tenant-controlled; Cloudflared runs on the host, outside the compose stack, by design.
+External paid third parties are SMTP and PayFast, both tenant-controlled. Cloudflared is a service of the production stack (`docker-compose.prod.yml`) and reaches the gateway by service name.
 
 ## Skills
 

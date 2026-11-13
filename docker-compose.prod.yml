@@ -10,7 +10,9 @@
 # club LAN. Cloudflared is a service of THIS stack (2026-09-19), so it reaches the gateway by
 # service name over the compose bridge rather than via a published port. The gateway is still
 # published on 8088 anyway, because the court box is on the LAN and does not come in through
-# the tunnel; the box's secrets.h names http://<this machine's LAN address>:8088. The stack
+# the tunnel; it dials http://<this machine's LAN address>:8088 (compiled in as the first-boot
+# default, changeable afterwards over the heartbeat), so give this machine a DHCP reservation —
+# an address that moves after a power cut is a fleet that cannot find its server. The stack
 # keeps compose's own bridge rather than host networking because the gateway image reaches the
 # API and the SPA by service name (backend:5000, frontend:80), and because the API only believes
 # X-Forwarded-* headers from that bridge's pinned subnet — see the note on `networks` below.
