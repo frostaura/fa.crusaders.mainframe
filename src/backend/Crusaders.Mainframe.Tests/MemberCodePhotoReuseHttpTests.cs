@@ -255,13 +255,15 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
 
         var photo = club.Code(club.Olga, at: clock.Now);
         Assert.True((await SendAsync(device, club.Activate(photo))).Body.GetProperty("activated").GetBoolean());
-        Assert.Equal("code_used", Reason((await SendAsync(device, club.Activate(photo))).Body));           // same box
+        // MCV1-02 (member-code §13): the same box and court again is a repeat activation of the
+        // session it just lit — a harmless re-grant with no second court use, so no refusal row.
+        Assert.True((await SendAsync(device, club.Activate(photo))).Body.GetProperty("activated").GetBoolean()); // same box
         Assert.Equal("code_used", Reason((await SendAsync(device, ActivateAt(club, boxTwo, photo))).Body)); // another box
         Assert.Equal("code_used", Reason((await SendAsync(device, club.WalkUp(photo, court: 3, nonce: "9999888877776666"))).Body));
 
         var rows = await club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
             .Where(a => a.TenantId == club.TenantId && a.Action == "court.activation_refused").OrderBy(a => a.CreatedAt).ToListAsync());
-        Assert.Equal(3, rows.Count);
+        Assert.Equal(2, rows.Count);
         Assert.All(rows, a =>
         {
             Assert.Equal(club.Olga, a.SubjectUserId);
@@ -275,8 +277,8 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         var refused = night.GetProperty("events").EnumerateArray()
             .Where(e => e.GetProperty("kind").GetString() == "court.refused")
             .Select(e => e.GetProperty("headline").GetString()).ToList();
-        Assert.Equal(3, refused.Count);
-        Assert.Contains("Was turned away at Court 1 — code already used", refused);
+        Assert.Equal(2, refused.Count);
+        Assert.DoesNotContain("Was turned away at Court 1 — code already used", refused);
         Assert.Contains("Was turned away at Court 4 — code already used", refused);
         // R11 E11-4: the walk-up's refusal says what was being bought, not the lights' words.
         Assert.Contains("Was turned away buying light time at Court 3 — code already used", refused);
