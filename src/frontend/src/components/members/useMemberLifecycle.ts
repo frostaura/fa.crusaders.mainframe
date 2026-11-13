@@ -4,6 +4,7 @@ import { endpoints } from "@/lib/api";
 import { OUTCOMES } from "@/lib/membersCopy";
 import type { MemberRow } from "./membersModel";
 import { transitionTruth } from "./lostTransition";
+import type { MembershipStatus } from "@/lib/memberDetailApi";
 import { focusAfterAction, pageHeading } from "@/lib/focusAfterAction";
 
 export type ResetResult = { tempPassword: string; emailQueuedTo: string | null };
@@ -66,42 +67,47 @@ export function useMemberLifecycle({ load }: Deps) {
       await load();
       // F3.20: the approved row leaves the Pending list and took focus with it, to <body>. The
       // keyboard goes to the next application's Approve — the queue's next step — or the heading.
-      focusAfterAction(() => document.querySelector<HTMLElement>("[data-approve-row]") ?? pageHeading());
+      focusAfterAction(() => document.querySelector<HTMLElement>("[data-approve-row] button") ?? pageHeading());
     }
   }), [load, once, toast]);
 
-  const reject = useCallback((m: MemberRow, reason: string) => once(`reject:${m.user_id}`, async () => {
+  /**
+   * FA-11: reject, suspend and reactivate read a lost reply back as Approve does (F3-3). The
+   * member's status is asked: there already → the transition landed, said as such and the dialog
+   * closes; unreadable → "not known yet", never "failed"; not there, or refused → thrown, so the
+   * dialog stays open and says why.
+   */
+  const transition = useCallback(async (
+    m: MemberRow, target: MembershipStatus, did: string, verb: string,
+    work: () => Promise<{ member_email_queued?: boolean }>, said: { sent: string; unsent: string },
+  ) => {
     try {
-      const r = await endpoints.adminReject(m.membership_id, reason.trim());
-      toast.push(r.member_email_queued
-        ? { tone: "success", text: OUTCOMES.rejected }
-        : { tone: "warning", text: OUTCOMES.rejectedUnnotified(m.full_name) });
+      const r = await work();
+      toast.push(r.member_email_queued ? { tone: "success", text: said.sent } : { tone: "warning", text: said.unsent });
+    } catch (err) {
+      const truth = await transitionTruth(m.user_id, target, err);
+      if (truth === "done") toast.push({ tone: "warning", text: OUTCOMES.transitionAfterLostReply(m.full_name, did), durationMs: 8000 });
+      else if (truth === "unknown") toast.push({ tone: "warning", text: OUTCOMES.transitionUnknown(m.full_name, verb), durationMs: 8000 });
+      else throw err;
     } finally {
       void load();
     }
-  }), [load, once, toast]);
+  }, [load, toast]);
 
-  const suspend = useCallback((m: MemberRow, reason: string) => once(`suspend:${m.user_id}`, async () => {
-    try {
-      const r = await endpoints.adminSuspend(m.membership_id, reason.trim());
-      toast.push(r.member_email_queued
-        ? { tone: "success", text: OUTCOMES.suspended(m.full_name) }
-        : { tone: "warning", text: OUTCOMES.suspendedUnnotified(m.full_name) });
-    } finally {
-      void load();
-    }
-  }), [load, once, toast]);
+  const reject = useCallback((m: MemberRow, reason: string) => once(`reject:${m.user_id}`, () => transition(
+    m, "Rejected", "rejected", "rejected", () => endpoints.adminReject(m.membership_id, reason.trim()),
+    { sent: OUTCOMES.rejected, unsent: OUTCOMES.rejectedUnnotified(m.full_name) },
+  )), [once, transition]);
 
-  const reactivate = useCallback((m: MemberRow) => once(`reactivate:${m.user_id}`, async () => {
-    try {
-      const r = await endpoints.adminReactivate(m.membership_id);
-      toast.push(r.member_email_queued
-        ? { tone: "success", text: OUTCOMES.reactivated(m.full_name) }
-        : { tone: "warning", text: OUTCOMES.reactivatedUnnotified(m.full_name) });
-    } finally {
-      void load();
-    }
-  }), [load, once, toast]);
+  const suspend = useCallback((m: MemberRow, reason: string) => once(`suspend:${m.user_id}`, () => transition(
+    m, "Suspended", "suspended", "suspended", () => endpoints.adminSuspend(m.membership_id, reason.trim()),
+    { sent: OUTCOMES.suspended(m.full_name), unsent: OUTCOMES.suspendedUnnotified(m.full_name) },
+  )), [once, transition]);
+
+  const reactivate = useCallback((m: MemberRow) => once(`reactivate:${m.user_id}`, () => transition(
+    m, "Active", "active again", "reactivated", () => endpoints.adminReactivate(m.membership_id),
+    { sent: OUTCOMES.reactivated(m.full_name), unsent: OUTCOMES.reactivatedUnnotified(m.full_name) },
+  )), [once, transition]);
 
   const resetPassword = useCallback(async (m: MemberRow): Promise<ResetResult | undefined> => once(`reset:${m.user_id}`, async () => {
     const r = await endpoints.adminResetMemberPassword(m.membership_id);

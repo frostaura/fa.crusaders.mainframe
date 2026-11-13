@@ -184,7 +184,10 @@ describe("the members table's own controls", () => {
     renderPage(<AdminMembersPage />);
     for (const name of [ROW_ACTIONS.approve, ROW_ACTIONS.reject]) {
       const control = await screen.findByRole("button", { name });
-      expect(control.className, `${name} lost its extended hit area`).toContain("after:-inset-y-[5px]");
+      // Reject is a sm Button with the extended hit area; Approve is an armed ConfirmButton,
+      // which is a full 44px control (min-h-touch) of its own (BA-02).
+      const classes = control.className.split(" ");
+      expect(classes.includes("after:-inset-y-[5px]") || classes.includes("min-h-touch"), `${name} lost its 44px target`).toBe(true);
     }
     const more = screen.getByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") });
     expect(more.className).toContain("after:-inset-[5px]");

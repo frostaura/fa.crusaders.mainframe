@@ -1490,3 +1490,16 @@ export function memberCodeRoutes(options: {
     },
   ];
 }
+
+/**
+ * BA-02: Approve is armed — the first press shows the consequence, the second ("go") approves.
+ * `index` picks the row's Approve among several. Returns once the armed go has been pressed.
+ */
+export async function approveFromRow(index = 0): Promise<void> {
+  const { fireEvent, screen } = await import("@testing-library/react");
+  const idle = (await screen.findAllByRole("button", { name: "Approve" }))[index];
+  fireEvent.click(idle);
+  const go = document.querySelector<HTMLButtonElement>("[data-confirm='go']");
+  if (!go) throw new Error("Approve did not arm");
+  fireEvent.click(go);
+}

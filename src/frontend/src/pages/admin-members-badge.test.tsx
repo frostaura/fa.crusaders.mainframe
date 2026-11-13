@@ -9,7 +9,7 @@ import { AuthProvider } from "../lib/auth";
 import { BalanceProvider } from "../lib/balance";
 import { ProfileProvider } from "../lib/profile";
 import { ToastProvider } from "../components/Toast";
-import { memberFixture, signIn, signOut } from "../test/harness";
+import { approveFromRow, memberFixture, signIn, signOut } from "../test/harness";
 import { OUTCOMES } from "../lib/membersCopy";
 
 /**
@@ -158,8 +158,7 @@ describe("the pending-applications badge, after an approval on the same screen",
     await waitFor(() => expect(screen.getAllByLabelText("2 membership applications awaiting review").length).toBeGreaterThan(0));
     expect(summaryLine(2)).toBeInTheDocument();
 
-    const approveButtons = await screen.findAllByRole("button", { name: "Approve" });
-    await userEvent.click(approveButtons[0]);
+    await approveFromRow(0);
 
     // The screen's own summary line, and the chrome, now say the same thing.
     await waitFor(() => expect(summaryLine(1)).toBeInTheDocument());
@@ -190,7 +189,7 @@ describe("the pending-applications badge, after an approval on the same screen",
 
     await waitFor(() => expect(screen.getAllByLabelText("2 membership applications awaiting review").length).toBeGreaterThan(0));
 
-    await userEvent.click((await screen.findAllByRole("button", { name: "Approve" }))[0]);
+    await approveFromRow(0);
 
     // The approval committed and the reply was lost: the console asks, and says the truth
     // (review round 2, F3-3) — never "Approval failed." about a member who is Active...
@@ -211,7 +210,7 @@ describe("the pending-applications badge, after an approval on the same screen",
 
     await waitFor(() => expect(screen.getAllByLabelText("1 membership application awaiting review").length).toBeGreaterThan(0));
 
-    await userEvent.click((await screen.findAllByRole("button", { name: "Approve" }))[0]);
+    await approveFromRow(0);
 
     // Not "0" — the badge is a cue and renders nothing when there is nothing to cue.
     await waitFor(() => expect(screen.queryByLabelText(/awaiting review/)).not.toBeInTheDocument());
