@@ -15,8 +15,13 @@ RUN npm ci
 COPY src/frontend/ /workspace/src/frontend/
 RUN npm run build
 
-FROM nginx:alpine AS runtime
+# Pinned, like every base image here: a rebuild then changes only what this repository changed.
+FROM nginx:1.31.8-alpine AS runtime
 COPY --from=build /workspace/src/frontend/dist /usr/share/nginx/html
 COPY src/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
+# The commit this image was built from (CI passes it; a local build says "unknown").
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision=$BUILD_SHA
+ENV BUILD_SHA=$BUILD_SHA
 CMD ["nginx", "-g", "daemon off;"]

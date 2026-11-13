@@ -1,11 +1,15 @@
 # Go-live checklist
 
-The 2026-08-24 adversarial E2E review ([`reviews/adversarial-e2e-review.md`](reviews/adversarial-e2e-review.md))
-found the end-to-end path unbuilt; this checklist is valid only at the tip of the fix
-programme's branch/PR, and the code-complete claim returns only when a closing re-review
-passes. **Nothing here is code.** Each item
-needs physical access, a live credential, or a person's decision — and each one, left
-undone, breaks the club in a specific way that is written next to it.
+Everything between the code on `main` and a lit court at Crusaders. **Nothing here is code.**
+Each item needs physical access, a live credential, or a person's decision — and each one, left
+undone, breaks the club in a specific way that is written next to it. Finding ids in brackets
+(`IO-…`, `FC-…`) are the 2026-11-13 pre-go-live analysis; the older ones decode against
+[`reviews/adversarial-e2e-review.md`](reviews/adversarial-e2e-review.md).
+
+**The flash in §5 is the last one a cable delivers.** Device contract v3 (Mega 3.0.0, bridge 3.0.0,
+door gate 2.0.0 — `specs/device-api.md`) makes every later change — WiFi, the server's address,
+the device key, ESP firmware — a server-side action. So §2b and §2c are **preconditions of that
+flash**, not tidy-ups after it: anything they leave undone has no second chance at the wall.
 
 Ordered by what stops go-live first.
 
@@ -39,17 +43,37 @@ installation re-closing contacts by itself at three in the morning after a brown
 
 ---
 
-## 2. The publish chain is unproven, and the redeploy is manual
+## 2. The publish chain, and the manual redeploy
 
 CI builds multi-arch images and pushes them to Docker Hub. **It stops there** — the
 Portainer deploy job was removed by decision, so nothing in the pipeline touches the club
-stack. Only a real push to `main` builds anything; `workflow_dispatch` does not.
+stack. Only a real push to `main` builds anything; `workflow_dispatch` does not. Every such push
+publishes an immutable `sha-<commit>` release of all three images, and `:latest` follows it only
+when all six builds passed and only forward. The redeploy is
+[`runbooks/redeploy-and-rollback.md`](runbooks/redeploy-and-rollback.md), every time.
 
 - [x] `DOCKERHUB_USERNAME` — set 2026-09-05
 - [x] `DOCKERHUB_TOKEN` — set 2026-09-05
 - [x] One real push to `main` completed, with the six image jobs green and three `:latest`
       manifests visible on Docker Hub — run 35434498116, 2026-09-19 (commit `29284e14`).
-- [ ] A manual redeploy of the club stack performed once, end to end, and written down.
+- [ ] The first push to `main` after release tagging landed shows `sha-<commit>` for all three
+      images on Docker Hub, and `:latest` carrying the same `org.opencontainers.image.revision`.
+- [ ] **The club stack file replaced by the current `docker-compose.prod.yml`** (it adds the
+      `backup` and `volume-init` services, log rotation, pinned cloudflared, and
+      `${CRUSADERS_IMAGE_TAG}`), every `CHANGE-ME` carried across from the password manager —
+      including `MemberCodes__MasterKey`, which the API refuses to start without, and the tunnel
+      token. The backend now runs as a non-root user: without `volume-init` in the stack, a volume
+      the old root backend created refuses every photo upload.
+- [ ] Before that redeploy: `make migrations-pending REF=<commit> PSQL=…` run against the club's
+      database (IO-06). At least `AddSeatShortfall` is owed, and probably `AddDemoClubs`,
+      `AddDemoMemberView`, `AddEmailOutbox` and `FindableByDefault`, which turns every member's
+      *not findable* choice back on — count those members first.
+- [ ] A manual redeploy of the club stack performed once, end to end, by the runbook, pinned to
+      a `sha-` tag, and the commit recorded in the memory store's state topic.
+- [ ] **Production reachable**: `https://crusaders.frostaura.net/healthz` answers. On
+      2026-11-13 it answered Cloudflare error 1033 (no tunnel connector) all evening: check the
+      machine is up, the stack's `cloudflared` is running, and the tunnel's ingress in the
+      Cloudflare dashboard targets `http://gateway:80`, not the old host-side `localhost:8088`.
 
 Delete any `PORTAINER_URL`, `PORTAINER_TOKEN`, `PORTAINER_STACK_ID`, `PORTAINER_ENDPOINT_ID`
 or `OTA_PRIVATE_KEY` still set on the repository — nothing reads them, and a secret nothing
@@ -63,6 +87,13 @@ back in one rate-limit bucket — while reporting a successful deploy.
 **If skipped:** the club never gets a build, or gets one behind a stale gateway. **The
 chain stays unproven until one real push to `main` has completed and one manual redeploy
 has been done** — a green CI run on a branch says nothing about either.
+
+**GitHub settings only Dean can change** (no file in the repository can): the repository is
+**public** and has been since it was created; `main` is **not branch-protected**, and merges
+have landed on red CI. Decide the visibility (private changes the Actions budget: about 141
+runner-minutes per main push and ~130 per PR run), and require the gate jobs — `backend`,
+`frontend`, `e2e`, `backend-integration`, `iot`, `iot-build`, `e2e-device`, `security`,
+`infra` — as status checks on `main`.
 
 ---
 
@@ -96,6 +127,63 @@ names this section, and the suite goes red if the heading above is renamed and t
 **If skipped:** the API container stops at start-up on the refusal and the club has no
 booking system until the reset is done. Deleting money rows by hand to get past it instead
 erases balances members believe they hold.
+
+---
+
+## 2b. Backups, and the secrets that exist nowhere else
+
+The production stack's `backup` service dumps the database and the photos daily to a directory
+**on the host** ([`runbooks/backup-and-restore.md`](runbooks/backup-and-restore.md)). Money is
+ledger-only and the device key every board carries lives in the same database, so a lost SD
+card without this is every balance gone and every board locked out.
+
+- [ ] The backup container reports **healthy** and a `crusaders-daily-*.dump` from the last
+      24 hours sits in `/var/backups/crusaders-mainframe` (or `CRUSADERS_BACKUP_DIR`).
+- [ ] **An encrypted copy leaves the machine every day** — the host cron in the runbook, to a
+      second machine or a bucket — and one copy has been decrypted elsewhere and read with
+      `pg_restore --list`.
+- [ ] **The restore drill run once** with a real dump on a spare machine (runbook, *Restore
+      drill*), and the time it took recorded. (The mechanical drill ran 2026-11-13 on a laptop
+      against a throwaway stack: 18 s from empty to a healthy restored backend.)
+- [ ] In the password manager, **off the club's machine**: the database password, `Jwt__Secret`,
+      `MemberCodes__MasterKey`, the cloudflared tunnel token, the bootstrap admin password, the
+      **device API key**, the backup encryption passphrase, the firmware **signing key pair**
+      (§2c) and `SETUP_AP_PASSWORD`. Today the first four exist only in the Portainer stack file
+      on the same host as the database.
+
+**If skipped:** one dead SD card ends the club's money records, and a rebuilt database mints a
+device key no board holds.
+
+---
+
+## 2c. Before the last cable flash
+
+Everything a board compiles in is only its **first-boot** default after v3, so none of this forces
+a reflash any more — but a box that cannot reach its server on its first boot has nothing to be
+told by. Settle these before §5.
+
+- [ ] **The server has a DHCP reservation** on the club router (or a hostname the router
+      resolves), and that address is the `API_BASE_URL` compiled into every board. A server that
+      comes back from a power cut on another address is a fleet that cannot find it (IO-02).
+- [ ] **The club WiFi is settled and its password rotated first** (§6), so the compiled SSID and
+      password are the real ones. Later changes go through the club's device network setting.
+- [ ] **The device API key** read off the Devices page and stored in the password manager before
+      it is compiled into any board. Never press anything that replaces it without the v3
+      rotation (§6).
+- [ ] **The OTA signing key pair** generated with `src/iot/tools/ota_sign.py` on the founder's
+      machine; the private key stays there and in the password manager, never in the repository
+      or a CI secret. Its public modulus goes into every board's `secrets.h` as
+      `OTA_PUBLIC_KEY_N` and into the stack as `DeviceOta__PublicKeyModulus` — the two must
+      match, or no ESP will ever accept an update.
+- [ ] **`SETUP_AP_PASSWORD`** chosen, compiled in, and printed on a label inside each enclosure.
+- [ ] **`MemberCodes__MasterKey` set once, before members enrol** (MCV1-09): a key changed later
+      rotates every member's code. Then, from the Devices page, every board's running version and
+      capabilities recorded, the court boxes acknowledged, and `member_code_manual_hold` set until
+      the flashed boards are verified — so the automatic cut-over cannot fire on a half-flashed
+      fleet.
+
+**If skipped:** boards that join nothing, or a fleet that cannot be updated because the key it
+trusts was never kept.
 
 ---
 
@@ -135,68 +223,74 @@ indifferent to which end the debit is taken from.
 
 ---
 
-## 5. Flash both halves and see the box come up
+## 5. Flash both halves and see the box come up — Mega 3.0.0 first, then bridge 3.0.0
 
-Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pad access,
-and no network path — the whole procedure is the **Arduino IDE 2**: open the sketch, pick
-the board and the port, press Upload. `src/iot/court-box/arduino/README.md` is the page, and it needs
-no terminal, no `make` and nothing from the Library Manager. The `make flash-*` targets do
-the same two uploads from PlatformIO and are the developer alternative.
+Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pad access —
+the whole procedure is the **Arduino IDE 2**: open the sketch, pick the board and the port,
+press Upload. `src/iot/court-box/arduino/README.md` is the page, and it needs no terminal, no
+`make` and nothing from the Library Manager. The `make flash-*` targets do the same two
+uploads from PlatformIO and are the developer alternative. **This is the last cable flash**:
+both halves are flashed this once (the Mega cannot be updated over WiFi; the bridge can, by
+signed OTA, from here on). Door gates get 2.0.0 the same way (§12).
 
-**Everything the box needs is compiled in — four values, all mandatory.** `secrets.h` is
-gitignored and lives on the flashing machine only; `court_bridge` `#error`s on a missing
-value and `static_assert`s on an empty one, so there is no way to produce an image with a
-blank in it — and therefore no way to hand a box to the wall believing a credential landed
-when it did not. There is nothing to claim, nothing to discover and nothing to provision: a
-flashed box joins, heartbeats, and appears on the admin Devices screen by itself.
+**`secrets.h` holds the first-boot values.** It is gitignored and lives on the flashing
+machine only; the build `#error`s on a missing value and refuses a placeholder or the test
+signing key, so there is no way to produce an image with a blank in it. There is nothing to
+claim, nothing to discover and nothing to provision: a flashed box joins, heartbeats, and
+appears on the admin Devices screen by itself.
 
 - [ ] Arduino IDE 2 installed, with `https://arduino.esp8266.com/stable/package_esp8266com_index.json`
       added under *Preferences → Additional boards manager URLs*, and both cores installed
       from Boards Manager: **Arduino AVR Boards 1.8.6** and **esp8266 3.1.2**. Those are the
       versions CI compiles the sketches against and the ones `src/iot/court-box/platformio.ini` pins.
 - [ ] `cp src/iot/court-box/arduino/court_bridge/secrets.h.example src/iot/court-box/arduino/court_bridge/secrets.h`
-      on the flashing machine and fill in all four, then do not commit it:
-      `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL` (the backend's **LAN** address and port,
-      no trailing slash — the box and the backend are on the same club network), and
-      `DEVICE_API_KEY` (copy it from the admin Devices page).
-- [ ] Open `src/iot/court-box/arduino/court_mega/court_mega.ino`, board **Arduino Mega or Mega 2560**,
-      processor **ATmega2560**, pick the port, **Upload** — with DIP
-      **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
-- [ ] Open `src/iot/court-box/arduino/court_bridge/court_bridge.ino`, board **Generic ESP8266 Module**,
-      flash size **4MB (FS:2MB OTA:~1019KB)**, CPU **80 MHz**, upload speed **115200**, pick
-      the port, **Upload** — with DIP **1–4 OFF, 5 ON, 6 ON, 7 ON**, 8 OFF. Then move DIP 7
-      OFF and open the **Serial Monitor at 9600** — **watch the monitor, not the glass**: in
-      that DIP position the ESP's UART is on the USB socket and the Mega is not on the other
-      end of it, so the LCD cannot change.
-- [ ] Restore the run positions (**1, 2, 3, 4 ON**, 5–8 OFF) and confirm the LCD now shows
-      `CONNECTED / SCAN TO START`. That repaint is the proof the ESP and the Mega are
-      talking again, and it is the only positive confirmation the box gives. If it reads
-      `CRUSADERS COURTS / SCAN TO START` instead, the two halves are talking and the box is
-      **not** on the WiFi — check the SSID and password in `secrets.h`.
+      on the flashing machine and fill in every value (§2c), then do not commit it:
+      `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL` (the server's **reserved LAN** address and
+      port, `http://`, no trailing slash), `DEVICE_API_KEY` (from the Devices page),
+      `OTA_PUBLIC_KEY_N` and `SETUP_AP_PASSWORD`.
+- [ ] **Mega first.** Open `src/iot/court-box/arduino/court_mega/court_mega.ino`, board
+      **Arduino Mega or Mega 2560**, processor **ATmega2560**, pick the port, **Upload** — with
+      DIP **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
+- [ ] **Then the bridge.** Open `src/iot/court-box/arduino/court_bridge/court_bridge.ino`, board
+      **Generic ESP8266 Module**, flash size **4MB (FS:2MB OTA:~1019KB)** — the layout OTA
+      stages into, so a different one breaks every later update — CPU **80 MHz**, upload speed
+      **115200**, **Erase Flash: Only Sketch**, pick the port, **Upload** — with DIP **1–4 OFF,
+      5 ON, 6 ON, 7 ON**, 8 OFF. In the upload log, read esptool's **`Auto-detected Flash size`**
+      line: it must say 4MB (HW-10). Then move DIP 7 OFF and open the **Serial Monitor at 9600**
+      — watch the monitor, not the glass: in that DIP position the ESP's UART is on the USB
+      socket and the Mega is not on the other end of it.
+- [ ] Restore the run positions (**1, 2, 3, 4 ON**, 5–8 OFF) and confirm the LCD shows the 3.0.0
+      landing: **`SCAN YOUR QR`** (compact, the default) on row 0 and the courts and status
+      below it (`READY 18:05` once the clock is trusted). `OUT OF SERVICE` / `SEE THE DESK`
+      means the Mega is not hearing the bridge. **A glass reading `CRUSADERS COURTS / SCAN YOUR
+      CODE` (Mega 2.0.0) or `SCAN YOUR CODE / TO PLAY` (2.1.0) means the Mega upload did NOT
+      land** — and 2.0.0 next to the solid-state relays lights the courts it means to switch off.
 - [ ] Confirm the box appears on the admin Devices page within one heartbeat (30 s by
-      default) with four court numbers against it. That is the whole of registration.
+      default) with four court numbers against it, **bridge 3.0.0 and Mega 3.0.0** both shown
+      (v3 reports the Mega's version), and acknowledge it.
 
-**If skipped:** the box has no firmware. Nothing here needs a second visit: everything is
-in the image, so a box that flashed and painted `CONNECTED` is a box that will join the
-network and register itself.
+**If skipped:** the box has no firmware, or a Mega whose relay polarity is the opposite of the
+relays fitted.
 
 ---
 
-## 6. Rotate the club WiFi password
+## 6. Rotate the club WiFi password — before the flash
 
 The password is in Carl's original sketch, in plain text, in a file that has been on more
 than one machine.
 
-- [ ] Rotate it on the access point.
-- [ ] Edit `secrets.h` on the flashing machine and upload `court_bridge` again from the
-      Arduino IDE (item 5; `make flash-bridge` does the same thing). That is
-      the whole delivery mechanism: every credential is compiled into the image, so there is
-      no store to go stale, no precedence rule between two credentials, and nothing to
-      power-cycle to prove. The same is true of the device API key — pressing
-      "Regenerate" on the admin Devices page invalidates the old one immediately, so a
-      regeneration is a reflash and must be planned as one.
-- [ ] Confirm the box rejoins — the LCD returns to `CONNECTED / SCAN TO START` once the run
-      DIPs are restored, and the box shows as heartbeating on the admin Devices screen.
+- [ ] Rotate it on the access point **before §5**, so the boards are flashed with the new one.
+- [ ] Afterwards, every WiFi or server-address change is made **without a cable**: add the new
+      network as the second profile in the club's device network setting (Devices), wait until
+      every board reports the new `net_ver`, then switch the router — the boards fall back to
+      the previous profile, then to the compiled one, if the new one fails
+      (`specs/device-api.md` §8). A board nothing can reach is re-pointed through its setup
+      portal (court box: hold courts A and D together for 5 s within 60 s of power-on).
+- [ ] **The device key is rotated, never regenerated**: Devices → rotate starts an overlap in
+      which both keys work and the new one is delivered in every heartbeat; the old one retires
+      when every acknowledged board is on the new one and `device_key_grace_hours` has passed
+      (§6 of the same spec). *Regenerate*, which killed the old key on the next request and
+      stranded every board, is gone.
 
 **If skipped:** the club's WiFi credential is known to everyone who has seen that file.
 
@@ -252,9 +346,19 @@ exercises it.
 
 ---
 
-## 8. Event-queue durability, accepted knowingly
+## 8. Event-queue durability
 
-Queued events live in RAM. They survive the WiFi going away, a router reboot and a two-day
+**Bridge 3.0.0 persists its snapshot, roster and every undelivered event to flash** (LittleFS,
+`specs/device-api.md` §4), so a power cut with the network down no longer loses attendance and a
+paid court is restored for at most `device_power_restore_trust_minutes`. Verify it once, on the
+bench, as §10 asks; the text below describes the 2.x bridges and is kept because a box left on
+one still behaves this way.
+
+- [ ] On the bench: light a court offline, cut the power, restore it with the server still
+      down — the court comes back lit (inside the trust window) and the activation uploads once
+      the server returns.
+
+With 2.x firmware: queued events live in RAM. They survive the WiFi going away, a router reboot and a two-day
 outage — the API now believes a scan up to 30 days old (`DeviceEventEndpoints.MaxEventAge`)
 and keeps booking codes resolvable that long, so a long outage's attendance still lands and
 reverses the sweep; they do not survive a power cut. `hal::IStore` is a key/value port for
@@ -262,9 +366,7 @@ short identifiers (128-byte values) with no ring semantics — an `Event` is 48 
 would fit in one record, so this is unbuilt work rather than a hard limit, and the half-right
 version of it (a torn ring that replays a stale activation) charges a member twice.
 
-- [ ] Somebody accepts this, or schedules the work.
-
-**If accepted:** a court lit during an offline window that ended in a power cut is never
+**On a 2.x box:** a court lit during an offline window that ended in a power cut is never
 reported, so the sweep concludes nobody played.
 
 **What that costs changed direction when §6a shipped, and the change is the reason to read this
@@ -342,14 +444,12 @@ a multimeter on the actual box:
       measured during WiFi transmit bursts (item 7).
 - [ ] The physical 8-way DIP verified against the wiring sheet for all four modes — Mega
       upload, ESP upload, ESP USB monitor, run.
-- [ ] All firmware screens confirmed legible on the physical 20×4 glass — which the
-      firmware now drives as 20×4 rather than as 16×2. No wrapped or orphaned half-lines,
-      and rows 2 and 3 landing where they should. See §10a, which gates this.
-- [ ] A real minted **12-character access code** QR fed to the physical scanner and its TX
-      output captured: the terminator, and that the whole code arrives intact. (This bullet
-      used to describe a ~200-character JWT payload and ask where it truncates; the system
-      has not minted those since the resolver was narrowed to booking- and member-scoped
-      codes, so the length question it was written for no longer exists.)
+- [ ] All firmware screens confirmed legible on the physical glass in the layout the club
+      chose (§10a): compact (16×2, the default) and, if the panel is a 20×4, expanded. No
+      wrapped or orphaned half-lines; the marquee scrolls smoothly on one row with no flicker.
+- [ ] A real **19-character member code** QR fed to the physical scanner and its TX output
+      captured: the terminator, and that the whole code arrives intact (a scanner that
+      truncates past 12 characters used to pass this check, because it asked for 12).
 - [ ] Scanner confirmed factory-set to 9600 baud on both fixed links. **Every UART in the
       box is 9600 8N1** — the Mega↔ESP link, the scanner, and the ESP's USB monitor (DIP 5
       and 6 ON, which is what `make monitor-bridge` opens). The only 115200 in
@@ -360,8 +460,11 @@ a multimeter on the actual box:
 - [ ] Item 7's check **(b)** done with the ESP plugged in as well as unplugged: the
       `court_mega_bench` build stalled with a court lit, box back within 2 s with relays
       open — and the production `-e court_mega` image reflashed afterwards.
-- [ ] Relay board JD-VCC jumper confirmed (which 5V feeds coil vs logic), and active-LOW
-      behaviour re-confirmed end to end on all four channels.
+- [ ] The relays are the normally-open **solid-state** relays the Mega ≥ 2.1.0 drives
+      **active-HIGH** (`RELAY_ACTIVE_LOW=0`: energised means lit) — confirmed end to end on all
+      four channels with Mega 3.0.0: a court shown OFF is dark. (The old electromechanical
+      board was active-LOW; following a page that still says so lights courts that should be
+      dark.)
 - [ ] Physical A/B/C/D and 15/30/45/60 buttons confirmed on pins 22/24/26/28 and
       30/32/34/36 in that order — a swapped pair sells the wrong duration or court.
 
@@ -386,13 +489,15 @@ every screen, enforced by a table-driven test over all of them. A 1602 fitted by
 therefore degrades to exactly the old behaviour instead of to half a sentence.
 
 - [ ] Somebody has read the part number off the panel, or counted the character cells, and
-      confirmed it is 20×4.
-- [ ] If it is a 1602: `-DLCD_COLS`/`-DLCD_ROWS` in `court-box/platformio.ini`'s `[lcd]`
-      block go back to 16/2 before flashing, and the box is confirmed to show the same two
-      rows it always did.
+      recorded it in the memory store.
+- [ ] **No flag changes for either answer.** Since v3 the layout is a setting, not a build:
+      `lcd_layout` (club default, per-board override, `compact` 16×2 unless set) arrives in the
+      heartbeat, the box falls back to compact on any doubt, and the console's *Back to compact*
+      reverts a board remotely. A 2004A may be switched to `expanded` after one look at the
+      glass; a 1602 stays compact. The Mega also probes the I²C backpack at 0x27 and 0x3F.
 
-**If skipped:** four rows of text written to a panel that has two. Half of every screen
-lands nowhere and the member reads the remaining half as the whole message.
+**If skipped:** `expanded` chosen for a 1602 writes rows that land nowhere — one press of
+*Back to compact* undoes it, which is why the default is compact.
 
 **Bench the four-row atomic repaint against a wedged I²C bus.**
 
@@ -562,6 +667,12 @@ certified as one, and no combination of the build flags turns it into one.
       exist and neither is read by the other route: `src/iot/door-gate/src/common/secrets.h`
       is the developer's, for `pio run`. Copy `secrets.h.example` from whichever folder is
       being built and fill in all four values. Both are gitignored.
+- [ ] **Gate 2.0.0** (v3): besides the four values below, `secrets.h` carries `OTA_PUBLIC_KEY_N`
+      and `SETUP_AP_PASSWORD` (§2c), and all of them are first-boot defaults — WiFi, the
+      server's address and the key change later over the heartbeat, and the setup portal is the
+      BOOT button held 5 s within 60 s of power-on (never *during* power-on). The roster now
+      survives a reset, so the "nobody gets in until the server answers" window is gone; check
+      it with the server down after a power cycle.
 - [ ] **All four values actually replaced.** Every value in the `.example` is a placeholder
       and **every placeholder is a compile error** — `WIFI_SSID`, `WIFI_PASSWORD` and
       `DEVICE_API_KEY` against their own literal, and `API_BASE_URL` against the reserved

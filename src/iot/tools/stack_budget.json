@@ -1,0 +1,18 @@
+{
+  "about": "Stack budgets read by src/iot/tools/stack_budget.py (ESPR-4). A ratchet: each number is what the code used when it was set, lowered as the code shrinks and raised only in the commit that needs it, with the reason. `goal` is where the 2026-11-13 analysis says the bridge should be on its 4 KB cont stack (an interrupt adds >= 256 B at peak); the gate runs loop() on an 8 KB task stack. The path budget carries 48 B over the measured 3088 B for toolchain variance between hosts; frames carry none. The ESP32's GCC 8 cannot write a call graph, so the gate has no path budget.",
+  "targets": {
+    "court_bridge": {
+      "loop_frame": 928,
+      "max_frame": 928,
+      "worst_path": 3136,
+      "measured": {"at": "a77a1d72 (bridge 2.3.0)", "loop_frame": 928, "max_frame": 928, "worst_path": 3088},
+      "goal": {"loop_frame": 256, "max_frame": 512, "worst_path": 3000}
+    },
+    "door_gate": {
+      "loop_frame": 32,
+      "max_frame": 816,
+      "measured": {"at": "a77a1d72 (gate 1.1.2)", "loop_frame": 32, "max_frame": 816},
+      "goal": {"loop_frame": 256, "max_frame": 512}
+    }
+  }
+}

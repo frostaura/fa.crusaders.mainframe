@@ -40,13 +40,26 @@ services:
 
   mailhog:
     logging: *capped-log
-    image: jcalonso/mailhog:latest
+    image: jcalonso/mailhog:v1.0.1
     ports:
       - "${MAILHOG_SMTP_PORT:-11025}:1025"
       - "${MAILHOG_UI_PORT:-8025}:8025"
     expose:
       - "1025"
       - "8025"
+
+  # The backend image runs as uid 1654 (`app`), not root. Volumes a root backend created are
+  # root-owned, so this hands them over first — only what is not already owned — and exits.
+  # docker-compose.prod.yml carries the same service for the same reason.
+  volume-init:
+    logging: *capped-log
+    image: postgres:16-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["find /app/media /app/biometric ! -user 1654 -exec chown 1654:1654 {} +"]
+    volumes:
+      - media_data:/app/media
+      - biometric_data:/app/biometric
 
   backend:
     logging: *capped-log
@@ -134,9 +147,12 @@ services:
       - media_data:/app/media
       - biometric_data:/app/biometric
     # Biometric peripheral passthrough — enabled when a real driver is selected.
-    # Example for a USB fingerprint reader:
+    # Example for a USB fingerprint reader. The API runs as uid 1654, not root, so the device
+    # node's group must be added too (`ls -ln /dev/bus/usb/001/004` shows its gid):
     # devices:
     #   - "/dev/bus/usb/001/004:/dev/bus/usb/001/004"
+    # group_add:
+    #   - "<gid of that device node>"
     healthcheck:
       # Readiness (IO-16): healthy means the API reached its database, not merely that it answers.
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/readyz >/dev/null || exit 1"]
@@ -147,6 +163,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
       mailhog:
         condition: service_started
 

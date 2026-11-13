@@ -254,7 +254,7 @@ public sealed class PlatformPassUnitTests
         {
             var start = services.IndexOf($"\n  {name}:", StringComparison.Ordinal);
             var next = names.IndexOf(name) + 1 < names.Count ? services.IndexOf($"\n  {names[names.IndexOf(name) + 1]}:", StringComparison.Ordinal) : services.Length;
-            Assert.True(services[start..next].Contains("logging: *capped-log", StringComparison.Ordinal), $"service {name} has no capped log");
+            Assert.True(services[start..next].Contains("logging: *default-logging", StringComparison.Ordinal), $"service {name} has no capped log");
         }
 
         Assert.Contains("max-size: \"10m\"", compose, StringComparison.Ordinal);
