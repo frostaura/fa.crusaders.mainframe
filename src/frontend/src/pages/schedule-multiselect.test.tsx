@@ -92,13 +92,28 @@ describe("entering and leaving — R4", () => {
 
   it("puts a checkbox only on cells that can be chosen — a member cannot take somebody's booking", async () => {
     openBookings({ day: DAY });
-    await select([]);
+    await select([/^Book Court 1 at 16:00/]);
     const theirs = cellAt("Court 2 at 17:00 — booked by Thandi");
     expect(theirs.querySelector("[data-cell-check]")).toBeNull();
     expect(theirs).not.toHaveAttribute("aria-selected");
-    // …and it steps back, so the choosable ones stand out.
+    // …and mid-pick it steps back, so the choosable ones stand out — and opens no player card.
     expect(theirs.firstElementChild?.firstElementChild?.className).toContain("border-dashed");
+    expect(within(theirs).queryByRole("button")).toBeNull();
     expect(cellAt("Court 1 at 16:00").querySelector("[data-cell-check]")).toBeTruthy();
+  });
+
+  it("opens the player card on somebody's booking while nothing is chosen, though the mode is on", async () => {
+    openBookings({ day: DAY });
+    await screen.findByRole("grid");
+    const theirs = cellAt("Court 2 at 17:00");
+    expect(theirs.querySelector("[data-cell-check]")).toBeNull();
+    await act(async () => {
+      fireEvent.click(within(theirs).getByRole("button", { name: "Court 2 at 17:00 — booked by Thandi. Show who is playing" }));
+    });
+    const card = await screen.findByRole("dialog");
+    expect(within(card).getByRole("heading", { name: "Thandi" })).toBeInTheDocument();
+    // The press picked nothing (the modal hides the grid from the role tree, so ask the DOM).
+    expect(document.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(0);
   });
 
   it("clears the selection when the day changes, and says why", async () => {
