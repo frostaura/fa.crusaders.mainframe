@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-players-pay-what-you-can
 description: "Pay what you can (2026-10-12): a short partner accepts paying part of their share; the booking becomes an amount split, the organiser covers the rest with no new ledger row, is mailed players.shortfall, and any re-split clears ShortfallMinutes."
 type: decision
-last_verified: 2026-10-12
+last_verified: 2026-11-13
 ---
 
 # Live decisions — players: pay what you can
@@ -32,3 +32,5 @@ how to split what's left." Pinned in `PayWhatYouCanHttpTests` (backend) and
   Save only at exactly the shortfall. A partner asked for more is asked again (the raise rule).
 - **MEMORY.md index not regenerated** in the session that added this file — the tree-root
   `audit-tree.py` was not present in that checkout; run it from the tree root.
+
+- **The player card under default multi-select (2026-11-13).** Main made selection mode the default, so the card's guard is "nothing chosen yet" (`selection.count === 0`), not "mode off" — otherwise no member could ever open it. Pinned in `schedule-multiselect.test.tsx`.
