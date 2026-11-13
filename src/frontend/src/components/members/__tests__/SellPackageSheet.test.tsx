@@ -5,6 +5,9 @@ import { ledgerRowFixture, refuse, renderPage, stubFetch, type StubRoute } from 
 import { PACKAGE_IDS, discountedShelf, seededShelf } from "../../../test/minutesFixtures";
 import { LIVE_SAID, LOST_REPLY, PAYMENT_CHOICES, SELL_COPY as COPY } from "../../../lib/deskMinutesCopy";
 
+/** BA-20: the note's label says "(required)" up front, so it is found by its first word. */
+const SALE_NOTE = new RegExp(`^${COPY.detailLabel}\\b`);
+
 /**
  * The desk's "Sell package" (P13 §3.7): the member's OWN shelf (their discount, their groups'
  * packages), how it was paid, the money received defaulting to their price, a confirm that states
@@ -37,7 +40,10 @@ async function pay(how: string, note: string, zar?: string) {
   fireEvent.pointerDown(await screen.findByRole("combobox", { name: COPY.paymentLabel }), POINTER);
   fireEvent.click(await screen.findByRole("option", { name: how }));
   if (zar !== undefined) fireEvent.change(screen.getByLabelText(COPY.zarLabel), { target: { value: zar } });
-  fireEvent.change(screen.getByLabelText(COPY.detailLabel), { target: { value: note } });
+  // BA-20: required, and said so before a failed Next — in the label and to assistive tech.
+  expect(screen.getByLabelText(SALE_NOTE)).toHaveAttribute("aria-required", "true");
+  expect(screen.getByText("(required)")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText(SALE_NOTE), { target: { value: note } });
   fireEvent.click(screen.getByRole("button", { name: COPY.next }));
 }
 

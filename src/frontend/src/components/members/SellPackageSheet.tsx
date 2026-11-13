@@ -472,8 +472,9 @@ function FreeStep({ flow }: { flow: Flow }) {
 function NoteField({ flow }: { flow: Flow }) {
   return (
     <Field>
-      <FieldLabel>{COPY.detailLabel}</FieldLabel>
-      <Input autoComplete="off" value={flow.detail} placeholder={COPY.detailPlaceholder} onChange={(e) => flow.setDetail(e.target.value)} />
+      {/* BA-20: the note is required, and the label says so before a failed Next does. */}
+      <FieldLabel>{COPY.detailLabel} <span className="font-normal text-text-muted">(required)</span></FieldLabel>
+      <Input autoComplete="off" aria-required="true" value={flow.detail} placeholder={COPY.detailPlaceholder} onChange={(e) => flow.setDetail(e.target.value)} />
       <FieldDescription>{COPY.detailHint}</FieldDescription>
       <FieldError>{flow.complaints.detail}</FieldError>
     </Field>
