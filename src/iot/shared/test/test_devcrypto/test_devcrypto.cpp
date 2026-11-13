@@ -1,4 +1,5 @@
-// Unity tests for lib/devcrypto — which, as of firmware 2.0.0, is hex.
+// Unity tests for lib/devcrypto — hex, and since device contract v3 the RSA-2048
+// verify under signed OTA (its corpus vectors run in test_devota).
 //
 // WHAT THIS SUITE USED TO BE
 // --------------------------
@@ -25,6 +26,7 @@
 #include <unity.h>
 
 #include "devcrypto/Hex.h"
+#include "devcrypto/Rsa.h"
 
 void test_hex_encodes_lowercase_and_round_trips(void) {
   const uint8_t bytes[] = {0x00U, 0x0FU, 0xA5U, 0xFFU, 0xDEU, 0xADU};
@@ -88,6 +90,48 @@ void test_hex_decode_refuses_a_buffer_that_would_not_hold_the_result(void) {
   TEST_ASSERT_EQUAL_size_t(4U, len);
 }
 
+// --- RSA-2048 (device contract v3, signed OTA) ---------------------------
+//
+// The corpus vectors are executed by test_devota; these are the properties
+// that need no vector at all.
+
+void test_rsa_refuses_what_is_not_an_rsa_2048_modulus() {
+  uint8_t n[dc::kRsa2048Bytes];
+  memset(n, 0xFF, sizeof(n));
+  uint8_t x[dc::kRsa2048Bytes] = {};
+  x[dc::kRsa2048Bytes - 1U] = 2U;
+  uint8_t out[dc::kRsa2048Bytes];
+  // An odd full-width modulus works...
+  TEST_ASSERT_TRUE(dc::rsa2048PublicOp(n, x, out));
+  // ...an even one (Montgomery cannot use it, and no RSA modulus is even) and
+  // one with a zero top byte (not 2048 bits) are refused.
+  n[dc::kRsa2048Bytes - 1U] = 0xFEU;
+  TEST_ASSERT_FALSE(dc::rsa2048PublicOp(n, x, out));
+  n[dc::kRsa2048Bytes - 1U] = 0xFFU;
+  n[0] = 0x00U;
+  TEST_ASSERT_FALSE(dc::rsa2048PublicOp(n, x, out));
+}
+
+void test_rsa_public_op_matches_a_small_known_answer() {
+  // 2^65537 mod (2^2048 - 1): since 2^2048 = 1 (mod n), 2^65537 = 2^(65537 mod
+  // 2048) = 2^1 = 2. Arithmetic none of this code wrote.
+  uint8_t n[dc::kRsa2048Bytes];
+  memset(n, 0xFF, sizeof(n));
+  uint8_t x[dc::kRsa2048Bytes] = {};
+  x[dc::kRsa2048Bytes - 1U] = 2U;
+  uint8_t out[dc::kRsa2048Bytes];
+  TEST_ASSERT_TRUE(dc::rsa2048PublicOp(n, x, out));
+  uint8_t want[dc::kRsa2048Bytes] = {};
+  want[dc::kRsa2048Bytes - 1U] = 2U;
+  TEST_ASSERT_EQUAL_MEMORY(want, out, sizeof(want));
+  // 3^65537 mod (2^2048 - 1) = 3^(65537) — not reducible by the same trick,
+  // but x = n - 1 = -1 gives (-1)^odd = -1 = n - 1.
+  memcpy(x, n, sizeof(x));
+  x[dc::kRsa2048Bytes - 1U] = 0xFEU;
+  TEST_ASSERT_TRUE(dc::rsa2048PublicOp(n, x, out));
+  TEST_ASSERT_EQUAL_MEMORY(x, out, sizeof(x));
+}
+
 void setUp(void) {
 }
 
@@ -96,6 +140,8 @@ void tearDown(void) {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_rsa_refuses_what_is_not_an_rsa_2048_modulus);
+  RUN_TEST(test_rsa_public_op_matches_a_small_known_answer);
   RUN_TEST(test_hex_encodes_lowercase_and_round_trips);
   RUN_TEST(test_hex_encodes_a_mac_at_exactly_the_length_the_contract_names);
   RUN_TEST(test_hex_an_empty_input_is_an_empty_string_not_a_failure);

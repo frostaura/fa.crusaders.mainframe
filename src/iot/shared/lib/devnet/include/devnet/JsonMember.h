@@ -1,0 +1,68 @@
+// Crusaders Mainframe — reading ONE member of ONE small JSON object, with its
+// type and its escapes, for the three v3 objects a heartbeat can carry: `ota`,
+// `net` and `key_next` (docs/specs/device-api.md §6–§8).
+//
+// WHY NOT devapi::json ALONE
+// --------------------------
+// `devapi::json` is a scanner: it copies escape pairs verbatim and says so, and
+// for the fields it was built for — a roster token, a reason code — nothing
+// legitimate is ever escaped. A WiFi password is different. The server
+// serialises with System.Text.Json, whose default encoder writes `+`, `&`, `<`,
+// `'` and every non-ASCII character as `\uXXXX`; a password `squash+court`
+// arrives as `squash+court`, and a board that stored the escape would join
+// nothing, for ever, on the word of the one configuration change that cannot be
+// undone without a visit. So these objects are read with the escapes DECODED
+// (to UTF-8) and with the value's JSON type reported, because the contract's
+// refusal reasons distinguish "absent" from "present but the wrong type"
+// (`missing_size` against `size`, `base_empty` for a `"base": null`).
+//
+// Built ON `devapi::json::findTopLevelKey`, so "member of the outermost object"
+// means exactly what it means everywhere else in this tree: a key inside a
+// nested object or array is never a match.
+//
+// No Arduino headers, no heap. C++11-valid. Compiles for AVR, Xtensa, the host.
+
+#ifndef CRUSADERS_DEVNET_JSONMEMBER_H
+#define CRUSADERS_DEVNET_JSONMEMBER_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+namespace devnet {
+namespace json {
+
+/// What a member's value turned out to be.
+enum class Member : uint8_t {
+  /// The key is not a member of the outermost object.
+  Missing = 0U,
+  /// Present and read into the caller's buffer.
+  Ok = 1U,
+  /// Present, but of another JSON type (a number where a string was wanted, a
+  /// string where a number was, `null`, `true`).
+  WrongType = 2U,
+  /// Present and of the right type, but it does not fit (a string longer than
+  /// the buffer, an integer above 2^32 - 1, a malformed escape).
+  Unreadable = 3U,
+};
+
+/// The string member `key`, decoded (all JSON escapes, `\uXXXX` and surrogate
+/// pairs to UTF-8) into `out`, NUL-terminated, with its byte length in `outLen`.
+/// A decoded NUL is Unreadable: nothing on this path may contain one.
+Member stringMember(const char* object, size_t len, const char* key, char* out, size_t outCap, size_t& outLen);
+
+/// The unsigned integer member `key`: a bare JSON integer, no sign, no
+/// fraction, no exponent, at most 2^32 - 1.
+Member unsignedMember(const char* object, size_t len, const char* key, uint32_t& out);
+
+/// True when the member `key` is present and its value is the literal `null`.
+bool isNullMember(const char* object, size_t len, const char* key);
+
+/// Locates the object under top-level `key` in `body`, braces INCLUDED, so the
+/// readers above can be pointed straight at it. False when absent or not an
+/// object.
+bool topLevelObjectText(const char* body, size_t len, const char* key, const char*& object, size_t& objectLen);
+
+} // namespace json
+} // namespace devnet
+
+#endif // CRUSADERS_DEVNET_JSONMEMBER_H

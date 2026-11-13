@@ -1,0 +1,202 @@
+#include "devcrypto/Rsa.h"
+
+#include <string.h>
+
+namespace dc {
+namespace {
+
+/// 2048 bits in 32-bit limbs, least significant limb first.
+constexpr size_t kLimbs = kRsa2048Bytes / 4U;
+
+struct Big {
+  uint32_t limb[kLimbs];
+};
+
+/// Big-endian bytes to little-endian limbs.
+void load(Big& out, const uint8_t* bytes) {
+  for (size_t i = 0U; i < kLimbs; ++i) {
+    const uint8_t* p = bytes + kRsa2048Bytes - 4U - (4U * i);
+    out.limb[i] = (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+                  (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
+  }
+}
+
+void store(const Big& in, uint8_t* bytes) {
+  for (size_t i = 0U; i < kLimbs; ++i) {
+    uint8_t* p = bytes + kRsa2048Bytes - 4U - (4U * i);
+    const uint32_t v = in.limb[i];
+    p[0] = static_cast<uint8_t>(v >> 24);
+    p[1] = static_cast<uint8_t>(v >> 16);
+    p[2] = static_cast<uint8_t>(v >> 8);
+    p[3] = static_cast<uint8_t>(v);
+  }
+}
+
+/// -1, 0 or 1 as a < b, a == b, a > b.
+int compare(const Big& a, const Big& b) {
+  for (size_t i = kLimbs; i > 0U; --i) {
+    if (a.limb[i - 1U] != b.limb[i - 1U]) {
+      return a.limb[i - 1U] < b.limb[i - 1U] ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+/// a -= b, ignoring the final borrow (callers only subtract when a >= b, or
+/// when a carried out of the top limb and the borrow cancels it).
+void subtract(Big& a, const Big& b) {
+  uint64_t borrow = 0U;
+  for (size_t i = 0U; i < kLimbs; ++i) {
+    const uint64_t d = static_cast<uint64_t>(a.limb[i]) - b.limb[i] - borrow;
+    a.limb[i] = static_cast<uint32_t>(d);
+    borrow = (d >> 63) & 1U;
+  }
+}
+
+/// -n^-1 mod 2^32, by Newton's iteration (each step doubles the correct bits;
+/// five steps from one correct bit give 32). `n0` must be odd.
+uint32_t montgomeryN0(uint32_t n0) {
+  uint32_t inv = 1U;
+  for (int i = 0; i < 5; ++i) {
+    inv *= 2U - (n0 * inv);
+  }
+  return static_cast<uint32_t>(0U - inv);
+}
+
+/// out = a * b * R^-1 mod n (CIOS). `out` may alias neither input.
+void montMul(Big& out, const Big& a, const Big& b, const Big& n, uint32_t n0) {
+  uint32_t t[kLimbs + 2U];
+  memset(t, 0, sizeof(t));
+  for (size_t i = 0U; i < kLimbs; ++i) {
+    uint64_t carry = 0U;
+    for (size_t j = 0U; j < kLimbs; ++j) {
+      const uint64_t s = static_cast<uint64_t>(t[j]) + (static_cast<uint64_t>(a.limb[j]) * b.limb[i]) + carry;
+      t[j] = static_cast<uint32_t>(s);
+      carry = s >> 32;
+    }
+    uint64_t s = static_cast<uint64_t>(t[kLimbs]) + carry;
+    t[kLimbs] = static_cast<uint32_t>(s);
+    t[kLimbs + 1U] = static_cast<uint32_t>(s >> 32);
+
+    const uint32_t m = t[0] * n0;
+    s = static_cast<uint64_t>(t[0]) + (static_cast<uint64_t>(m) * n.limb[0]);
+    carry = s >> 32;
+    for (size_t j = 1U; j < kLimbs; ++j) {
+      s = static_cast<uint64_t>(t[j]) + (static_cast<uint64_t>(m) * n.limb[j]) + carry;
+      t[j - 1U] = static_cast<uint32_t>(s);
+      carry = s >> 32;
+    }
+    s = static_cast<uint64_t>(t[kLimbs]) + carry;
+    t[kLimbs - 1U] = static_cast<uint32_t>(s);
+    t[kLimbs] = t[kLimbs + 1U] + static_cast<uint32_t>(s >> 32);
+  }
+  memcpy(out.limb, t, sizeof(out.limb));
+  if (t[kLimbs] != 0U || compare(out, n) >= 0) {
+    subtract(out, n);
+  }
+}
+
+/// R^2 mod n, R = 2^2048: one, doubled 4096 times modulo n. Each doubling of a
+/// value below n is below 2n, so one conditional subtraction keeps it reduced.
+void montgomeryR2(Big& r, const Big& n) {
+  memset(r.limb, 0, sizeof(r.limb));
+  r.limb[0] = 1U;
+  for (size_t bit = 0U; bit < 2U * 32U * kLimbs; ++bit) {
+    uint32_t carry = 0U;
+    for (size_t i = 0U; i < kLimbs; ++i) {
+      const uint32_t next = r.limb[i] >> 31;
+      r.limb[i] = (r.limb[i] << 1) | carry;
+      carry = next;
+    }
+    if (carry != 0U || compare(r, n) >= 0) {
+      subtract(r, n);
+    }
+  }
+}
+
+bool isRsa2048Modulus(const uint8_t* modulus) {
+  // Odd (Montgomery needs it, and an RSA modulus is a product of two odd
+  // primes) and a full 2048 bits.
+  return (modulus[kRsa2048Bytes - 1U] & 1U) != 0U && modulus[0] != 0U;
+}
+
+/// SHA-256's DigestInfo prefix, RFC 8017 §9.2 note 1.
+const uint8_t kDigestInfoSha256[19] = {0x30U, 0x31U, 0x30U, 0x0dU, 0x06U, 0x09U, 0x60U, 0x86U, 0x48U, 0x01U,
+                                       0x65U, 0x03U, 0x04U, 0x02U, 0x01U, 0x05U, 0x00U, 0x04U, 0x20U};
+
+} // namespace
+
+bool rsa2048InRange(const uint8_t modulus[kRsa2048Bytes], const uint8_t signature[kRsa2048Bytes]) {
+  Big n;
+  Big s;
+  load(n, modulus);
+  load(s, signature);
+  return compare(s, n) < 0;
+}
+
+bool rsa2048PublicOp(const uint8_t modulus[kRsa2048Bytes], const uint8_t input[kRsa2048Bytes],
+                     uint8_t out[kRsa2048Bytes]) {
+  if (modulus == nullptr || input == nullptr || out == nullptr || !isRsa2048Modulus(modulus)) {
+    return false;
+  }
+  Big n;
+  Big x;
+  load(n, modulus);
+  load(x, input);
+  if (compare(x, n) >= 0) {
+    return false;
+  }
+  const uint32_t n0 = montgomeryN0(n.limb[0]);
+
+  Big r2;
+  montgomeryR2(r2, n);
+  Big xm;
+  montMul(xm, x, r2, n, n0); // x * R
+  Big a;
+  Big b;
+  memcpy(a.limb, xm.limb, sizeof(a.limb));
+  // 65537 = 2^16 + 1: sixteen squarings, then one multiply by x.
+  for (int i = 0; i < 16; ++i) {
+    montMul(b, a, a, n, n0);
+    memcpy(a.limb, b.limb, sizeof(a.limb));
+  }
+  montMul(b, a, xm, n, n0);
+  // Out of Montgomery form: multiply by plain one.
+  Big one;
+  memset(one.limb, 0, sizeof(one.limb));
+  one.limb[0] = 1U;
+  montMul(a, b, one, n, n0);
+  store(a, out);
+  return true;
+}
+
+bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t digest[32],
+                         const uint8_t signature[kRsa2048Bytes]) {
+  if (modulus == nullptr || digest == nullptr || signature == nullptr) {
+    return false;
+  }
+  if (!rsa2048InRange(modulus, signature)) {
+    return false;
+  }
+  uint8_t decoded[kRsa2048Bytes];
+  if (!rsa2048PublicOp(modulus, signature, decoded)) {
+    return false;
+  }
+  // The one encoding the scheme allows: 00 01, 0xFF padding, 00, DigestInfo,
+  // digest. Built in full and compared in full — no parsing.
+  uint8_t expected[kRsa2048Bytes];
+  const size_t tail = sizeof(kDigestInfoSha256) + 32U;
+  expected[0] = 0x00U;
+  expected[1] = 0x01U;
+  memset(expected + 2, 0xFF, kRsa2048Bytes - tail - 3U);
+  expected[kRsa2048Bytes - tail - 1U] = 0x00U;
+  memcpy(expected + kRsa2048Bytes - tail, kDigestInfoSha256, sizeof(kDigestInfoSha256));
+  memcpy(expected + kRsa2048Bytes - 32U, digest, 32U);
+  uint8_t diff = 0U;
+  for (size_t i = 0U; i < kRsa2048Bytes; ++i) {
+    diff = static_cast<uint8_t>(diff | (decoded[i] ^ expected[i]));
+  }
+  return diff == 0U;
+}
+
+} // namespace dc

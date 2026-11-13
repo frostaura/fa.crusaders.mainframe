@@ -1,0 +1,10 @@
+{
+  "name": "devnet",
+  "version": "1.0.0",
+  "description": "How a board reaches the club, shared by both ESP images (device contract v3): the server base URL grammar, the heartbeat's net and key_next objects adopted all-or-nothing, the WiFi link supervisor, and a typed, escape-decoding reader for one JSON object's members. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
+  "keywords": "device, network, wifi, provisioning, key rotation, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": { "devapi": "*", "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}
