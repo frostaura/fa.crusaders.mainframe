@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Crusaders.Mainframe.Api.Biometric;
 using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Security;
@@ -295,6 +296,16 @@ public sealed class PlatformPassUnitTests
         Assert.DoesNotContain("$request ", format, StringComparison.Ordinal);
         Assert.DoesNotContain("$request_uri", format, StringComparison.Ordinal);
         Assert.DoesNotContain("$http_referer", format, StringComparison.Ordinal);
+    }
+
+    /// <summary>BP-06: the document's CSP loads images only from this origin, data: and blob:.</summary>
+    [Fact]
+    public void The_gateway_loads_images_from_nowhere_else()
+    {
+        var conf = Repo("nginx", "nginx.conf");
+        var csp = Regex.Match(conf, @"(?m)^\s*add_header Content-Security-Policy ""(?<v>[^""]*)"" always;").Groups["v"].Value;
+        Assert.Contains("img-src 'self' data: blob:", csp, StringComparison.Ordinal);
+        Assert.Contains("frame-ancestors 'none'", csp, StringComparison.Ordinal);
     }
 
     [Fact]

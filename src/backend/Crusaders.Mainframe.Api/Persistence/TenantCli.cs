@@ -116,7 +116,10 @@ public static class TenantCli
         await using var tx = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(ct) : null;
         var tenant = new Tenant
         {
-            Slug = plan.Slug, DisplayName = plan.Name, Status = TenantStatus.Active, PublicBaseUrl = plan.PublicBaseUrl,
+            Slug = plan.Slug,
+            DisplayName = plan.Name,
+            Status = TenantStatus.Active,
+            PublicBaseUrl = plan.PublicBaseUrl,
         };
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings
@@ -158,7 +161,12 @@ public static class TenantCli
     {
         var admin = new User
         {
-            TenantId = tenant.Id, Email = email, PasswordHash = null, EmailVerified = false, IsAdmin = true, Status = "active",
+            TenantId = tenant.Id,
+            Email = email,
+            PasswordHash = null,
+            EmailVerified = false,
+            IsAdmin = true,
+            Status = "active",
         };
         db.Users.Add(admin);
         db.Memberships.Add(new Membership
@@ -180,7 +188,10 @@ public static class TenantCli
         });
         db.AuditLogs.Add(new AuditLog
         {
-            TenantId = tenant.Id, ActorUserId = Guid.Empty, SubjectUserId = admin.Id, Action = "tenant.created_by_operator",
+            TenantId = tenant.Id,
+            ActorUserId = Guid.Empty,
+            SubjectUserId = admin.Id,
+            Action = "tenant.created_by_operator",
         });
         await db.SaveChangesAsync(ct);
         return token;
@@ -199,7 +210,8 @@ public static class TenantCli
         tenant.Status = status;
         c.Db.AuditLogs.Add(new AuditLog
         {
-            TenantId = tenant.Id, Action = $"tenant.{status}_by_operator",
+            TenantId = tenant.Id,
+            Action = $"tenant.{status}_by_operator",
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { from = before, to = status }),
         });
         await c.Db.SaveChangesAsync(ct);
@@ -286,16 +298,28 @@ public static class TenantCli
 
             var problems = new List<string>();
             CheckSlug(slug, problems);
-            if (name.Length is 0 or > 255) problems.Add("--name must be 1 to 255 characters.");
-            if (email.Length > 320 || email.IndexOf('@') is <= 0 || email.EndsWith('@')) problems.Add($"--admin-email '{email}' is not an email address.");
-            var courts = 4;
-            if (o.Get("courts") is { } courtsText && (!int.TryParse(courtsText, NumberStyles.None, CultureInfo.InvariantCulture, out courts) || courts is < 1 or > 64))
-                problems.Add("--courts must be a whole number from 1 to 64.");
+            CheckNameAndEmail(name, email, problems);
+            var courts = CheckCourts(o.Get("courts"), problems);
             var timezone = o.Get("timezone")?.Trim() ?? "Africa/Johannesburg";
             if (!TimeZoneInfo.TryFindSystemTimeZoneById(timezone, out _)) problems.Add($"--timezone '{timezone}' is not an IANA time zone.");
             var url = o.Get("public-base-url")?.Trim().TrimEnd('/');
             if (url is not null && TenantLinks.Problem(config, slug, url) is { } urlProblem) problems.Add($"--public-base-url {urlProblem}.");
             return new CreatePlan(slug, name, email, courts, timezone, url, problems);
+        }
+
+        private static void CheckNameAndEmail(string name, string email, List<string> problems)
+        {
+            if (name.Length is 0 or > 255) problems.Add("--name must be 1 to 255 characters.");
+            if (email.Length > 320 || email.IndexOf('@') <= 0 || email.EndsWith('@')) problems.Add($"--admin-email '{email}' is not an email address.");
+        }
+
+        /// <summary>The court count, 4 when not given (the bootstrap's default), or a problem.</summary>
+        private static int CheckCourts(string? text, List<string> problems)
+        {
+            if (text is null) return 4;
+            if (int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var courts) && courts is >= 1 and <= 64) return courts;
+            problems.Add("--courts must be a whole number from 1 to 64.");
+            return 4;
         }
 
         private static void CheckSlug(string slug, List<string> problems)

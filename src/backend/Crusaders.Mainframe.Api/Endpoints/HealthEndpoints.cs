@@ -43,7 +43,11 @@ public static class HealthEndpoints
 
         app.MapGet("/healthz", () => Results.Ok(new
         {
-            status = "ok", service = Service, version = build.Version, revision = build.Revision, time = DateTimeOffset.UtcNow,
+            status = "ok",
+            service = Service,
+            version = build.Version,
+            revision = build.Revision,
+            time = DateTimeOffset.UtcNow,
         })).AllowAnonymous();
 
         app.MapGet("/readyz", async (MainframeDbContext db, ILoggerFactory logs, CancellationToken ct) =>
@@ -52,8 +56,12 @@ public static class HealthEndpoints
             var ready = database == "ok";
             return Results.Json(new
             {
-                status = ready ? "ready" : "not_ready", service = Service, database,
-                version = build.Version, revision = build.Revision, time = DateTimeOffset.UtcNow,
+                status = ready ? "ready" : "not_ready",
+                service = Service,
+                database,
+                version = build.Version,
+                revision = build.Revision,
+                time = DateTimeOffset.UtcNow,
             }, statusCode: ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
         }).AllowAnonymous();
 

@@ -130,7 +130,11 @@ public abstract class PlatformPassHttpTests
         {
             db.AuthTokens.Add(new AuthToken
             {
-                TenantId = club.TenantId, UserId = userId, Kind = kind, TokenHash = TokenHashing.Hash(plain), ExpiresAt = DateTimeOffset.UtcNow.Add(life),
+                TenantId = club.TenantId,
+                UserId = userId,
+                Kind = kind,
+                TokenHash = TokenHashing.Hash(plain),
+                ExpiresAt = DateTimeOffset.UtcNow.Add(life),
             });
             return Task.CompletedTask;
         });
@@ -297,8 +301,11 @@ public abstract class PlatformPassHttpTests
         private async Task<HttpResponseMessage> ApplyAsync(WebApplicationFactory<Program> app, Club club, string? photoUrl, string? email = null) =>
             await Anonymous(app, club.Host).PostAsJsonAsync("/api/v1/auth/register", new
             {
-                email = email ?? $"p-{Guid.NewGuid():N}@platform.review.test", password = "Pass1234!", fullName = "Photo Probe",
-                membershipNumber = $"P-{Guid.NewGuid():N}"[..12], photoUrl,
+                email = email ?? $"p-{Guid.NewGuid():N}@platform.review.test",
+                password = "Pass1234!",
+                fullName = "Photo Probe",
+                membershipNumber = $"P-{Guid.NewGuid():N}"[..12],
+                photoUrl,
             });
 
         /// <summary>
@@ -611,7 +618,8 @@ public abstract class PlatformPassHttpTests
                 var other = await SeedAsync(pg.SharedHost, "sweep");
                 var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Media:StoragePath"] = media, ["Uploads:OrphanAfterMinutes"] = "60",
+                    ["Media:StoragePath"] = media,
+                    ["Uploads:OrphanAfterMinutes"] = "60",
                 }).Build();
                 var photos = new MemberPhotoFiles(config, NullLogger<MemberPhotoFiles>.Instance);
 
@@ -692,8 +700,12 @@ public abstract class PlatformPassHttpTests
             var club = await SeedAsync(app, "pkdel");
             var credential = new WebAuthnCredential
             {
-                TenantId = club.TenantId, UserId = club.MemberId, CredentialId = Guid.NewGuid().ToByteArray(),
-                PublicKey = [1, 2, 3], UserHandle = [4, 5, 6], Label = "Work laptop",
+                TenantId = club.TenantId,
+                UserId = club.MemberId,
+                CredentialId = Guid.NewGuid().ToByteArray(),
+                PublicKey = [1, 2, 3],
+                UserHandle = [4, 5, 6],
+                Label = "Work laptop",
             };
             await WriteAsync(app, db => { db.WebAuthnCredentials.Add(credential); return Task.CompletedTask; });
 
@@ -717,7 +729,12 @@ public abstract class PlatformPassHttpTests
             {
                 db.WebAuthnCredentials.Add(new WebAuthnCredential
                 {
-                    TenantId = club.TenantId, UserId = club.MemberId, CredentialId = id, PublicKey = [1], UserHandle = [2], Label = "Phone",
+                    TenantId = club.TenantId,
+                    UserId = club.MemberId,
+                    CredentialId = id,
+                    PublicKey = [1],
+                    UserHandle = [2],
+                    Label = "Phone",
                 });
                 return Task.CompletedTask;
             });

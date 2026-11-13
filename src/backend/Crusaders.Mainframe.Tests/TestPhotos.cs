@@ -48,7 +48,11 @@ public static class TestPhotos
         var photo = await UploadAsync(clubClient);
         return await clubClient.PostAsJsonAsync("/api/v1/auth/register", new
         {
-            email, password, fullName, membershipNumber, photoUrl = photo,
+            email,
+            password,
+            fullName,
+            membershipNumber,
+            photoUrl = photo,
         });
     }
 }

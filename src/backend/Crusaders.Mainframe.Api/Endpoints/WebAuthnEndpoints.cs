@@ -292,11 +292,17 @@ public static class WebAuthnEndpoints
     /// by index; asked first so a duplicate is the ceremony's refusal, not a lost race.
     /// </summary>
     internal static async Task<bool> CredentialIdIsFreeAsync(MainframeDbContext db, byte[] credentialId, CancellationToken ct)
-        => !await db.WebAuthnCredentials.IgnoreQueryFilters().AnyAsync(c => c.CredentialId == credentialId, ct);
+    {
+        // Block body: lizard mis-scopes an expression body into a file-long *global* (memory/gotchas-gates.md).
+        var taken = await db.WebAuthnCredentials.IgnoreQueryFilters().AnyAsync(c => c.CredentialId == credentialId, ct);
+        return !taken;
+    }
 
     /// <summary>The 503 a full ceremony store answers — the stable busy code every client already words.</summary>
-    private static IResult Busy() => Results.Json(
-        new { error = "service_busy", message = "Too many sign-ins are in progress. Try again in a moment." }, statusCode: 503);
+    private static IResult Busy()
+    {
+        return Results.Json(new { error = "service_busy", message = "Too many sign-ins are in progress. Try again in a moment." }, statusCode: 503);
+    }
 
     /// <summary>
     /// Saves a passkey added or removed with its audit row, then queues the member's mail. A mail
