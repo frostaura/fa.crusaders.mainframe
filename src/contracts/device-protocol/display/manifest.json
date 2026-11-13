@@ -1,0 +1,14 @@
+{
+  "description": "Court-box glass: landing composition (compact and expanded), the marquee window, and the screen-commit CRC.",
+  "authority": "docs/specs/device-serial-protocol.md; gen_cases.py beside this file is the reference implementation.",
+  "generator": "src/contracts/device-protocol/display/gen_cases.py",
+  "read_by": [
+    "fw-court-box",
+    "vitest"
+  ],
+  "case_count": {
+    "landing": 19,
+    "marquee": 8,
+    "screen_crc": 6
+  }
+}

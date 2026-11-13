@@ -326,15 +326,27 @@ test-classes:
 # the whole directory, not a list: a family that gains a file must not be able
 # to gain it silently.
 MEMBERCODE_CORPUS = src/contracts/device-protocol/membercode
+#
+# THE V3 FAMILIES — `ota/`, `provision/`, `display/` — are each the reference
+# implementation of what they pin (signing, adoption, landing composition), so a
+# generator edited and not run is a contract nobody implements. Whole directories,
+# for the same reason as membercode/.
+V3_CORPUS = src/contracts/device-protocol/ota \
+	src/contracts/device-protocol/provision \
+	src/contracts/device-protocol/display
 CORPUS_GENERATED = $(IOT_DIR)/court-box/test/test_protocol/corpus_generated.h \
 	src/contracts/device-protocol/gate/cases.json \
 	src/contracts/device-protocol/gate/manifest.json \
-	$(MEMBERCODE_CORPUS)
+	$(MEMBERCODE_CORPUS) \
+	$(V3_CORPUS)
 
 corpus-check:
 	$(PY) $(IOT_TOOLS)/gen_corpus.py
 	$(PY) src/contracts/device-protocol/gate/gen_cases.py
 	$(PY) $(IOT_SHARED_TOOLS)/membercode_vectors.py
+	$(PY) src/contracts/device-protocol/ota/gen_cases.py
+	$(PY) src/contracts/device-protocol/provision/gen_cases.py
+	$(PY) src/contracts/device-protocol/display/gen_cases.py
 	@git diff --exit-code --stat -- $(CORPUS_GENERATED) \
 	  || (echo "generated corpus files are stale — rerun the generators and commit" && exit 1)
 	@untracked="$$(git ls-files --others --exclude-standard -- $(CORPUS_GENERATED))"; \
