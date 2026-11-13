@@ -20,6 +20,7 @@
 // executes.
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unity.h>
 
@@ -396,6 +397,61 @@ void test_modulus_hex_is_exact() {
   TEST_ASSERT_FALSE(devota::parseModulusHex(hex, out));
 }
 
+/// THE LIFELINE TOLERATES A LATER SERVER (device-api.md §11.1, compat/
+/// `cb-lifeline-extra-fields`). An offer carrying keys this image has never
+/// heard of — of every JSON kind, before, between and after its own, including
+/// an object that itself names `version` — is read for its own six fields and
+/// nothing else. An absent required field is still a refusal.
+void test_an_offer_with_extra_keys_of_every_kind_is_read_for_its_own_fields() {
+  load();
+  corpus::ArrayIter it(section("images"));
+  const char* c = nullptr;
+  size_t checked = 0U;
+  while (it.next(&c)) {
+    const char* offerObj = corpus::member(c, "offer");
+    char target[32] = {};
+    char version[16] = {};
+    char sha[80] = {};
+    char sig[400] = {};
+    char path[128] = {};
+    text(offerObj, "target", target, sizeof(target));
+    text(offerObj, "version", version, sizeof(version));
+    text(offerObj, "sha256", sha, sizeof(sha));
+    text(offerObj, "sig", sig, sizeof(sig));
+    text(offerObj, "path", path, sizeof(path));
+    const unsigned long size = static_cast<unsigned long>(corpus::unsignedValue(corpus::member(offerObj, "size")));
+    static char body[1400];
+    const int n = snprintf(body, sizeof(body),
+                           "{\"rollout\":{\"version\":\"9.9.9\",\"target\":\"court_box\",\"n\":[1,{\"size\":1}]},"
+                           "\"target\":\"%s\",\"note\":\"a \\\"quoted\\\" note\",\"version\":\"%s\","
+                           "\"weight\":1.5e3,\"size\":%lu,\"null_key\":null,\"sha256\":\"%s\",\"flag\":true,"
+                           "\"sig\":\"%s\",\"list\":[\"path\",\"/x\"],\"path\":\"%s\",\"zz\":false}",
+                           target, version, size, sha, sig, path);
+    TEST_ASSERT_TRUE(n > 0 && static_cast<size_t>(n) < sizeof(body));
+    devota::Offer offer;
+    TEST_ASSERT_EQUAL_STRING("ok", devota::refusalName(devota::parseOffer(body, static_cast<size_t>(n), target, offer)));
+    TEST_ASSERT_EQUAL_STRING(target, offer.target);
+    TEST_ASSERT_EQUAL_STRING(version, offer.version);
+    TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(size), offer.size);
+    TEST_ASSERT_EQUAL_STRING(sha, offer.sha256);
+    TEST_ASSERT_EQUAL_STRING(sig, offer.sig);
+    TEST_ASSERT_EQUAL_STRING(path, offer.path);
+
+    // The same object with `path` taken out (the decoy list still names it):
+    // a required field absent is a refusal, however much else is there.
+    char* cut = strstr(body, ",\"path\":\"");
+    TEST_ASSERT_NOT_NULL(cut);
+    char* after = strstr(cut + 1, ",\"zz\"");
+    TEST_ASSERT_NOT_NULL(after);
+    memmove(cut, after, strlen(after) + 1U);
+    devota::Offer refused;
+    TEST_ASSERT_EQUAL_STRING("missing_path",
+                             devota::refusalName(devota::parseOffer(body, strlen(body), target, refused)));
+    ++checked;
+  }
+  TEST_ASSERT_TRUE(checked >= 2U);
+}
+
 } // namespace
 
 void setUp() {}
@@ -413,5 +469,6 @@ int main(int, char**) {
   RUN_TEST(test_failed_list_keeps_the_four_newest);
   RUN_TEST(test_probation_commits_when_proven_and_rolls_back_otherwise);
   RUN_TEST(test_modulus_hex_is_exact);
+  RUN_TEST(test_an_offer_with_extra_keys_of_every_kind_is_read_for_its_own_fields);
   return UNITY_END();
 }

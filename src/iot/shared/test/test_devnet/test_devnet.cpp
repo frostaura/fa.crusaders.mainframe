@@ -365,6 +365,47 @@ void test_key_ring_moves_forward_and_holds_two() {
   TEST_ASSERT_EQUAL_STRING("current", devnet::refusalName(devnet::adoptKeyNext(k2, strlen(k2), two, three)));
 }
 
+/// THE LIFELINE TOLERATES A LATER SERVER (device-api.md §11.1). `net` and
+/// `key_next` carrying keys of every JSON kind — including objects that
+/// themselves name `ver`, `base`, `id` and `key` — are read for their own
+/// members only, and an absent required member is still a refusal.
+void test_net_and_key_next_ignore_extra_keys_of_every_kind() {
+  const char* net =
+      "{\"meta\":{\"ver\":99,\"base\":\"http://10.9.9.9\"},\"ver\":4,\"why\":\"router \\\"swap\\\"\","
+      "\"base\":\"http://192.168.1.20:8088\",\"weight\":2.5e1,\"wifi0_ssid\":\"CRUSADERS\",\"n\":null,"
+      "\"wifi0_psk\":\"squash-court-4\",\"list\":[\"wifi1_ssid\",{\"wifi1_psk\":\"x\"}],\"on\":true,"
+      "\"wifi1_ssid\":\"CRUSADERS-NEW\",\"wifi1_psk\":\"new-router-pass\",\"zz\":false}";
+  devnet::NetSet out;
+  TEST_ASSERT_EQUAL_STRING("ok", devnet::refusalName(devnet::adoptNet(net, strlen(net), 3U, out).reason));
+  TEST_ASSERT_EQUAL_UINT32(4U, out.ver);
+  TEST_ASSERT_EQUAL_STRING("http://192.168.1.20:8088", out.base);
+  TEST_ASSERT_EQUAL_STRING("CRUSADERS", out.wifi[0].ssid);
+  TEST_ASSERT_EQUAL_STRING("squash-court-4", out.wifi[0].psk);
+  TEST_ASSERT_EQUAL_STRING("CRUSADERS-NEW", out.wifi[1].ssid);
+  TEST_ASSERT_EQUAL_STRING("new-router-pass", out.wifi[1].psk);
+  const char* noVer = "{\"meta\":{\"ver\":99},\"base\":\"http://192.168.1.20:8088\",\"wifi0_ssid\":\"C\","
+                      "\"wifi0_psk\":\"squash-court-4\",\"extra\":[1,2]}";
+  devnet::NetSet refused;
+  TEST_ASSERT_EQUAL_STRING("ver", devnet::refusalName(devnet::adoptNet(noVer, strlen(noVer), 0U, refused).reason));
+
+  devnet::KeyRing ring;
+  memcpy(ring.currentId, "k1", 3U);
+  memset(ring.currentKey, 'A', devnet::kKeyLen);
+  const char* keyNext = "{\"rotation\":{\"id\":\"k9\",\"key\":\"short\"},\"id\":\"k2\",\"started\":17000,"
+                        "\"n\":null,\"key\":\"Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr\",\"tags\":[\"a\"],"
+                        "\"grace\":1.5,\"on\":true}";
+  devnet::KeyRing next;
+  TEST_ASSERT_EQUAL_STRING("ok", devnet::refusalName(devnet::adoptKeyNext(keyNext, strlen(keyNext), ring, next)));
+  TEST_ASSERT_EQUAL_STRING("k2", next.currentId);
+  TEST_ASSERT_EQUAL_STRING("Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr", next.currentKey);
+  TEST_ASSERT_EQUAL_STRING("k1", next.previousId);
+  const char* noKey = "{\"rotation\":{\"key\":\"Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr\"},\"id\":\"k2\"}";
+  devnet::KeyRing kept;
+  TEST_ASSERT_NOT_EQUAL(static_cast<int>(devnet::Refusal::Ok),
+                        static_cast<int>(devnet::adoptKeyNext(noKey, strlen(noKey), ring, kept)));
+  TEST_ASSERT_EQUAL_STRING("k1", kept.currentId);
+}
+
 } // namespace
 
 void setUp() {}
@@ -382,5 +423,6 @@ int main(int, char**) {
   RUN_TEST(test_net_values_are_read_with_their_escapes_decoded);
   RUN_TEST(test_net_reads_only_its_own_members);
   RUN_TEST(test_key_ring_moves_forward_and_holds_two);
+  RUN_TEST(test_net_and_key_next_ignore_extra_keys_of_every_kind);
   return UNITY_END();
 }
