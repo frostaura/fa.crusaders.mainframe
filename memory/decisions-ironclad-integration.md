@@ -50,3 +50,9 @@ runtime network, setup portal, supervisor, stall watchdog and LittleFS persisten
 3.0.0 announces `codes:m1 hb:3 lcd:2` only. The Mega 3.0.0 and gate 2.0.0 flashes are final;
 the bridge's is not (go-live checklist §2c, §5). Box halves of FC-11 (fractions report no
 drift), MCV1-07 (24-key ring, not 64) and `test_compat` are also owed.
+
+**Gates on the integrated tree:** backend 4,501/4,501 on Postgres; vitest 6,638 + 2 expected
+fail; Playwright 2,376 passed (1 large-text flake, green on rerun); firmware native and ASAN
+188/386/183; corpus-check, arduino-check, complexity, stack budgets, device-replay-check and
+infra 71/71 green. Device e2e: everything but the two harness gaps in the state topic.
+

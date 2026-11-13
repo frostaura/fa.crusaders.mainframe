@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "Ironclad pass integrated on fix/ironclad (140 commits on a77a1d72, not pushed, 2026-11-14). Mega 3.0.0 and gate 2.0.0 are final; bridge 3.0.0 is not OTA-capable yet. Production last seen down (1033)."
+description: "Ironclad pass integrated on fix/ironclad over a77a1d72, not pushed (2026-11-14). Mega 3.0.0 and gate 2.0.0 are final; bridge 3.0.0 is not OTA-capable yet. Production last seen down (1033)."
 type: state
 last_verified: 2026-11-14
 ---
@@ -12,8 +12,9 @@ Re-measured **2026-11-14** by hand (`git fetch`, `rev-list --left-right --count`
 
 **The code.** The ironclad pre-go-live pass (Dean: "fix any and all, full e2e testing") ran nine
 fix lanes in worktrees under `~/src/.crusaders-wt/` and was integrated on branch
-**`fix/ironclad`** (worktree `~/src/.crusaders-wt/integration`): 140 commits ahead of
-`origin/main` = `a77a1d72`, 0 behind, **not pushed** — pushing is Dean's call. What the
+**`fix/ironclad`** (worktree `~/src/.crusaders-wt/integration`): ahead of `origin/main` =
+`a77a1d72` by the nine lanes plus the integration, 0 behind, **not pushed** — pushing is Dean's
+call. Re-count with `git rev-list --left-right --count origin/main...fix/ironclad`. What the
 integration found and decided: [`decisions-ironclad-integration.md`](decisions-ironclad-integration.md).
 The lanes' own decisions are in the `decisions-*-v3*`, `decisions-money-golive`,
 `decisions-platform-*`, `decisions-release-ops` and `decisions-*-golive` topics.
@@ -36,6 +37,11 @@ key ring, runtime network, portal, NVS persistence). **No flash is recorded anyw
 5. Bring production back: it answered Cloudflare **1033** (no tunnel connector) on 2026-11-13.
 
 **Open after the pass** (none blocks a redeploy):
+- The device e2e harness lags the firmware: `scenario.py`'s landing/E-LCD steps assert the Mega
+  2.1.0 screen, and `door_evening.py`'s DSIM offline legs scan a legacy booking code that a
+  codes:m1 door's v1 roster (MCV1-04) no longer carries. Every other step passes.
+- The court-box soak at 20,000 sequences finds 6 "owed court dark 5 s after a Mega reset"
+  (seed 50511693); 1,000 sequences are clean. In the bridge, so a phase-B fix.
 - Bridge phase B (above), and the box halves of FC-11 (a fraction in a config value reports no
   drift), MCV1-07 (the bridge's key ring is 24, the server sends up to 64) and `test_compat`.
 - BM-9 (one key case per reply) needs the frontend reads switched first.

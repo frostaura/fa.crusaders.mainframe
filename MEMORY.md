@@ -1,7 +1,7 @@
 # MEMORY — Technologies/projects/crusaders.mainframe
 
 - [Red — the relay question is an electrical safety matter, and it is unanswered](memory/safety-relays.md) — RED: nobody knows the fitted relays (now unidentified SSRs) or whether they switch a contactor coil or the lighting load. If direct, an electrician is needed first; no software touches this, and it gates go-live.
-- [Current state](memory/state.md) — Ironclad pass integrated on fix/ironclad (140 commits on a77a1d72, not pushed, 2026-11-14). Mega 3.0.0 and gate 2.0.0 are final; bridge 3.0.0 is not OTA-capable yet. Production last seen down (1033).
+- [Current state](memory/state.md) — Ironclad pass integrated on fix/ironclad over a77a1d72, not pushed (2026-11-14). Mega 3.0.0 and gate 2.0.0 are final; bridge 3.0.0 is not OTA-capable yet. Production last seen down (1033).
 - [Live decisions — product and economics](memory/decisions.md) — Product and economics: blueprint Rev 2 is the customer's word on economics; whole minutes replaced credits (P13); charge AT BOOKING still needs committee sign-off; PayFast replaced Peach.
 - [Live decisions — what the admin console may assume about a reply \(review rounds 2–4, lane F3\)](memory/decisions-admin-contracts.md) — Every admin reply the console reads is pinned to its C# handler; paged admin reads (ledger totals from the server, members, a night); the change record is words for every action.
 - [Decisions — the admin console for device contract v3 \(lane frontend-admin, 2026-11-13\)](memory/decisions-admin-device-v3.md) — The console half of device contract v3 (2026-11-13): Boards' remote-fix panels, per-board screen, hardware and health, the member-code rollout, served-only bounds, and the field names the console reads.
