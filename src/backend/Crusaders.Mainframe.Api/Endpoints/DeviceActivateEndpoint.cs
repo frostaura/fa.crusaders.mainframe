@@ -194,8 +194,11 @@ public static class DeviceActivateEndpoint
         Booking booking, Device device, DateTimeOffset now, DeviceActivateServices services, CancellationToken ct)
     {
         if (booking.CheckedInAt is null || booking.EndsAt <= now) return false;
+        // The online grant records its light with no device (the server lit it, not a relay report);
+        // a box's own evidence names this box. Either is "lit here": the booking was found among this
+        // box's courts, so its court is one this box drives.
         return await services.Db.CourtLightStates.AsNoTracking().AnyAsync(l =>
-            l.CourtId == booking.CourtId && l.State == LightState.On && l.DeviceId == device.Id
+            l.CourtId == booking.CourtId && l.State == LightState.On && (l.DeviceId == null || l.DeviceId == device.Id)
             && l.BookingId == booking.Id && (l.OnUntil == null || l.OnUntil > now), ct);
     }
 

@@ -1209,23 +1209,10 @@ public static class DeviceEventEndpoints
         // cap at its upper bound plus a minute — is a box's arithmetic, not a member leaving (a
         // 2.3.0 bridge sent 4294967272 after a wrapped age). Receipted and audited, never paired,
         // never settled, and never a reason to drop a booking from the snapshot.
+        // The verdict row the upload writes for every non-ok outcome is the audit:
+        // `device.release_implausible`, carrying the event's own details (relay, seq, duration).
         if (e.DurationMs > ImplausibleReleaseMs)
         {
-            db.AuditLogs.Add(new AuditLog
-            {
-                TenantId = device.TenantId,
-                ActorUserId = Guid.Empty,
-                Action = ReleaseImplausibleAction,
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    device_id = device.Id,
-                    device_code = device.DeviceCode,
-                    relay = e.Court,
-                    seq = e.Seq,
-                    duration_ms = e.DurationMs,
-                    cause = ReleaseCause(e.Cause),
-                }),
-            });
             return new ActivationOutcome(RelayRestorePlan.ImplausibleOutcome, null, ReleaseKind);
         }
 
