@@ -92,6 +92,13 @@ public static class TokenPurposes
         WalletStreamPath, ControlBoardStreamPath, MonitoringStreamPath,
     ];
 
+    /// <summary>
+    /// The <c>HttpContext.Items</c> key the bearer handler sets when the token came from
+    /// <c>?ticket=</c> rather than the Authorization header: such a token must be a stream
+    /// ticket, never an <see cref="Access"/> token (BP-18).
+    /// </summary>
+    public const string FromQueryItem = "auth.token_from_query";
+
     /// <summary>Whether a ticket in <c>?ticket=</c> should be read on this path at all.</summary>
     public static bool AcceptsTicketInQuery(PathString path)
         => TicketPaths.Any(p => path.StartsWithSegments(p));

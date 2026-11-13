@@ -109,7 +109,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     // — and is re-sent on every reconnect, so what travels here has to be worth
                     // roughly nothing: one minute, one read-only stream. See TokenPurposes.
                     var qToken = ctx.Request.Query["ticket"].ToString();
-                    if (!string.IsNullOrEmpty(qToken)) ctx.Token = qToken;
+                    if (!string.IsNullOrEmpty(qToken))
+                    {
+                        ctx.Token = qToken;
+                        ctx.HttpContext.Items[TokenPurposes.FromQueryItem] = true;
+                    }
                 }
                 return Task.CompletedTask;
             },
@@ -133,6 +137,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 if (!TokenPurposes.IsValidFor(purpose, ctx.HttpContext.Request.Path))
                 {
                     ctx.Fail($"Token purpose '{purpose ?? "(none)"}' is not valid for API access.");
+                    return;
+                }
+
+                // BP-18: the query string is logged by every hop in front of this, so only a
+                // one-minute stream ticket may ride there — never a session token, which the
+                // purpose check above accepts everywhere.
+                if (ctx.HttpContext.Items.ContainsKey(TokenPurposes.FromQueryItem)
+                    && string.Equals(purpose, TokenPurposes.Access, StringComparison.Ordinal))
+                {
+                    ctx.Fail("A session token is not a stream ticket.");
                     return;
                 }
 
