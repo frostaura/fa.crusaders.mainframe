@@ -14,7 +14,7 @@ Local Machine (on-premises at the club, or Dean's office for dev)
   │
   ├── Docker / Portainer
   │     ├── gateway   (nginx, published on :8088 — the only port members and boxes use)
-  │     │     ├── /api/, /graphql, /uploads/, /healthz → backend:5000
+  │     │     ├── /api/, /uploads/, /healthz, /readyz → backend:5000
   │     │     └── /                                    → frontend:80
   │     ├── crusaders-mainframe-frontend  (nginx + React build)
   │     ├── crusaders-mainframe-backend   (.NET 10 ASP.NET Core, :5000)
@@ -99,6 +99,18 @@ It is a **comma-delimited string**, not a JSON array, and that is load-bearing: 
 
 **No nginx `limit_req` on `/device/` — decided.** Behind cloudflared and the club's NAT every board shares one `$remote_addr`, and every board shares the club's one device key, so neither can key a per-board limit at the gateway; it would throttle the whole fleet together. The per-board limit is the API's (`door-gate.md`, the device rate limit).
 
+## Health, logs and knowing what runs (IO-05, IO-07, IO-16)
+
+- **`/healthz` is liveness** — the process answers; it touches nothing. **`/readyz` is readiness** — `SELECT 1` on the database within 2 s; `200 {status: "ready"}` or `503 {status: "not_ready", database: "unreachable"|"timeout"}`, never the detail. Both carry `version` and `revision` (the commit). The backend container's healthcheck in both compose files uses `/readyz`, so Portainer shows an outage as an unhealthy backend; an external uptime monitor (the launch bar's ≥99.5 %) should poll `https://<club host>/readyz` — that monitor is an ops step, not in this repository.
+- **The revision is stamped at build**: `src/backend/Dockerfile` takes `ARG BUILD_SHA` into `SourceRevisionId`, and CI passes `github.sha` to both backend image builds. A build without it reports `"unknown"`. (Immutable per-commit image tags and a rollback runbook are the ops lane's.)
+- **Log levels.** The base `appsettings.json` keeps `Microsoft.EntityFrameworkCore` and `Microsoft.AspNetCore` (request lines included) at `Warning`; Production used to log every SQL command at Information, ~35 KB a minute with nobody using the stack. Raise one category for a diagnosis with `Logging__LogLevel__<category>=Information` on the backend service, and take it back out.
+- **Log rotation.** Every service in both compose files logs through the `x-capped-log` anchor: `json-file`, `max-size: 10m`, `max-file: 5` — 50 MB a service at most on the Pi's SD card, where a full disk stops Postgres writes. `docker compose logs` and Portainer read the same files.
+- **No credential in a log.** The gateway's access log is the `crusaders_redacted` format (`nginx/nginx.conf`): `?ticket=` and the token segment of `/verify-email`, `/reset-password`, `/welcome`, `/magic-link`, `/j` and `/invites` are written as `REDACTED`, and no referrer is logged.
+
+## A second club (BP-07)
+
+`docker compose exec backend dotnet Crusaders.Mainframe.Api.dll tenant create --slug <slug> --name "<club>" --admin-email <address>` — see `multi-tenancy.md`. The club is then reached at the deployment's host with its slug as the first label (`https://<slug>.frostaura.net` for a deployment at `https://crusaders.frostaura.net`), so that host needs a DNS record and a public hostname on the tunnel; `tenant set-url` records a different address when the club uses one. `App__PublicBaseUrl` stays the deployment's (the default club's) address.
+
 ## Image names
 - `frostaura/crusaders-mainframe-backend:latest`
 - `frostaura/crusaders-mainframe-frontend:latest`
@@ -147,7 +159,7 @@ What it grants is one bit — `User.IsAdmin` — and it is applied as the last s
 ## Local development
 The `Makefile` is the entry point; there is no `scripts/` directory.
 
-- `make up` — `docker compose up --build -d`; app on `http://localhost:${GATEWAY_PORT:-8088}`, MailHog on `:8025`. `BIOMETRIC_DRIVER=Null` by default, so no hardware is required. `make down` / `make down-reset` (drops volumes).
+- `make up` — `docker compose up --build -d`; app on `http://localhost:${GATEWAY_PORT:-8088}`, MailHog on `:8025`. The Development environment runs the biometric simulator (`Biometric:Driver` = `Null` in `appsettings.Development.json`), so no hardware is required; outside Development and Testing the simulator is never used (BP-09) and the API runs with no reader at all. `make down` / `make down-reset` (drops volumes).
 - `make virt-up` / `make virt-down` — the PayFast mountebank imposter and the firmware's native simulator as plain processes.
 - `make test-e2e-device` — the same device end-to-end proof CI runs, against whatever Postgres answers on `E2E_PG_HOST:E2E_PG_PORT` (default a throwaway container on `localhost:5439`).
 - `make test`, `make test-iot`, `make test-iot-asan`, `make test-integration`, `make test-e2e`, `make corpus-check`, `make complexity` — the individual gates.
