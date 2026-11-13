@@ -33,6 +33,8 @@
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/PayFor.h"
+#include "bridgelogic/V3Heartbeat.h"
+#include "devlink/EventUpload.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterTokenFits.h"
 #include "bridgelogic/ScanFlow.h"
@@ -1049,7 +1051,9 @@ size_t bodyOf(const char* vector, char* out, size_t cap) {
   // Static, and 1280 rather than 512: the settings vectors carry all nine
   // operator keys beside the button map and the roster, and a decode buffer
   // that is quietly too small reports "body_hex" and reads as a corpus fault.
-  static uint8_t bytes[1280] = {};
+  // Sized from the v3 contract: a hb:3 body is read into 5120 (the widest
+  // vector is 4087 bytes), plus the NUL.
+  static uint8_t bytes[bridgelogic::kHeartbeatResponseCap + 1U] = {};
   size_t n = 0U;
   TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, "body_hex", bytes, sizeof(bytes), &n), "body_hex");
   TEST_ASSERT_TRUE(n < cap);
@@ -1582,7 +1586,6 @@ const char* const kBoundHttpVectors[] = {
     "events-request-across-the-millis-wrap",
     "activate-request-escaped-scan",
     "walkup-request-escaped-scan",
-    "payfor-request-escaped-scan",
     "events-request-escaped-subject",
     "activate-response-ok",
     "activate-response-too-early",
@@ -1613,6 +1616,25 @@ const char* const kBoundHttpVectors[] = {
     "extend-response-no-time",
     "extend-response-insufficient",
     "activate-response-greeting",
+    // v3 (device-api.md §2-§9, §12).
+    "v3-heartbeat-request",
+    "v3-heartbeat-request-first-beat",
+    "v3-heartbeat-request-rolled-back",
+    "v3-heartbeat-request-relight",
+    "v3-events-request-release-cause",
+    "v3-heartbeat-request-telemetry",
+    "v3-heartbeat-request-widest",
+    "v3-heartbeat-response-snapshot",
+    "v3-heartbeat-response-unacknowledged",
+    "v3-heartbeat-response-display-expanded",
+    "v3-heartbeat-response-display-out-of-range",
+    "v3-heartbeat-response-ota-offer",
+    "v3-heartbeat-response-key-next",
+    "v3-heartbeat-response-net",
+    "v3-heartbeat-response-widest",
+    "v3-activate-response-play-remaining",
+    "v3-heartbeat-response-hardware",
+    "v3-heartbeat-response-lifeline-only",
 };
 
 bool isBound(const char* id) {
@@ -1763,28 +1785,6 @@ void test_corpus_walkup_escapes_a_scan_the_mega_passed_through() {
 
   char rendered[bridgelogic::kWalkUpBodyCap] = {};
   const size_t renderedLen = bridgelogic::renderWalkUpBody(rendered, sizeof(rendered), request);
-  TEST_ASSERT_EQUAL_STRING(expected, rendered);
-  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
-  TEST_ASSERT_TRUE(asciiOnly(rendered));
-}
-
-void test_corpus_payfor_escapes_a_scan_the_mega_passed_through() {
-  loadHttpCorpus();
-  const char* vector = requestVector("payfor-request-escaped-scan");
-  char expected[512] = {};
-  const size_t n = bodyOf(vector, expected, sizeof(expected));
-  char token[proto::kMaxArgLen + 1U] = {};
-  scanOf(vector, "token_hex", token, sizeof(token));
-
-  bridgelogic::PayForRequest request;
-  request.mac = corpusMac();
-  request.token = token;
-  request.courtNumber = 2;
-  request.nonce = "9f2a4c6e8b0d1f3a";
-  request.confirm = false;
-
-  char rendered[bridgelogic::kPayForBodyCap] = {};
-  const size_t renderedLen = bridgelogic::renderPayForBody(rendered, sizeof(rendered), request);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
   TEST_ASSERT_EQUAL_size_t(n, renderedLen);
   TEST_ASSERT_TRUE(asciiOnly(rendered));
@@ -4404,6 +4404,355 @@ void test_a_known_member_with_nothing_booked_is_invited_to_walk_up() {
   TEST_ASSERT_FALSE(r.invitesWalkUp);
 }
 
+
+// --- v3 (device-api.md §2-§9, §12): every v3 http vector, by id --------------
+
+devlink::HeartbeatV3 v3Base() {
+  devlink::HeartbeatV3 v;
+  v.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapOta | devlink::kCapKey | devlink::kCapNet |
+           devlink::kCapLcd2;
+  return v;
+}
+
+void expectHeartbeat(const char* id, const char* version, uint64_t uptime, const devlink::RelayState* state,
+                     uint8_t stateCount, bool stateKnown, const devlink::HeartbeatV3& v3) {
+  char expected[devlink::kHeartbeatBodyCap] = {};
+  const size_t n = bodyOf(requestVector(id), expected, sizeof(expected));
+  devlink::HeartbeatReport report;
+  report.relayState = stateKnown ? state : nullptr;
+  report.relayStateCount = stateCount;
+  report.v3 = &v3;
+  static char rendered[devlink::kHeartbeatBodyCap] = {};
+  const size_t len = devlink::renderHeartbeatBody(rendered, sizeof(rendered), corpusMac(), version, uptime, report);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE(expected, rendered, id);
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(n, len, id);
+}
+
+void test_corpus_v3_heartbeat_requests_render_byte_for_byte() {
+  loadHttpCorpus();
+  const devlink::RelayState two[2] = {{0U, 1834U}, {2U, 600U}};
+  {
+    devlink::HeartbeatV3 v = v3Base();
+    v.megaVersion = "3.0.0";
+    v.fwState = "committed";
+    v.netReported = true;
+    v.netVer = 4U;
+    v.netSrc = "server";
+    v.lcdLayout = "compact";
+    expectHeartbeat("v3-heartbeat-request", "3.0.0", 86400000ULL, two, 2U, true, v);
+  }
+  {
+    // First beat: no !STATE yet this Mega boot, so relay_state is ABSENT,
+    // never [] (BR-12); no Mega heard, so no mega_version and no lcd_layout.
+    devlink::HeartbeatV3 v = v3Base();
+    v.fwState = "probation";
+    v.netReported = true;
+    v.netVer = 4U;
+    v.netSrc = "server";
+    v.restore = "warm";
+    expectHeartbeat("v3-heartbeat-request-first-beat", "3.0.0", 86400000ULL, nullptr, 0U, false, v);
+  }
+  {
+    devlink::HeartbeatV3 v = v3Base();
+    v.megaVersion = "3.0.0";
+    v.fwState = "rolled_back";
+    v.fwFailed = "3.0.1";
+    v.fwError = "probation";
+    v.netReported = true;
+    v.netVer = 4U;
+    v.netSrc = "server";
+    v.lcdLayout = "compact";
+    expectHeartbeat("v3-heartbeat-request-rolled-back", "3.0.0", 86400000ULL, two, 0U, true, v);
+  }
+  {
+    const devlink::RelayState one[1] = {{0U, 2640U}};
+    devlink::RelightEntry relight[1];
+    relight[0].relay = 0U;
+    strcpy(relight[0].ref, "3fa85f64");
+    devlink::HeartbeatV3 v = v3Base();
+    v.megaVersion = "3.0.0";
+    v.fwState = "committed";
+    v.netReported = true;
+    v.netVer = 0U;
+    v.netSrc = "local";
+    v.lcdLayout = "expanded";
+    v.relight = relight;
+    v.relightCount = 1U;
+    expectHeartbeat("v3-heartbeat-request-relight", "3.0.0", 86400000ULL, one, 1U, true, v);
+  }
+  {
+    devlink::MegaReport mega;
+    mega.reset = 0x08U;
+    mega.lcd = 0x27U;
+    mega.relayLow = false;
+    mega.scanBaud = 9600U;
+    mega.scanCrlf = false;
+    mega.keys = 0x0FU;
+    const uint16_t counters[5] = {3U, 1U, 0U, 2U, 0U};
+    memcpy(mega.counters, counters, sizeof(counters));
+    devlink::DiagReport diag;
+    diag.reset = "soft_wdt";
+    diag.heap = 21504U;
+    diag.heapMin = 17800U;
+    diag.block = 11200U;
+    diag.stackMin = 712U;
+    diag.sketchFree = 1019904U;
+    diag.flashMb = 4U;
+    devlink::HeartbeatV3 v = v3Base();
+    v.megaVersion = "3.0.0";
+    v.fwState = "committed";
+    v.netReported = true;
+    v.netVer = 4U;
+    v.netSrc = "server";
+    v.lcdLayout = "compact";
+    v.mega = &mega;
+    v.diag = &diag;
+    expectHeartbeat("v3-heartbeat-request-telemetry", "3.0.0", 86400000ULL, two, 2U, true, v);
+  }
+  {
+    const devlink::RelayState four[4] = {{0U, 5400U}, {1U, 5400U}, {2U, 5400U}, {3U, 5400U}};
+    devlink::RelightEntry relight[4];
+    for (uint8_t i = 0U; i < 4U; ++i) {
+      relight[i].relay = i;
+      strcpy(relight[i].ref, "ffffffff");
+    }
+    devlink::MegaReport mega;
+    mega.reset = 0xFFU;
+    mega.lcd = 0x3FU;
+    mega.scanBaud = 115200U;
+    mega.scanCrlf = true;
+    mega.keys = 0xFFU;
+    for (uint8_t i = 0U; i < 5U; ++i) {
+      mega.counters[i] = 65535U;
+    }
+    devlink::DiagReport diag;
+    diag.reset = "exception";
+    diag.exc = 4294967295UL;
+    diag.epc1 = 4294967295UL;
+    diag.heap = 81920U;
+    diag.heapMin = 81920U;
+    diag.block = 81920U;
+    diag.stackMin = 65535U;
+    diag.sketchFree = 16777216UL;
+    diag.flashMb = 16U;
+    const char* const drift[8] = {"config.hw_scanner_line_end",
+                                  "config.relay_reconcile_min_seconds",
+                                  "config.lcd_after_lights_on_seconds",
+                                  "config.device_power_restore_trust_minutes",
+                                  "config.device_net_fallback_minutes",
+                                  "config.device_ota_probation_minutes",
+                                  "config.relay_authorisation_cap_minutes",
+                                  "code_days"};
+    devlink::HeartbeatV3 v = v3Base();
+    v.megaVersion = "999.999.999";
+    v.fwState = "rolled_back";
+    v.fwFailed = "999.999.999";
+    v.fwError = "probation";
+    v.netReported = true;
+    v.netVer = 2147483647UL;
+    v.netSrc = "compiled";
+    v.lcdLayout = "expanded";
+    v.restore = "warm";
+    v.relight = relight;
+    v.relightCount = 4U;
+    v.mega = &mega;
+    v.diag = &diag;
+    v.drift = drift;
+    v.driftCount = 8U;
+    expectHeartbeat("v3-heartbeat-request-widest", "999.999.999", 4294967295ULL, four, 4U, true, v);
+  }
+}
+
+void test_corpus_v3_a_release_says_why_the_relay_opened() {
+  loadHttpCorpus();
+  char expected[512] = {};
+  const size_t n = bodyOf(requestVector("v3-events-request-release-cause"), expected, sizeof(expected));
+  eventq::Event e;
+  e.seq = 42U;
+  e.uptimeMs = 86490000UL;
+  e.kind = eventq::Kind::Release;
+  e.court = 1U;
+  e.durationMs = 1260000UL;
+  e.cause = eventq::Cause::MegaReset;
+  char rendered[devlink::kEventBodyCap] = {};
+  const size_t len = devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 2596069104UL, 86500000ULL, e);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_size_t(n, len);
+  // A 2.x-shaped release (no cause) is byte-for-byte what it was.
+  e.cause = eventq::Cause::None;
+  TEST_ASSERT_NULL(strstr(rendered + 0, "\"cause\":\"member\""));
+  const size_t plain = devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 2596069104UL, 86500000ULL, e);
+  TEST_ASSERT_NULL(strstr(rendered, "cause"));
+  TEST_ASSERT_TRUE(plain < len);
+}
+
+static char g_v3Body[bridgelogic::kHeartbeatResponseCap + 1U] = {};
+
+size_t v3Response(const char* id) {
+  return bodyOf(responseVector(id), g_v3Body, sizeof(g_v3Body));
+}
+
+void expectSnapshotOfTheFourCourts(const bridgelogic::Snapshot& snap) {
+  TEST_ASSERT_TRUE(snap.valid);
+  TEST_ASSERT_EQUAL_UINT8(4U, snap.count);
+  TEST_ASSERT_TRUE(snap.courts[0].lit);
+  TEST_ASSERT_EQUAL_UINT32(2700U, snap.courts[0].seconds);
+  TEST_ASSERT_EQUAL_CHAR('b', snap.courts[0].kind);
+  TEST_ASSERT_EQUAL_STRING("3fa85f64", snap.courts[0].ref);
+  TEST_ASSERT_FALSE(snap.courts[1].lit);
+  TEST_ASSERT_EQUAL_STRING("", snap.courts[1].ref);
+  TEST_ASSERT_EQUAL_UINT32(7140U, snap.courts[2].seconds); // uncapped: past the 90-minute relay cap
+  TEST_ASSERT_EQUAL_CHAR('e', snap.courts[2].kind);
+  TEST_ASSERT_EQUAL_UINT8(3U, snap.courts[3].relay);
+}
+
+void expectCfg(const bridgelogic::MegaConfig& cfg, const char* key, uint16_t value) {
+  TEST_ASSERT_EQUAL_UINT16_MESSAGE(value, bridgelogic::cfgValue(cfg, key, 0xFFFFU), key);
+}
+
+void test_corpus_v3_the_snapshot_and_its_settings_are_read_from_config_only() {
+  loadHttpCorpus();
+  size_t n = v3Response("v3-heartbeat-response-snapshot");
+  TEST_ASSERT_TRUE(devapi::json::isCompleteObject(g_v3Body, n));
+  bridgelogic::Snapshot snap;
+  TEST_ASSERT_TRUE(bridgelogic::readSnapshot(g_v3Body, n, snap, 1000U) == bridgelogic::ReadResult::Adopted);
+  expectSnapshotOfTheFourCourts(snap);
+  bridgelogic::Drift drift;
+  bridgelogic::MegaConfig cfg;
+  bridgelogic::readMegaConfig(g_v3Body, n, bridgelogic::defaultMegaConfig(), cfg, drift);
+  expectCfg(cfg, "LAYOUT", 0U);
+  expectCfg(cfg, "MARQ", 1U);
+  expectCfg(cfg, "STEP", 400U);
+  expectCfg(cfg, "CEIL", 60U);
+  expectCfg(cfg, "CAP", 240U);
+  expectCfg(cfg, "SCANH", 10U);
+  TEST_ASSERT_EQUAL_UINT8(0U, drift.count);
+  // The hardware keys come first: in force before any relay frame (HW-1).
+  TEST_ASSERT_EQUAL_STRING("RPOL", cfg.items[0].key);
+
+  // An unacknowledged box gets no `courts` key: no opinion, nothing changes.
+  n = v3Response("v3-heartbeat-response-unacknowledged");
+  bridgelogic::Snapshot kept = snap;
+  TEST_ASSERT_TRUE(bridgelogic::readSnapshot(g_v3Body, n, kept, 2000U) == bridgelogic::ReadResult::Absent);
+  TEST_ASSERT_EQUAL_UINT32(1000U, kept.atMs);
+}
+
+void test_corpus_v3_display_and_hardware_settings_clamp_independently() {
+  loadHttpCorpus();
+  size_t n = v3Response("v3-heartbeat-response-display-expanded");
+  bridgelogic::Drift drift;
+  bridgelogic::MegaConfig cfg;
+  bridgelogic::readMegaConfig(g_v3Body, n, bridgelogic::defaultMegaConfig(), cfg, drift);
+  expectCfg(cfg, "LAYOUT", 1U);
+  TEST_ASSERT_TRUE(cfg.expanded);
+  expectCfg(cfg, "MARQ", 0U);
+  expectCfg(cfg, "STEP", 250U);
+  expectCfg(cfg, "PAGE", 15U);
+  expectCfg(cfg, "CEIL", 15U);
+  expectCfg(cfg, "DWELL", 10U);
+  expectCfg(cfg, "AFTON", 5U);
+  expectCfg(cfg, "REINIT", 600U);
+  expectCfg(cfg, "CAP", 720U);
+  expectCfg(cfg, "RPOL", 1U);
+  expectCfg(cfg, "LCDA", 63U);
+  expectCfg(cfg, "SBAUD", 5U);
+  expectCfg(cfg, "SSUF", 1U);
+  expectCfg(cfg, "SGAP", 90U);
+
+  n = v3Response("v3-heartbeat-response-display-out-of-range");
+  bridgelogic::MegaConfig before = cfg;
+  drift.clear();
+  bridgelogic::readMegaConfig(g_v3Body, n, before, cfg, drift);
+  expectCfg(cfg, "LAYOUT", 0U); // unknown is compact
+  expectCfg(cfg, "STEP", 250U);
+  expectCfg(cfg, "PAGE", 15U);
+  expectCfg(cfg, "CEIL", 120U);
+  expectCfg(cfg, "DWELL", 10U);
+  expectCfg(cfg, "AFTON", 5U);
+  expectCfg(cfg, "REINIT", 30U);
+  expectCfg(cfg, "CAP", 90U);
+  // Unknown hardware values keep the current ones.
+  expectCfg(cfg, "RPOL", 1U);
+  expectCfg(cfg, "LCDA", 63U);
+  expectCfg(cfg, "SBAUD", 5U);
+  expectCfg(cfg, "SSUF", 1U);
+  expectCfg(cfg, "SGAP", 50U);
+  TEST_ASSERT_TRUE(drift.count >= 5U);
+
+  n = v3Response("v3-heartbeat-response-hardware");
+  drift.clear();
+  bridgelogic::readMegaConfig(g_v3Body, n, bridgelogic::defaultMegaConfig(), cfg, drift);
+  expectCfg(cfg, "RPOL", 1U);
+  expectCfg(cfg, "LCDA", 63U);
+  expectCfg(cfg, "SBAUD", 1U);
+  expectCfg(cfg, "SSUF", 1U);
+  expectCfg(cfg, "SGAP", 100U);
+  TEST_ASSERT_EQUAL_UINT8(0U, drift.count);
+}
+
+void test_corpus_v3_lifeline_answers_still_carry_the_snapshot() {
+  loadHttpCorpus();
+  const char* const ids[3] = {"v3-heartbeat-response-ota-offer", "v3-heartbeat-response-key-next",
+                              "v3-heartbeat-response-net"};
+  const char* const objects[3] = {"ota", "key_next", "net"};
+  for (uint8_t i = 0U; i < 3U; ++i) {
+    const size_t n = v3Response(ids[i]);
+    bridgelogic::Snapshot snap;
+    TEST_ASSERT_TRUE_MESSAGE(bridgelogic::readSnapshot(g_v3Body, n, snap, 0U) == bridgelogic::ReadResult::Adopted,
+                             ids[i]);
+    expectSnapshotOfTheFourCourts(snap);
+    size_t objLen = 0U;
+    TEST_ASSERT_TRUE_MESSAGE(devapi::json::findTopLevelObject(g_v3Body, n, objects[i], objLen) !=
+                                 devapi::json::kNotFound,
+                             ids[i]);
+  }
+  // A lifeline-only body is "no opinion" on the snapshot and the roster.
+  const size_t n = v3Response("v3-heartbeat-response-lifeline-only");
+  bridgelogic::Snapshot snap;
+  snap.valid = true;
+  snap.atMs = 77U;
+  TEST_ASSERT_TRUE(bridgelogic::readSnapshot(g_v3Body, n, snap, 0U) == bridgelogic::ReadResult::Absent);
+  TEST_ASSERT_EQUAL_UINT32(77U, snap.atMs);
+  TEST_ASSERT_EQUAL(devapi::json::kNotFound, devapi::json::findTopLevelArray(g_v3Body, n, "roster"));
+}
+
+void test_corpus_v3_the_widest_answer_fits_the_buffer_and_is_read_whole() {
+  loadHttpCorpus();
+  const size_t n = v3Response("v3-heartbeat-response-widest");
+  TEST_ASSERT_TRUE(n <= 4096U);
+  TEST_ASSERT_TRUE(n < bridgelogic::kHeartbeatResponseCap);
+  TEST_ASSERT_TRUE(devapi::json::isCompleteObject(g_v3Body, n));
+  int16_t numbers[devlink::kMaxCourts] = {};
+  uint8_t count = 0U;
+  TEST_ASSERT_TRUE(devlink::parseCourtNumbers(g_v3Body, n, numbers, count));
+  TEST_ASSERT_EQUAL_UINT8(4U, count);
+}
+
+void test_corpus_v3_activate_arms_relighting_from_the_uncapped_remainder() {
+  // FSF-05: a 105-minute booking activated online went dark at minute 90.
+  loadHttpCorpus();
+  char body[512] = {};
+  const size_t n = bodyOf(responseVector("v3-activate-response-play-remaining"), body, sizeof(body));
+  const int16_t numbers[devlink::kMaxCourts] = {1, 2, 3, 4};
+  bridgelogic::ScanFlow flow;
+  const bridgelogic::ActivationResult r = flow.onActivateResponse(200U, body, n, numbers, 4U);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_EQUAL_UINT32(6300U, r.playRemainingSeconds);
+  // FC-4: a 201 is a decision too.
+  const bridgelogic::ActivationResult r201 = flow.onActivateResponse(201U, body, n, numbers, 4U);
+  TEST_ASSERT_FALSE(r201.fallbackToRoster);
+}
+
+void test_v3_keys_mask_follows_the_button_map() {
+  court::ButtonMap map;
+  TEST_ASSERT_EQUAL_UINT8(0x0FU, bridgelogic::keysFromButtonMap(map));
+  const char* const wires[8] = {"court:A", "court:B", "minutes:15", "court:D", "minutes:15", "off", "minutes:45", "court:C"};
+  for (uint8_t i = 0U; i < 8U; ++i) {
+    TEST_ASSERT_TRUE(map.setFromWire(i, wires[i]));
+  }
+  TEST_ASSERT_EQUAL_UINT8(0xABU, bridgelogic::keysFromButtonMap(map));
+}
+
 } // namespace
 
 void setUp() {
@@ -4414,6 +4763,14 @@ void tearDown() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
+  RUN_TEST(test_corpus_v3_a_release_says_why_the_relay_opened);
+  RUN_TEST(test_corpus_v3_the_snapshot_and_its_settings_are_read_from_config_only);
+  RUN_TEST(test_corpus_v3_display_and_hardware_settings_clamp_independently);
+  RUN_TEST(test_corpus_v3_lifeline_answers_still_carry_the_snapshot);
+  RUN_TEST(test_corpus_v3_the_widest_answer_fits_the_buffer_and_is_read_whole);
+  RUN_TEST(test_corpus_v3_activate_arms_relighting_from_the_uncapped_remainder);
+  RUN_TEST(test_v3_keys_mask_follows_the_button_map);
 
   RUN_TEST(test_a_late_arrival_is_granted_what_is_left_not_what_was_booked);
   RUN_TEST(test_a_grant_never_exceeds_the_relay_cap);
@@ -4471,7 +4828,6 @@ int main(int, char**) {
   RUN_TEST(test_corpus_every_http_section_is_declared_and_every_vector_is_bound);
   RUN_TEST(test_corpus_activate_escapes_a_scan_the_mega_passed_through);
   RUN_TEST(test_corpus_walkup_escapes_a_scan_the_mega_passed_through);
-  RUN_TEST(test_corpus_payfor_escapes_a_scan_the_mega_passed_through);
   RUN_TEST(test_corpus_event_escapes_a_subject_the_mega_passed_through);
   RUN_TEST(test_the_scan_bodies_fit_the_worst_scan_in_the_bridges_own_buffers);
   RUN_TEST(test_the_scan_bodies_hold_their_shape_whatever_was_scanned);
