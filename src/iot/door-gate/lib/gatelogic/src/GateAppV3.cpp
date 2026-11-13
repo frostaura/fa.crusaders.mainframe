@@ -154,7 +154,7 @@ void GateApp::restoreCold(uint32_t nowMs) {
     settingsWrittenValid_ = true;
   }
   const uint32_t trustMinutes = state_.settings.powerRestoreTrustMinutes;
-  ColdRoster cold;
+  static ColdRoster cold;
   uint32_t age = 0U;
   if (trustMinutes == 0U ||
       !sealedGet(*blobs_, kRecRoster, kRosterLayout, cold, gScratch, sizeof(gScratch)) ||
@@ -201,7 +201,9 @@ void GateApp::applyState(uint32_t nowMs) {
 void GateApp::persistDirty(uint32_t nowMs) {
   if (warmDirty_ && warmBytes_ != nullptr && warmClock_ != nullptr && warmBytesCap_ >= sizeof(WarmImage)) {
     const uint64_t nowUs = warmClock_->nowUs();
-    gWarm = WarmImage();
+    // Cleared in place: `gWarm = WarmImage()` builds a 3.5 KB temporary on the
+    // loop task's stack, which put the worst path past its 8 KB (ESPR-4).
+    memset(static_cast<void*>(&gWarm), 0, sizeof(gWarm));
     gWarm.settings = state_.settings;
     gWarm.roster = state_.roster;
     gWarm.codes = state_.codes;
@@ -239,7 +241,8 @@ void GateApp::persistColdRoster(uint32_t nowMs) {
       !rosterWrittenValid_ || !sameContent(rosterWritten_.entries, rosterWritten_.count, rosterWrittenAnchorMs_,
                                            state_.roster.entries, state_.roster.count, state_.roster.anchorMs);
   if (changed) {
-    ColdRoster cold;
+    // Static, like every record buffer here: 1.7 KB is not the loop's to spend.
+    static ColdRoster cold;
     for (uint8_t i = 0U; i < state_.roster.count; ++i) {
       cold.entries[i] = state_.roster.entries[i];
     }
@@ -279,7 +282,7 @@ void GateApp::persistEvents() {
   if (signature == eventsSignature_) {
     return;
   }
-  gEvents = EventsRecord();
+  memset(static_cast<void*>(&gEvents), 0, sizeof(gEvents));
   for (uint16_t i = 0U; i < carriedCount_ && gEvents.count < kStoredEventSlots; ++i) {
     gEvents.events[gEvents.count] = carried_[i];
     ++gEvents.count;
