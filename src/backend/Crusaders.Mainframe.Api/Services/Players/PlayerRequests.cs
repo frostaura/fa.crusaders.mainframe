@@ -67,6 +67,13 @@ public static class PlayerErrors
 
     /// <summary>Pay what you can: the part named is not a whole part of the share (see <see cref="PayWhatYouCan"/>).</summary>
     public const string PayMinutesInvalid = "pay_minutes_invalid";
+
+    /// <summary>
+    /// Pay what you can is for a partner who is SHORT (money lane BM-5): one whose spendable minutes,
+    /// with what the seat has already paid, cover the whole share is refused a part payment — otherwise
+    /// any partner could drop their share to one minute and leave the organiser carrying it.
+    /// </summary>
+    public const string ShareAffordable = "share_affordable";
     public const string PreviouslyDeclined = "player_previously_declined";
     public const string PreviouslyRemoved = "player_previously_removed";
     public const string InviteLimit = "player_invite_limit";
@@ -120,4 +127,12 @@ public static class PayWhatYouCan
     /// </summary>
     public static bool IsValid(int pay, int shareMinutes, int paidMinutes) =>
         pay > 0 && pay < shareMinutes && pay >= paidMinutes;
+
+    /// <summary>
+    /// Whether the partner is short of the share at all: what the seat has paid plus every minute they
+    /// may spend is less than the share (money lane BM-5). Only then may they pay part of it — a
+    /// partner who can afford the whole share pays the whole share.
+    /// </summary>
+    public static bool IsShort(int shareMinutes, int paidMinutes, int spendableMinutes) =>
+        (long)paidMinutes + Math.Max(0, spendableMinutes) < shareMinutes;
 }
