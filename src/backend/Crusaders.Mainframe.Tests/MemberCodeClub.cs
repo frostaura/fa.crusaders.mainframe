@@ -111,7 +111,9 @@ internal sealed class MemberCodeClub
             .ToList();
         db.Courts.AddRange(courts);
 
-        var refs = refValues ?? [.. Enumerable.Range(0, 4).Select(_ => Random.Shared.Next(1, MemberCodeMath.MaxRefValue))];
+        // Four DISTINCT draws: (TenantId, Ref) is unique, and four independent draws collide often
+        // enough across the suite's hundreds of seeds to fail a run (CI 43402729679, shard 2).
+        var refs = refValues ?? DistinctRefs(4);
         var (admin, _) = Person(db, tenant.Id, slug, "adm", "Ada Admin", true);
         var (olga, olgaM) = Person(db, tenant.Id, slug, "olga", "Olga Organiser", false);
         var (pam, _) = Person(db, tenant.Id, slug, "pam", "Pam Payer", false);
@@ -154,6 +156,17 @@ internal sealed class MemberCodeClub
             Courts = [.. courts.Select(c => c.Id)], BoxMac = boxMac, DoorMac = doorMac, Refs = refMap,
             Zone = JsonDocument.Parse(settings).RootElement.TryGetProperty("timezone", out var tz) ? tz.GetString()! : "UTC",
         };
+    }
+
+    private static int[] DistinctRefs(int count)
+    {
+        var refs = new HashSet<int>();
+        while (refs.Count < count)
+        {
+            refs.Add(Random.Shared.Next(1, MemberCodeMath.MaxRefValue));
+        }
+
+        return [.. refs];
     }
 
     private static (Guid User, Guid Membership) Person(MainframeDbContext db, Guid tenantId, string slug, string handle, string name, bool admin)
