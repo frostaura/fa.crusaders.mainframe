@@ -107,7 +107,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
       if (failure instanceof UnsureOutcome) void balance.refresh({ expectSelf: true });
       // R8 X8-5 — a 402 is the club saying this phone's wallet is stale (somebody else moved it): read
       // it again, bare (not this member's doing), so the chip says what the sheet now does.
-      else if (codeOf(failure) === "insufficient_balance") void balance.refresh();
+      else if (codeOf(failure) === "insufficient_balance" || codeOf(failure) === "share_affordable") void balance.refresh();
       void afterRefusal(failure);
     },
   });

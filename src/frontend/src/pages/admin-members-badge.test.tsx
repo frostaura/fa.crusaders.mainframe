@@ -60,7 +60,7 @@ function applicant(n: number): MemberRow {
  * @param commitButFail answers the approve POST with 500 AFTER applying it — the shape an
  *   SMTP outage produced for real: the row is committed and the caller is told it was not.
  */
-function stubClub(members: MemberRow[], commitButFail = false) {
+function stubClub(members: MemberRow[], commitButFail = false, refuseUnverified = false) {
   const state = { members: [...members] };
 
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -74,6 +74,15 @@ function stubClub(members: MemberRow[], commitButFail = false) {
     } as unknown as Response);
 
     const approve = /\/api\/v1\/admin\/members\/([^/]+)\/approve$/.exec(path);
+    if (method === "POST" && approve && refuseUnverified) {
+      // BP-02: the API refuses to approve an address nobody has confirmed, and changes nothing.
+      return Promise.resolve({
+        ok: false, status: 409,
+        headers: { get: () => null },
+        text: () => Promise.resolve('{"error":"email_not_verified"}'),
+        json: () => Promise.resolve({ error: "email_not_verified" }),
+      } as unknown as Response);
+    }
     if (method === "POST" && approve) {
       state.members = state.members.map((m) =>
         m.membership_id === approve[1] ? { ...m, status: "Active" } : m);
@@ -180,6 +189,19 @@ describe("the pending-applications badge, after an approval on the same screen",
    * answer rather than with the console's optimism.
    * </p>
    */
+  it("says an unconfirmed applicant was not approved, and why, rather than 'Approval failed.'", async () => {
+    signIn({ isAdmin: true });
+    stubClub([applicant(1), applicant(2)], false, true);
+    renderConsole();
+    await waitFor(() => expect(screen.getAllByLabelText("2 membership applications awaiting review").length).toBeGreaterThan(0));
+
+    await approveFromRow(0);
+
+    expect(await screen.findByText(OUTCOMES.approveUnverified("Applicant 1"))).toBeInTheDocument();
+    expect(screen.queryByText(OUTCOMES.approveFailed)).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("2 membership applications awaiting review").length).toBeGreaterThan(0);
+  });
+
   it("agrees with the counter beside it even when the approval reports failure", async () => {
     signIn({ isAdmin: true });
     stubClub([applicant(1), applicant(2)], true);

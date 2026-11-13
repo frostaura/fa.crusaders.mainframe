@@ -201,6 +201,14 @@ function withFigures(e: ApiError, timezone?: string): string | null {
         ? "Your share has changed since you opened this. Check the new figure and say yes again."
         : `Your share is now ${minutesSpoken(share)}. Check it and say yes again if you're happy.`;
     }
+    case "share_affordable": {
+      // BM-5: pay-what-you-can is for a partner who is short. The wallet this phone showed was stale —
+      // the partner now has enough, so the whole share is theirs to pay.
+      const share = numberDetail(e, "share_minutes");
+      return share === null
+        ? "You now have enough minutes for your whole share, so pay all of it rather than part."
+        : `You now have enough minutes for your whole share of ${minutesSpoken(share)}, so pay all of it rather than part.`;
+    }
     case "insufficient_balance": {
       const have = numberDetail(e, "current_minutes");
       const need = numberDetail(e, "required_minutes");

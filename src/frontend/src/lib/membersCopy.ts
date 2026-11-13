@@ -243,6 +243,9 @@ export const OUTCOMES = {
   approvedUnnotified: (name: string) =>
     `${name} is approved, but the welcome email couldn't be queued. Their membership is active — tell them directly.`,
   approveFailed: "Approval failed.",
+  // BP-02: the API approves only a confirmed address; the record has the resend.
+  approveUnverified: (name: string) => `${name} has not confirmed their email address yet, so they were not approved.`
+    + " Open their record to resend the verification email.",
   /** F3-3: the reply was lost, the member was read again, and they are Active. */
   approvedAfterLostReply: (name: string) =>
     `${name} is approved — the reply got lost, so the club was asked, and their membership is active. Check with them that the welcome email arrived.`,

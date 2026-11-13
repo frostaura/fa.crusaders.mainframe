@@ -1,6 +1,6 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import { useToast } from "@/components/toastContext";
-import { endpoints } from "@/lib/api";
+import { endpoints, errorCode } from "@/lib/api";
 import { OUTCOMES } from "@/lib/membersCopy";
 import type { MemberRow } from "./membersModel";
 import { transitionTruth } from "./lostTransition";
@@ -62,6 +62,7 @@ export function useMemberLifecycle({ load }: Deps) {
       const truth = await transitionTruth(m.user_id, "Active", err);
       if (truth === "done") toast.push({ tone: "warning", text: OUTCOMES.approvedAfterLostReply(m.full_name), durationMs: 8000 });
       else if (truth === "unknown") toast.push({ tone: "warning", text: OUTCOMES.approveUnknown(m.full_name), durationMs: 8000 });
+      else if (errorCode(err) === "email_not_verified") toast.push({ tone: "warning", text: OUTCOMES.approveUnverified(m.full_name), durationMs: 10000 });
       else toast.push({ tone: "danger", text: OUTCOMES.approveFailed });
     } finally {
       await load();

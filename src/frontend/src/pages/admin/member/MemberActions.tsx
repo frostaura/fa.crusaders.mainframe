@@ -80,7 +80,7 @@ function useLifecycleItems({ detail, name, onChanged }: Props): LifecycleItems |
     label: COPY.approve, icon: <UserPlus aria-hidden="true" />,
     confirm: {
       title: COPY.approveTitle(name), description: COPY.approveBody, confirmLabel: COPY.approveConfirm, tone: "primary",
-      action: COPY.approveAction,
+      action: COPY.approveAction, codes: { email_not_verified: COPY.approveUnverified(name) },
       onConfirm: async () => {
         try {
           const r = await endpoints.adminApprove(id);

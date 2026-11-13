@@ -96,6 +96,9 @@ export const ACTIONS_COPY = {
   approveBody: "They become an active member straight away and are emailed to say so. They can then buy minutes and book.",
   approveConfirm: "Approve member",
   approveAction: "approve this application",
+  // BP-02: the API approves only a confirmed address — whoever typed it chose the password.
+  approveUnverified: (name: string) => `${name} has not confirmed their email address yet, so they cannot be approved.`
+    + " Send it again with Resend verification email, and approve them once they have clicked the link.",
   approved: (name: string) => `${name} is now an active member.`,
   approvedUnnotified: (name: string) => `${name} is active, but the email couldn't be queued. Tell them directly.`,
   approvedAfterLostReply: (name: string) =>
