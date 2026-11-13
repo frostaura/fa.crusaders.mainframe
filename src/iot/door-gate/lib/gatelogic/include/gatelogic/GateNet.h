@@ -93,6 +93,10 @@ public:
   const NetRecord& record() const { return record_; }
 
 private:
+  /// Each WiFi profile a set carries, in order, unless already listed.
+  void addProfiles(const devnet::NetSet& set);
+  /// One profile, unless already listed or the list is full.
+  void addProfile(const devnet::Profile& profile);
   void rebuild();
   bool persist();
 

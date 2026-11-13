@@ -26,51 +26,44 @@ bool courtOf(const proto::Frame& f, proto::Court& c) {
   return proto::courtFromChar(f.arg(0)[0], c);
 }
 
-/// `frame` rebuilt with `tag` (a v3 Mega), or as is (v2: tag 0).
-proto::Frame tagged(const proto::Frame& f, uint8_t tag) {
+/// An ON, OFF or EXT rebuilt with `tag`; empty when its court does not parse.
+proto::Frame taggedCourtFrame(const proto::Frame& f, uint8_t tag) {
   proto::Court c = proto::Court::A;
-  switch (f.verb()) {
-  case proto::Verb::On:
-    return courtOf(f, c) ? proto::Frame::on(c, argU32(f, 1U), tag) : proto::Frame();
-  case proto::Verb::Off:
-    return courtOf(f, c) ? proto::Frame::off(c, tag) : proto::Frame();
-  case proto::Verb::Ext:
-    return courtOf(f, c) ? proto::Frame::ext(c, argU32(f, 1U), tag) : proto::Frame();
-  case proto::Verb::Auth:
+  if (!courtOf(f, c)) {
+    return proto::Frame();
+  }
+  if (f.verb() == proto::Verb::On) {
+    return proto::Frame::on(c, argU32(f, 1U), tag);
+  }
+  return f.verb() == proto::Verb::Off ? proto::Frame::off(c, tag) : proto::Frame::ext(c, argU32(f, 1U), tag);
+}
+
+/// `frame` rebuilt with `tag` (a v3 Mega), or as is (v2: tag 0). Only the six
+/// acknowledged verbs carry a tag; anything else is an empty frame.
+proto::Frame tagged(const proto::Frame& f, uint8_t tag) {
+  const proto::Verb v = f.verb();
+  if (v == proto::Verb::On || v == proto::Verb::Off || v == proto::Verb::Ext) {
+    return taggedCourtFrame(f, tag);
+  }
+  if (v == proto::Verb::Auth) {
     return proto::Frame::auth(static_cast<uint16_t>(argU32(f, 0U)), tag);
-  case proto::Verb::Want: {
+  }
+  if (v == proto::Verb::Want) {
     const int32_t s[4] = {opinion(f, 1U), opinion(f, 2U), opinion(f, 3U), opinion(f, 4U)};
     return proto::Frame::want(tag, s);
   }
-  case proto::Verb::Cfg:
+  if (v == proto::Verb::Cfg) {
     return proto::Frame::cfg(tag, f.arg(1U), static_cast<uint16_t>(argU32(f, 2U)));
-  case proto::Verb::Unknown:
-  case proto::Verb::Lcd:
-  case proto::Verb::Rst:
-  case proto::Verb::Ping:
-  case proto::Verb::Btn:
-  case proto::Verb::Scan:
-  case proto::Verb::State:
-  case proto::Verb::Pong:
-  case proto::Verb::Evt:
-  case proto::Verb::Err:
-  case proto::Verb::Row:
-  case proto::Verb::Show:
-  case proto::Verb::Idle:
-  case proto::Verb::Map:
-  case proto::Verb::Rw:
-  case proto::Verb::Cmt:
-  case proto::Verb::Land:
-  case proto::Verb::Note:
-  case proto::Verb::Live:
-  case proto::Verb::Ack:
-  case proto::Verb::Boot:
-  case proto::Verb::Held:
-  case proto::Verb::Diag:
-  case proto::Verb::Hw:
-    break;
   }
   return proto::Frame();
+}
+
+/// The court a relay frame names, or 0xFF for one that names none.
+uint8_t courtByte(const proto::Frame& t) {
+  const proto::Verb v = t.verb();
+  proto::Court c = proto::Court::A;
+  const bool relay = v == proto::Verb::On || v == proto::Verb::Off || v == proto::Verb::Ext;
+  return relay && courtOf(t, c) ? static_cast<uint8_t>(c) : 0xFFU;
 }
 
 bool isV3Only(proto::Verb v) {
@@ -88,6 +81,17 @@ void stripBang(const char* in, char* out, size_t cap) {
 }
 
 } // namespace
+
+/// The most a whole screen encodes to: four RW frames and the CMT. Each text
+/// character escapes to at most three bytes (`%21`), and a frame's verb, three
+/// numbers, separators, checksum and newline fit in 32. Sized from the frames,
+/// not as kMaxRows + 1 times kMaxFrameLen (960 B): two of those on the stack
+/// put the bridge's deepest loop() path at 4144 B of a 4096-byte cont stack.
+/// proto::encode is capacity-checked byte by byte, so a screen that did not
+/// fit would be refused, never written past the end.
+constexpr size_t kRwFrameMax = (court::kLineLen * 3U) + 32U;
+constexpr size_t kScreenEncodeCap = (proto::kMaxRows * kRwFrameMax) + 48U;
+static_assert(kRwFrameMax <= proto::kMaxFrameLen, "an RW frame is a frame");
 
 size_t encodeV3Screen(const Screen& screen, uint8_t seq, char* out, size_t cap) {
   // v2's action-row-only update (flags bit1) is v3's keep with that row alone.
@@ -198,12 +202,7 @@ bool MegaTx::command(const proto::Frame& frame, uint32_t nowMs) {
     }
     return encodeAndQueue(tagged(frame, proto::kNoTag), true);
   }
-  uint8_t slot = kPendingSlots;
-  for (uint8_t i = 0U; i < kPendingSlots && slot == kPendingSlots; ++i) {
-    if (!pending_[i].used) {
-      slot = i;
-    }
-  }
+  const uint8_t slot = freeSlot();
   if (slot == kPendingSlots) {
     return false;
   }
@@ -220,11 +219,7 @@ bool MegaTx::command(const proto::Frame& frame, uint32_t nowMs) {
   p.attempts = 1U;
   p.sentAtMs = nowMs;
   p.verb = t.verb();
-  proto::Court c = proto::Court::A;
-  p.court =
-      (p.verb == proto::Verb::On || p.verb == proto::Verb::Off || p.verb == proto::Verb::Ext) && courtOf(t, c)
-          ? static_cast<uint8_t>(c)
-          : 0xFFU;
+  p.court = courtByte(t);
   p.len = static_cast<uint8_t>(len);
   memcpy(p.line, line, len);
   if (frame.verb() == proto::Verb::Cfg && strcmp(frame.arg(1U), "LAYOUT") == 0) {
@@ -232,6 +227,15 @@ bool MegaTx::command(const proto::Frame& frame, uint32_t nowMs) {
     layoutTag_ = tag;
   }
   return true;
+}
+
+uint8_t MegaTx::freeSlot() const {
+  for (uint8_t i = 0U; i < kPendingSlots; ++i) {
+    if (!pending_[i].used) {
+      return i;
+    }
+  }
+  return kPendingSlots;
 }
 
 bool MegaTx::plain(const proto::Frame& frame) {
@@ -244,28 +248,7 @@ bool MegaTx::plain(const proto::Frame& frame) {
 bool MegaTx::screen(const Screen& s, uint32_t nowMs) {
   if (dialect_ != MegaDialect::V3) {
     // v2 (or not yet heard: a 2.1.0 Mega reads !ROW/!SHOW, and so does 3.0.0).
-    char buf[(proto::kMaxRows + 1U) * proto::kMaxFrameLen];
-    size_t at = 0U;
-    for (size_t i = 0U; i < kScreenFrameCount; ++i) {
-      proto::Frame f = screenFrame(s, i);
-      if (i < proto::kMaxRows) {
-        char text[court::kLineLen + 1U];
-        stripBang(s.rows[i], text, sizeof(text));
-        f = proto::Frame::row(static_cast<uint8_t>(i), text);
-      }
-      const size_t n = proto::encode(f, buf + at, sizeof(buf) - at);
-      if (n == 0U) {
-        return false;
-      }
-      at += n;
-    }
-    if (!enqueue(buf, at, false)) {
-      if (screensDropped_ < UINT16_MAX) {
-        ++screensDropped_;
-      }
-      return false;
-    }
-    return true;
+    return screenV2(s);
   }
   if (screenCount_ >= kScreenSlots) {
     // Full: the oldest waiting screen is dropped whole and counted.
@@ -278,6 +261,31 @@ bool MegaTx::screen(const Screen& s, uint32_t nowMs) {
   screens_[(screenHead_ + screenCount_) % kScreenSlots] = s;
   ++screenCount_;
   startScreen(nowMs);
+  return true;
+}
+
+bool MegaTx::screenV2(const Screen& s) {
+  char buf[kScreenEncodeCap];
+  size_t at = 0U;
+  for (size_t i = 0U; i < kScreenFrameCount; ++i) {
+    proto::Frame f = screenFrame(s, i);
+    if (i < proto::kMaxRows) {
+      char text[court::kLineLen + 1U];
+      stripBang(s.rows[i], text, sizeof(text));
+      f = proto::Frame::row(static_cast<uint8_t>(i), text);
+    }
+    const size_t n = proto::encode(f, buf + at, sizeof(buf) - at);
+    if (n == 0U) {
+      return false;
+    }
+    at += n;
+  }
+  if (!enqueue(buf, at, false)) {
+    if (screensDropped_ < UINT16_MAX) {
+      ++screensDropped_;
+    }
+    return false;
+  }
   return true;
 }
 
@@ -294,7 +302,7 @@ void MegaTx::startScreen(uint32_t nowMs) {
       ++screensDropped_;
     }
   }
-  char buf[(proto::kMaxRows + 1U) * proto::kMaxFrameLen];
+  char buf[kScreenEncodeCap];
   const uint8_t seq = seq_;
   const size_t n = encodeV3Screen(screens_[screenHead_], seq, buf, sizeof(buf));
   if (n == 0U || !enqueue(buf, n, false)) {
@@ -321,7 +329,7 @@ void MegaTx::onAck(const proto::Frame& ack, uint32_t nowMs) {
     screenInFlight_ = false;
     if (code == static_cast<uint32_t>(proto::AckCode::Incomplete) && screenResends_ == 0U) {
       // Re-sent once, whole, under a new seq.
-      char buf[(proto::kMaxRows + 1U) * proto::kMaxFrameLen];
+      char buf[kScreenEncodeCap];
       const uint8_t next = seq_;
       const size_t n = encodeV3Screen(inFlight_, next, buf, sizeof(buf));
       if (n > 0U && enqueue(buf, n, false)) {

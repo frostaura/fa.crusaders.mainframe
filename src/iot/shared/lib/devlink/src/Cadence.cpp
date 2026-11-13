@@ -210,20 +210,58 @@ void renderCaps(Out& o, uint8_t caps) {
   o.putc(']');
 }
 
+/// `relight`: the relays the bridge re-lit this boot, as `relay|ref` strings.
+void renderRelight(Out& o, const HeartbeatV3& v) {
+  if (v.relight == nullptr || v.relightCount == 0U) {
+    return;
+  }
+  o.put(",\"relight\":[");
+  const uint8_t n = v.relightCount > kMaxRelightElements ? kMaxRelightElements : v.relightCount;
+  for (uint8_t i = 0U; i < n; ++i) {
+    o.put(i == 0U ? "\"" : ",\"");
+    o.u32(v.relight[i].relay);
+    o.putc('|');
+    o.put(v.relight[i].ref);
+    o.putc('"');
+  }
+  o.putc(']');
+}
+
+/// `drift`: the keys of the server's last answer the board could not read (§11.2).
+void renderDrift(Out& o, const HeartbeatV3& v) {
+  if (v.drift == nullptr || v.driftCount == 0U) {
+    return;
+  }
+  o.put(",\"drift\":[");
+  const uint8_t n = v.driftCount > kMaxDriftNames ? kMaxDriftNames : v.driftCount;
+  for (uint8_t i = 0U; i < n; ++i) {
+    o.put(i == 0U ? "\"" : ",\"");
+    o.put(v.drift[i]);
+    o.putc('"');
+  }
+  o.putc(']');
+}
+
+/// The optional strings, each only when set.
+void renderV3Strings(Out& o, const HeartbeatV3& v) {
+  const struct {
+    const char* key;
+    const char* value;
+  } strings[] = {{"mega_version", v.megaVersion},
+                 {"fw_state", v.fwState},
+                 {"fw_failed", v.fwFailed},
+                 {"fw_error", v.fwError}};
+
+  for (const auto& s : strings) {
+    if (s.value != nullptr) {
+      o.str(s.key, s.value);
+    }
+  }
+}
+
 /// Everything after `relay_state`, in device-api.md §2's order, then caps.
 void renderV3(Out& o, const HeartbeatV3& v) {
-  if (v.megaVersion != nullptr) {
-    o.str("mega_version", v.megaVersion);
-  }
-  if (v.fwState != nullptr) {
-    o.str("fw_state", v.fwState);
-  }
-  if (v.fwFailed != nullptr) {
-    o.str("fw_failed", v.fwFailed);
-  }
-  if (v.fwError != nullptr) {
-    o.str("fw_error", v.fwError);
-  }
+  renderV3Strings(o, v);
   if (v.netReported) {
     o.num("net_ver", v.netVer);
     o.str("net_src", v.netSrc);
@@ -234,34 +272,14 @@ void renderV3(Out& o, const HeartbeatV3& v) {
   if (v.restore != nullptr) {
     o.str("restore", v.restore);
   }
-  if (v.relight != nullptr && v.relightCount > 0U) {
-    o.put(",\"relight\":[");
-    const uint8_t n = v.relightCount > kMaxRelightElements ? kMaxRelightElements : v.relightCount;
-    for (uint8_t i = 0U; i < n; ++i) {
-      o.put(i == 0U ? "\"" : ",\"");
-      o.u32(v.relight[i].relay);
-      o.putc('|');
-      o.put(v.relight[i].ref);
-      o.putc('"');
-    }
-    o.putc(']');
-  }
+  renderRelight(o, v);
   if (v.mega != nullptr) {
     renderMega(o, *v.mega);
   }
   if (v.diag != nullptr) {
     renderDiag(o, *v.diag);
   }
-  if (v.drift != nullptr && v.driftCount > 0U) {
-    o.put(",\"drift\":[");
-    const uint8_t n = v.driftCount > kMaxDriftNames ? kMaxDriftNames : v.driftCount;
-    for (uint8_t i = 0U; i < n; ++i) {
-      o.put(i == 0U ? "\"" : ",\"");
-      o.put(v.drift[i]);
-      o.putc('"');
-    }
-    o.putc(']');
-  }
+  renderDrift(o, v);
   renderCaps(o, v.caps);
 }
 

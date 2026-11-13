@@ -72,9 +72,7 @@ public:
   /// The 2.0.0 heartbeat, with the v3 fields and telemetry (device-api.md §2),
   /// rendered into a static kGateHeartbeatRequestCap buffer: 1.5 KB is too
   /// much to put on the loop task's stack under a blocking call.
-  HttpOutcome heartbeatV3(const char* mac, const char* firmwareVersion, uint64_t uptimeMs,
-                          const GateDiagnostics& counters, const GateReport& report, char* out,
-                          size_t outCap);
+  HttpOutcome heartbeatV3(const GateBeat& beat, char* out, size_t outCap);
 
   /// Called between a 401 and its retry with the other key: the caller kicks
   /// the watchdog and re-checks the lock, exactly as around any blocking call.

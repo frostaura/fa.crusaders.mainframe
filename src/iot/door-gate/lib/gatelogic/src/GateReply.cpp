@@ -224,59 +224,52 @@ ArrayRead readRoster(const jv::Value& body, RosterImage& image, uint32_t nowMs, 
   return ArrayRead::Adopted;
 }
 
-void readCodes(const jv::Value& body, CodeImage& image, Drift& drift, ArrayRead& days, ArrayRead& keys) {
-  days = ArrayRead::Absent;
-  keys = ArrayRead::Absent;
+namespace {
 
-  const jv::Value dayArray = jv::member(body, "code_days");
-  if (dayArray.present()) {
-    if (!dayArray.isArray()) {
-      drift.add("code_days");
-      days = ArrayRead::Kept;
-    } else {
-      memcode::DaySlot staged[memcode::kMaxDaySlots];
-      jv::ArrayIter it(dayArray);
-      jv::Value element;
-      size_t present = 0U;
-      size_t readable = 0U;
-      uint8_t slot = 0U;
-      while (it.next(element)) {
-        ++present;
-        memcode::DaySlot day;
-        if (readDayElement(element, day)) {
-          ++readable;
-          if (slot < memcode::kMaxDaySlots) {
-            staged[slot] = day;
-          }
-        }
-        // The slot is the server's index, readable or not: keys name it.
-        if (slot < UINT8_MAX) {
-          ++slot;
-        }
-      }
-      if (present > 0U && readable == 0U) {
-        drift.add("code_days");
-        days = ArrayRead::Kept;
-      } else {
-        if (readable < present) {
-          drift.add("code_days");
-        }
-        for (uint8_t s = 0U; s < memcode::kMaxDaySlots; ++s) {
-          image.days[s] = staged[s];
-        }
-        days = ArrayRead::Adopted;
+/// `code_days`: adopted whole, kept when nothing in a non-empty array reads.
+ArrayRead readCodeDays(const jv::Value& dayArray, CodeImage& image, Drift& drift) {
+  if (!dayArray.isArray()) {
+    drift.add("code_days");
+    return ArrayRead::Kept;
+  }
+  memcode::DaySlot staged[memcode::kMaxDaySlots];
+  jv::ArrayIter it(dayArray);
+  jv::Value element;
+  size_t present = 0U;
+  size_t readable = 0U;
+  uint8_t slot = 0U;
+  while (it.next(element)) {
+    ++present;
+    memcode::DaySlot day;
+    if (readDayElement(element, day)) {
+      ++readable;
+      if (slot < memcode::kMaxDaySlots) {
+        staged[slot] = day;
       }
     }
+    // The slot is the server's index, readable or not: keys name it.
+    if (slot < UINT8_MAX) {
+      ++slot;
+    }
   }
+  if (present > 0U && readable == 0U) {
+    drift.add("code_days");
+    return ArrayRead::Kept;
+  }
+  if (readable < present) {
+    drift.add("code_days");
+  }
+  for (uint8_t s = 0U; s < memcode::kMaxDaySlots; ++s) {
+    image.days[s] = staged[s];
+  }
+  return ArrayRead::Adopted;
+}
 
-  const jv::Value keyArray = jv::member(body, "code_keys");
-  if (!keyArray.present()) {
-    return;
-  }
+/// `code_keys`: counted first so a wholly unreadable array keeps the ring, then adopted.
+ArrayRead readCodeKeys(const jv::Value& keyArray, CodeImage& image, Drift& drift) {
   if (!keyArray.isArray()) {
     drift.add("code_keys");
-    keys = ArrayRead::Kept;
-    return;
+    return ArrayRead::Kept;
   }
   jv::ArrayIter count(keyArray);
   jv::Value element;
@@ -291,8 +284,7 @@ void readCodes(const jv::Value& body, CodeImage& image, Drift& drift, ArrayRead&
   }
   if (present > 0U && readable == 0U) {
     drift.add("code_keys");
-    keys = ArrayRead::Kept;
-    return;
+    return ArrayRead::Kept;
   }
   if (readable < present) {
     drift.add("code_keys");
@@ -305,7 +297,16 @@ void readCodes(const jv::Value& body, CodeImage& image, Drift& drift, ArrayRead&
       ++image.count;
     }
   }
-  keys = ArrayRead::Adopted;
+  return ArrayRead::Adopted;
+}
+
+} // namespace
+
+void readCodes(const jv::Value& body, CodeImage& image, Drift& drift, ArrayRead& days, ArrayRead& keys) {
+  const jv::Value dayArray = jv::member(body, "code_days");
+  days = dayArray.present() ? readCodeDays(dayArray, image, drift) : ArrayRead::Absent;
+  const jv::Value keyArray = jv::member(body, "code_keys");
+  keys = keyArray.present() ? readCodeKeys(keyArray, image, drift) : ArrayRead::Absent;
 }
 
 bool readStepClock(const jv::Value& body, StepImage& image, uint32_t nowMs, Drift& drift) {

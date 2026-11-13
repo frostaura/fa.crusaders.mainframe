@@ -26,6 +26,24 @@ bool isHex(char c) {
   return isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
+/// Past one escape whose letter is at `p` (just after the backslash), on its
+/// last character; null when it is not a JSON escape.
+const char* skipEscape(const char* p, const char* end) {
+  const char e = *p;
+  if (e == 'u') {
+    if (end - p < 5) {
+      return nullptr;
+    }
+    for (int i = 1; i <= 4; ++i) {
+      if (!isHex(p[i])) {
+        return nullptr;
+      }
+    }
+    return p + 4;
+  }
+  return strchr("\"\\/bfnrt", e) != nullptr && e != '\0' ? p : nullptr;
+}
+
 /// Past the closing quote of a string starting at `p` (on the quote), or null.
 const char* skipString(const char* p, const char* end) {
   ++p;
@@ -39,28 +57,25 @@ const char* skipString(const char* p, const char* end) {
     }
     if (c == '\\') {
       ++p;
-      if (p >= end) {
-        return nullptr;
-      }
-      const char e = *p;
-      if (e == 'u') {
-        if (end - p < 5) {
-          return nullptr;
-        }
-        for (int i = 1; i <= 4; ++i) {
-          if (!isHex(p[i])) {
-            return nullptr;
-          }
-        }
-        p += 4;
-      } else if (e != '"' && e != '\\' && e != '/' && e != 'b' && e != 'f' && e != 'n' && e != 'r' &&
-                 e != 't') {
+      p = p < end ? skipEscape(p, end) : nullptr;
+      if (p == nullptr) {
         return nullptr;
       }
     }
     ++p;
   }
   return nullptr;
+}
+
+/// Past a run of one or more digits at `q`, or null when there is none.
+const char* skipDigits(const char* q, const char* end) {
+  if (q >= end || !isDigit(*q)) {
+    return nullptr;
+  }
+  while (q < end && isDigit(*q)) {
+    ++q;
+  }
+  return q;
 }
 
 /// Past a number starting at `p`, classifying it, or null.
@@ -72,21 +87,12 @@ const char* skipNumber(const char* p, const char* end, Kind& kind) {
   if (q >= end || !isDigit(*q)) {
     return nullptr;
   }
-  if (*q == '0') {
-    ++q;
-  } else {
-    while (q < end && isDigit(*q)) {
-      ++q;
-    }
-  }
+  q = *q == '0' ? q + 1 : skipDigits(q, end);
   kind = Kind::Integer;
   if (q < end && *q == '.') {
-    ++q;
-    if (q >= end || !isDigit(*q)) {
+    q = skipDigits(q + 1, end);
+    if (q == nullptr) {
       return nullptr;
-    }
-    while (q < end && isDigit(*q)) {
-      ++q;
     }
     kind = Kind::Number;
   }
@@ -95,12 +101,7 @@ const char* skipNumber(const char* p, const char* end, Kind& kind) {
     if (q < end && (*q == '+' || *q == '-')) {
       ++q;
     }
-    if (q >= end || !isDigit(*q)) {
-      return nullptr;
-    }
-    while (q < end && isDigit(*q)) {
-      ++q;
-    }
+    q = skipDigits(q, end);
     kind = Kind::Number;
   }
   return q;
@@ -331,6 +332,32 @@ int hexDigit(char c) {
 
 } // namespace
 
+namespace {
+
+/// The character one escape stands for, `p` on its letter (just after the
+/// backslash) and left on its last character. False for a `\u` outside ASCII
+/// or a NUL, which nothing on this path may hold. The string was already
+/// validated by skipString, so the escape is well formed.
+bool decodeEscape(const char*& p, char& c) {
+  const char e = *p;
+  if (e == 'u') {
+    const int code = (hexDigit(p[1]) << 12) | (hexDigit(p[2]) << 8) | (hexDigit(p[3]) << 4) | hexDigit(p[4]);
+    if (code == 0 || code > 0x7F) {
+      return false;
+    }
+    c = static_cast<char>(code);
+    p += 4;
+    return true;
+  }
+  static const char kFrom[] = "bfnrt";
+  static const char kTo[] = "\b\f\n\r\t";
+  const char* at = strchr(kFrom, e);
+  c = (at != nullptr && e != '\0') ? kTo[at - kFrom] : e;
+  return true;
+}
+
+} // namespace
+
 bool asString(const Value& value, char* out, size_t cap, size_t& outLen) {
   outLen = 0U;
   if (value.kind != Kind::String || out == nullptr || cap == 0U || value.len < 2U) {
@@ -343,36 +370,8 @@ bool asString(const Value& value, char* out, size_t cap, size_t& outLen) {
     char c = *p;
     if (c == '\\') {
       ++p;
-      const char e = *p;
-      switch (e) {
-      case 'b':
-        c = '\b';
-        break;
-      case 'f':
-        c = '\f';
-        break;
-      case 'n':
-        c = '\n';
-        break;
-      case 'r':
-        c = '\r';
-        break;
-      case 't':
-        c = '\t';
-        break;
-      case 'u': {
-        const int code =
-            (hexDigit(p[1]) << 12) | (hexDigit(p[2]) << 8) | (hexDigit(p[3]) << 4) | hexDigit(p[4]);
-        if (code == 0 || code > 0x7F) {
-          return false;
-        }
-        c = static_cast<char>(code);
-        p += 4;
-        break;
-      }
-      default:
-        c = e;
-        break;
+      if (!decodeEscape(p, c)) {
+        return false;
       }
     }
     if (n + 1U >= cap) {

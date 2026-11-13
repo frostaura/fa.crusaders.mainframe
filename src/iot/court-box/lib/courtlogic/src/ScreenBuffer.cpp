@@ -399,6 +399,14 @@ Layout ScreenBuffer::effectiveLayout() const {
 // --- one pass ---------------------------------------------------------------
 
 void ScreenBuffer::runDeadlines(uint32_t nowMs) {
+  runOverlayDeadlines(nowMs);
+  runOneShots(nowMs);
+  if (!overlayUp_ && reinitDue_.expired(nowMs)) {
+    reinitNow_ = true;
+  }
+}
+
+void ScreenBuffer::runOverlayDeadlines(uint32_t nowMs) {
   if (overlayUp_ && ceiling_.expired(nowMs)) {
     enterLanding(nowMs);
     if (ceilings_ < UINT16_MAX) {
@@ -424,6 +432,9 @@ void ScreenBuffer::runDeadlines(uint32_t nowMs) {
   if (overlayUp_ && chainWait_.expired(nowMs)) {
     enterLanding(nowMs);
   }
+}
+
+void ScreenBuffer::runOneShots(uint32_t nowMs) {
   // Every one-shot deadline is disarmed once acted on: an armed deadline left
   // standing reads as pending again after 2^31 ms (FWM-13).
   if (dwell_.expired(nowMs)) {
@@ -448,9 +459,6 @@ void ScreenBuffer::runDeadlines(uint32_t nowMs) {
     noteUntil_.disarm();
     note_[0] = '\0';
     composeNow_ = true;
-  }
-  if (!overlayUp_ && reinitDue_.expired(nowMs)) {
-    reinitNow_ = true;
   }
 }
 
@@ -628,31 +636,35 @@ void ScreenBuffer::paint(uint32_t nowMs) {
   }
   uint16_t budget = display_.cellsPerPass();
   for (uint8_t r = 0U; r < kGlassRows && budget > 0U; ++r) {
-    uint8_t c = 0U;
-    while (c < kGlassCols && budget > 0U) {
-      if (desired_[r][c] == shadow_[r][c]) {
-        ++c;
-        continue;
-      }
-      // One run of changed cells: one cursor move, then the characters.
-      char run[kGlassCols + 1U];
-      const uint8_t start = c;
-      uint8_t n = 0U;
-      --budget; // the cursor move costs about one character of bus time
-      while (c < kGlassCols && budget > 0U && desired_[r][c] != shadow_[r][c]) {
-        run[n] = desired_[r][c];
-        ++n;
-        ++c;
-        --budget;
-      }
-      run[n] = '\0';
-      if (n == 0U) {
-        break;
-      }
-      display_.print(r, start, run);
-      for (uint8_t i = 0U; i < n; ++i) {
-        shadow_[r][start + i] = run[i];
-      }
+    paintRow(r, budget);
+  }
+}
+
+void ScreenBuffer::paintRow(uint8_t r, uint16_t& budget) {
+  uint8_t c = 0U;
+  while (c < kGlassCols && budget > 0U) {
+    if (desired_[r][c] == shadow_[r][c]) {
+      ++c;
+      continue;
+    }
+    // One run of changed cells: one cursor move, then the characters.
+    char run[kGlassCols + 1U];
+    const uint8_t start = c;
+    uint8_t n = 0U;
+    --budget; // the cursor move costs about one character of bus time
+    while (c < kGlassCols && budget > 0U && desired_[r][c] != shadow_[r][c]) {
+      run[n] = desired_[r][c];
+      ++n;
+      ++c;
+      --budget;
+    }
+    run[n] = '\0';
+    if (n == 0U) {
+      return;
+    }
+    display_.print(r, start, run);
+    for (uint8_t i = 0U; i < n; ++i) {
+      shadow_[r][start + i] = run[i];
     }
   }
 }

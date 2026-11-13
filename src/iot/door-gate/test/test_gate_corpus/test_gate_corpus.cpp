@@ -262,8 +262,8 @@ void executeV3HeartbeatRequest(const char* id, const char* expected, size_t expe
   }
 
   static char rendered[gatelogic::kGateHeartbeatRequestCap];
-  const size_t written =
-      gatelogic::renderGateHeartbeatV3(rendered, sizeof(rendered), mac, version, uptime, counters, report);
+  const size_t written = gatelogic::renderGateHeartbeatV3(
+      rendered, sizeof(rendered), gatelogic::GateBeat{mac, version, uptime, counters, report});
   TEST_ASSERT_EQUAL_size_t_MESSAGE(expectedLen, written, id);
   TEST_ASSERT_EQUAL_STRING_MESSAGE(expected, rendered, id);
   // And inside its budget with room to spare (compat/ `budgets`).

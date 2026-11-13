@@ -38,54 +38,68 @@ bool isHex(char c) {
   return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
 }
 
-/// The first five `|`-fields of one element; any after them are ignored.
-bool parseCourtElement(const char* s, size_t n, SnapshotCourt& out) {
-  size_t fieldStart[5] = {0U, 0U, 0U, 0U, 0U};
-  size_t fieldLen[5] = {0U, 0U, 0U, 0U, 0U};
-  uint8_t field = 0U;
+/// The `|`-separated fields of one element, up to five; any after them are ignored.
+struct Fields {
+  size_t start[5] = {0U, 0U, 0U, 0U, 0U};
+  size_t len[5] = {0U, 0U, 0U, 0U, 0U};
+  uint8_t count = 0U;
+};
+
+Fields splitFields(const char* s, size_t n) {
+  Fields f;
   size_t start = 0U;
-  for (size_t i = 0U; i <= n && field < 5U; ++i) {
+  for (size_t i = 0U; i <= n && f.count < 5U; ++i) {
     if (i == n || s[i] == '|') {
-      fieldStart[field] = start;
-      fieldLen[field] = i - start;
-      ++field;
+      f.start[f.count] = start;
+      f.len[f.count] = i - start;
+      ++f.count;
       start = i + 1U;
     }
   }
-  if (field < 5U) {
+  return f;
+}
+
+/// The kind letter; an unknown one is a later server's word for "lit, some
+/// other reason" — the light is what matters, so it reads as a booking.
+char kindOf(char kind) {
+  return (kind == 'b' || kind == 'w' || kind == 'e' || kind == '-') ? kind : 'b';
+}
+
+/// `-` (no reference) or eight lowercase hex digits, copied into `out`.
+bool readRef(const char* ref, size_t n, char out[9]) {
+  if (n == 1U && ref[0] == '-') {
+    out[0] = '\0';
+    return true;
+  }
+  if (n != 8U) {
+    return false;
+  }
+  for (size_t i = 0U; i < 8U; ++i) {
+    if (!isHex(ref[i])) {
+      return false;
+    }
+    out[i] = ref[i];
+  }
+  out[8] = '\0';
+  return true;
+}
+
+/// The first five `|`-fields of one element; any after them are ignored.
+bool parseCourtElement(const char* s, size_t n, SnapshotCourt& out) {
+  const Fields f = splitFields(s, n);
+  if (f.count < 5U) {
     return false;
   }
   uint32_t relay = 0U;
   uint32_t lit = 0U;
   uint32_t seconds = 0U;
-  if (!parseDigits(s + fieldStart[0], fieldLen[0], relay) || relay >= kSnapshotRelays ||
-      !parseDigits(s + fieldStart[1], fieldLen[1], lit) || lit > 1U ||
-      !parseDigits(s + fieldStart[2], fieldLen[2], seconds) || fieldLen[3] != 1U) {
+  if (!parseDigits(s + f.start[0], f.len[0], relay) || relay >= kSnapshotRelays ||
+      !parseDigits(s + f.start[1], f.len[1], lit) || lit > 1U ||
+      !parseDigits(s + f.start[2], f.len[2], seconds) || f.len[3] != 1U ||
+      !readRef(s + f.start[4], f.len[4], out.ref)) {
     return false;
   }
-  const char kind = s[fieldStart[3]];
-  if (kind != 'b' && kind != 'w' && kind != 'e' && kind != '-') {
-    // An unknown kind is a later server's word for "lit, some other reason";
-    // the light is what matters, so it reads as a booking.
-    out.kind = 'b';
-  } else {
-    out.kind = kind;
-  }
-  const char* ref = s + fieldStart[4];
-  const size_t refLen = fieldLen[4];
-  if (refLen == 1U && ref[0] == '-') {
-    out.ref[0] = '\0';
-  } else if (refLen == 8U) {
-    for (size_t i = 0U; i < 8U; ++i) {
-      if (!isHex(ref[i])) {
-        return false;
-      }
-      out.ref[i] = ref[i];
-    }
-    out.ref[8] = '\0';
-  } else {
-    return false;
-  }
+  out.kind = kindOf(s[f.start[3]]);
   out.relay = static_cast<uint8_t>(relay);
   out.lit = lit == 1U;
   out.seconds = out.lit ? seconds : 0U;
@@ -389,6 +403,20 @@ void Reconciler::memberReleased(uint8_t relay, const Snapshot& snap, uint32_t no
   }
 }
 
+namespace {
+
+/// The seconds of light a relay is owed, capped at the relay's own hard cap;
+/// 0 when the snapshot's paid remainder is gone or under the reconcile minimum.
+uint32_t owedSeconds(int32_t left, uint32_t minSeconds) {
+  if (left <= 0 || static_cast<uint32_t>(left) < minSeconds) {
+    return 0U;
+  }
+  const uint32_t cap = static_cast<uint32_t>(proto::kRelayHardCapSeconds);
+  return static_cast<uint32_t>(left) > cap ? cap : static_cast<uint32_t>(left);
+}
+
+} // namespace
+
 bool Reconciler::plan(const Snapshot& snap, const RelayView view[kSnapshotRelays],
                       const ReconcileSettings& settings, uint32_t nowMs, bool force,
                       int32_t out[kSnapshotRelays]) {
@@ -407,43 +435,52 @@ bool Reconciler::plan(const Snapshot& snap, const RelayView view[kSnapshotRelays
   for (uint8_t i = 0U; i < snap.count; ++i) {
     const SnapshotCourt& c = snap.courts[i];
     const uint8_t r = c.relay;
-    if (suppressed_[r]) {
-      const bool sameRef = strcmp(suppressRef_[r], c.ref) == 0 && c.lit;
-      if (sameRef && tb::since(nowMs, suppressAtMs_[r]) < kSuppressMs) {
-        continue;
-      }
-      suppressed_[r] = false;
-    }
-    const int32_t left = paidSeconds(snap, r, nowMs);
-    if (left <= 0 || static_cast<uint32_t>(left) < settings.minSeconds) {
+    if (stillSuppressed(c, nowMs)) {
       continue;
     }
-    const uint32_t wanted = static_cast<uint32_t>(left) > proto::kRelayHardCapSeconds
-                                ? static_cast<uint32_t>(proto::kRelayHardCapSeconds)
-                                : static_cast<uint32_t>(left);
-    const bool needs = !view[r].lit || view[r].seconds + kShortMarginSeconds < wanted;
-    if (!needs) {
-      attempts_[r] = 0U;
+    const uint32_t wanted = owedSeconds(paidSeconds(snap, r, nowMs), settings.minSeconds);
+    if (wanted == 0U) {
+      continue;
+    }
+    if (view[r].lit && view[r].seconds + kShortMarginSeconds >= wanted) {
+      attempts_[r] = 0U; // lit as owed
       continue;
     }
     if (!force && !wentDark[r] && tried_[r] && tb::since(nowMs, lastAtMs_[r]) < kRelightEveryMs) {
       continue;
     }
-    if (attempts_[r] == kMaxAttempts) {
-      // Three !WANTs and the relay is still not lit as owed: relight_failed,
-      // once. It keeps being re-tried at the same pace — a relay the snapshot
-      // owes is never given up on.
-      failed_[r] = true;
-    }
-    if (attempts_[r] < UINT8_MAX) {
-      ++attempts_[r];
-    }
-    tried_[r] = true;
-    lastAtMs_[r] = nowMs;
+    recordAttempt(r, nowMs);
     out[r] = static_cast<int32_t>(wanted);
     any = true;
   }
   return any;
+}
+
+bool Reconciler::stillSuppressed(const SnapshotCourt& c, uint32_t nowMs) {
+  const uint8_t r = c.relay;
+  if (!suppressed_[r]) {
+    return false;
+  }
+  const bool sameRef = strcmp(suppressRef_[r], c.ref) == 0 && c.lit;
+  if (sameRef && tb::since(nowMs, suppressAtMs_[r]) < kSuppressMs) {
+    return true;
+  }
+  suppressed_[r] = false;
+  return false;
+}
+
+void Reconciler::recordAttempt(uint8_t r, uint32_t nowMs) {
+  if (attempts_[r] == kMaxAttempts) {
+    // Three !WANTs and the relay is still not lit as owed: relight_failed,
+    // once. It keeps being re-tried at the same pace — a relay the snapshot
+    // owes is never given up on.
+    failed_[r] = true;
+  }
+  if (attempts_[r] < UINT8_MAX) {
+    ++attempts_[r];
+  }
+  tried_[r] = true;
+  lastAtMs_[r] = nowMs;
 }
 
 void Reconciler::confirmed(uint8_t relay) {

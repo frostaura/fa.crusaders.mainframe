@@ -45,11 +45,18 @@ enum class Member : uint8_t {
   Unreadable = 3U,
 };
 
+/// Where a decoded string goes: the buffer, its capacity, and the byte length
+/// written (NUL excluded).
+struct Out {
+  char* buf;
+  size_t cap;
+  size_t& len;
+};
+
 /// The string member `key`, decoded (all JSON escapes, `\uXXXX` and surrogate
-/// pairs to UTF-8) into `out`, NUL-terminated, with its byte length in `outLen`.
-/// A decoded NUL is Unreadable: nothing on this path may contain one.
-Member stringMember(const char* object, size_t len, const char* key, char* out, size_t outCap,
-                    size_t& outLen);
+/// pairs to UTF-8) into `out`, NUL-terminated, with its byte length in
+/// `out.len`. A decoded NUL is Unreadable: nothing on this path may contain one.
+Member stringMember(const char* object, size_t len, const char* key, Out out);
 
 /// The unsigned integer member `key`: a bare JSON integer, no sign, no
 /// fraction, no exponent, at most 2^32 - 1.

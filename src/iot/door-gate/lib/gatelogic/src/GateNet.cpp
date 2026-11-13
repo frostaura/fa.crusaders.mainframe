@@ -68,36 +68,36 @@ void GateNet::rebuild() {
   copyText(base_, sizeof(base_), base);
 
   profileCount_ = 0U;
-  const devnet::NetSet* sets[2] = {record_.hasCurrent ? &record_.current : nullptr,
-                                   record_.hasPrevious ? &record_.previous : nullptr};
-  for (uint8_t s = 0U; s < 2U; ++s) {
-    if (sets[s] == nullptr) {
-      continue;
-    }
-    for (uint8_t w = 0U; w < devnet::kProfiles; ++w) {
-      if (!sets[s]->hasWifi[w]) {
-        continue;
-      }
-      bool seen = false;
-      for (uint8_t i = 0U; i < profileCount_; ++i) {
-        seen = seen || sameProfile(profiles_[i], sets[s]->wifi[w]);
-      }
-      if (!seen && profileCount_ < kMaxProfiles) {
-        profiles_[profileCount_] = sets[s]->wifi[w];
-        ++profileCount_;
-      }
-    }
+  // New first, then the previous set, then the compiled defaults (§8).
+  if (record_.hasCurrent) {
+    addProfiles(record_.current);
   }
-  bool seen = false;
-  for (uint8_t i = 0U; i < profileCount_; ++i) {
-    seen = seen || sameProfile(profiles_[i], compiled_);
+  if (record_.hasPrevious) {
+    addProfiles(record_.previous);
   }
-  if (!seen && profileCount_ < kMaxProfiles) {
-    profiles_[profileCount_] = compiled_;
-    ++profileCount_;
-  }
+  addProfile(compiled_);
   if (active_ >= profileCount_) {
     active_ = 0U;
+  }
+}
+
+void GateNet::addProfiles(const devnet::NetSet& set) {
+  for (uint8_t w = 0U; w < devnet::kProfiles; ++w) {
+    if (set.hasWifi[w]) {
+      addProfile(set.wifi[w]);
+    }
+  }
+}
+
+void GateNet::addProfile(const devnet::Profile& profile) {
+  for (uint8_t i = 0U; i < profileCount_; ++i) {
+    if (sameProfile(profiles_[i], profile)) {
+      return;
+    }
+  }
+  if (profileCount_ < kMaxProfiles) {
+    profiles_[profileCount_] = profile;
+    ++profileCount_;
   }
 }
 
@@ -130,7 +130,10 @@ devnet::NetResult GateNet::adopt(const char* object, size_t len, uint32_t nowMs)
     copyText(staged.base, sizeof(staged.base), base_);
     staged.hasBase = true;
   }
-  const NetRecord before = record_;
+  // Static: the record is two whole network sets, and the copy kept for a
+  // failed persist() put this over the 8 KB loop task's frame budget.
+  static NetRecord before;
+  before = record_;
   if (record_.hasCurrent) {
     record_.previous = record_.current;
     record_.hasPrevious = true;
@@ -151,7 +154,10 @@ devnet::NetResult GateNet::adopt(const char* object, size_t len, uint32_t nowMs)
 }
 
 bool GateNet::adoptLocal(const devnet::NetSet& local) {
-  const NetRecord before = record_;
+  // Static: the record is two whole network sets, and the copy kept for a
+  // failed persist() put this over the 8 KB loop task's frame budget.
+  static NetRecord before;
+  before = record_;
   if (record_.hasCurrent) {
     record_.previous = record_.current;
     record_.hasPrevious = true;
@@ -238,28 +244,32 @@ bool urlDecode(const char* in, size_t inLen, char* out, size_t cap) {
   return true;
 }
 
+namespace {
+
+/// One form field, JSON-escaped; a missing field is the empty string.
+bool escapeField(const char* in, char* out, size_t cap) {
+  const char* text = in != nullptr ? in : "";
+  return devapi::json::escapeInto(text, strlen(text), out, cap);
+}
+
+} // namespace
+
 devnet::Refusal validatePortalForm(const PortalForm& form, devnet::NetSet& out) {
   // THE SAME RULES AS A SERVER `net`, by construction: the form is written as
   // the object the server would have sent and read by the same reader, so a
   // value the portal accepts is one the server would have, and the reverse.
   static char json[640];
-  char ssid[devnet::kSsidMax * devapi::json::kMaxEscapeExpansion + 1U] = {};
-  char psk[devnet::kPskMax * devapi::json::kMaxEscapeExpansion + 1U] = {};
-  char ssid2[sizeof(ssid)] = {};
-  char psk2[sizeof(psk)] = {};
-  char base[devnet::kBaseUrlMax * devapi::json::kMaxEscapeExpansion + 1U] = {};
-  const char* none = "";
+  // Static, as `json` is: the portal is served from the loop, one form at a time,
+  // and these were a 2 KB frame on the 8 KB loop task.
+  static char ssid[devnet::kSsidMax * devapi::json::kMaxEscapeExpansion + 1U];
+  static char psk[devnet::kPskMax * devapi::json::kMaxEscapeExpansion + 1U];
+  static char ssid2[sizeof(ssid)];
+  static char psk2[sizeof(psk)];
+  static char base[devnet::kBaseUrlMax * devapi::json::kMaxEscapeExpansion + 1U];
   const bool second = form.ssid2 != nullptr && form.ssid2[0] != '\0';
-  if (!devapi::json::escapeInto(form.ssid ? form.ssid : none, strlen(form.ssid ? form.ssid : none), ssid,
-                                sizeof(ssid)) ||
-      !devapi::json::escapeInto(form.psk ? form.psk : none, strlen(form.psk ? form.psk : none), psk,
-                                sizeof(psk)) ||
-      !devapi::json::escapeInto(form.ssid2 ? form.ssid2 : none, strlen(form.ssid2 ? form.ssid2 : none), ssid2,
-                                sizeof(ssid2)) ||
-      !devapi::json::escapeInto(form.psk2 ? form.psk2 : none, strlen(form.psk2 ? form.psk2 : none), psk2,
-                                sizeof(psk2)) ||
-      !devapi::json::escapeInto(form.base ? form.base : none, strlen(form.base ? form.base : none), base,
-                                sizeof(base))) {
+  if (!escapeField(form.ssid, ssid, sizeof(ssid)) || !escapeField(form.psk, psk, sizeof(psk)) ||
+      !escapeField(form.ssid2, ssid2, sizeof(ssid2)) || !escapeField(form.psk2, psk2, sizeof(psk2)) ||
+      !escapeField(form.base, base, sizeof(base))) {
     return devnet::Refusal::TooLong;
   }
   int n = 0;

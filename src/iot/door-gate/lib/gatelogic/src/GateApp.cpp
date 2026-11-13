@@ -267,7 +267,7 @@ void GateApp::forgetElapsedWindows(uint32_t nowMs) {
   // `roster_stale` — the board no longer knows — not `not_recognised`.
   if (coldTrustUntil_.isArmed() && coldTrustUntil_.remaining(nowMs) == 0U) {
     coldTrustUntil_.disarm();
-    roster_ = GateRoster(kGateConfig.rosterMaxAgeMs);
+    roster_.forget();
     state_.roster.loaded = false;
     state_.roster.count = 0U;
     warmDirty_ = true;
@@ -1000,8 +1000,9 @@ void GateApp::pumpHeartbeat() {
   beforeBlocking();
   GateDiag diag;
   const GateReport v3 = report(diag);
-  const HttpOutcome outcome = api_.heartbeatV3(mac_, firmwareVersion_, uptime_.value(), diagnostics(), v3,
-                                               heartbeatBody_, heartbeatBodyCap_);
+  const GateDiagnostics counters = diagnostics();
+  const HttpOutcome outcome = api_.heartbeatV3(
+      GateBeat{mac_, firmwareVersion_, uptime_.value(), counters, v3}, heartbeatBody_, heartbeatBodyCap_);
   afterBlocking();
 
   // ARMED AFTER THE CALL. Armed before it, the call's own duration comes out of
@@ -1036,8 +1037,11 @@ void GateApp::commitEmptyRoster() {
   state_.roster.count = 0U;
   state_.roster.loaded = true;
   state_.roster.anchorMs = clock_.nowMs();
-  state_.codes = CodeImage();
-  state_.step = StepImage();
+  // From static blanks: `CodeImage()` built on the stack made this a 1.5 KB frame.
+  static const CodeImage kNoCodes;
+  static const StepImage kNoStep;
+  state_.codes = kNoCodes;
+  state_.step = kNoStep;
   coldTrustUntil_.disarm();
   warmDirty_ = true;
   rosterDirty_ = true;

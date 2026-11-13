@@ -143,34 +143,10 @@ private:
 
 } // namespace
 
-size_t renderGateHeartbeatV3(char* out, size_t cap, const char* mac, const char* firmwareVersion,
-                             uint64_t uptimeMs, const GateDiagnostics& counters, const GateReport& report) {
-  if (out == nullptr || cap == 0U) {
-    return 0U;
-  }
-  out[0] = '\0';
-  if (mac == nullptr || mac[0] == '\0' || firmwareVersion == nullptr || report.fwState == nullptr ||
-      report.netSrc == nullptr) {
-    return 0U;
-  }
-  char uptime[21] = {};
-  if (tb::formatU64(uptimeMs, uptime, sizeof(uptime)) == 0U) {
-    return 0U;
-  }
-  Writer w(out, cap);
-  w.text("{\"mac\":\"");
-  w.text(mac);
-  w.text("\",\"firmware_version\":\"");
-  w.text(firmwareVersion);
-  w.text("\",\"uptime_ms\":");
-  w.text(uptime);
-  w.text(",\"kind\":\"gate\"");
-  if (counters.noPush != 0U) {
-    w.number("no_push", saturate(counters.noPush));
-  }
-  if (counters.eventsLost != 0U) {
-    w.number("events_lost", saturate(counters.eventsLost));
-  }
+namespace {
+
+/// The firmware and network facts: fw_state, and fw_failed / fw_error when set.
+void writeFirmware(Writer& w, const GateReport& report) {
   w.field("fw_state", report.fwState);
   if (report.fwFailed != nullptr && report.fwFailed[0] != '\0') {
     w.field("fw_failed", report.fwFailed);
@@ -183,29 +159,71 @@ size_t renderGateHeartbeatV3(char* out, size_t cap, const char* mac, const char*
   if (report.restore != nullptr) {
     w.field("restore", report.restore);
   }
-  if (report.diag != nullptr) {
-    const GateDiag& d = *report.diag;
-    w.text(",\"diag\":{\"reset\":\"");
-    w.text(d.reset == nullptr ? "unknown" : d.reset);
+}
+
+/// `diag`: the board's own health (device-api.md §13).
+void writeDiag(Writer& w, const GateDiag& d) {
+  w.text(",\"diag\":{\"reset\":\"");
+  w.text(d.reset == nullptr ? "unknown" : d.reset);
+  w.text("\"");
+  w.number("exc", d.exc);
+  w.number("epc1", d.epc1);
+  w.number("heap", d.heap);
+  w.number("heap_min", d.heapMin);
+  w.number("block", d.block);
+  w.number("stack_min", d.stackMin);
+  w.number("sketch_free", d.sketchFree);
+  w.number("flash_mb", d.flashMb);
+  w.text("}");
+}
+
+/// `drift`: the keys of the previous answer this board could not read (§11.2).
+void writeDrift(Writer& w, const Drift& drift) {
+  w.text(",\"drift\":[");
+  for (uint8_t i = 0U; i < drift.count; ++i) {
+    w.text(i == 0U ? "\"" : ",\"");
+    w.text(drift.names[i]);
     w.text("\"");
-    w.number("exc", d.exc);
-    w.number("epc1", d.epc1);
-    w.number("heap", d.heap);
-    w.number("heap_min", d.heapMin);
-    w.number("block", d.block);
-    w.number("stack_min", d.stackMin);
-    w.number("sketch_free", d.sketchFree);
-    w.number("flash_mb", d.flashMb);
-    w.text("}");
+  }
+  w.text("]");
+}
+
+} // namespace
+
+size_t renderGateHeartbeatV3(char* out, size_t cap, const GateBeat& beat) {
+  if (out == nullptr || cap == 0U) {
+    return 0U;
+  }
+  out[0] = '\0';
+  const GateReport& report = beat.report;
+  if (beat.mac == nullptr || beat.mac[0] == '\0' || beat.firmwareVersion == nullptr ||
+      report.fwState == nullptr || report.netSrc == nullptr) {
+    return 0U;
+  }
+  char uptime[21] = {};
+  if (tb::formatU64(beat.uptimeMs, uptime, sizeof(uptime)) == 0U) {
+    return 0U;
+  }
+  Writer w(out, cap);
+  w.text("{\"mac\":\"");
+  w.text(beat.mac);
+  w.text("\",\"firmware_version\":\"");
+  w.text(beat.firmwareVersion);
+  w.text("\",\"uptime_ms\":");
+  w.text(uptime);
+  w.text(",\"kind\":\"gate\"");
+  if (beat.counters.noPush != 0U) {
+    w.number("no_push", saturate(beat.counters.noPush));
+  }
+  if (beat.counters.eventsLost != 0U) {
+    w.number("events_lost", saturate(beat.counters.eventsLost));
+  }
+  writeFirmware(w, report);
+  if (report.diag != nullptr) {
+    writeDiag(w, *report.diag);
   }
   if (report.drift != nullptr && report.drift->count > 0U) {
-    w.text(",\"drift\":[");
-    for (uint8_t i = 0U; i < report.drift->count; ++i) {
-      w.text(i == 0U ? "\"" : ",\"");
-      w.text(report.drift->names[i]);
-      w.text("\"");
-    }
-    w.text("]");
+    writeDrift(w, *report.drift);
   }
   w.text(kGateCapsV3);
   w.text("}");

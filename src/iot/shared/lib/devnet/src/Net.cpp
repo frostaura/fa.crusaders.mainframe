@@ -88,41 +88,18 @@ Refusal checkPort(const char* port, size_t n) {
   return (v >= 1U && v <= 65535U) ? Refusal::Ok : Refusal::Port;
 }
 
+/// A base-URL grammar refusal as the `net` object's own reason (`host` becomes
+/// `base_host`). Empty..Port and BaseEmpty..BasePort are the same six reasons in
+/// the same order, which the static_asserts hold; anything else is returned as is.
 Refusal prefixed(Refusal base) {
-  switch (base) {
-  case Refusal::Empty:
-    return Refusal::BaseEmpty;
-  case Refusal::TooLong:
-    return Refusal::BaseTooLong;
-  case Refusal::Https:
-    return Refusal::BaseHttps;
-  case Refusal::Grammar:
-    return Refusal::BaseGrammar;
-  case Refusal::Host:
-    return Refusal::BaseHost;
-  case Refusal::Port:
-    return Refusal::BasePort;
-  case Refusal::Ok:
-  case Refusal::Ver:
-  case Refusal::NotNewer:
-  case Refusal::BaseEmpty:
-  case Refusal::BaseTooLong:
-  case Refusal::BaseHttps:
-  case Refusal::BaseGrammar:
-  case Refusal::BaseHost:
-  case Refusal::BasePort:
-  case Refusal::Wifi0Ssid:
-  case Refusal::Wifi0Psk:
-  case Refusal::Wifi1Ssid:
-  case Refusal::Wifi1Psk:
-  case Refusal::NetEmpty:
-  case Refusal::Id:
-  case Refusal::Key:
-  case Refusal::Current:
-  case Refusal::Held:
-    break;
+  static_assert(static_cast<int>(Refusal::Port) - static_cast<int>(Refusal::Empty) ==
+                    static_cast<int>(Refusal::BasePort) - static_cast<int>(Refusal::BaseEmpty),
+                "the base_* reasons must mirror the base-URL reasons one for one");
+  const int i = static_cast<int>(base);
+  if (i < static_cast<int>(Refusal::Empty) || i > static_cast<int>(Refusal::Port)) {
+    return base;
   }
-  return base;
+  return static_cast<Refusal>(static_cast<int>(Refusal::BaseEmpty) + (i - static_cast<int>(Refusal::Empty)));
 }
 
 bool printableAscii(const char* s, size_t n) {
@@ -147,6 +124,21 @@ bool ssidBytesOk(const char* s, size_t n) {
   return true;
 }
 
+/// A decoded SSID the board can join: 1..32 bytes, no control byte.
+bool ssidOk(json::Member m, const char* ssid, size_t n) {
+  return m == json::Member::Ok && n >= 1U && n <= kSsidMax && ssidBytesOk(ssid, n);
+}
+
+/// A decoded password: open (empty) or 8..63 printable ASCII characters.
+bool pskOk(const char* psk, size_t n) {
+  return printableAscii(psk, n) && (n == 0U || (n >= kPskMin && n <= kPskMax));
+}
+
+/// A member that is missing or a JSON null — the reference implementation's None.
+bool absent(json::Member m, const char* obj, size_t len, const char* key) {
+  return m == json::Member::Missing || (m == json::Member::WrongType && json::isNullMember(obj, len, key));
+}
+
 /// One `wifi<slot>_*` pair. `present` false (and Ok) when neither key is there
 /// or both are null — the slot is kept as the board has it.
 Refusal readProfile(const char* obj, size_t len, uint8_t slot, Profile& out, bool& present) {
@@ -154,8 +146,6 @@ Refusal readProfile(const char* obj, size_t len, uint8_t slot, Profile& out, boo
   char pskKey[12] = "wifi0_psk";
   ssidKey[4] = static_cast<char>('0' + slot);
   pskKey[4] = static_cast<char>('0' + slot);
-  const Refusal badSsid = slot == 0U ? Refusal::Wifi0Ssid : Refusal::Wifi1Ssid;
-  const Refusal badPsk = slot == 0U ? Refusal::Wifi0Psk : Refusal::Wifi1Psk;
 
   // Decoded with headroom past the bound, so "too long" is a length check and
   // not a buffer that happened to be full.
@@ -163,28 +153,22 @@ Refusal readProfile(const char* obj, size_t len, uint8_t slot, Profile& out, boo
   char psk[(kPskMax * 2U) + 2U] = {};
   size_t ssidLen = 0U;
   size_t pskLen = 0U;
-  const json::Member s = json::stringMember(obj, len, ssidKey, ssid, sizeof(ssid), ssidLen);
-  const json::Member p = json::stringMember(obj, len, pskKey, psk, sizeof(psk), pskLen);
-  // A JSON null is the reference implementation's None: absent.
-  const bool ssidNull = s == json::Member::WrongType && json::isNullMember(obj, len, ssidKey);
-  const bool pskNull = p == json::Member::WrongType && json::isNullMember(obj, len, pskKey);
-  const bool ssidAbsent = s == json::Member::Missing || ssidNull;
-  const bool pskAbsent = p == json::Member::Missing || pskNull;
+  const json::Member s = json::stringMember(obj, len, ssidKey, json::Out{ssid, sizeof(ssid), ssidLen});
+  const json::Member p = json::stringMember(obj, len, pskKey, json::Out{psk, sizeof(psk), pskLen});
+  const bool pskAbsent = absent(p, obj, len, pskKey);
   present = false;
-  if (ssidAbsent && pskAbsent) {
+  if (absent(s, obj, len, ssidKey) && pskAbsent) {
     return Refusal::Ok;
   }
-  if (s != json::Member::Ok || ssidLen < 1U || ssidLen > kSsidMax || !ssidBytesOk(ssid, ssidLen)) {
-    return badSsid;
+  if (!ssidOk(s, ssid, ssidLen)) {
+    return slot == 0U ? Refusal::Wifi0Ssid : Refusal::Wifi1Ssid;
   }
   if (pskAbsent) {
     psk[0] = '\0';
     pskLen = 0U;
-  } else if (p != json::Member::Ok) {
-    return badPsk;
   }
-  if (!printableAscii(psk, pskLen) || !(pskLen == 0U || (pskLen >= kPskMin && pskLen <= kPskMax))) {
-    return badPsk;
+  if ((!pskAbsent && p != json::Member::Ok) || !pskOk(psk, pskLen)) {
+    return slot == 0U ? Refusal::Wifi0Psk : Refusal::Wifi1Psk;
   }
   memcpy(out.ssid, ssid, ssidLen + 1U);
   memcpy(out.psk, psk, pskLen + 1U);
@@ -220,75 +204,23 @@ bool keyOk(const char* key, size_t n) {
 
 } // namespace
 
-const char* refusalName(Refusal refusal) {
-  switch (refusal) {
-  case Refusal::Ok:
-    return "ok";
-  case Refusal::Empty:
-    return "empty";
-  case Refusal::TooLong:
-    return "too_long";
-  case Refusal::Https:
-    return "https";
-  case Refusal::Grammar:
-    return "grammar";
-  case Refusal::Host:
-    return "host";
-  case Refusal::Port:
-    return "port";
-  case Refusal::Ver:
-    return "ver";
-  case Refusal::NotNewer:
-    return "not_newer";
-  case Refusal::BaseEmpty:
-    return "base_empty";
-  case Refusal::BaseTooLong:
-    return "base_too_long";
-  case Refusal::BaseHttps:
-    return "base_https";
-  case Refusal::BaseGrammar:
-    return "base_grammar";
-  case Refusal::BaseHost:
-    return "base_host";
-  case Refusal::BasePort:
-    return "base_port";
-  case Refusal::Wifi0Ssid:
-    return "wifi0_ssid";
-  case Refusal::Wifi0Psk:
-    return "wifi0_psk";
-  case Refusal::Wifi1Ssid:
-    return "wifi1_ssid";
-  case Refusal::Wifi1Psk:
-    return "wifi1_psk";
-  case Refusal::NetEmpty:
-    return "empty";
-  case Refusal::Id:
-    return "id";
-  case Refusal::Key:
-    return "key";
-  case Refusal::Current:
-    return "current";
-  case Refusal::Held:
-    return "held";
-  }
-  return "unknown";
-}
+namespace {
 
-Refusal checkBaseUrl(const char* url) {
-  if (url == nullptr || url[0] == '\0') {
-    return Refusal::Empty;
-  }
-  const size_t n = strlen(url);
-  if (n > kBaseUrlMax) {
-    return Refusal::TooLong;
-  }
-  if (strncmp(url, "https://", 8U) == 0) {
-    return Refusal::Https;
-  }
-  if (strncmp(url, "http://", 7U) != 0) {
-    return Refusal::Grammar;
-  }
-  const char* host = url + 7;
+/// The corpus spelling of each Refusal, in enumeration order. `NetEmpty` is the
+/// `nets` family's "empty" — the same word as the base URL's, by the corpus.
+constexpr const char* kRefusalNames[] = {
+    "ok",           "empty",     "too_long",  "https",      "grammar",       "host",
+    "port",         "ver",       "not_newer", "base_empty", "base_too_long", "base_https",
+    "base_grammar", "base_host", "base_port", "wifi0_ssid", "wifi0_psk",     "wifi1_ssid",
+    "wifi1_psk",    "empty",     "id",        "key",        "current",       "held",
+};
+
+constexpr size_t kRefusalNameCount = sizeof(kRefusalNames) / sizeof(kRefusalNames[0]);
+static_assert(kRefusalNameCount == static_cast<size_t>(Refusal::Held) + 1U,
+              "every Refusal needs its name in kRefusalNames, in enumeration order");
+
+/// The host and optional `:port` after `http://`: Grammar when the shape is wrong.
+Refusal checkHostAndPort(const char* host) {
   size_t hostLen = 0U;
   while (isHostChar(host[hostLen])) {
     ++hostLen;
@@ -314,6 +246,29 @@ Refusal checkBaseUrl(const char* url) {
   return portLen == 0U ? Refusal::Ok : checkPort(rest + 1, portLen);
 }
 
+} // namespace
+
+const char* refusalName(Refusal refusal) {
+  const size_t i = static_cast<size_t>(refusal);
+  return i < kRefusalNameCount ? kRefusalNames[i] : "unknown";
+}
+
+Refusal checkBaseUrl(const char* url) {
+  if (url == nullptr || url[0] == '\0') {
+    return Refusal::Empty;
+  }
+  if (strlen(url) > kBaseUrlMax) {
+    return Refusal::TooLong;
+  }
+  if (strncmp(url, "https://", 8U) == 0) {
+    return Refusal::Https;
+  }
+  if (strncmp(url, "http://", 7U) != 0) {
+    return Refusal::Grammar;
+  }
+  return checkHostAndPort(url + 7);
+}
+
 NetResult adoptNet(const char* netObjectJson, size_t len, uint32_t appliedVer, NetSet& out) {
   NetResult result;
   NetSet staged;
@@ -331,7 +286,8 @@ NetResult adoptNet(const char* netObjectJson, size_t len, uint32_t appliedVer, N
 
   char base[(kBaseUrlMax * 2U) + 2U] = {};
   size_t baseLen = 0U;
-  const json::Member b = json::stringMember(netObjectJson, len, "base", base, sizeof(base), baseLen);
+  const json::Member b =
+      json::stringMember(netObjectJson, len, "base", json::Out{base, sizeof(base), baseLen});
   if (b != json::Member::Missing) {
     // Present but not a string (null included) reads as no URL at all, as the
     // reference implementation's `base_url(None)` does: `base_empty`.
@@ -367,13 +323,13 @@ Refusal adoptKeyNext(const char* keyNextJson, size_t len, const KeyRing& ring, K
   out = ring;
   char id[16] = {};
   size_t idLen = 0U;
-  if (json::stringMember(keyNextJson, len, "id", id, sizeof(id), idLen) != json::Member::Ok ||
+  if (json::stringMember(keyNextJson, len, "id", json::Out{id, sizeof(id), idLen}) != json::Member::Ok ||
       !keyIdOk(id, idLen)) {
     return Refusal::Id;
   }
   char key[kKeyLen + 8U] = {};
   size_t keyLen = 0U;
-  if (json::stringMember(keyNextJson, len, "key", key, sizeof(key), keyLen) != json::Member::Ok ||
+  if (json::stringMember(keyNextJson, len, "key", json::Out{key, sizeof(key), keyLen}) != json::Member::Ok ||
       !keyOk(key, keyLen)) {
     return Refusal::Key;
   }
