@@ -119,6 +119,15 @@ services:
       Bootstrap__AdminEmail: dean.martin@frostaura.net
       Bootstrap__AdminPassword: CHANGE-ME-at-least-12-characters
       Bootstrap__Courts: "4"
+      # ---- Device keys (docs/specs/device-api.md §6, §7) ----
+      # After a database loss ONLY: the device key every board already holds, from the password
+      # manager. Applied to a club with no key, never over a live one; empty does nothing.
+      Bootstrap__DeviceApiKey: ""
+      # The club's firmware release key's PUBLIC modulus, 512 hex characters, printed by
+      # `src/iot/tools/ota_sign.py keygen` (the private half stays in the password manager). It is
+      # the same value compiled into every board as OTA_PUBLIC_KEY_N. Empty = signed OTA is off:
+      # uploads are refused and no board is offered anything. The corpus TEST key refuses to start.
+      DeviceOta__PublicKeyModulus: ""
       # ---- Inherent administrators ----
       # Whoever is listed here holds club-admin rights in every club on this deployment where
       # that address ALREADY has an account. It is applied at sign-in, so an address added
