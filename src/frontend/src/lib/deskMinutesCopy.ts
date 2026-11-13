@@ -295,6 +295,8 @@ export const ADJUST_SHEET = {
   reasonPlaceholder: "Choose a reason",
   detailLabel: "And why this one?",
   detailPlaceholder: "e.g. Lights failed on court 2 at 19:00",
+  /** BM-16: the wallet shows this text exactly as typed, so the desk writes it to the member. */
+  detailHint: "The member reads this on their wallet, exactly as you write it.",
   next: "Next",
   back: "Back",
   cancel: "Cancel",

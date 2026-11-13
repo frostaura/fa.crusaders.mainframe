@@ -165,6 +165,13 @@ describe("each field says its own complaint (R3 A-4)", () => {
     await waitFor(() => expect(detail).toHaveFocus());
   });
 
+  it("tells the desk the note is what the member reads on their wallet (BM-16)", () => {
+    renderPage(<Harness apply={vi.fn()} />);
+    typeAmount("30");
+    expect(screen.getByLabelText(ADJUST_SHEET.detailLabel)).toHaveAccessibleDescription(
+      expect.stringContaining(ADJUST_SHEET.detailHint));
+  });
+
   it("names a missing reason code at the code, and focuses it", async () => {
     renderPage(<Harness apply={vi.fn()} />);
     typeAmount("30");

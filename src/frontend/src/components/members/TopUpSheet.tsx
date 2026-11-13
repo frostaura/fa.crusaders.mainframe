@@ -292,6 +292,7 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
           placeholder={COPY.detailPlaceholder}
           onChange={(e) => { flow.setReasonText(e.target.value); flow.clear("detail"); }}
         />
+        <FieldDescription>{COPY.detailHint}</FieldDescription>
         <FieldError>{complaints.detail}</FieldError>
       </Field>
       {renderBookingField?.()}

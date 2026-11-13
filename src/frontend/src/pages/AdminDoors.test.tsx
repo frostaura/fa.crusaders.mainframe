@@ -4,6 +4,7 @@ import { Route, Routes } from "react-router-dom";
 import { AdminDoorsPage } from "./AdminDoors";
 import { AdminDoorsDetailPage } from "./AdminDoorsDetail";
 import { AdminDoorsCardPage } from "./AdminDoorsCard";
+import { setClubIdentityForTests } from "../lib/clubIdentity";
 import { refreshDoorsView } from "../components/doors/useDoorsChrome";
 import {
   SETTINGS_FIXTURE, activityFixture, deviceFixture, doorFixture, doorsServer, refuse, renderPage,
@@ -892,6 +893,16 @@ describe("the doors surface", () => {
       expect(screen.getByText(/RELEASED/)).toBeInTheDocument();
       expect(screen.getByText(/076 226 1390/)).toBeInTheDocument();
       expect(screen.getByText(/Check it is still right/)).toBeInTheDocument();
+    });
+
+    it("names the club this console serves, never the first club's name (FM-8)", async () => {
+      setClubIdentityForTests({ slug: "kestrel", name: "Kestrel Squash Club" });
+      openCard();
+
+      await screen.findByRole("heading", { name: "Side door" });
+      expect(screen.getByText("Kestrel Squash")).toBeInTheDocument();
+      expect(screen.getByText(/open Doors in the Kestrel Squash app/)).toBeInTheDocument();
+      expect(document.body.textContent).not.toContain("Crusaders");
     });
 
     /**
