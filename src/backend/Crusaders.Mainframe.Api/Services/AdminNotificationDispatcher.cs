@@ -235,7 +235,8 @@ public sealed class AdminNotificationDispatcher
         var delivery = new Delivery(db, row, kind, settings, ClubIdentityResolver.For(tenant, settings))
         {
             Email = scope.ServiceProvider.GetRequiredService<IEmailTransport>(),
-            BaseUrl = scope.ServiceProvider.GetRequiredService<IConfiguration>()["App:PublicBaseUrl"] ?? "http://localhost:8088",
+            // The club's own address (BP-03), so a second club's admins are linked to their club.
+            BaseUrl = await TenantLinks.ForTenantAsync(db, scope.ServiceProvider.GetRequiredService<IConfiguration>(), row.TenantId, ct),
         };
         var error = await SendAllAsync(delivery, ct);
         if (error is null) return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
@@ -289,7 +290,7 @@ public sealed class AdminNotificationDispatcher
 
         try
         {
-            var baseUrl = d.Services.GetRequiredService<IConfiguration>()["App:PublicBaseUrl"] ?? "http://localhost:8088";
+            var baseUrl = await TenantLinks.ForTenantAsync(db, d.Services.GetRequiredService<IConfiguration>(), row.TenantId, ct);
             var message = MemberEventCatalogue.Compose(
                 new MemberMailContext(ClubIdentityResolver.For(d.Tenant, d.Settings), to, row, baseUrl, d.Settings));
             await d.Services.GetRequiredService<IEmailTransport>().SendAsync(message, ct);

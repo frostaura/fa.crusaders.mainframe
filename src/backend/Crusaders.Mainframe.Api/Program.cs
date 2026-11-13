@@ -623,6 +623,15 @@ if (builder.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup"))
     await db.Database.MigrateAsync();
 }
 
+// ---- Operator commands (BP-07) ----
+// `dotnet Crusaders.Mainframe.Api.dll tenant <command>` runs one command against this database and
+// exits without serving: creating, suspending and addressing clubs. See TenantCli.
+if (TenantCli.IsCommand(args))
+{
+    Environment.ExitCode = await TenantCli.RunAsync(app.Services, args, Console.Out);
+    return;
+}
+
 // ---- First-run bootstrap ----
 //
 // Runs in EVERY environment, gated on Bootstrap:Enabled rather than on the environment name.

@@ -78,7 +78,7 @@ public static class ProductionBootstrap
     /// neither text nor a focus ring. Note that nothing reads this key today; it is written so
     /// the row is honest about the club when something finally does.
     /// </remarks>
-    private const string InitialSettingsJson = """
+    internal const string InitialSettingsJson = """
         {
           "timezone": "Africa/Johannesburg",
           "brand_accent_hex": "#00498D"
@@ -261,20 +261,29 @@ public static class ProductionBootstrap
     /// <summary>The club's courts, if it has none. Never adds to a club that already has some.</summary>
     private static async Task EnsureCourtsAsync(MainframeDbContext db, Tenant tenant, BootstrapPlan plan, List<string> created)
     {
-        if (await db.Courts.IgnoreQueryFilters().AnyAsync(c => c.TenantId == tenant.Id)) return;
+        if (await AddCourtsAsync(db, tenant.Id, plan.CourtCount)) created.Add($"{plan.CourtCount} squash court(s)");
+    }
 
-        for (var i = 1; i <= plan.CourtCount; i++)
+    /// <summary>
+    /// Courts 1..<paramref name="count"/> for a club that has none; false when it already has
+    /// some. Shared with the operator CLI's <c>tenant create</c>.
+    /// </summary>
+    internal static async Task<bool> AddCourtsAsync(MainframeDbContext db, Guid tenantId, int count)
+    {
+        if (await db.Courts.IgnoreQueryFilters().AnyAsync(c => c.TenantId == tenantId)) return false;
+
+        for (var i = 1; i <= count; i++)
         {
             db.Courts.Add(new Court
             {
-                TenantId = tenant.Id,
+                TenantId = tenantId,
                 CourtNumber = i,
                 Name = $"Court {i}",
                 CourtType = CourtType.Squash,
             });
         }
         await db.SaveChangesAsync();
-        created.Add($"{plan.CourtCount} squash court(s)");
+        return true;
     }
 
     /// <summary>What happened, at a level an operator reading container logs will actually see.</summary>
@@ -295,7 +304,7 @@ public static class ProductionBootstrap
     /// <summary>
     /// The first ADMIN-nnnn membership number not already taken in this tenant.
     /// </summary>
-    private static async Task<string> FreeAdminNumberAsync(MainframeDbContext db, Guid tenantId)
+    internal static async Task<string> FreeAdminNumberAsync(MainframeDbContext db, Guid tenantId)
     {
         var taken = await db.Memberships.IgnoreQueryFilters()
             .Where(m => m.TenantId == tenantId && m.MembershipNumber.StartsWith("ADMIN-"))

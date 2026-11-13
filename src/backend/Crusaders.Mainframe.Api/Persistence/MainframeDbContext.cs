@@ -8,7 +8,7 @@ namespace Crusaders.Mainframe.Api.Persistence;
 /// <summary>
 /// EF Core context. Every <see cref="ITenantScoped"/> entity is filtered to the current
 /// tenant via global query filter; bypass requires <c>IgnoreQueryFilters()</c> and is reserved
-/// for platform-admin operations + onboarding.
+/// for work above any one club — workers sweeping every club, startup, and the operator CLI.
 /// </summary>
 public partial class MainframeDbContext : DbContext
 {
@@ -111,10 +111,9 @@ public partial class MainframeDbContext : DbContext
     /// </para>
     ///
     /// <para>
-    /// Nothing needed the escape: no platform admin is seeded, and the <c>/api/v1/platform/</c>
-    /// endpoints it existed for are not mapped. When they are, they belong on a
-    /// filter-bypassing repository of their own rather than on a hole punched through every
-    /// tenant's user list.
+    /// Nothing needed the escape, and the flag itself is gone (BP-13, 2026-11-13): cross-club
+    /// operations are the operator CLI's (<c>Persistence/TenantCli.cs</c>), which opens its own
+    /// scope above tenancy rather than punching a hole through every tenant's user list.
     /// </para>
     /// </remarks>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -129,6 +128,7 @@ public partial class MainframeDbContext : DbContext
             e.Property(t => t.Slug).HasMaxLength(64).IsRequired();
             e.Property(t => t.DisplayName).HasMaxLength(255).IsRequired();
             e.Property(t => t.Status).HasMaxLength(32).IsRequired();
+            e.Property(t => t.PublicBaseUrl).HasMaxLength(512);
             // One demo club per real club: the switch finds it by this, and a race between two
             // admins entering at once loses on the index rather than making two.
             e.HasIndex(t => t.DemoOfTenantId).IsUnique().HasFilter("\"DemoOfTenantId\" IS NOT NULL");
