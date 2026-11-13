@@ -578,21 +578,7 @@ public sealed class LedgerService
 
     public async Task<LedgerEntry> PostAsync(LedgerPosting posting, CancellationToken ct)
     {
-        var entry = new LedgerEntry
-        {
-            TenantId = _tenant.TenantId,
-            UserId = posting.UserId,
-            Type = posting.Type,
-            AmountMinutes = posting.AmountMinutes,
-            ZarPaid = posting.ZarPaid,
-            RelatedBookingId = posting.RelatedBookingId,
-            ActorUserId = posting.ActorUserId,
-            Reason = posting.Reason,
-            ExternalReference = posting.ExternalReference,
-            PurchaseId = posting.PurchaseId,
-            ReversesEntryId = posting.ReversesEntryId,
-            CreatedAt = posting.At ?? DateTimeOffset.UtcNow,
-        };
+        var entry = Build(posting);
         _db.LedgerEntries.Add(entry);
         await _db.SaveChangesAsync(ct);
 
