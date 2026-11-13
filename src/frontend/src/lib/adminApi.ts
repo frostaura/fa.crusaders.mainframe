@@ -914,7 +914,35 @@ export type AdminPackageUpdate = {
 // The calls
 // ---------------------------------------------------------------------------------------
 
+/**
+ * `GET /api/v1/admin/payments/payfast` — the club's PayFast account as stored (BM-4). The passphrase is
+ * write-only: the API says only whether one is set. `problems` are PayFastCredentialRules' codes, and
+ * `configured` is false while any remains — members are then told payments are not set up.
+ */
+export type PayFastSettings = {
+  configured: boolean;
+  problems: string[];
+  merchant_id: string | null;
+  merchant_key: string | null;
+  passphrase_set: boolean;
+  passphrase_required: boolean;
+  environment: string | null;
+  notify_url: string;
+};
+
+/** A save: an omitted field keeps the stored value; the passphrase is never read back. */
+export type PayFastSettingsSave = {
+  merchant_id?: string;
+  merchant_key?: string;
+  passphrase?: string;
+  environment?: "test" | "live";
+};
+
 export const adminEndpoints = {
+  // --- Payments (BM-4) -------------------------------------------------------------------
+  payFastSettings: () => api.get<PayFastSettings>("/api/v1/admin/payments/payfast"),
+  payFastSettingsSave: (req: PayFastSettingsSave) => api.put<PayFastSettings>("/api/v1/admin/payments/payfast", req),
+
   // --- Control board (item 10) -----------------------------------------------------------
   controlBoard: () => api.get<ControlBoardView>("/api/v1/admin/control-board"),
   /**

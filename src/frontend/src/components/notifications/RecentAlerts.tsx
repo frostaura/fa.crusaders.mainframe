@@ -46,6 +46,8 @@ const KIND_ICON: Record<string, Icon> = {
   "webhook.auto_disabled": WebhooksLogo,
   "schedule.conflict": Repeat,
   "booking.overdraft_authorised": Coins,
+  // Past bookings nobody settled (BM-11 of the money pass): booked, a payer, never checked in.
+  "booking.unsettled": Clock,
   "admin.role_changed": ShieldCheck,
   "code.forgery_suspected": ShieldWarning,
   "member.deleted": UserMinus,
