@@ -3,7 +3,7 @@ namespace Crusaders.Mainframe.Api.Domain;
 public enum WebhookOwnerKind
 {
     Tenant = 0,   // tenant-wide; receives all events for the tenant
-    User = 1,     // player-scoped; receives only events where the player is subject/actor
+    User = 1,     // retired (BP-08): no route creates one and nothing delivers to one; kept so the value keeps its meaning
 }
 
 public sealed class WebhookEndpoint : ITenantScoped
