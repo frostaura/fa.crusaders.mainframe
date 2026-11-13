@@ -505,6 +505,18 @@ Dean's answer 1 removes the cap entirely. This disappears:
 - It answers the same shape as `/sell` without `package` and with `zar_received: null`.
 - The `snake_case` aliases `reason_code` and `zar_received` stay bound on both routes, as they are today.
 
+**`POST /api/v1/admin/minutes/{userId}/reverse-payment`** records rand given back for a purchase (money lane BM-6) — the route `refund_outside_system` never was, because that code moves minutes only and Revenue kept the sale. Full contract in [`payments-payfast.md`](./payments-payfast.md), "Money going back".
+
+```json
+{ "entry_id": "uuid of a TopUp or AdminTopUp row that took rand", "kind": "refund|chargeback",
+  "zar_reversed": 120.00, "minutes_taken_back": 60, "reason": "…", "idempotency_key": "…" }
+```
+
+- Posts one `PaymentReversal`: `AmountMinutes = −minutes_taken_back` (0 allowed — the member keeps them), `ZarPaid = −zar_reversed`, `ReversesEntryId` = the purchase, `Reason = "Refund of R120.00 for {the purchase's own reason}"`, `ExternalReference = adjust:{tenant:N}:{key}` (key required).
+- Refused: `entry_not_found` (404 — not this member's, or another club's), `entry_not_reversible` (409 — not a paid funding row), `reversal_exceeds_payment {zar_left, minutes_left}` (409, summed over every earlier reversal under the payer lock), `kind_invalid`, `zar_reversed_out_of_range` / `_not_whole_cents`, `minutes_out_of_range`, `reason_required`, `idempotency_key_required` / `_invalid`, `idempotency_key_reused` (409).
+- Change action `payment.reversed` (no "credit" — §2.5 only shrinks), audit `credit.adjusted`, mail `EmailTemplates.PaymentReversed`, webhook `minutes.payment_reversed`. The balance may go below zero.
+- `GET /api/v1/admin/minutes/{userId}/reversible` → `{entries: [{entry_id, type, created_at, reason, zar_paid, amount_minutes, zar_reversed, minutes_taken_back, zar_left, minutes_left}]}`, newest first, at most 200.
+
 ### 3.8 Groups and tariff
 
 **Group wire** (`GET /api/v1/admin/member-groups`, the POST and PATCH answers):

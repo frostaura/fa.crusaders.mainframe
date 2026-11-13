@@ -12,7 +12,7 @@ A player sees their own data:
 
 ## Admin view
 A tenant admin sees the above for any individual member, plus tenant-wide:
-- **Revenue** — sum of `top_up` net of `payment_reversal` in the period. Money the tenant actually took, in rand, beside the minutes it sold for it and the rate between them (below).
+- **Revenue** — sum of `top_up` net of `payment_reversal` in the period. Money the tenant actually took, in rand, beside the minutes it sold for it and the rate between them (below). A reversal's rand always counts as given back, even when it took back no minutes (money lane BM-6, the desk's `reverse-payment`); the figures are summed by the database (BM-10), never by loading the window's rows.
 - **Bookings issued** — count, broken down by court / weekday / hour-of-day.
 - **Court utilisation** — % of available slices booked, per court, per day. Heatmap chart (court × hour).
 - **No-show rate** — count and % of bookings that no-showed; trend line over time.
