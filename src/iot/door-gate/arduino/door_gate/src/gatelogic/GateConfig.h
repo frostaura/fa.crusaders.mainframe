@@ -204,10 +204,11 @@ inline constexpr uint8_t kGateReplaySlots = 32U;
 /// the orchestration is written against is the one the board actually builds.
 inline constexpr uint16_t kGateEventSlots = static_cast<uint16_t>(EVENTQ_SLOTS);
 
-/// The contract's whole-body budget for a heartbeat response (4096) with room
-/// to spare. Static, because loop() makes blocking HTTP calls and a 4.6 KB
-/// local under one of them is a crash that reads as a random reset.
-inline constexpr size_t kGateResponseCap = 4608U;
+/// The heartbeat response buffer: 8192, so the v3 gate contract's 6144-byte
+/// body is at most 80% of it (compat/ `budgets`, device-api.md §11.4; 1.x read
+/// 4096 into 4608). Static, because loop() makes blocking HTTP calls and an
+/// 8 KB local under one of them is a crash that reads as a random reset.
+inline constexpr size_t kGateResponseCap = 8192U;
 
 /// The lower bound of the server's own `clamp(gate_unlock_seconds, 1, 30)`.
 /// Applied again here because a zero-second release is a door that clicks and

@@ -93,6 +93,9 @@
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateApp.h"
 #include "gatelogic/GateConfig.h"
+#include "gatelogic/GateKeys.h"
+#include "gatelogic/GateNet.h"
+#include "gatelogic/GateStore.h"
 #include "gatelogic/LedPattern.h"
 #include "gatelogic/LockDriver.h"
 #include "gatelogic/ScanAssembler.h"
@@ -165,6 +168,9 @@ struct Options {
   /// this simulator uses by default. Round G4, A4: the one unbounded path in
   /// this firmware was the one path no test vehicle could reach.
   bool boardHeaderTimeout = false;
+  /// A warm boot: the RTC memory the last run left in the store is believed, as
+  /// the board believes RTC memory after any reset but a power-on (§14.1).
+  bool warm = false;
 };
 
 /// A boot identity for a run that did not name one.
@@ -206,6 +212,9 @@ void usage() {
          "                instead of an absolute deadline. A peer that dribbles then\n"
          "                holds the call open past the watchdog, exactly as on the\n"
          "                hardware, and the breach is reported instead of resetting\n"
+         "  --warm        a warm boot: the RTC memory the last run left in --store is\n"
+         "                believed, as after a watchdog or software reset. Without it\n"
+         "                every launch is a power-on (the flash records alone)\n"
          "console: 'scan <code>', 'rxerror', 'wifi up|down', 'status', 'quit'\n");
 }
 
@@ -238,6 +247,10 @@ bool parseArgument(int argc, char** argv, int& i, Options& out) {
   }
   if (strcmp(argv[i], "--link-down") == 0) {
     out.linkDown = true;
+    return true;
+  }
+  if (strcmp(argv[i], "--warm") == 0) {
+    out.warm = true;
     return true;
   }
   if (strcmp(argv[i], "--board-header-timeout") == 0) {
@@ -343,7 +356,7 @@ public:
         relayPin_("relay", lockPinLevel(true, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay),
                   clock_),
         ledPin_("led", ledPinLevel(true, kGateConfig.ledActiveHigh), clock_), link_(clock_),
-        watchdog_(kGateConfig.watchdogSeconds, clock_), http_(options.apiBase, authorization_, clock_),
+        watchdog_(kGateConfig.watchdogSeconds, clock_), http_(net_.baseUrl(), keys_.header(), clock_),
         api_(http_, breaker_, clock_, faults_),
         lock_(relayPin_, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay),
         unlockTimer_(kGateConfig.unlockHardCapMs, kGateConfig.minRelockMs, kGateConfig.relockDwellMs),
@@ -354,18 +367,20 @@ public:
   /// Static and filled before the Board is constructed, because SocketHttpPort
   /// holds it by pointer for the life of the process.
   static bool renderIdentity(const char* deviceKey) {
-    return devapi::renderAuthorization(authorization_, sizeof(authorization_), deviceKey) != 0U;
+    char header[devapi::kAuthorizationBufSize] = {};
+    return devapi::renderAuthorization(header, sizeof(header), deviceKey) != 0U;
   }
 
   /// Opens the store and the console. False when the store directory cannot be
   /// used — reported rather than run with a store that silently loses the event
   /// queue's sequence across a restart.
   bool begin() {
-    if (!store_.begin(options_.storeDir)) {
+    if (!store_.begin(options_.storeDir) || !blobs_.begin(options_.storeDir)) {
       fprintf(stderr, "[sim] cannot use store directory %s\n", options_.storeDir);
       return false;
     }
     static_cast<void>(console_.begin());
+    loadWarm();
     // BEFORE ANY CALL. See Options::boardHeaderTimeout and round G4's A4.
     http_.useBoardHeaderTimeout(options_.boardHeaderTimeout);
 
@@ -386,9 +401,12 @@ public:
     return true;
   }
 
+  bool restartRequested() const { return system_.requested(); }
+
   void run() {
-    while (gStopRequested == 0) {
+    while (gStopRequested == 0 && !system_.requested()) {
       app_.pass();
+      saveWarm();
       reportChanges();
       while (console_.poll()) {
         command(console_.line());
@@ -408,6 +426,35 @@ public:
   }
 
 private:
+  /// The RTC memory file: what the last run left, believed only with --warm.
+  void loadWarm() {
+    char p[300];
+    if (!options_.warm || snprintf(p, sizeof(p), "%s/warm.bin", options_.storeDir) <= 0) {
+      return;
+    }
+    FILE* f = fopen(p, "rb");
+    if (f != nullptr) {
+      static_cast<void>(fread(warm_, 1U, sizeof(warm_), f));
+      static_cast<void>(fclose(f));
+    }
+  }
+
+  void saveWarm() {
+    if (memcmp(warm_, warmSaved_, sizeof(warm_)) == 0) {
+      return;
+    }
+    memcpy(warmSaved_, warm_, sizeof(warm_));
+    char p[300];
+    if (snprintf(p, sizeof(p), "%s/warm.bin", options_.storeDir) <= 0) {
+      return;
+    }
+    FILE* f = fopen(p, "wb");
+    if (f != nullptr) {
+      static_cast<void>(fwrite(warm_, 1U, sizeof(warm_), f));
+      static_cast<void>(fclose(f));
+    }
+  }
+
   GateApp::Ports wire() {
     GateApp::Ports ports;
     ports.clock = &clock_;
@@ -441,6 +488,23 @@ private:
     ports.bootReason = nullptr;
     ports.heartbeatBody = heartbeatBody_;
     ports.heartbeatBodyCap = sizeof(heartbeatBody_);
+    // 2.0.0. No OTA slot and no setup portal: a simulator cannot replace its own
+    // image or open an access point, and pretending would test the pretence.
+    // Both are proven against the same GateApp in test/test_gate_v3.
+    ports.blobs = &blobs_;
+    ports.warmBytes = warm_;
+    ports.warmBytesCap = sizeof(warm_);
+    ports.warmClock = &rtc_;
+    ports.coldBoot = !options_.warm;
+    ports.keys = &keys_;
+    ports.net = &net_;
+    ports.compiledKey = options_.deviceKey;
+    ports.compiledSsid = "SIMULATOR";
+    ports.compiledPsk = "simulator-pass";
+    ports.compiledBase = options_.apiBase;
+    ports.radio = &radio_;
+    ports.system = &system_;
+    ports.diag = &diag_;
     return ports;
   }
 
@@ -555,13 +619,20 @@ private:
     }
   }
 
-  /// Held by SocketHttpPort by pointer for the life of the process, so it
-  /// outlives every call — the same lifetime the board's compiled-in one has.
-  static char authorization_[devapi::kAuthorizationBufSize];
-
   Options options_;
 
   posix_hal::PosixClock clock_;
+  // The keys and the network before the HTTP port, which holds their header
+  // and base-URL buffers (GateApp::begin fills them).
+  GateKeys keys_;
+  GateNet net_;
+  posix_gate_hal::FileBlobs blobs_;
+  posix_gate_hal::MonotonicRtc rtc_;
+  posix_gate_hal::ConsoleRadio radio_;
+  posix_gate_hal::ConsoleSystem system_;
+  posix_gate_hal::SimDiag diag_{options_.warm};
+  uint8_t warm_[sizeof(WarmImage)] = {};
+  uint8_t warmSaved_[sizeof(WarmImage)] = {};
   posix_hal::FileStore store_;
   posix_hal::StdinLines console_;
 
@@ -614,7 +685,6 @@ private:
   bool reported_ = false;
 };
 
-char Board::authorization_[devapi::kAuthorizationBufSize] = {};
 
 } // namespace
 
@@ -641,5 +711,5 @@ int main(int argc, char** argv) {
   static_cast<void>(signal(SIGTERM, onSignal));
 
   board.run();
-  return 0;
+  return board.restartRequested() ? posix_gate_hal::ConsoleSystem::kRestartExit : 0;
 }

@@ -604,4 +604,86 @@ void ConsoleDecisionLog::decided(const gatelogic::ScanDecision& decision, const 
   static_cast<void>(fflush(stdout));
 }
 
+// --- gate 2.0.0 -------------------------------------------------------------
+
+bool FileBlobs::begin(const char* dir) {
+  const int n = snprintf(dir_, sizeof(dir_), "%s", dir == nullptr ? "." : dir);
+  return n > 0 && static_cast<size_t>(n) < sizeof(dir_);
+}
+
+bool FileBlobs::path(const char* key, char* out, size_t cap) const {
+  const int n = snprintf(out, cap, "%s/%s.rec", dir_, key);
+  return n > 0 && static_cast<size_t>(n) < cap;
+}
+
+bool FileBlobs::put(const char* key, const void* data, size_t len) {
+  char final[300];
+  char temp[310];
+  if (key == nullptr || !path(key, final, sizeof(final))) {
+    return false;
+  }
+  const int n = snprintf(temp, sizeof(temp), "%s.tmp", final);
+  if (n <= 0 || static_cast<size_t>(n) >= sizeof(temp)) {
+    return false;
+  }
+  FILE* f = fopen(temp, "wb");
+  if (f == nullptr) {
+    return false;
+  }
+  const bool wrote = fwrite(data, 1U, len, f) == len;
+  const bool closed = fclose(f) == 0;
+  return wrote && closed && rename(temp, final) == 0;
+}
+
+size_t FileBlobs::get(const char* key, void* out, size_t cap) {
+  char p[300];
+  if (key == nullptr || !path(key, p, sizeof(p))) {
+    return 0U;
+  }
+  FILE* f = fopen(p, "rb");
+  if (f == nullptr) {
+    return 0U;
+  }
+  const size_t n = fread(out, 1U, cap, f);
+  const bool more = fgetc(f) != EOF;
+  static_cast<void>(fclose(f));
+  return more ? 0U : n;
+}
+
+void FileBlobs::erase(const char* key) {
+  char p[300];
+  if (key != nullptr && path(key, p, sizeof(p))) {
+    static_cast<void>(remove(p));
+  }
+}
+
+uint64_t MonotonicRtc::nowUs() {
+  timespec ts;
+  static_cast<void>(clock_gettime(CLOCK_MONOTONIC, &ts));
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000ULL;
+}
+
+void ConsoleRadio::join(const char* ssid, const char* psk) {
+  static_cast<void>(psk);
+  ++joins_;
+  printf("[radio] join ssid=%s\n", ssid == nullptr ? "" : ssid);
+  static_cast<void>(fflush(stdout));
+}
+
+void ConsoleSystem::restart() {
+  requested_ = true;
+  printf("[sim] restart requested\n");
+  static_cast<void>(fflush(stdout));
+}
+
+void SimDiag::read(gatelogic::GateDiag& out) {
+  out.reset = warm_ ? "software" : "power_on";
+  out.heap = 200000U;
+  out.heapMin = 180000U;
+  out.block = 110000U;
+  out.stackMin = 4096U;
+  out.sketchFree = 1310720U;
+  out.flashMb = 4U;
+}
+
 } // namespace posix_gate_hal

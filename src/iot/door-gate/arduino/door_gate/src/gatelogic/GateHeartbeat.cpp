@@ -3,6 +3,7 @@
 #include "../gatelogic/GateHeartbeat.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "../devapi/Json.h"
 #include "../devlink/Cadence.h"
@@ -84,6 +85,133 @@ size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const cha
     return 0U;
   }
   return static_cast<size_t>(written);
+}
+
+namespace {
+
+/// Appends to a bounded buffer; any overflow makes the whole render fail.
+class Writer {
+public:
+  Writer(char* out, size_t cap) : out_(out), cap_(cap) {}
+
+  void text(const char* s) {
+    if (failed_) {
+      return;
+    }
+    const size_t n = strlen(s);
+    if (len_ + n + 1U > cap_) {
+      failed_ = true;
+      return;
+    }
+    memcpy(out_ + len_, s, n + 1U);
+    len_ += n;
+  }
+
+  void field(const char* key, const char* value) {
+    text(",\"");
+    text(key);
+    text("\":\"");
+    text(value);
+    text("\"");
+  }
+
+  void number(const char* key, uint32_t value) {
+    char digits[16] = {};
+    const int n = snprintf(digits, sizeof(digits), "%lu", static_cast<unsigned long>(value));
+    if (n < 0) {
+      failed_ = true;
+      return;
+    }
+    text(",\"");
+    text(key);
+    text("\":");
+    text(digits);
+  }
+
+  size_t finish() {
+    if (failed_) {
+      out_[0] = '\0';
+      return 0U;
+    }
+    return len_;
+  }
+
+private:
+  char* out_;
+  size_t cap_;
+  size_t len_ = 0U;
+  bool failed_ = false;
+};
+
+} // namespace
+
+size_t renderGateHeartbeatV3(char* out, size_t cap, const char* mac, const char* firmwareVersion, uint64_t uptimeMs,
+                             const GateDiagnostics& counters, const GateReport& report) {
+  if (out == nullptr || cap == 0U) {
+    return 0U;
+  }
+  out[0] = '\0';
+  if (mac == nullptr || mac[0] == '\0' || firmwareVersion == nullptr || report.fwState == nullptr ||
+      report.netSrc == nullptr) {
+    return 0U;
+  }
+  char uptime[21] = {};
+  if (tb::formatU64(uptimeMs, uptime, sizeof(uptime)) == 0U) {
+    return 0U;
+  }
+  Writer w(out, cap);
+  w.text("{\"mac\":\"");
+  w.text(mac);
+  w.text("\",\"firmware_version\":\"");
+  w.text(firmwareVersion);
+  w.text("\",\"uptime_ms\":");
+  w.text(uptime);
+  w.text(",\"kind\":\"gate\"");
+  if (counters.noPush != 0U) {
+    w.number("no_push", saturate(counters.noPush));
+  }
+  if (counters.eventsLost != 0U) {
+    w.number("events_lost", saturate(counters.eventsLost));
+  }
+  w.field("fw_state", report.fwState);
+  if (report.fwFailed != nullptr && report.fwFailed[0] != '\0') {
+    w.field("fw_failed", report.fwFailed);
+  }
+  if (report.fwError != nullptr && report.fwError[0] != '\0') {
+    w.field("fw_error", report.fwError);
+  }
+  w.number("net_ver", report.netVer);
+  w.field("net_src", report.netSrc);
+  if (report.restore != nullptr) {
+    w.field("restore", report.restore);
+  }
+  if (report.diag != nullptr) {
+    const GateDiag& d = *report.diag;
+    w.text(",\"diag\":{\"reset\":\"");
+    w.text(d.reset == nullptr ? "unknown" : d.reset);
+    w.text("\"");
+    w.number("exc", d.exc);
+    w.number("epc1", d.epc1);
+    w.number("heap", d.heap);
+    w.number("heap_min", d.heapMin);
+    w.number("block", d.block);
+    w.number("stack_min", d.stackMin);
+    w.number("sketch_free", d.sketchFree);
+    w.number("flash_mb", d.flashMb);
+    w.text("}");
+  }
+  if (report.drift != nullptr && report.drift->count > 0U) {
+    w.text(",\"drift\":[");
+    for (uint8_t i = 0U; i < report.drift->count; ++i) {
+      w.text(i == 0U ? "\"" : ",\"");
+      w.text(report.drift->names[i]);
+      w.text("\"");
+    }
+    w.text("]");
+  }
+  w.text(kGateCapsV3);
+  w.text("}");
+  return w.finish();
 }
 
 bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs) {

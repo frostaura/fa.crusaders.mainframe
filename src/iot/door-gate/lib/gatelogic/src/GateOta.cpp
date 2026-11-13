@@ -29,6 +29,10 @@ public:
 
   bool chunk(const uint8_t* data, size_t len) override {
     hooks_.duringDownload();
+    if (len == 0U) {
+      // A wait for the next bytes: the watchdog and the lock, nothing else.
+      return true;
+    }
     if (static_cast<uint64_t>(bytes_) + len > limit_) {
       overrun_ = true;
       return false;

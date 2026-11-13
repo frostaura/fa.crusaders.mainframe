@@ -72,6 +72,18 @@ constexpr bool startsWith(const char* s, const char* prefix) {
   return (*prefix == '\0') ? true : (*s != *prefix) ? false : startsWith(s + 1, prefix + 1);
 }
 
+/// Every character of `s` in [from, to) is a lowercase or uppercase hex digit.
+/// Divide and conquer, so a 512-character key stays nine calls deep: C++11
+/// constexpr recursion is bounded at 512 by GCC, and the Arduino IDE builds the
+/// sketch at C++11.
+constexpr bool isHexRange(const char* s, size_t from, size_t to) {
+  return (to - from == 0U)   ? true
+         : (to - from == 1U) ? ((s[from] >= '0' && s[from] <= '9') || (s[from] >= 'a' && s[from] <= 'f') ||
+                                (s[from] >= 'A' && s[from] <= 'F'))
+                             : (isHexRange(s, from, from + (to - from) / 2U) &&
+                                isHexRange(s, from + (to - from) / 2U, to));
+}
+
 } // namespace text
 } // namespace gatelogic
 

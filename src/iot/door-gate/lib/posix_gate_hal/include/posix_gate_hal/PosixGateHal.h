@@ -48,7 +48,9 @@
 #include "hal/PinLevel.h"
 
 #include "gatelogic/GateFlow.h"
+#include "gatelogic/GateHeartbeat.h"
 #include "gatelogic/GatePorts.h"
+#include "gatelogic/GateStore.h"
 #include "gatelogic/HttpPort.h"
 #include "gatelogic/PinOut.h"
 
@@ -294,6 +296,65 @@ public:
 
 private:
   uint32_t count_ = 0U;
+};
+
+// --- gate 2.0.0 -------------------------------------------------------------
+
+/// Flash records as files, one per key, in the simulator's store directory.
+/// Each write lands in a temporary file renamed over the old one, so a killed
+/// simulator leaves the previous record or the new one, never half of either —
+/// which is what NVS guarantees the board.
+class FileBlobs final : public gatelogic::IBlobStore {
+public:
+  bool begin(const char* dir);
+  bool put(const char* key, const void* data, size_t len) override;
+  size_t get(const char* key, void* out, size_t cap) override;
+  void erase(const char* key) override;
+
+private:
+  bool path(const char* key, char* out, size_t cap) const;
+  char dir_[256] = {};
+};
+
+/// The RTC counter: CLOCK_MONOTONIC, which keeps counting across simulator
+/// processes exactly as the ESP32's RTC keeps counting across a warm reset.
+class MonotonicRtc final : public gatelogic::IWarmClock {
+public:
+  uint64_t nowUs() override;
+};
+
+/// The radio, on the console: a join is announced (the SSID, never the
+/// password) and the link stays as `wifi up|down` left it.
+class ConsoleRadio final : public gatelogic::IRadio {
+public:
+  void join(const char* ssid, const char* psk) override;
+  uint32_t joins() const { return joins_; }
+
+private:
+  uint32_t joins_ = 0U;
+};
+
+/// A restart request: announced, and the simulator exits with kRestartExit so
+/// a harness can start the next boot (with --warm, as the board's RTC would).
+class ConsoleSystem final : public gatelogic::ISystem {
+public:
+  static constexpr int kRestartExit = 75;
+  void restart() override;
+  bool requested() const { return requested_; }
+
+private:
+  bool requested_ = false;
+};
+
+/// What a simulator honestly knows about its own health: nothing it could
+/// measure the way the board does, so fixed, plausible values that say so.
+class SimDiag final : public gatelogic::IDiagSource {
+public:
+  explicit SimDiag(bool warm) : warm_(warm) {}
+  void read(gatelogic::GateDiag& out) override;
+
+private:
+  bool warm_;
 };
 
 } // namespace posix_gate_hal

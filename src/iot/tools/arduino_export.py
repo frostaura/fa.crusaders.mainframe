@@ -487,10 +487,10 @@ DOOR_GATE_SECRETS_EXAMPLE_SUBS = [
     ("// Copy to secrets.h and fill in all four values before flashing. secrets.h is",
      "// Copy to secrets.h — in THIS folder, beside door_gate.ino — and fill in all\n"
      "// four values before flashing. secrets.h is"),
-    ("To change any of these: edit the value and reflash. See\n"
+    ("the one that puts 2.0.0 on the board. See\n"
      "// src/iot/door-gate/README.md's Flashing section.",
-     "To change any of these: edit the value and Upload again from\n"
-     "// the Arduino IDE. See src/iot/door-gate/arduino/README.md."),
+     "the one that puts 2.0.0 on the board. See\n"
+     "// src/iot/door-gate/arduino/README.md."),
 ]
 
 ESP8266_INDEX = "https://arduino.esp8266.com/stable/package_esp8266com_index.json"
