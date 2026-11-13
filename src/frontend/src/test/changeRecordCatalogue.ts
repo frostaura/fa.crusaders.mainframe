@@ -442,6 +442,10 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     action: "member.admin_revoked", area: "member", headline: "Removed a member's administrator rights — Thandi Mokoena",
     writer: "AdminRoleService.StageRecordsAsync", before: { is_admin: true }, after: { is_admin: false },
   }),
+  row({
+    action: "member.pin_set", area: "member", headline: "Set a member's court PIN — Thandi Mokoena",
+    writer: "PinEndpoints (admin set)", before: null, after: { pin_set: true },
+  }),
 
   // ---- setting ----
   row({

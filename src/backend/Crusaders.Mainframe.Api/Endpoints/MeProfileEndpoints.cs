@@ -73,7 +73,7 @@ public static class MeProfileEndpoints
             });
         });
 
-        g.MapPut("/profile", async (UpdateProfileRequest req, HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
+        g.MapPut("/profile", async (UpdateProfileRequest req, HttpContext ctx, MainframeDbContext db, MemberPhotoFiles photos, ITenantContext tenant, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
             var membership = await db.Memberships.FirstOrDefaultAsync(m => m.UserId == userId, ct);
@@ -87,11 +87,15 @@ public static class MeProfileEndpoints
             }
             if (req.PhotoUrl is not null)
             {
-                // Accept either an in-tenant uploaded URL ("/uploads/...") or a data: URI fallback.
+                // BP-06: only a photo this club issued, whose file exists — never another club's
+                // path, an outside URL, a data: URI (a 4 KB one never fitted the column anyway) or
+                // nothing at all. The photo is what the booking grid shows other players instead of
+                // an email or a membership number, which is why it is mandatory.
                 var url = req.PhotoUrl.Trim();
-                if (url.Length == 0) membership.PhotoUrl = null;
-                else if (url.StartsWith("/uploads/") || url.StartsWith("data:image/")) membership.PhotoUrl = url;
-                else return Results.BadRequest(new { error = "photo_url_invalid" });
+                if (await PhotoRefusalAsync(db, photos, tenant.TenantSlug, url, membership.Id, ct) is { } problem)
+                    return Results.BadRequest(new { error = problem });
+                if (membership.PhotoUrl != url) photos.TryDelete(tenant.TenantSlug, membership.PhotoUrl);
+                membership.PhotoUrl = url;
             }
             await db.SaveChangesAsync(ct);
             return Results.Ok(new
@@ -133,47 +137,47 @@ public static class MeProfileEndpoints
 
         // Authenticated multipart upload: stores under the resolved tenant slug
         // and pins the membership's photo_url to the new URL atomically.
-        g.MapPost("/photo", async (HttpRequest req, HttpContext ctx, ITenantContext tenant, IConfiguration config, MainframeDbContext db, ILoggerFactory loggerFactory, CancellationToken ct) =>
-        {
-            var logger = loggerFactory.CreateLogger("MePhoto");
-            if (!req.HasFormContentType) return Results.BadRequest(new { error = "expected_multipart" });
-
-            var form = await req.ReadFormAsync(ct);
-            var file = form.Files.GetFile("file");
-            if (file is null || file.Length == 0) return Results.BadRequest(new { error = "file_missing" });
-            if (file.Length > 5 * 1024 * 1024) return Results.BadRequest(new { error = "file_too_large", max_bytes = 5 * 1024 * 1024 });
-            var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/png", "image/webp", "image/gif" };
-            if (!allowed.Contains(file.ContentType ?? "")) return Results.BadRequest(new { error = "unsupported_content_type", got = file.ContentType });
-
-            var userId = ctx.User.Id() ?? Guid.Empty;
-            var membership = await db.Memberships.FirstOrDefaultAsync(m => m.UserId == userId, ct);
-            if (membership is null) return Results.NotFound(new { error = "membership_not_found" });
-
-            var ext = file.ContentType switch
-            {
-                "image/jpeg" => "jpg",
-                "image/png" => "png",
-                "image/webp" => "webp",
-                "image/gif" => "gif",
-                _ => "bin",
-            };
-            var storageRoot = config["Media:StoragePath"] ?? "./media";
-            var subdir = Path.Combine(storageRoot, tenant.TenantSlug, "photos");
-            Directory.CreateDirectory(subdir);
-            var fileId = Guid.NewGuid().ToString("N");
-            var fullPath = Path.Combine(subdir, $"{fileId}.{ext}");
-            await using (var fs = File.Create(fullPath))
-            await using (var src = file.OpenReadStream())
-                await src.CopyToAsync(fs, ct);
-
-            var url = $"/uploads/{tenant.TenantSlug}/photos/{fileId}.{ext}";
-            membership.PhotoUrl = url;
-            await db.SaveChangesAsync(ct);
-            logger.LogInformation("photo updated for user {UserId}", userId);
-            return Results.Ok(new { photo_url = url });
-        }).DisableAntiforgery();
+        g.MapPost("/photo", ReplacePhotoAsync).DisableAntiforgery();
 
         return app;
+    }
+
+    /// <summary>
+    /// Why <paramref name="url"/> cannot be this membership's photo, or null: not one this club
+    /// issued, its file gone, or another membership's photo already (a face copied off the grid is
+    /// somebody else's face). Shared with registration, where <paramref name="selfMembershipId"/> is null.
+    /// </summary>
+    internal static async Task<string?> PhotoRefusalAsync(
+        MainframeDbContext db, MemberPhotoFiles photos, string tenantSlug, string? url, Guid? selfMembershipId, CancellationToken ct)
+    {
+        if (photos.Problem(tenantSlug, url) is { } problem) return problem;
+        var taken = await db.Memberships.IgnoreQueryFilters()
+            .AnyAsync(m => m.PhotoUrl == url!.Trim() && m.Id != selfMembershipId, ct);
+        return taken ? "photo_url_invalid" : null;
+    }
+
+    /// <summary>
+    /// Stores a new photo and points the membership at it, removing the one it replaces (BP-04: the
+    /// old file used to stay on the volume forever). The bytes decide the type — see MemberPhotoFiles.
+    /// </summary>
+    private static async Task<IResult> ReplacePhotoAsync(
+        HttpRequest req, HttpContext ctx, ITenantContext tenant, MemberPhotoFiles photos, MainframeDbContext db, CancellationToken ct)
+    {
+        if (!req.HasFormContentType) return Results.BadRequest(new { error = "expected_multipart" });
+
+        var userId = ctx.User.Id() ?? Guid.Empty;
+        var membership = await db.Memberships.FirstOrDefaultAsync(m => m.UserId == userId, ct);
+        if (membership is null) return Results.NotFound(new { error = "membership_not_found" });
+
+        var form = await req.ReadFormAsync(ct);
+        var saved = await photos.SaveAsync(tenant.TenantSlug, form.Files.GetFile("file"), ct);
+        if (!saved.Ok) return UploadEndpoints.Refusal(saved);
+
+        var previous = membership.PhotoUrl;
+        membership.PhotoUrl = saved.Url;
+        await db.SaveChangesAsync(ct);
+        photos.TryDelete(tenant.TenantSlug, previous);
+        return Results.Ok(new { photo_url = saved.Url });
     }
 
     /// <summary>

@@ -242,13 +242,7 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
         anonymous.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
 
         var email = $"new-{Guid.NewGuid():N}@test.local";
-        var response = await anonymous.PostAsJsonAsync("/api/v1/auth/register", new
-        {
-            email,
-            password = "a-long-enough-password",
-            fullName = "New Member",
-            membershipNumber = $"N-{Guid.NewGuid():N}"[..10],
-        });
+        var response = await TestPhotos.RegisterAsync(anonymous, email, $"N-{Guid.NewGuid():N}"[..10], "New Member", "a-long-enough-password");
 
         Assert.True(response.IsSuccessStatusCode, $"register returned {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
 
@@ -265,15 +259,24 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// The consequence the empty tenant actually had: registering somebody else's address.
+    /// The consequence the empty tenant actually had: registering somebody else's address. The
+    /// application is answered like any other (BP-14 — the screen no longer says which addresses
+    /// hold accounts), but no second account is made, and the address's real owner is told.
+    ///
+    /// <para>
+    /// This test used to post no photo, so after BP-06 it passed on <c>400 photo_required</c>
+    /// whatever the duplicate handling did. It now sends a real one, so the duplicate is what is
+    /// tested.
+    /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task Registering_an_address_that_already_exists_in_the_tenant_is_refused()
+    public async Task Registering_an_address_that_already_exists_in_the_tenant_makes_no_second_account()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = CreateFactory();
-        var club = await SeedAsync(factory);
+        var mail = new CapturingMail();
+        await using var factory = CapturingMail.On(CreateFactory(), mail);
+        var club = await SeedAsync(_pg.SharedHost);
 
         string existingEmail;
         using (var scope = factory.Services.CreateScope())
@@ -285,35 +288,33 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
         using var anonymous = factory.CreateClient();
         anonymous.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
 
-        var response = await anonymous.PostAsJsonAsync("/api/v1/auth/register", new
-        {
-            email = existingEmail,
-            password = "a-long-enough-password",
-            fullName = "Impostor",
-            membershipNumber = $"I-{Guid.NewGuid():N}"[..10],
-        });
+        var response = await TestPhotos.RegisterAsync(anonymous, existingEmail, $"I-{Guid.NewGuid():N}"[..10], "Impostor", "a-long-enough-password");
 
-        Assert.False(response.IsSuccessStatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var told = Assert.Single(mail.Sent, m => m.To == existingEmail);
+        Assert.Equal("You already have an account", told.Subject);
+        Assert.Contains($"http://{club.Slug}.localhost:8088/forgot-password", told.HtmlBody, StringComparison.Ordinal);
 
         using var check = factory.Services.CreateScope();
         var db2 = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var rows = await db2.Users.IgnoreQueryFilters().CountAsync(u => u.Email == existingEmail);
         Assert.Equal(1, rows);
+        Assert.False(await db2.Memberships.IgnoreQueryFilters().AnyAsync(m => m.FullName == "Impostor"));
     }
 
     /// <summary>
-    /// A platform admin in one tenant is not in another tenant's user list.
+    /// A user in one tenant is not in another tenant's user list — whatever flag they carry.
     ///
     /// <para>
     /// The <c>Users</c> query filter carried <c>|| u.IsPlatformAdmin</c> — the only
     /// disjunction in the model. It put every platform-admin row in the deployment inside
     /// every tenant, and the credit-adjustment endpoint's existence check passed on one, so
     /// a tenant admin could post a ledger entry in their own tenant against a user who was
-    /// not in it.
+    /// not in it. The flag itself is gone (BP-13); the cross-tenant injection stays pinned.
     /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task A_platform_admin_from_another_tenant_cannot_be_credited()
+    public async Task A_user_from_another_tenant_cannot_be_credited()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -332,7 +333,7 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
                 Email = $"platform-{Guid.NewGuid():N}@test.local",
                 PasswordHash = "x",
                 EmailVerified = true,
-                IsPlatformAdmin = true,
+                IsAdmin = true,
             };
             db.Users.Add(outsider);
             await db.SaveChangesAsync();

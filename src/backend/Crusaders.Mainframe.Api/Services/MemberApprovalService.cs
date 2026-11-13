@@ -82,6 +82,15 @@ public sealed class MemberApprovalService
 
         var from = membership.Status == MembershipStatus.Rejected ? "rejected" : "pending_approval";
         var user = await _db.Users.FirstAsync(u => u.Id == membership.UserId, ct);
+
+        // BP-02: an applicant whose address is unconfirmed cannot be approved. Whoever typed an
+        // address into the form chose the password with it, and the welcome link below is mailed
+        // to that ADDRESS: approving first let a stranger register somebody else's email, wait for
+        // the club to approve "them", and keep a working password once the real owner clicked the
+        // welcome mail. Confirming first means the password and the mailbox belong to the same
+        // person before the club lets either in. The console offers "Resend verification" on
+        // exactly these rows.
+        if (!user.EmailVerified) return TransitionReport.Refused(MembershipTransition.EmailNotVerified);
         membership.Status = MembershipStatus.Active;
         membership.RejectionReason = null;
         membership.ReviewedAt = DateTimeOffset.UtcNow;
@@ -108,7 +117,7 @@ public sealed class MemberApprovalService
         await _db.SaveChangesAsync(ct);
 
         var club = await _club.GetAsync(ct);
-        var url = $"{_config["App:PublicBaseUrl"] ?? "http://localhost:8088"}/welcome/{magicLinkPlain}";
+        var url = $"{await TenantLinks.ForTenantAsync(_db, _config, _tenant.TenantId, ct)}/welcome/{magicLinkPlain}";
         var notified = await SendOrLogAsync(
             EmailTemplates.MembershipApproved(club, user.Email, url), $"approval notice for {user.Email}", ct);
         await EmitAsync("member.approved", membership, actorId, null, ct);
@@ -355,6 +364,9 @@ public enum MembershipTransition
     NotFound,
     AlreadyInState,
     WrongStatus,
+
+    /// <summary>The applicant has not confirmed their address yet (BP-02): approval waits for it.</summary>
+    EmailNotVerified,
 }
 
 /// <summary>

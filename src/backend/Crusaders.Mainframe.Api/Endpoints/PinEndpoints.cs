@@ -74,16 +74,30 @@ public static class PinEndpoints
             var user = await db.Users.FirstOrDefaultAsync(u => u.Id == membership.UserId, ct);
             if (user is null) return Results.NotFound();
 
+            var actor = ctx.User.Id() ?? Guid.Empty;
             user.PinHash = hasher.Hash(req.Pin!);
             db.AuditLogs.Add(new AuditLog
             {
                 TenantId = membership.TenantId,
-                ActorUserId = ctx.User.Id() ?? Guid.Empty,
+                ActorUserId = actor,
                 SubjectUserId = user.Id,
                 Action = "user.pin_set_by_admin",
             });
+            // BP-11: a PIN identifies the member at the court and spends their minutes there, so a
+            // desk that sets one is changing a credential — on the club's undeletable change record
+            // in the same save (never the PIN itself), and told to the member afterwards.
+            await ctx.RequestServices.GetRequiredService<AdminChangeRecorder>().StageAsync(new AdminChange(
+                Action: AdminChangeActions.MemberPinSet, ActorUserId: actor, SubjectKind: AdminChangeSubjects.User,
+                SubjectId: user.Id, SubjectLabel: membership.FullName, After: new { pin_set = true }), ct);
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new { pin_set = true });
+
+            var services = ctx.RequestServices;
+            var queued = await Email.EmailDispatch.QueueAsync(
+                services.GetRequiredService<Email.IEmailService>(),
+                services.GetRequiredService<ILoggerFactory>().CreateLogger("AdminSetPin"),
+                Email.EmailTemplates.PinSetByClub(await services.GetRequiredService<Email.ClubIdentityResolver>().GetAsync(ct), user.Email, membership.FullName),
+                $"PIN-set notice for {user.Id}");
+            return Results.Ok(new { pin_set = true, member_email_queued = queued });
         }).RequireAuthorization(p => p.RequireRole("admin"));
 
         // Court-side — identify by PIN. Returns the matched user_id if any active-booking holder's

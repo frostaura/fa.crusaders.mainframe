@@ -4,11 +4,11 @@ using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
+using Crusaders.Mainframe.Api.Services;
 using Fido2NetLib;
 using Fido2NetLib.Objects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
@@ -22,20 +22,27 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// <para><b>Register / list / delete</b> — authenticated. Add or remove passkeys for the
 /// signed-in user.</para>
 ///
-/// Challenge state is stashed in <see cref="IMemoryCache"/> against an opaque flow id, with
-/// a 5 minute TTL. This avoids needing a session cookie and keeps the API stateless.
+/// Challenge state is stashed in <see cref="WebAuthnFlows"/> — a bounded store of its own —
+/// against an opaque flow id, with a 5 minute TTL. This avoids needing a session cookie.
+///
+/// <para>
+/// BP-10: the anonymous half is under the sign-in rate limit like every other way in (it was its
+/// own group, outside the auth limiter, so 60 option calls and 30 failed assertions a minute from
+/// one address were never 429), a passkey sign-in takes the same last steps a password sign-in
+/// does (the deployment's inherent admins, <c>last_login_at</c>), and adding or removing a passkey
+/// mails the member and writes an audit row — a passkey quietly added to a hijacked account was
+/// never announced to its owner.
+/// </para>
 /// </summary>
 public static class WebAuthnEndpoints
 {
-    private static readonly TimeSpan FlowTtl = TimeSpan.FromMinutes(5);
-
     public static IEndpointRouteBuilder MapWebAuthnEndpoints(this IEndpointRouteBuilder app)
     {
-        var anon = app.MapGroup("/api/v1/auth/webauthn");
+        var anon = app.MapGroup("/api/v1/auth/webauthn").RequireRateLimiting(RateLimitPolicies.SignIn);
 
         // ---- Login flow ----------------------------------------------------------------
 
-        anon.MapPost("/login/options", (IFido2 fido2, IMemoryCache cache) =>
+        anon.MapPost("/login/options", (IFido2 fido2, WebAuthnFlows flows) =>
         {
             // Empty allowCredentials → discoverable-credential ("usernameless") flow.
             var options = fido2.GetAssertionOptions(
@@ -43,23 +50,22 @@ public static class WebAuthnEndpoints
                 UserVerificationRequirement.Required);
 
             var flowId = NewFlowId();
-            cache.Set($"wa:login:{flowId}", options.ToJson(), FlowTtl);
+            if (!flows.TryStore($"wa:login:{flowId}", options.ToJson())) return Busy();
             return Results.Ok(new { flowId, options = JsonDocument.Parse(options.ToJson()).RootElement });
         });
 
         anon.MapPost("/login", async (
             WebAuthnLoginRequest req,
             IFido2 fido2,
-            IMemoryCache cache,
+            WebAuthnFlows flows,
             MainframeDbContext db,
             ITenantContext tenant,
             IJwtIssuer jwt,
             HttpContext ctx,
             CancellationToken ct) =>
         {
-            if (!cache.TryGetValue<string>($"wa:login:{req.FlowId}", out var optionsJson) || optionsJson is null)
+            if (flows.Take($"wa:login:{req.FlowId}") is not { } optionsJson)
                 return Results.BadRequest(new { error = "session_expired" });
-            cache.Remove($"wa:login:{req.FlowId}");
 
             var options = AssertionOptions.FromJson(optionsJson);
             var clientResponse = req.Response;
@@ -101,6 +107,11 @@ public static class WebAuthnEndpoints
             if (membership is not null && membership.Status != MembershipStatus.Active && !user.IsAdmin)
                 return Results.StatusCode(403);
 
+            // The password sign-in's last two steps, in its order: every refusal has run, so the
+            // deployment's inherent-admin list can only add the flag to a sign-in that was going to
+            // succeed (see AuthService.LoginAsync for why the position is the safety argument).
+            user.LastLoginAt = DateTimeOffset.UtcNow;
+            await ctx.RequestServices.GetRequiredService<InherentAdminService>().ApplyAsync(user, ct);
             await db.SaveChangesAsync(ct);
 
             var roles = new List<string> { "user" };
@@ -141,7 +152,7 @@ public static class WebAuthnEndpoints
             WebAuthnRegisterOptionsRequest req,
             HttpContext ctx,
             IFido2 fido2,
-            IMemoryCache cache,
+            WebAuthnFlows flows,
             MainframeDbContext db,
             CancellationToken ct) =>
         {
@@ -187,7 +198,7 @@ public static class WebAuthnEndpoints
 
             var flowId = NewFlowId();
             var stash = JsonSerializer.Serialize(new RegistrationStash(req.Label, handle, options.ToJson()));
-            cache.Set($"wa:reg:{userId}:{flowId}", stash, FlowTtl);
+            if (!flows.TryStore($"wa:reg:{userId}:{flowId}", stash)) return Busy();
 
             return Results.Ok(new { flowId, options = JsonDocument.Parse(options.ToJson()).RootElement });
         });
@@ -196,16 +207,14 @@ public static class WebAuthnEndpoints
             WebAuthnRegisterRequest req,
             HttpContext ctx,
             IFido2 fido2,
-            IMemoryCache cache,
+            WebAuthnFlows flows,
             MainframeDbContext db,
             ITenantContext tenant,
             CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
-            var key = $"wa:reg:{userId}:{req.FlowId}";
-            if (!cache.TryGetValue<string>(key, out var stashJson) || stashJson is null)
+            if (flows.Take($"wa:reg:{userId}:{req.FlowId}") is not { } stashJson)
                 return Results.BadRequest(new { error = "session_expired" });
-            cache.Remove(key);
 
             var stash = JsonSerializer.Deserialize<RegistrationStash>(stashJson)!;
             var options = CredentialCreateOptions.FromJson(stash.OptionsJson);
@@ -216,7 +225,9 @@ public static class WebAuthnEndpoints
                 resultBox = await fido2.MakeNewCredentialAsync(
                     req.Response,
                     options,
-                    (args, ct2) => Task.FromResult(true),  // CredentialId is unique by DB constraint
+                    // BP-16: a credential already registered anywhere is refused here, as a refusal —
+                    // left to the unique index it surfaced as "busy, retry", which can never succeed.
+                    (args, ct2) => CredentialIdIsFreeAsync(db, args.CredentialId, ct2),
                     cancellationToken: ct);
             }
             catch (Fido2VerificationException ex)
@@ -254,7 +265,7 @@ public static class WebAuthnEndpoints
                 Label = label,
             };
             db.WebAuthnCredentials.Add(entity);
-            await db.SaveChangesAsync(ct);
+            await PasskeyChangedAsync(ctx, db, userId, entity.Label, added: true, ct);
 
             return Results.Ok(new { id = entity.Id, label = entity.Label });
         });
@@ -269,11 +280,47 @@ public static class WebAuthnEndpoints
             var row = await db.WebAuthnCredentials.FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId, ct);
             if (row is null) return Results.NotFound();
             db.WebAuthnCredentials.Remove(row);
-            await db.SaveChangesAsync(ct);
+            await PasskeyChangedAsync(ctx, db, userId, row.Label, added: false, ct);
             return Results.NoContent();
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// Whether no account in any club holds this credential id yet. The ids are globally unique
+    /// by index; asked first so a duplicate is the ceremony's refusal, not a lost race.
+    /// </summary>
+    internal static async Task<bool> CredentialIdIsFreeAsync(MainframeDbContext db, byte[] credentialId, CancellationToken ct)
+        => !await db.WebAuthnCredentials.IgnoreQueryFilters().AnyAsync(c => c.CredentialId == credentialId, ct);
+
+    /// <summary>The 503 a full ceremony store answers — the stable busy code every client already words.</summary>
+    private static IResult Busy() => Results.Json(
+        new { error = "service_busy", message = "Too many sign-ins are in progress. Try again in a moment." }, statusCode: 503);
+
+    /// <summary>
+    /// Saves a passkey added or removed with its audit row, then queues the member's mail. A mail
+    /// that cannot be queued is logged: the change has committed (the email-outbox rule).
+    /// </summary>
+    private static async Task PasskeyChangedAsync(HttpContext ctx, MainframeDbContext db, Guid userId, string label, bool added, CancellationToken ct)
+    {
+        var user = await db.Users.FirstAsync(u => u.Id == userId, ct);
+        db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = user.TenantId,
+            ActorUserId = userId,
+            SubjectUserId = userId,
+            Action = added ? "user.passkey_added" : "user.passkey_removed",
+            DetailsJson = JsonSerializer.Serialize(new { label }),
+        });
+        await db.SaveChangesAsync(ct);
+
+        var services = ctx.RequestServices;
+        var club = await services.GetRequiredService<Email.ClubIdentityResolver>().GetAsync(ct);
+        var message = added ? Email.EmailTemplates.PasskeyAdded(club, user.Email, label) : Email.EmailTemplates.PasskeyRemoved(club, user.Email, label);
+        await Email.EmailDispatch.QueueAsync(
+            services.GetRequiredService<Email.IEmailService>(), services.GetRequiredService<ILoggerFactory>().CreateLogger("Passkeys"),
+            message, $"passkey {(added ? "added" : "removed")} notice for {user.Email}");
     }
 
     private static string NewFlowId() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16));

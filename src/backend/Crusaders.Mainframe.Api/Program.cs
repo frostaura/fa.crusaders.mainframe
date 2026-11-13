@@ -521,6 +521,8 @@ builder.Services.AddScoped<AdminRoleService>();
 builder.Services.AddScoped<MemberDeletionService>();
 builder.Services.AddScoped<MemberDeletionService.AccessEnders>();
 builder.Services.AddSingleton<MemberPhotoFiles>();
+// BP-04: removes photo files no membership references, once they are older than an upload in flight.
+builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.PhotoOrphanSweepWorker>();
 
 // Demo mode: each club's demo club, the switch into and out of it, and what fills it.
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.Demo.DemoModeService>();
@@ -583,6 +585,8 @@ builder.Services.AddScoped<BiometricService>();
 
 // WebAuthn / passkeys
 builder.Services.AddMemoryCache();
+// BP-10: the ceremonies' challenge state, in a bounded store of its own (WebAuthnFlows).
+builder.Services.AddSingleton<WebAuthnFlows>();
 builder.Services.AddSingleton<IFido2>(sp =>
 {
     var cfg = sp.GetRequiredService<IConfiguration>();
