@@ -4,6 +4,7 @@ import SchedulePage from "./Schedule";
 import { forgetClubZone } from "../lib/clubZone";
 import { CELL_TEXT } from "../lib/bookingsCopy";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { singleTap } from "../test/bookingsKit";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -62,6 +63,9 @@ describe("item 19 — the daily maximum, on the grid", () => {
 
   it("locks every free cell once the quota is gone, with a lock, a word and a dashed edge", async () => {
     open(dayWith({ maxSlotsPerDay: 4, bookedSlotsToday: 4, remainingToday: 0, adminExempt: false }));
+    // The restricted fill is the cell at rest: selection mode (on by default) recedes every
+    // cell that cannot be ticked, so the mode is switched off to see it.
+    await singleTap();
 
     // R2 F1-5 — the fixture's day is not today, so the name says the day it is about.
     const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — you've used your 4 slots on Mon 9 Sep/ });
@@ -154,6 +158,7 @@ describe("item 3 — the group's window, on the member's grid", () => {
 
   it("marks a slot outside the window with its own colour, glyph and word", async () => {
     open(dayWith(GROUPED));
+    await singleTap();
 
     const restricted = await screen.findByRole("button", { name: /Court 1 at 17:00 — outside the times you can book/ });
     expect(restricted).toHaveTextContent("From 16:00");
