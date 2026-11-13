@@ -2267,6 +2267,8 @@ export async function uploadPhoto(file: File): Promise<{ url: string }> {
 
 export const endpoints = {
   whoami: () => api.get<WhoAmI>("/api/v1/whoami"),
+  /** Go-live FM-8 — which club this address serves (anonymous, tenant-resolved). See `lib/clubIdentity`. */
+  club: () => api.get<{ slug: string; name: string }>("/api/v1/auth/club"),
   /**
    * Ends the session on the server as well as in this browser.
    *

@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
-  APP_NAME, clearRetryLanding, entityPageName, focusFragmentTarget, focusHeading, isEntityRoute, isPlaceholderHeading, isRetryLanding,
-  routePageName, routeTitle,
+  clearRetryLanding, entityPageName, focusFragmentTarget, focusHeading, isEntityRoute, isPlaceholderHeading, isRetryLanding,
+  routePageName, withClub,
 } from "../lib/routeAnnouncer";
 import { resetStandingAnnouncements } from "../lib/announce";
 import { syncSeoHead } from "../lib/seoHead";
+import { useClubShortName } from "../lib/clubIdentity";
+
+/**
+ * The page (or record) half of the tab title, so the club half can arrive later (FM-8): the
+ * club's name is read once per page load and lands after the first route has titled the tab.
+ */
+let tabPage: string | null = null;
+function setTabTitle(page: string, club?: string | null) {
+  tabPage = page;
+  document.title = club === undefined ? withClub(page) : withClub(page, club);
+}
 
 /**
  * What happens when this app changes page. (C6, and the shell half of C15 / D9)
@@ -29,6 +40,11 @@ import { syncSeoHead } from "../lib/seoHead";
 export function RouteAnnouncer() {
   const location = useLocation();
   const [announcement, setAnnouncement] = useState("");
+  // FM-8 — the club's name arriving (or changing) re-titles the tab; nothing is announced.
+  const club = useClubShortName();
+  useEffect(() => {
+    if (tabPage !== null) setTabTitle(tabPage, club);
+  }, [club]);
   /**
    * <b>The first ROUTE, not a "have I run yet" flag — and the difference is StrictMode.</b>
    *
@@ -73,7 +89,7 @@ export function RouteAnnouncer() {
     // Always, even on a query-string change: the title is derived from the path, so this is a
     // no-op there, and a route that arrives by any means has its name in the tab.
     const name = routePageName(location.pathname);
-    document.title = routeTitle(location.pathname);
+    setTabTitle(name);
     syncSeoHead(location.pathname);
 
     const initial = location.key === firstKey.current;
@@ -259,7 +275,7 @@ function nameTheRecord(pathname: string, announce: ((text: string) => void) | nu
     const text = heading.textContent ?? "";
     if (isPlaceholderHeading(text, pathname)) return;
     const name = entityPageName(text, pathname);
-    document.title = `${name} — ${APP_NAME}`;
+    setTabTitle(name);
     announce?.(name);
   };
 }

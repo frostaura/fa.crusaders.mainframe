@@ -1,8 +1,9 @@
-import { Suspense, lazy as reactLazy, type ComponentType, type ReactNode } from "react";
+import { Suspense, lazy as reactLazy, useEffect, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider } from "./lib/auth";
 import AppShell from "./components/shell/AppShell";
 import { ToastProvider } from "./components/Toast";
+import { loadClubIdentity } from "./lib/clubIdentity";
 import { BalanceProvider } from "./lib/balance";
 import { ProfileProvider } from "./lib/profile";
 import { ClubUiProvider } from "./lib/ClubUiProvider";
@@ -150,6 +151,8 @@ function RoutedToasts({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  // FM-8 — which club this address serves: the crest, the sign-in band, the pass and the tab title.
+  useEffect(() => { void loadClubIdentity(); }, []);
   return (
     <BrowserRouter>
       {/*

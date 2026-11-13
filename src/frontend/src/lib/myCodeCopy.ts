@@ -26,8 +26,6 @@ export const MY_CODE = {
   /** The pass card's accessible name. */
   passLabel: "Your member pass",
   overline: "MEMBER",
-  /** The club's name on the pass band — the same words the crest link carries. */
-  clubName: "Crusaders Squash",
   /** The accessible name of the element whose text is the whole token. */
   codeLabel: "Your code",
   fullScreenTrigger: "Show your code full screen",
