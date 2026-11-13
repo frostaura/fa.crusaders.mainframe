@@ -7,7 +7,7 @@ import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
 import { StateBlock } from "../../components/ui/state-block";
 import { CaretDown, ListChecks } from "../../components/ui/icons";
 import {
-  CardListSkeleton, DownloadCsvLink, FilterBar, FilterSelect, type FilterOption,
+  CardListSkeleton, DownloadCsvButton, FilterBar, FilterSelect, type FilterOption,
 } from "../../components/monitoring/parts";
 import { useAsyncAction } from "../../lib/useAsyncAction";
 import { usePagedFocus } from "../../lib/usePagedFocus";
@@ -153,9 +153,9 @@ export function AdminChangeRecordPage() {
             options={PERIOD_OPTIONS}
             onChange={setPeriod}
           />
-          <DownloadCsvLink
-            className="sm:ml-auto"
-            href={adminEndpoints.adminChangesCsvUrl({ ...(area ? { area } : {}), period })}
+          <DownloadCsvButton
+            className="sm:ml-auto" fallbackName="change-record.csv"
+            path={adminEndpoints.adminChangesCsvUrl({ ...(area ? { area } : {}), period })}
           />
         </FilterBar>
         <p className="text-xs text-text-muted">{CHANGES_EXPORT_NOTE}</p>

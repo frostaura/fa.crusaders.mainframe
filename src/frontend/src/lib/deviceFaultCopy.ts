@@ -166,6 +166,12 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
     means: "A board stopped calling in for longer than the club allows. Nothing can be said about its courts while that lasts.",
     doThis: "Go and look at the board: power first, then network. Until it is back, its courts show as unknown on the control board.",
   },
+  // BA-22: the same fault about a door says what a door does without the club.
+  outage_opened_gate: {
+    means: "A door stopped calling in for longer than the club allows. It goes on opening for the members on the list it last"
+      + " had, and nobody new can be let in by it until it is back.",
+    doThis: "Go and look at the door's board: power first, then network. Until it is back, Doors shows it as not reporting.",
+  },
   court_not_mapped: {
     means: "A box switched a relay that has no court against it, so the club's system cannot tell which court it was.",
     doThis: "Open this board on Boards and set which court sits on each relay, in relay order.",
@@ -199,6 +205,33 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
     means: "The two halves of the court box stopped talking. Its buttons, screen and relays may not respond.",
     doThis: "Switch the box off at the plug, wait ten seconds and switch it back on. If it comes straight back, the board needs somebody who can open it.",
   },
+  // --- device contract v3 (device-api §4, §13; device-serial-protocol v3; door-gate §14) ------
+  boot: {
+    means: "The board started up — after a power cut, a reset, a firmware update or a restart it chose itself. Whatever it"
+      + " was doing at that moment was interrupted, and a court box puts paid courts back on from the club's record.",
+    doThis: "Nothing, if it happened once and the board came back. Several in a day: check its Health on Boards for why it"
+      + " restarted — a power dip or a freeze points at the power supply first.",
+  },
+  mega_unacked: {
+    means: "The court box's bridge sent the controller a command three times and never heard it was taken. If it was a"
+      + " lights command, the box showed TRY AGAIN and the court may not have switched.",
+    doThis: "Look at the court. If its lights are wrong, the member can scan again; if it keeps happening, power the box off"
+      + " and on, and check the cable between the two boards inside it.",
+  },
+  relight_failed: {
+    means: "The club's record says a paid court should be lit, and the box tried three times to switch it back on and could not.",
+    doThis: "Go and look at the court. Switch its lights at the wall for the players on it, then check the box's Hardware on"
+      + " Boards — a wrong relay drive level keeps every court dark.",
+  },
+  kind_mismatch: {
+    means: "A door gate was answered as if it were a court box, so it kept the list it already had and did not take the new one.",
+    doThis: "Open Boards and check this board is listed as a door. If two boards share one network address, give each its own.",
+  },
+  screen_dropped: {
+    means: "The court box's screen fell behind and skipped a screen to keep up. A member may have missed a message; the"
+      + " lights were never affected — they always go first.",
+    doThis: "Nothing, if it is rare. If it keeps rising, the link inside the box is slow — power it off and on.",
+  },
   error_log_overflow: {
     means: "This board is producing faults faster than the club's system will record them, so most of them are being counted rather than kept.",
     doThis: "A board in this state is in real trouble. The count below is how many were suppressed — go and look at the board itself.",
@@ -214,7 +247,19 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
  * a neutral sentence naming the raw code, never a guessed one, and never `undefined`.
  * </p>
  */
-export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "detail">, timezone?: string): {
+/** `uptime_ms=<n>` (the boot fault's detail) as "after 3 h 12 min", or null. */
+function bootUptime(detail: string | null | undefined): string | null {
+  const ms = /^uptime_ms=(\d+)$/.exec((detail ?? "").trim())?.[1];
+  if (ms === undefined) return null;
+  const minutes = Math.floor(Number(ms) / 60_000);
+  if (minutes < 1) return "It reported starting from zero, so it had only just come on.";
+  const h = Math.floor(minutes / 60);
+  return `It had been running for ${h > 0 ? `${h} h ` : ""}${minutes % 60} min when it said so.`;
+}
+
+export function explainFault(
+  row: Pick<DeviceErrorRow, "code" | "headline" | "detail"> & { device_kind?: string | null }, timezone?: string,
+): {
   title: string;
   means: string;
   doThis: string;
@@ -234,7 +279,13 @@ export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "de
       return { title: headline || kind.title, means: kind.means, doThis: kind.doThis, unrecognised: false };
     }
   }
-  const known = EXPLANATIONS[row.code];
+  if (row.code === "boot") {
+    const known = EXPLANATIONS.boot;
+    const uptime = bootUptime(row.detail);
+    return { title: (row.headline ?? "").trim() || "The board restarted", means: uptime ? `${known.means} ${uptime}` : known.means,
+      doThis: known.doThis, unrecognised: false };
+  }
+  const known = row.code === "outage_opened" && row.device_kind === "Gate" ? EXPLANATIONS.outage_opened_gate : EXPLANATIONS[row.code];
   const headline = (row.headline ?? "").trim();
   const title = headline
     || (known ? row.code.replace(/_/g, " ") : `An error the club's software does not have a name for (${row.code})`);

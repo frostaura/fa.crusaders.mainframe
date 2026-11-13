@@ -13,7 +13,7 @@ import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
 import { StateBlock } from "../../components/ui/state-block";
 import { Check, CheckCircle, X } from "../../components/ui/icons";
 import {
-  CardListSkeleton, DownloadCsvLink, FilterBar, FilterSelect, type FilterOption,
+  CardListSkeleton, DownloadCsvButton, FilterBar, FilterSelect, type FilterOption,
 } from "../../components/monitoring/parts";
 import { useAsyncAction } from "../../lib/useAsyncAction";
 import { useTicker } from "../../lib/useTicker";
@@ -338,7 +338,7 @@ function FaultFilters({ filters, onFilters, boards }: {
         ]}
         onChange={(next) => onFilters((f) => ({ ...f, device: next }))}
       />
-      <DownloadCsvLink className="sm:ml-auto" href={adminEndpoints.monitoringErrorsCsvUrl(filterQuery(filters))} />
+      <DownloadCsvButton className="sm:ml-auto" fallbackName="faults.csv" path={adminEndpoints.monitoringErrorsCsvUrl(filterQuery(filters))} />
     </FilterBar>
   );
 }

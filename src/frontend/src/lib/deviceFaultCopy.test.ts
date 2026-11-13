@@ -152,3 +152,28 @@ describe("review round 1, F3.7 — the faults page in words", () => {
     expect(said).toMatch(/18:05/);
   });
 });
+
+describe("the v3 faults and the door's own words (device-api §4, §13; BA-22)", () => {
+  it.each(["boot", "mega_unacked", "relight_failed", "kind_mismatch", "screen_dropped"])("%s has its own words", (code) => {
+    const said = explainFault({ code, headline: null, detail: null });
+    expect(said.unrecognised, code).toBe(false);
+    expect(said.doThis).not.toMatch(/Pass the code/);
+  });
+
+  it("explains a restart in words and turns its raw uptime into a sentence", () => {
+    const fresh = explainFault({ code: "boot", headline: "The board restarted", detail: "uptime_ms=0" });
+    expect(fresh.title).toBe("The board restarted");
+    expect(fresh.means).not.toContain("uptime_ms");
+    expect(fresh.means).toContain("It reported starting from zero");
+    const later = explainFault({ code: "boot", headline: null, detail: "uptime_ms=11520000" });
+    expect(later.means).toContain("It had been running for 3 h 12 min");
+  });
+
+  it("talks about doors, not courts, when a door stops reporting", () => {
+    const door = explainFault({ code: "outage_opened", headline: null, detail: null, device_kind: "Gate" });
+    expect(`${door.means} ${door.doThis}`).not.toMatch(/court/i);
+    expect(door.means).toMatch(/door/i);
+    const box = explainFault({ code: "outage_opened", headline: null, detail: null, device_kind: "CourtBox" });
+    expect(box.doThis).toMatch(/its courts show as unknown/);
+  });
+});
