@@ -48,7 +48,6 @@ export function ToastProvider({ children, routeKey }: { children: React.ReactNod
     if (lastRoute.current === routeKey) return;
     lastRoute.current = routeKey;
     const cutoff = Date.now() - TOAST_KEEP_ACROSS_NAV_MS;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the route is the external event; the list follows it
     setToasts((t) => (t.some((x) => x.raisedAt < cutoff) ? t.filter((x) => x.raisedAt >= cutoff) : t));
   }, [routeKey]);
 
