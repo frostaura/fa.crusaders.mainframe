@@ -1,5 +1,5 @@
 // Crusaders Mainframe — what the bridge keeps in flash, and the check digits
-// that make a damaged record read as absent (docs/specs/device-api.md §4, §6–§8).
+// that make a damaged record read as absent (docs/specs/device-api.md §4, §6, §8).
 //
 // WHY WHOLE FILES, NOT hal::IStore
 // --------------------------------
@@ -7,9 +7,8 @@
 // thing bridge 3.0.0 kept (the event sequence mark). Bridge 3.1.0 keeps the
 // last accepted heartbeat answer (up to 4 KB: the snapshot, the court map, the
 // buttons, the settings, the roster and the member-code sync in one), every
-// undelivered event, the network set, the device keys and the OTA state — and
-// the previous firmware image itself. LittleFS files on the board, a directory
-// in the simulator, RAM in a test.
+// undelivered event, the network set and the device keys. LittleFS files on the
+// board, a directory in the simulator, RAM in a test.
 //
 // SEALED
 // ------
@@ -119,8 +118,6 @@ inline constexpr char kFileEvents[] = "/st/events.bin"; ///< this boot's undeliv
 inline constexpr char kFileCarried[] = "/st/carry.bin"; ///< earlier boots' undelivered events
 inline constexpr char kFileKeys[] = "/st/keys.bin";
 inline constexpr char kFileNet[] = "/st/net.bin";
-inline constexpr char kFileOta[] = "/ota/state.bin";
-inline constexpr char kFilePrevImage[] = "/ota/prev.bin";
 
 } // namespace bridgelogic
 

@@ -408,7 +408,6 @@ void readLifelineSettings(const char* body, size_t len, LifelineSettings& curren
   const ConfigObject in{obj, objLen + 2U, drift};
   readClamped(in, "device_power_restore_trust_minutes", 0U, 120U, current.trustMinutes);
   readClamped(in, "device_net_fallback_minutes", 3U, 60U, current.fallbackMinutes);
-  readClamped(in, "device_ota_probation_minutes", 3U, 60U, current.probationMinutes);
   readClamped(in, "relay_reconcile_min_seconds", 30U, 600U, current.reconcileMinSeconds);
 }
 

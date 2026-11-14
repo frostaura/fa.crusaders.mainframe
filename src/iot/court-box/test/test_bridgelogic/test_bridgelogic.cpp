@@ -1618,7 +1618,6 @@ const char* const kBoundHttpVectors[] = {
     // v3 (device-api.md §2-§9, §12).
     "v3-heartbeat-request",
     "v3-heartbeat-request-first-beat",
-    "v3-heartbeat-request-rolled-back",
     "v3-heartbeat-request-relight",
     "v3-events-request-release-cause",
     "v3-heartbeat-request-telemetry",
@@ -1627,7 +1626,6 @@ const char* const kBoundHttpVectors[] = {
     "v3-heartbeat-response-unacknowledged",
     "v3-heartbeat-response-display-expanded",
     "v3-heartbeat-response-display-out-of-range",
-    "v3-heartbeat-response-ota-offer",
     "v3-heartbeat-response-key-next",
     "v3-heartbeat-response-net",
     "v3-heartbeat-response-widest",
@@ -4407,8 +4405,7 @@ void test_a_known_member_with_nothing_booked_is_invited_to_walk_up() {
 
 devlink::HeartbeatV3 v3Base() {
   devlink::HeartbeatV3 v;
-  v.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapOta | devlink::kCapKey | devlink::kCapNet |
-           devlink::kCapLcd2;
+  v.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapKey | devlink::kCapNet | devlink::kCapLcd2;
   return v;
 }
 
@@ -4433,7 +4430,6 @@ void test_corpus_v3_heartbeat_requests_render_byte_for_byte() {
   {
     devlink::HeartbeatV3 v = v3Base();
     v.megaVersion = "3.0.0";
-    v.fwState = "committed";
     v.netReported = true;
     v.netVer = 4U;
     v.netSrc = "server";
@@ -4444,24 +4440,11 @@ void test_corpus_v3_heartbeat_requests_render_byte_for_byte() {
     // First beat: no !STATE yet this Mega boot, so relay_state is ABSENT,
     // never [] (BR-12); no Mega heard, so no mega_version and no lcd_layout.
     devlink::HeartbeatV3 v = v3Base();
-    v.fwState = "probation";
     v.netReported = true;
     v.netVer = 4U;
     v.netSrc = "server";
     v.restore = "warm";
     expectHeartbeat("v3-heartbeat-request-first-beat", "3.0.0", 86400000ULL, nullptr, 0U, false, v);
-  }
-  {
-    devlink::HeartbeatV3 v = v3Base();
-    v.megaVersion = "3.0.0";
-    v.fwState = "rolled_back";
-    v.fwFailed = "3.0.1";
-    v.fwError = "probation";
-    v.netReported = true;
-    v.netVer = 4U;
-    v.netSrc = "server";
-    v.lcdLayout = "compact";
-    expectHeartbeat("v3-heartbeat-request-rolled-back", "3.0.0", 86400000ULL, two, 0U, true, v);
   }
   {
     const devlink::RelayState one[1] = {{0U, 2640U}};
@@ -4470,7 +4453,6 @@ void test_corpus_v3_heartbeat_requests_render_byte_for_byte() {
     strcpy(relight[0].ref, "3fa85f64");
     devlink::HeartbeatV3 v = v3Base();
     v.megaVersion = "3.0.0";
-    v.fwState = "committed";
     v.netReported = true;
     v.netVer = 0U;
     v.netSrc = "local";
@@ -4499,7 +4481,6 @@ void test_corpus_v3_heartbeat_requests_render_byte_for_byte() {
     diag.flashMb = 4U;
     devlink::HeartbeatV3 v = v3Base();
     v.megaVersion = "3.0.0";
-    v.fwState = "committed";
     v.netReported = true;
     v.netVer = 4U;
     v.netSrc = "server";
@@ -4539,14 +4520,11 @@ void test_corpus_v3_heartbeat_requests_render_byte_for_byte() {
                                   "config.lcd_after_lights_on_seconds",
                                   "config.device_power_restore_trust_minutes",
                                   "config.device_net_fallback_minutes",
-                                  "config.device_ota_probation_minutes",
+                                  "config.lcd_screen_ceiling_seconds",
                                   "config.relay_authorisation_cap_minutes",
                                   "code_days"};
     devlink::HeartbeatV3 v = v3Base();
     v.megaVersion = "999.999.999";
-    v.fwState = "rolled_back";
-    v.fwFailed = "999.999.999";
-    v.fwError = "probation";
     v.netReported = true;
     v.netVer = 2147483647UL;
     v.netSrc = "compiled";
@@ -4693,10 +4671,9 @@ void test_corpus_v3_display_and_hardware_settings_clamp_independently() {
 
 void test_corpus_v3_lifeline_answers_still_carry_the_snapshot() {
   loadHttpCorpus();
-  const char* const ids[3] = {"v3-heartbeat-response-ota-offer", "v3-heartbeat-response-key-next",
-                              "v3-heartbeat-response-net"};
-  const char* const objects[3] = {"ota", "key_next", "net"};
-  for (uint8_t i = 0U; i < 3U; ++i) {
+  const char* const ids[2] = {"v3-heartbeat-response-key-next", "v3-heartbeat-response-net"};
+  const char* const objects[2] = {"key_next", "net"};
+  for (uint8_t i = 0U; i < 2U; ++i) {
     const size_t n = v3Response(ids[i]);
     bridgelogic::Snapshot snap;
     TEST_ASSERT_TRUE_MESSAGE(

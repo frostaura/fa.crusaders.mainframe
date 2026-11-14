@@ -48,7 +48,7 @@ public:
 
   /// True while the link is usable. On the Mega side this is effectively always
   /// true (a UART has no carrier), but on the ESP side the peer can be absent,
-  /// resetting or mid-OTA, and the simulator's TCP transport really does drop.
+  /// or resetting, and the simulator's TCP transport really does drop.
   virtual bool connected() = 0;
 
   /// Bytes write() will accept right now. Zero when disconnected.

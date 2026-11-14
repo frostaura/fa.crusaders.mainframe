@@ -10,10 +10,9 @@
 // WHY THIS HALF EXISTS
 // --------------------
 // It is the half that talks to the network, so everything volatile lives here
-// and the Mega stays near-static. Bridge 3.1.0 is the LAST cable flash (founder,
-// 2026-11-13): every later fix arrives as a signed image over HTTP from the
-// club's own server (device-api.md §7), and nothing an operator does — a
-// rotated key, a new router, a moved server — needs a cable (§6, §8). The four
+// and the Mega stays near-static. The bridge is updated only by cable, at the
+// box, so nothing an operator does — a rotated key, a new router, a moved
+// server — may need one (device-api.md §6, §8). The four
 // values compiled in from src/common/secrets.h (the WiFi SSID and password, the
 // API base URL and the device API key) are only the FIRST-BOOT DEFAULTS; what
 // the server or the setup portal sends since is kept in flash. There is still
@@ -92,7 +91,6 @@
 #include "arduino_hal/SerialTransport.h"
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/BootId.h"
-#include "bridgelogic/BridgeOta.h"
 #include "bridgelogic/EventDrain.h"
 #include "bridgelogic/Extend.h"
 #include "bridgelogic/FaultLog.h"
@@ -117,7 +115,6 @@
 #include "devapi/DeviceClient.h"
 #include "devapi/Json.h"
 #include "devcrypto/Hex.h"
-#include "devcrypto/Rsa.h"
 #include "devlink/ApiBreaker.h"
 #include "devlink/Cadence.h"
 #include "devlink/CodeSync.h"
@@ -126,7 +123,6 @@
 #include "devlink/RosterSync.h"
 #include "devnet/JsonMember.h"
 #include "devnet/Net.h"
-#include "devota/Ota.h"
 #include "eventq/EventQueue.h"
 #include "fwversion/Version.h"
 #include "memcode/GuessGuard.h"
@@ -139,10 +135,9 @@
 #include "roster/Roster.h"
 #include "timebase/TimeBase.h"
 
-// The six compiled-in values, all MANDATORY. The first four are first-boot
-// defaults (the runtime set in flash wins once there is one); the release
-// key's modulus and the setup portal's password are fixed for the life of the
-// image.
+// The five compiled-in values, all MANDATORY. The first four are first-boot
+// defaults (the runtime set in flash wins once there is one); the setup
+// portal's password is fixed for the life of the image.
 //
 // The build fails rather than producing an image with a blank in it — an image
 // that joins an empty SSID, or posts to an empty base URL with an empty bearer
@@ -173,9 +168,6 @@ static_assert(sizeof(API_BASE_URL) > 1U,
               "API_BASE_URL in secrets.h is empty — e.g. \"http://192.168.1.10:8088\"");
 static_assert(sizeof(DEVICE_API_KEY) > 1U,
               "DEVICE_API_KEY in secrets.h is empty — copy it from the admin Devices page");
-#ifndef OTA_PUBLIC_KEY_N
-#error "secrets.h does not define OTA_PUBLIC_KEY_N — see src/iot/court-box/src/common/secrets.h.example"
-#endif
 #ifndef SETUP_AP_PASSWORD
 #error "secrets.h does not define SETUP_AP_PASSWORD — see src/iot/court-box/src/common/secrets.h.example"
 #endif
@@ -183,42 +175,12 @@ static_assert(sizeof(DEVICE_API_KEY) > 1U,
 namespace secrets_check {
 
 // C++11-valid constexpr (one return each): the Arduino IDE builds at gnu++11.
-constexpr bool isHex(char c) {
-  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
-
-/// [lo, hi) all hex, halving: 512 digits is nine levels deep, inside GCC's
-/// 512-level constexpr limit that a character-at-a-time walk is not.
-constexpr bool hexFrom(const char* s, unsigned lo, unsigned hi) {
-  return hi - lo <= 1U ? (lo >= hi || isHex(s[lo]))
-                       : (hexFrom(s, lo, lo + (hi - lo) / 2U) && hexFrom(s, lo + (hi - lo) / 2U, hi));
-}
-
-constexpr char lower(char c) {
-  return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-constexpr bool startsWith(const char* s, const char* p, unsigned i) {
-  return p[i] == '\0' ? true : (lower(s[i]) == p[i] && startsWith(s, p, i + 1U));
-}
-
 constexpr bool equals(const char* a, const char* b, unsigned i) {
   return a[i] != b[i] ? false : (a[i] == '\0' ? true : equals(a, b, i + 1U));
 }
 
 } // namespace secrets_check
 
-// OTA_PUBLIC_KEY_N is the release key's RSA-2048 modulus, 512 hex characters,
-// from `src/iot/tools/ota_sign.py modulus` (device-api.md §7). Never the
-// contract corpus's TEST keys, whose private halves are in the repository: an
-// image signed with one would be accepted by every box.
-static_assert(sizeof(OTA_PUBLIC_KEY_N) == 513U && secrets_check::hexFrom(OTA_PUBLIC_KEY_N, 0U, 512U),
-              "OTA_PUBLIC_KEY_N must be the release key's RSA-2048 modulus as exactly 512 hex characters "
-              "(src/iot/tools/ota_sign.py modulus)");
-static_assert(!secrets_check::startsWith(OTA_PUBLIC_KEY_N, "d9ce9d8aeba6c19446077d6c0802c56f", 0U) &&
-                  !secrets_check::startsWith(OTA_PUBLIC_KEY_N, "a5105de8c0eeb5d3a8ddc78a4bc8a385", 0U),
-              "OTA_PUBLIC_KEY_N is one of the contract corpus's TEST keys — their private halves are in the "
-              "repository; generate the release key with src/iot/tools/ota_sign.py keygen");
 // SETUP_AP_PASSWORD is the setup portal's WPA2 password, printed on the label
 // inside the enclosure (device-api.md §8).
 static_assert(sizeof(SETUP_AP_PASSWORD) >= 9U && sizeof(SETUP_AP_PASSWORD) <= 64U,
@@ -635,20 +597,15 @@ bridgelogic::AuthPolicy gAuth(kScanMemoryMs);
 /// API chooses to send that this build does not read — and
 /// loop() runs on the ESP8266's 4 KB continuation stack, where a 2.5 KB local
 /// under an HTTP call is a crash that looks like a random reset.
-/// ONE 5 KB buffer for four jobs that never overlap (bridge 3.1.0, the heap
-/// floor): the heartbeat ANSWER (from byte 0), the heartbeat REQUEST (its
-/// tail — sent before the answer is read over it), the RSA workspace of an
-/// OTA signature check (after the answer was adopted and written to flash),
-/// and the OTA's copy and download chunks. A union, so the workspace is a real
-/// RsaWorkspace object and never a cast.
+/// ONE 5 KB buffer for jobs that never overlap (bridge 3.1.0, the heap floor):
+/// the heartbeat ANSWER (from byte 0), the heartbeat REQUEST (its tail — sent
+/// before the answer is read over it), a member call's reply and the setup
+/// portal's scratch. Word-aligned, as the flash reads of a record want it.
 union BigBuffer {
   char text[bridgelogic::kHeartbeatResponseCap];
-  dc::RsaWorkspace rsa;
   uint32_t align;
 };
 
-static_assert(sizeof(dc::RsaWorkspace) <= bridgelogic::kHeartbeatResponseCap - devlink::kHeartbeatBodyCap,
-              "the RSA workspace must fit beside the request tail");
 BigBuffer gBig = {};
 char* const gHeartbeatBody = gBig.text;
 constexpr size_t kHeartbeatBodyCap = bridgelogic::kHeartbeatResponseCap;
@@ -660,37 +617,14 @@ constexpr size_t kHeartbeatRequestCap = devlink::kHeartbeatBodyCap;
 
 // --- bridge 3.1.0: the lifeline (device-api.md §4, §6-§8) --------------------------
 
-/// The flash: LittleFS records, the OTA staging area, the download.
+/// The flash: LittleFS records.
 arduino_hal::LittleFsFiles gFiles;
-arduino_hal::EspImageFlash gImageFlash;
-const char* currentBaseUrl();
-const char* currentAuthHeader();
-arduino_hal::EspDownload gDownload(currentBaseUrl, currentAuthHeader, reinterpret_cast<uint8_t*>(gBig.text),
-                                   2048U);
 arduino_hal::RtcEpoch gEpoch;
 arduino_hal::SetupPortal gPortal;
 
-/// The device keys, the network set, the OTA state and the release key.
+/// The device keys and the network set.
 bridgelogic::BridgeKeys gKeys;
 bridgelogic::BridgeNet gNet;
-bridgelogic::BridgeOta gOta;
-/// The release key, in FLASH (PROGMEM: .rodata is RAM on this chip), parsed
-/// into gBig's tail only when a signature is checked — beside the RSA
-/// workspace (bytes 0..1791), the download chunk (0..2047) and the copy chunk
-/// (2048..4095), none of which is in use while the modulus is read.
-const char kOtaKeyHex[] PROGMEM = OTA_PUBLIC_KEY_N;
-constexpr size_t kModulusAt = 4096U;
-constexpr size_t kModulusHexAt = kModulusAt + dc::kRsa2048Bytes;
-static_assert(kModulusHexAt + sizeof(kOtaKeyHex) <= bridgelogic::kHeartbeatResponseCap,
-              "the modulus and its hex must fit gBig's tail");
-
-/// The modulus, or nullptr when the compiled key does not parse.
-const uint8_t* loadOtaModulus() {
-  char* hex = gBig.text + kModulusHexAt;
-  memcpy_P(hex, kOtaKeyHex, sizeof(kOtaKeyHex));
-  uint8_t* n = reinterpret_cast<uint8_t*>(gBig.text + kModulusAt);
-  return devota::parseModulusHex(hex, n) ? n : nullptr;
-}
 
 /// The link supervisor (30 s grace, 30-300 s backoff, restart at 15 min down)
 /// and the stall watchdog (link up, nothing accepted for 6 h: HW-8).
@@ -724,7 +658,7 @@ uint16_t gEventsSize = 0U;
 uint32_t gEventsLastSeq = 0U;
 uint32_t gEventsHeadSeq = 0U;
 
-/// The last member input (scan or press), for the OTA's idle rule.
+/// The last member input (scan or press), for the restart's idle rule.
 uint32_t gLastInputMs = 0U;
 
 /// The ONE reply buffer of the three member-facing calls — /activate,
@@ -2459,15 +2393,11 @@ const char* bridgeResetWord() {
 /// The v3 fields of this beat (device-api.md §2): caps, versions, the layout
 /// the Mega acknowledged, what was re-lit, the Mega's own report.
 void fillHeartbeatV3(devlink::HeartbeatV3& v3) {
-  // Bridge 3.1.0 names the lifeline: signed OTA, key rotation and network
-  // changes are real in this image (device-api.md §1), so the server may offer
-  // images, rotate keys and move the box.
-  v3.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapLcd2 | devlink::kCapOta | devlink::kCapKey |
-            devlink::kCapNet;
+  // Bridge 3.1.0 names the lifeline: key rotation and network changes are real
+  // in this image (device-api.md §1), so the server may rotate keys and move
+  // the box.
+  v3.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapLcd2 | devlink::kCapKey | devlink::kCapNet;
   v3.megaVersion = gMegaVersion[0] != '\0' ? gMegaVersion : nullptr;
-  v3.fwState = bridgelogic::fwStateName(gOta.state());
-  v3.fwFailed = gOta.failedVersion();
-  v3.fwError = gOta.error();
   v3.netReported = true;
   v3.netVer = gNet.version();
   v3.netSrc = bridgelogic::netSourceName(gNet.source());
@@ -2498,7 +2428,7 @@ void fillDiag(devlink::DiagReport& diag) {
   diag.heapMin = gHeapMin;
   diag.block = ESP.getMaxFreeBlockSize();
   diag.stackMin = ESP.getFreeContStack();
-  diag.sketchFree = gImageFlash.capacity();
+  diag.sketchFree = ESP.getFreeSketchSpace();
   diag.flashMb = ESP.getFlashChipRealSize() / (1024UL * 1024UL);
 }
 
@@ -2615,8 +2545,8 @@ void pumpHeartbeat(uint32_t nowMs) {
   report.relayStateCount = gRelayStateCount;
 
   // The v3 fields (device-api.md §2, §13). The caps name what THIS image does:
-  // member codes, the snapshot reconcile and both layouts. ota:1, key:1 and
-  // net:1 arrive with the over-the-air lane's libraries (phase B).
+  // member codes, the snapshot reconcile, both layouts, key rotation and
+  // network changes.
   devlink::HeartbeatV3 v3;
   fillHeartbeatV3(v3);
   devlink::DiagReport diag;
@@ -2655,11 +2585,9 @@ void pumpHeartbeat(uint32_t nowMs) {
   gRestoreReported = true;
   gStall.reset(gClock.nowMs());
   gNet.heartbeatAccepted();
-  // Probation commits on an ACCEPTED beat with the Mega heard (§7, §11.1).
-  gOta.heartbeatAccepted(gMegaHeard || gMegaSeen);
   const bool whole = devapi::json::isCompleteObject(response, responseLen);
   // The lifeline first, from any complete object, even when everything else
-  // has drifted (§11.1): it is how this image gets replaced.
+  // has drifted (§11.1): it is how this box stays reachable.
   if (whole) {
     adoptLifeline(response, responseLen, gClock.nowMs());
   }
@@ -2768,17 +2696,9 @@ void pumpMegaV3(uint32_t nowMs) {
 
 // --- bridge 3.1.0: the lifeline ---------------------------------------------------
 
-const char* currentBaseUrl() {
-  return gNet.baseUrl();
-}
-
-const char* currentAuthHeader() {
-  return gKeys.header();
-}
-
 /// The lifeline objects of an accepted, complete answer (§11.1): read
 /// independently of everything else, so a body whose roster or config this
-/// image can no longer read can still replace this image.
+/// image can no longer read can still rotate its key and move it.
 void adoptLifeline(const char* response, size_t responseLen, uint32_t nowMs) {
   const char* object = nullptr;
   size_t objectLen = 0U;
@@ -2803,9 +2723,6 @@ void adoptLifeline(const char* response, size_t responseLen, uint32_t nowMs) {
     } else if (net.reason != devnet::Refusal::NotNewer) {
       gDrift.add("net");
     }
-  }
-  if (devnet::json::topLevelObjectText(response, responseLen, "ota", object, objectLen)) {
-    gOta.offer(object, objectLen, nowMs);
   }
 }
 
@@ -2869,70 +2786,12 @@ void restoreFromFlash(bool epochCarried, uint32_t nowMs) {
   gHeartbeatBody[0] = '\0';
 }
 
-/// The lifeline's idle rule (device-api.md §7 step 2): no scan remembered, no
-/// button window or choice armed, nothing waiting on the Mega, and no member
-/// input for a minute. Lit courts are fine — the Mega holds them.
+/// The restart's idle rule: no scan remembered, no button window or choice
+/// armed, nothing waiting on the Mega, and no member input for a minute. Lit
+/// courts are fine — the Mega holds them.
 bool bridgeIdle(uint32_t nowMs) {
   return gLastScan[0] == '\0' && !gAuth.armed(nowMs) && !gPad.hasSelection() && gExtendCourt == kNoExtend &&
          !gFollowUpPending && gTx.idle() && tb::since(nowMs, gLastInputMs) >= 60000UL;
-}
-
-/// Keeps the Mega link and the core alive through a copy or a download.
-class OtaHooks final : public bridgelogic::BridgeOta::Hooks {
-public:
-  void during() override {
-    const uint32_t now = gClock.nowMs();
-    pumpMegaLink(now);
-    gTx.pump(gMega, now);
-    yield();
-  }
-};
-
-/// Signed OTA, from the top of loop(): the pending signature check (in the
-/// heartbeat buffer, once the answer it came in was written to flash), then
-/// the update itself when the board is idle.
-void pumpOta(uint32_t nowMs) {
-  if (gOta.verifyDue() && !gBody.due()) {
-    const uint8_t* modulus = loadOtaModulus();
-    if (modulus != nullptr) {
-      gOta.verifyOffer(modulus, gBig.rsa);
-    }
-    gHeartbeatBody[0] = '\0';
-  }
-  if (!gOta.ready() || !gWifiUp || !bridgeIdle(nowMs)) {
-    return;
-  }
-  // The Mega holds every lit court through the restart and must not read a
-  // two-minute silence as a dead bridge.
-  static_cast<void>(sendToMega(proto::Frame::note(180U, "UPDATING")));
-  static_cast<void>(sendToMega(proto::Frame::live(120U)));
-  flushMega(300UL);
-  OtaHooks hooks;
-  const uint8_t* modulus = loadOtaModulus();
-  if (modulus == nullptr) {
-    return;
-  }
-  const bridgelogic::BridgeOta::Lent lent{gBig.rsa, reinterpret_cast<uint8_t*>(gBig.text) + 2048U, 2048U};
-  const bool armed = gOta.run(gDownload, gImageFlash, modulus, lent, hooks, gClock.nowMs());
-  gHeartbeatBody[0] = '\0';
-  if (armed) {
-    flushMega(300UL);
-    ESP.restart();
-  }
-  static_cast<void>(sendToMega(proto::Frame::note(0U, "")));
-  static_cast<void>(sendToMega(proto::Frame::live(kLiveEveryMs / 1000UL)));
-}
-
-/// Probation: a new image that has not proven itself within the window goes
-/// back to the previous one (device-api.md §7 step 5).
-void pumpProbation(uint32_t nowMs) {
-  if (!gOta.tick(nowMs, gLife.probationMinutes)) {
-    return;
-  }
-  OtaHooks hooks;
-  if (gOta.rollBack(gImageFlash, reinterpret_cast<uint8_t*>(gBig.text), 2048U, hooks, "probation")) {
-    ESP.restart();
-  }
 }
 
 /// The live event queue to flash whenever it changed (BR-07), from the top of
@@ -3038,8 +2897,6 @@ bool pumpLifeline(uint32_t nowMs) {
   if (pumpPortal(nowMs)) {
     return true;
   }
-  pumpOta(nowMs);
-  pumpProbation(nowMs);
   superviseLink(nowMs);
   return false;
 }
@@ -3053,15 +2910,6 @@ void setup() {
   gMega.begin(kMegaRxBufferBytes);
   static_cast<void>(gStore.begin());
   arduino_hal::LittleFsFiles::prepare();
-
-  // PROBATION FIRST, before any network (device-api.md §7 step 5): a new image
-  // on its fourth boot unproven goes back to the previous one now.
-  if (gOta.begin(&gFiles, fw::kFirmwareVersion) == bridgelogic::BridgeOta::Boot::RollBack) {
-    OtaHooks hooks;
-    if (gOta.rollBack(gImageFlash, reinterpret_cast<uint8_t*>(gBig.text), 2048U, hooks, "probation")) {
-      ESP.restart();
-    }
-  }
 
   // The compiled WiFi, base URL and key are only the first-boot defaults: the
   // persisted network set and key ring win (device-api.md §6, §8).
@@ -3121,7 +2969,7 @@ void loop() {
   const uint32_t now = gClock.nowMs();
   gUptime.tick(now);
 
-  // The lifeline from the TOP of the pass: flash writes, OTA, probation, the
+  // The lifeline from the TOP of the pass: flash writes, the portal, the
   // supervisor. While the setup portal is open it owns the loop, and the Mega
   // link is still served.
   if (pumpLifeline(now)) {

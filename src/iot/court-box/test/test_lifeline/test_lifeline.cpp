@@ -1,7 +1,6 @@
 // Bridge 3.1.0's lifeline, host-tested: the flash records, the device key
 // ring, the runtime network, the lifeline settings, the stall watchdog, the
-// setup chord and portal form, signed OTA with its probation and rollback, and
-// what a boot restores after a power cut with no network
+// setup chord and portal form, and what a boot restores after a power cut with no network
 // (docs/specs/device-api.md §4, §6–§8, §11.1; BR-01, BR-06, BR-07, FSF-09,
 // HW-8).
 //
@@ -15,16 +14,12 @@
 
 #include <map>
 #include <string>
-#include <vector>
 
-#include "bridgelogic/BridgeOta.h"
 #include "bridgelogic/Lifeline.h"
 #include "bridgelogic/Persist.h"
 #include "bridgelogic/Records.h"
 #include "bridgelogic/V3Heartbeat.h"
 #include "devapi/Json.h"
-#include "devcrypto/Hex.h"
-#include "devcrypto/Sha256.h"
 #include "eventq/EventQueue.h"
 #include "support/CorpusJson.h"
 
@@ -104,168 +99,12 @@ public:
   uint32_t writes = 0U;
 };
 
-/// The ESP8266's flash: a running image, a staging area, the eboot copy at
-/// the next "boot" (apply()).
-class FakeFlash final : public bridgelogic::IImageFlash {
-public:
-  uint32_t runningSize() override { return static_cast<uint32_t>(running.size()); }
-
-  bool readRunning(uint32_t offset, uint8_t* out, size_t len) override {
-    if (offset % 4U != 0U || len % 4U != 0U) {
-      return false; // the real flashRead's rule
-    }
-    for (size_t i = 0U; i < len; ++i) {
-      out[i] = offset + i < running.size() ? running[offset + i] : 0xFFU;
-    }
-    return true;
-  }
-
-  uint32_t capacity() override { return cap; }
-
-  bool begin(uint32_t size) override {
-    if (size > cap) {
-      return false;
-    }
-    staged.clear();
-    stagedSize = size;
-    open = true;
-    return true;
-  }
-
-  bool write(const uint8_t* data, size_t len) override {
-    if (!open || staged.size() + len > stagedSize) {
-      return false;
-    }
-    staged.insert(staged.end(), data, data + len);
-    if (corruptStagedAt >= 0 && static_cast<size_t>(corruptStagedAt) < staged.size()) {
-      staged[static_cast<size_t>(corruptStagedAt)] ^= 0x40U; // a flash bit that did not take
-      corruptStagedAt = -1;
-    }
-    return true;
-  }
-
-  bool commit(bridgelogic::IStagedCheck& check) override {
-    if (!open || staged.size() != stagedSize) {
-      open = false;
-      return false;
-    }
-    open = false;
-    uint8_t digest[32];
-    dc::sha256(staged.data(), staged.size(), digest); // READ BACK, as the core does
-    if (!check.accept(digest, static_cast<uint32_t>(staged.size()))) {
-      return false;
-    }
-    armed = true;
-    return true;
-  }
-
-  void abort() override {
-    open = false;
-    staged.clear();
-  }
-
-  /// The reboot: eboot copies an armed image over the running one.
-  void reboot() {
-    if (armed) {
-      running = staged;
-      armed = false;
-    }
-  }
-
-  std::vector<uint8_t> running;
-  std::vector<uint8_t> staged;
-  uint32_t stagedSize = 0U;
-  uint32_t cap = 600000U;
-  bool open = false;
-  bool armed = false;
-  int corruptStagedAt = -1;
-};
-
-class FakeDownload final : public bridgelogic::IDownload {
-public:
-  uint16_t get(const char* path, uint32_t expectBytes, bridgelogic::IChunkSink& sink) override {
-    ++calls;
-    lastPath = path;
-    if (status != 200U) {
-      return status;
-    }
-    if (body.size() != expectBytes && !sendAnyway) {
-      return 0U; // Content-Length disagrees: refused before a byte
-    }
-    const size_t total = cutAt > 0U && cutAt < body.size() ? cutAt : body.size();
-    for (size_t at = 0U; at < total; at += chunk) {
-      const size_t take = (total - at) < chunk ? (total - at) : chunk;
-      if (!sink.chunk(body.data() + at, take)) {
-        return 200U;
-      }
-    }
-    return 200U;
-  }
-
-  std::vector<uint8_t> body;
-  uint16_t status = 200U;
-  size_t chunk = 300U;
-  size_t cutAt = 0U;
-  bool sendAnyway = false;
-  uint32_t calls = 0U;
-  std::string lastPath;
-};
-
-struct CountingHooks final : public bridgelogic::BridgeOta::Hooks {
-  void during() override { ++calls; }
-
-  uint32_t calls = 0U;
-};
-
 // --- the corpus ---------------------------------------------------------------------
 
-corpus::File g_ota;
 corpus::File g_http;
-
-void loadOta() {
-  TEST_ASSERT_TRUE_MESSAGE(g_ota.load("ota", "cases.json"), "ota corpus not found");
-}
 
 void loadHttp() {
   TEST_ASSERT_TRUE_MESSAGE(g_http.load("http", "cases.json"), "http corpus not found");
-}
-
-void modulusOf(const char* keyName, uint8_t out[dc::kRsa2048Bytes]) {
-  const char* key = corpus::member(g_ota.root(), keyName);
-  TEST_ASSERT_NOT_NULL(key);
-  char hex[600] = {};
-  TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(key, "n_hex"), hex, sizeof(hex), nullptr));
-  TEST_ASSERT_TRUE(devota::parseModulusHex(hex, out));
-}
-
-/// The bridge image vector: its bytes and its offer's JSON.
-struct BridgeImage {
-  std::vector<uint8_t> bytes;
-  std::string offer;
-};
-
-BridgeImage bridgeImage() {
-  loadOta();
-  corpus::ArrayIter it(corpus::member(g_ota.root(), "images"));
-  const char* c = nullptr;
-  while (it.next(&c)) {
-    char id[64] = {};
-    TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(c, "id"), id, sizeof(id), nullptr));
-    if (strcmp(id, "image-bridge") != 0) {
-      continue;
-    }
-    BridgeImage image;
-    static uint8_t raw[8192];
-    size_t len = 0U;
-    TEST_ASSERT_TRUE(corpus::hexField(c, "image_hex", raw, sizeof(raw), &len));
-    image.bytes.assign(raw, raw + len);
-    const char* offer = corpus::member(c, "offer");
-    const char* end = corpus::skipValue(offer);
-    image.offer.assign(offer, static_cast<size_t>(end - offer));
-    return image;
-  }
-  TEST_FAIL_MESSAGE("image-bridge missing from ota/");
-  return BridgeImage();
 }
 
 /// The response body of http/ vector `id`.
@@ -295,19 +134,6 @@ std::string objectIn(const std::string& body, const char* key) {
   TEST_ASSERT_NOT_EQUAL_MESSAGE(devapi::json::kNotFound, at, key);
   return body.substr(at - 1U, objLen + 2U);
 }
-
-/// A running image that is not the new one: 4 KB of a pattern, length not a
-/// multiple of four (the copy must round its reads, never its file).
-std::vector<uint8_t> oldImage() {
-  std::vector<uint8_t> v(4099U);
-  for (size_t i = 0U; i < v.size(); ++i) {
-    v[i] = static_cast<uint8_t>((i * 31U) ^ 0x5AU);
-  }
-  return v;
-}
-
-dc::RsaWorkspace g_work;
-alignas(4) uint8_t g_buffer[1024];
 
 // --- records -------------------------------------------------------------------------
 
@@ -545,23 +371,22 @@ void test_the_lifeline_settings_are_read_from_config_by_exact_kind_and_clamped()
   bridgelogic::LifelineSettings s;
   bridgelogic::Drift drift;
   const char body[] = "{\"device_power_restore_trust_minutes\":99,\"config\":{\"device_power_restore_"
-                      "trust_minutes\":500,\"device_net_fallback_minutes\":1,\"device_ota_probation_"
-                      "minutes\":12.5,\"relay_reconcile_min_seconds\":90}}";
+                      "trust_minutes\":500,\"device_net_fallback_minutes\":1,\"relay_reconcile_min_"
+                      "seconds\":12.5}}";
   bridgelogic::readLifelineSettings(body, strlen(body), s, &drift);
-  TEST_ASSERT_EQUAL_UINT32(120U, s.trustMinutes);  // clamped; the top-level decoy ignored
-  TEST_ASSERT_EQUAL_UINT32(3U, s.fallbackMinutes); // clamped up
-  TEST_ASSERT_EQUAL_UINT32(10U, s.probationMinutes);
-  TEST_ASSERT_EQUAL_UINT32(90U, s.reconcileMinSeconds);
+  TEST_ASSERT_EQUAL_UINT32(120U, s.trustMinutes);       // clamped; the top-level decoy ignored
+  TEST_ASSERT_EQUAL_UINT32(3U, s.fallbackMinutes);      // clamped up
+  TEST_ASSERT_EQUAL_UINT32(60U, s.reconcileMinSeconds); // a fraction is absent: the default kept
   TEST_ASSERT_EQUAL_UINT8(1U, drift.count);
-  TEST_ASSERT_EQUAL_STRING("config.device_ota_probation_minutes", drift.names[0]);
-  // The corpus snapshot body carries all four at their defaults.
+  TEST_ASSERT_EQUAL_STRING("config.relay_reconcile_min_seconds", drift.names[0]);
+  // The corpus snapshot body carries all three at their defaults.
   const std::string snap = httpBody("v3-heartbeat-response-snapshot");
   bridgelogic::LifelineSettings c;
   c.trustMinutes = 1U;
   bridgelogic::readLifelineSettings(snap.data(), snap.size(), c, nullptr);
   TEST_ASSERT_EQUAL_UINT32(20U, c.trustMinutes);
   TEST_ASSERT_EQUAL_UINT32(10U, c.fallbackMinutes);
-  TEST_ASSERT_EQUAL_UINT32(10U, c.probationMinutes);
+  TEST_ASSERT_EQUAL_UINT32(60U, c.reconcileMinSeconds);
 }
 
 void test_the_stall_watchdog_fires_after_six_hours_up_with_nothing_accepted() {
@@ -575,186 +400,6 @@ void test_the_stall_watchdog_fires_after_six_hours_up_with_nothing_accepted() {
   TEST_ASSERT_FALSE(w.stalled(11UL * 3600000UL + 1U, false));
   TEST_ASSERT_FALSE(w.stalled(16UL * 3600000UL, true));
   TEST_ASSERT_TRUE(w.stalled(17UL * 3600000UL + 2U, true));
-}
-
-// --- signed OTA (§7) -----------------------------------------------------------------
-
-struct OtaRig {
-  FakeFiles files;
-  FakeFlash flash;
-  FakeDownload download;
-  CountingHooks hooks;
-  BridgeImage image;
-  uint8_t modulus[dc::kRsa2048Bytes];
-
-  OtaRig() {
-    image = bridgeImage();
-    modulusOf("public_key", modulus);
-    flash.running = oldImage();
-    download.body = image.bytes;
-  }
-
-  /// One boot's worth: begin, offer, verify, run.
-  bool updateFrom(const char* running) {
-    bridgelogic::BridgeOta ota;
-    ota.begin(&files, running);
-    ota.offer(image.offer.data(), image.offer.size(), 1000U);
-    if (ota.verifyDue()) {
-      ota.verifyOffer(modulus, g_work);
-    }
-    if (!ota.ready()) {
-      return false;
-    }
-    return ota.run(download, flash, modulus, {g_work, g_buffer, sizeof(g_buffer)}, hooks, 2000U);
-  }
-};
-
-void test_ota_a_good_image_is_backed_up_staged_verified_switched_and_committed() {
-  OtaRig rig;
-  const std::vector<uint8_t> before = rig.flash.running;
-  TEST_ASSERT_TRUE(rig.updateFrom("3.0.0"));
-  TEST_ASSERT_EQUAL_STRING("/api/v1/device/firmware/r1b2c3d4", rig.download.lastPath.c_str());
-  TEST_ASSERT_TRUE(rig.flash.armed);
-  // The running image is in LittleFS, byte for byte, before anything was staged.
-  const std::string& prev = rig.files.files[bridgelogic::kFilePrevImage];
-  TEST_ASSERT_EQUAL_size_t(before.size(), prev.size());
-  TEST_ASSERT_EQUAL_MEMORY(before.data(), prev.data(), before.size());
-  TEST_ASSERT_TRUE(rig.hooks.calls > 0U);
-
-  rig.flash.reboot(); // eboot copies it in
-  bridgelogic::BridgeOta boot;
-  TEST_ASSERT_EQUAL(bridgelogic::BridgeOta::Boot::Normal, boot.begin(&rig.files, "3.0.1"));
-  TEST_ASSERT_EQUAL_STRING("probation", bridgelogic::fwStateName(boot.state()));
-  boot.heartbeatAccepted(false); // the Mega not heard: not proven
-  TEST_ASSERT_TRUE(boot.inProbation());
-  boot.heartbeatAccepted(true);
-  TEST_ASSERT_EQUAL_STRING("committed", bridgelogic::fwStateName(boot.state()));
-  bridgelogic::BridgeOta again;
-  again.begin(&rig.files, "3.0.1");
-  TEST_ASSERT_EQUAL_STRING("committed", bridgelogic::fwStateName(again.state()));
-  // The same offer to the new image: not newer, nothing fetched.
-  again.offer(rig.image.offer.data(), rig.image.offer.size(), 5000U);
-  TEST_ASSERT_FALSE(again.verifyDue());
-}
-
-void test_ota_an_image_nobody_signed_is_never_fetched() {
-  OtaRig rig;
-  modulusOf("other_public_key", rig.modulus); // the board trusts another key
-  TEST_ASSERT_FALSE(rig.updateFrom("3.0.0"));
-  TEST_ASSERT_EQUAL_UINT32(0U, rig.download.calls);
-  TEST_ASSERT_FALSE(rig.flash.armed);
-  bridgelogic::BridgeOta boot;
-  boot.begin(&rig.files, "3.0.0");
-  TEST_ASSERT_EQUAL_STRING("failed", bridgelogic::fwStateName(boot.state()));
-  TEST_ASSERT_EQUAL_STRING("sig", boot.error());
-  TEST_ASSERT_EQUAL_STRING("3.0.1", boot.failedVersion());
-  TEST_ASSERT_TRUE(boot.record().failed.contains("3.0.1"));
-}
-
-void test_ota_a_tampered_or_short_image_is_refused_and_the_running_one_kept() {
-  {
-    OtaRig rig;
-    rig.download.body[700] ^= 0x01U; // one byte on the wire
-    TEST_ASSERT_FALSE(rig.updateFrom("3.0.0"));
-    TEST_ASSERT_FALSE(rig.flash.armed);
-    bridgelogic::BridgeOta boot;
-    boot.begin(&rig.files, "3.0.0");
-    TEST_ASSERT_EQUAL_STRING("sha256", boot.error());
-    TEST_ASSERT_TRUE(boot.record().failed.contains("3.0.1")); // never again
-  }
-  {
-    OtaRig rig;
-    rig.flash.corruptStagedAt = 1000; // the bytes in FLASH are not what arrived
-    TEST_ASSERT_FALSE(rig.updateFrom("3.0.0"));
-    TEST_ASSERT_FALSE(rig.flash.armed);
-  }
-  {
-    OtaRig rig;
-    rig.download.cutAt = 900U; // cut in transit: retried later, not failed for good
-    TEST_ASSERT_FALSE(rig.updateFrom("3.0.0"));
-    bridgelogic::BridgeOta boot;
-    boot.begin(&rig.files, "3.0.0");
-    TEST_ASSERT_EQUAL_STRING("http", boot.error());
-    TEST_ASSERT_FALSE(boot.record().failed.contains("3.0.1"));
-  }
-  {
-    OtaRig rig;
-    rig.flash.cap = 1000U; // no room to stage it
-    TEST_ASSERT_FALSE(rig.updateFrom("3.0.0"));
-    bridgelogic::BridgeOta boot;
-    boot.begin(&rig.files, "3.0.0");
-    TEST_ASSERT_EQUAL_STRING("space", boot.error());
-    TEST_ASSERT_EQUAL_UINT32(0U, rig.download.calls);
-  }
-  {
-    OtaRig rig;
-    rig.files.failAfter = 100U; // LittleFS full: no way back, so nothing is fetched
-    TEST_ASSERT_FALSE(rig.updateFrom("3.0.0"));
-    TEST_ASSERT_EQUAL_UINT32(0U, rig.download.calls);
-  }
-}
-
-void test_ota_an_older_or_foreign_offer_is_refused_before_anything() {
-  OtaRig rig;
-  TEST_ASSERT_FALSE(rig.updateFrom("3.0.1")); // equal
-  TEST_ASSERT_FALSE(rig.updateFrom("3.1.0")); // older
-  TEST_ASSERT_EQUAL_UINT32(0U, rig.download.calls);
-  std::string gate = rig.image.offer;
-  const size_t at = gate.find("court_bridge");
-  gate.replace(at, strlen("court_bridge"), "door_gate");
-  bridgelogic::BridgeOta ota;
-  ota.begin(&rig.files, "3.0.0");
-  ota.offer(gate.data(), gate.size(), 1000U);
-  TEST_ASSERT_FALSE(ota.verifyDue());
-  TEST_ASSERT_EQUAL_STRING("target", ota.error());
-  const char absolute[] = "{\"target\":\"court_bridge\",\"version\":\"9.9.9\",\"size\":10,\"sha256\":\"x\","
-                          "\"sig\":\"y\",\"path\":\"http://evil/firmware\"}";
-  ota.offer(absolute, strlen(absolute), 1000U);
-  TEST_ASSERT_FALSE(ota.verifyDue());
-}
-
-void test_ota_probation_rolls_back_on_the_fourth_boot_and_never_retakes_the_version() {
-  OtaRig rig;
-  const std::vector<uint8_t> old = rig.flash.running;
-  TEST_ASSERT_TRUE(rig.updateFrom("3.0.0"));
-  rig.flash.reboot();
-  // Three boots that never reach an accepted beat (crash, crash, crash) ...
-  for (int i = 0; i < 3; ++i) {
-    bridgelogic::BridgeOta boot;
-    TEST_ASSERT_EQUAL(bridgelogic::BridgeOta::Boot::Normal, boot.begin(&rig.files, "3.0.1"));
-  }
-  // ... and the fourth rolls back from LittleFS, verified.
-  bridgelogic::BridgeOta fourth;
-  TEST_ASSERT_EQUAL(bridgelogic::BridgeOta::Boot::RollBack, fourth.begin(&rig.files, "3.0.1"));
-  TEST_ASSERT_TRUE(fourth.rollBack(rig.flash, g_buffer, sizeof(g_buffer), rig.hooks, "probation"));
-  rig.flash.reboot();
-  TEST_ASSERT_EQUAL_size_t(old.size(), rig.flash.running.size());
-  TEST_ASSERT_EQUAL_MEMORY(old.data(), rig.flash.running.data(), old.size());
-  bridgelogic::BridgeOta back;
-  TEST_ASSERT_EQUAL(bridgelogic::BridgeOta::Boot::Normal, back.begin(&rig.files, "3.0.0"));
-  TEST_ASSERT_EQUAL_STRING("rolled_back", bridgelogic::fwStateName(back.state()));
-  TEST_ASSERT_EQUAL_STRING("3.0.1", back.failedVersion());
-  TEST_ASSERT_EQUAL_STRING("probation", back.error());
-  back.offer(rig.image.offer.data(), rig.image.offer.size(), 1000U);
-  TEST_ASSERT_FALSE(back.verifyDue()); // never that version again
-}
-
-void test_ota_probation_rolls_back_when_the_window_passes() {
-  OtaRig rig;
-  TEST_ASSERT_TRUE(rig.updateFrom("3.0.0"));
-  rig.flash.reboot();
-  bridgelogic::BridgeOta boot;
-  boot.begin(&rig.files, "3.0.1");
-  TEST_ASSERT_FALSE(boot.tick(0U, 10U));
-  TEST_ASSERT_FALSE(boot.tick(9UL * 60000UL, 10U));
-  TEST_ASSERT_TRUE(boot.tick(10UL * 60000UL, 10U));
-  // A damaged copy of the old image is never flashed back: the new image,
-  // which boots, is kept and reported.
-  rig.files.files[bridgelogic::kFilePrevImage][10] ^= 0x01;
-  TEST_ASSERT_FALSE(boot.rollBack(rig.flash, g_buffer, sizeof(g_buffer), rig.hooks, "probation"));
-  TEST_ASSERT_FALSE(rig.flash.armed);
-  TEST_ASSERT_EQUAL_STRING("failed", bridgelogic::fwStateName(boot.state()));
-  TEST_ASSERT_EQUAL_STRING("flash", boot.error());
 }
 
 // --- persistence (§4) ------------------------------------------------------------------
@@ -942,12 +587,6 @@ int main(int, char**) {
   RUN_TEST(test_the_setup_chord_opens_the_portal_only_inside_the_window);
   RUN_TEST(test_the_lifeline_settings_are_read_from_config_by_exact_kind_and_clamped);
   RUN_TEST(test_the_stall_watchdog_fires_after_six_hours_up_with_nothing_accepted);
-  RUN_TEST(test_ota_a_good_image_is_backed_up_staged_verified_switched_and_committed);
-  RUN_TEST(test_ota_an_image_nobody_signed_is_never_fetched);
-  RUN_TEST(test_ota_a_tampered_or_short_image_is_refused_and_the_running_one_kept);
-  RUN_TEST(test_ota_an_older_or_foreign_offer_is_refused_before_anything);
-  RUN_TEST(test_ota_probation_rolls_back_on_the_fourth_boot_and_never_retakes_the_version);
-  RUN_TEST(test_ota_probation_rolls_back_when_the_window_passes);
   RUN_TEST(test_the_last_answer_is_written_at_most_once_a_minute_and_at_once_when_a_court_lights);
   RUN_TEST(test_a_power_cut_with_the_server_down_restores_paid_courts_for_the_trust_window_only);
   RUN_TEST(test_queued_attendance_survives_a_power_cut_under_its_own_boot);

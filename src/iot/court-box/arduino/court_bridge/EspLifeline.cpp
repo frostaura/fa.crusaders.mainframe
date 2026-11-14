@@ -5,16 +5,12 @@
 #ifdef TARGET_COURT_BRIDGE
 
 #include <Arduino.h>
-#include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 
 #include <LittleFS.h>
-#include <Updater.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "src/devcrypto/Sha256.h"
 
 namespace arduino_hal {
 
@@ -45,7 +41,6 @@ char gStreamTmp[kPathCap] = {};
 
 void LittleFsFiles::prepare() {
   LittleFS.mkdir("/st");
-  LittleFS.mkdir("/ota");
 }
 
 bool LittleFsFiles::write(const char* path, const bridgelogic::Part* parts, uint8_t count) {
@@ -120,151 +115,6 @@ bool LittleFsFiles::end(bool keep) {
     return true;
   }
   return commitTmp(gStreamTmp, gStreamPath);
-}
-
-// --- the OTA staging area -----------------------------------------------------------
-
-namespace {
-
-/// SHA-256 for the Updater's read-back pass.
-class Sha256Hash final : public UpdaterHashClass {
-public:
-  void begin() override { hash_.reset(); }
-
-  void add(const void* data, uint32_t len) override { hash_.update(static_cast<const uint8_t*>(data), len); }
-
-  void end() override { hash_.finish(digest_); }
-
-  int len() override { return 32; }
-
-  const void* hash() override { return digest_; }
-
-  const unsigned char* oid() override { return nullptr; }
-
-private:
-  dc::Sha256 hash_;
-  uint8_t digest_[32] = {};
-};
-
-/// No signature in the image (length 0): the decision is ours, over the
-/// read-back digest.
-class StagedVerify final : public UpdaterVerifyClass {
-public:
-  StagedVerify(bridgelogic::IStagedCheck& check, uint32_t size) : check_(check), size_(size) {}
-
-  uint32_t length() override { return 0U; }
-
-  bool verify(UpdaterHashClass* hash, const void*, uint32_t) override {
-    return hash != nullptr && check_.accept(static_cast<const uint8_t*>(hash->hash()), size_);
-  }
-
-private:
-  bridgelogic::IStagedCheck& check_;
-  uint32_t size_;
-};
-
-uint32_t gStagedSize = 0U;
-
-} // namespace
-
-uint32_t EspImageFlash::runningSize() {
-  return ESP.getSketchSize();
-}
-
-bool EspImageFlash::readRunning(uint32_t offset, uint8_t* out, size_t len) {
-  // The running image starts at flash address 0 (eboot copies it there).
-  return ESP.flashRead(offset, reinterpret_cast<uint32_t*>(out), len);
-}
-
-uint32_t EspImageFlash::capacity() {
-  return ESP.getFreeSketchSpace();
-}
-
-bool EspImageFlash::begin(uint32_t size) {
-  gStagedSize = size;
-  return Update.begin(size, U_FLASH);
-}
-
-bool EspImageFlash::write(const uint8_t* data, size_t len) {
-  return Update.write(const_cast<uint8_t*>(data), len) == len;
-}
-
-bool EspImageFlash::commit(bridgelogic::IStagedCheck& check) {
-  Sha256Hash hash;
-  StagedVerify verify(check, gStagedSize);
-  Update.installSignature(&hash, &verify);
-  const bool ok = Update.end(false);
-  Update.installSignature(nullptr, nullptr);
-  return ok;
-}
-
-void EspImageFlash::abort() {
-  // Not finished: end() resets without arming anything.
-  Update.installSignature(nullptr, nullptr);
-  static_cast<void>(Update.end(false));
-}
-
-// --- the download ----------------------------------------------------------------------
-
-namespace {
-
-/// Up to `left` bytes of `stream` into `sink`, `cap` at a time through `buffer`:
-/// until the server closes, the sink refuses, or ten seconds pass with nothing.
-void pumpBody(WiFiClient* stream, uint32_t left, uint8_t* buffer, size_t cap, bridgelogic::IChunkSink& sink) {
-  uint32_t quietSince = millis();
-  while (left > 0U && stream != nullptr && (stream->connected() || stream->available() > 0)) {
-    const size_t avail = static_cast<size_t>(stream->available());
-    if (avail == 0U) {
-      if (!sink.chunk(nullptr, 0U) || millis() - quietSince > 10000UL) {
-        return;
-      }
-      delay(1);
-      continue;
-    }
-    const size_t want = avail < cap ? avail : cap;
-    const size_t take = want < left ? want : left;
-    const int got = stream->read(buffer, take);
-    if (got <= 0) {
-      continue;
-    }
-    quietSince = millis();
-    if (!sink.chunk(buffer, static_cast<size_t>(got))) {
-      return;
-    }
-    left -= static_cast<uint32_t>(got);
-  }
-}
-
-} // namespace
-
-uint16_t EspDownload::get(const char* path, uint32_t expectBytes, bridgelogic::IChunkSink& sink) {
-  char url[devnet::kBaseUrlMax + devota::kPathCap + 2U];
-  const int n = snprintf(url, sizeof(url), "%s%s", baseUrl_(), path);
-  if (n <= 0 || static_cast<size_t>(n) >= sizeof(url)) {
-    return 0U;
-  }
-  WiFiClient client;
-  HTTPClient http;
-  if (!http.begin(client, url)) {
-    return 0U;
-  }
-  http.useHTTP10(true);
-  http.setReuse(false);
-  http.setTimeout(4000U);
-  http.addHeader("Authorization", authHeader_());
-  const int status = http.GET();
-  if (status != 200) {
-    http.end();
-    return status > 0 ? static_cast<uint16_t>(status) : 0U;
-  }
-  if (http.getSize() != static_cast<int>(expectBytes)) {
-    // A length that disagrees with the signed size: nothing is read.
-    http.end();
-    return 0U;
-  }
-  pumpBody(http.getStreamPtr(), expectBytes, buffer_, cap_, sink);
-  http.end();
-  return 200U;
 }
 
 // --- the warm epoch ----------------------------------------------------------------------

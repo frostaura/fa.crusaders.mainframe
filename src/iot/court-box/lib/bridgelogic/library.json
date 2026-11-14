@@ -15,7 +15,6 @@
     "eventq": "*",
     "memcode": "*",
     "timebase": "*",
-    "devota": "*",
     "devnet": "*"
   },
   "build": {

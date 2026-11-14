@@ -15,7 +15,7 @@
 //
 // connected() is honest about what a UART can know: there is no carrier on this
 // link, so the only detectable failure is the port never having been opened.
-// The peer being absent, resetting or mid-OTA is indistinguishable from the peer
+// The peer being absent or resetting is indistinguishable from the peer
 // being quiet, which is why the protocol has `!PING`/`!PONG` and why the Mega's
 // timer does not depend on the answer either way.
 
