@@ -197,6 +197,48 @@ bool escapeScan(const char* token, char* out, size_t cap);
 
 /// The decision core. Stateless; every input is an argument so the host suite
 /// can drive each branch without a socket.
+/// Why a scan the roster had to decide got no decision from the server
+/// (BR-08, MCV1-08). A valid member the roster does not know — a walk-up
+/// member, a v1 code with nothing booked here, a key the ring shed — is not an
+/// unknown code, and NOT RECOGNISED / SEE THE DESK told them it was.
+enum class OnlineMiss : uint8_t {
+  /// Not asked: no WiFi, the breaker open, or no courts mapped.
+  NotAsked = 0U,
+  /// Asked, and nothing answered (status 0: connect, timeout, budget).
+  Unreachable = 1U,
+  /// Asked, and the server could not decide: 429, a 5xx, or a 2xx this box
+  /// could not read whole. Scanning again in a moment works.
+  Busy = 2U,
+  /// Asked, and refused for a reason about the BOX (401, 403, 404, ...).
+  Refused = 3U,
+};
+
+/// The miss for an `/activate` that gave no decision, from its status.
+OnlineMiss missFor(uint16_t status);
+
+/// Rewrites a roster refusal that would read NOT RECOGNISED into what is true
+/// when the server could not be heard: NO CONNECTION / BOOKINGS ONLY offline,
+/// BUSY / SCAN AGAIN when the server was too busy, SEE THE DESK for a box the
+/// server refused. Only for an UNRECOGNISED refusal whose scan `couldBeMember`
+/// (a legacy token the roster does not hold, a verified v1 code with nothing
+/// booked here, or a v1 code with no key): a replay, a throttle, a wrong v1
+/// code and a stale roster keep their own words. Never arms anything — the
+/// outcome stays unrecognised. True when the lines changed.
+bool explainNoDecision(court::Outcome& outcome, OnlineMiss miss, bool couldBeMember);
+
+/// An online grant onto a court this box ALREADY had lit before the grant:
+/// the member's own rescan of their game (FSF-06, MCV1-02). It keeps the scan
+/// buyable — the member rescanned to extend, and spending the scan on the
+/// re-grant looped every court press on SCAN TO EXTEND — and the caller puts
+/// the extend prompt up for that court. The server claims no court use for a
+/// repeat activation of the session in play (member-code.md, MCV1-02).
+bool regrantsLitCourt(const court::Outcome& outcome, bool courtWasLit);
+
+inline constexpr char kBookingsOnlyLine1[] = "NO CONNECTION";
+inline constexpr char kBookingsOnlyLine2[] = "BOOKINGS ONLY";
+inline constexpr char kServerBusyLine1[] = "BUSY";
+inline constexpr char kServerBusyLine2[] = "SCAN AGAIN";
+
 class ScanFlow {
 public:
   /// Online only when every precondition for a call the server will accept AND
