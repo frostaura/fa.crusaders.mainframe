@@ -208,6 +208,38 @@ size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* to
   return static_cast<size_t>(n);
 }
 
+OnlineMiss missFor(uint16_t status) {
+  if (status == 0U) {
+    return OnlineMiss::Unreachable;
+  }
+  if (status == 429U || status >= 500U || (status >= 200U && status <= 299U)) {
+    return OnlineMiss::Busy;
+  }
+  return OnlineMiss::Refused;
+}
+
+bool explainNoDecision(court::Outcome& outcome, OnlineMiss miss, bool couldBeMember) {
+  if (!couldBeMember || outcome.recognised || outcome.action != court::Action::Refuse) {
+    return false;
+  }
+  switch (miss) {
+  case OnlineMiss::NotAsked:
+  case OnlineMiss::Unreachable:
+    court::detail::setLine(outcome.line1, kBookingsOnlyLine1);
+    court::detail::setLine(outcome.line2, kBookingsOnlyLine2);
+    return true;
+  case OnlineMiss::Busy:
+    court::detail::setLine(outcome.line1, kServerBusyLine1);
+    court::detail::setLine(outcome.line2, kServerBusyLine2);
+    return true;
+  case OnlineMiss::Refused:
+    court::detail::setLine(outcome.line1, "SEE THE DESK");
+    court::detail::setLine(outcome.line2, "");
+    return true;
+  }
+  return false;
+}
+
 Attempt ScanFlow::onScan(const LinkState& link) const {
   if (link.knownReplay) {
     return Attempt::RosterOnly;

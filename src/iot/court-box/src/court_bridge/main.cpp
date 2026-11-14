@@ -1178,7 +1178,7 @@ bool settleScan(const court::Outcome& outcome, uint32_t nowMs) {
 /// Forward declarations: the API calls sit together further down, with the
 /// helpers they share. Moving them up to satisfy the compiler would put them
 /// away from the code they belong with.
-bool activateOnline(const char* token);
+bool activateOnline(const char* token, bridgelogic::OnlineMiss& miss);
 void requestWalkUp(const court::WalkUpIntent& intent);
 void requestExtend(const court::WalkUpIntent& intent);
 
@@ -1205,9 +1205,12 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   link.apiDown = gBreaker.open(nowMs);
   link.knownReplay = memcode::knownReplay(frame.arg(0), gStepClock, gKeyRing, gReplay, nowMs);
 
+  // Why the server, if asked, decided nothing — so a member the roster does
+  // not know reads what is true rather than NOT RECOGNISED (BR-08, MCV1-08).
+  bridgelogic::OnlineMiss miss = bridgelogic::OnlineMiss::NotAsked;
   switch (gScanFlow.onScan(link)) {
   case bridgelogic::Attempt::Online:
-    if (activateOnline(frame.arg(0))) {
+    if (activateOnline(frame.arg(0), miss)) {
       return;
     }
     // No decision from the API. The roster's scan, as below.
@@ -1236,8 +1239,9 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
                                 memcode::ReplayRing<bridgelogic::kCourtReplaySlots>>
         codes = {gStepClock, gKeyRing, gReplay, gGuessGuard};
     const bridgelogic::BoxCourts box = {gHeld, gCourtCount, &gOnlineGrants};
-    const bridgelogic::MemberScanResult member =
+    bridgelogic::MemberScanResult member =
         bridgelogic::decideOfflineMemberCode(frame.arg(0), codes, gRoster, gSession, box, now);
+    static_cast<void>(bridgelogic::explainNoDecision(member.outcome, miss, member.couldBeMember));
     if (member.alreadyOn) {
       if (member.scanSpent) {
         // The same code again on the member's own lit court: their OFF works,
@@ -1273,8 +1277,8 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // once more against sixteen entries so the guard sits in front of the event
   // rather than behind it.
   court::Outcome alreadyOn;
-  if (bridgelogic::regrantsHeldCourt(gRoster.decide(frame.arg(0), roster::CourtCount(gCourtCount), now),
-                                     gHeld, alreadyOn)) {
+  const roster::Decision held = gRoster.decide(frame.arg(0), roster::CourtCount(gCourtCount), now);
+  if (bridgelogic::regrantsHeldCourt(held, gHeld, alreadyOn)) {
     static_cast<void>(sendToMega(proto::Frame::lcd(alreadyOn.line1, alreadyOn.line2)));
     // Bound to the lit court: they are the member standing at the panel and
     // their OFF press has to work. The scan itself stays live, so they can
@@ -1283,8 +1287,11 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
 
-  const court::Outcome rostered =
+  court::Outcome rostered =
       gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, now);
+  // A legacy token the roster does not hold may be any member with nothing
+  // booked here; offline, the box cannot tell.
+  static_cast<void>(bridgelogic::explainNoDecision(rostered, miss, held.verdict == roster::Verdict::Unknown));
   if (rostered.recognised) {
     greet(bridgelogic::Greeting(), now);
   }
@@ -1935,13 +1942,14 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
 /// not be asked or gave no decision, in which case the caller falls back to
 /// the roster. The interpretation is bridgelogic::ScanFlow's; this owns the
 /// socket and the one side effect it cannot see: the Mega.
-bool activateOnline(const char* token) {
+bool activateOnline(const char* token, bridgelogic::OnlineMiss& miss) {
   // Its own wait screen: OneMoment says "Buying your time", which is the
   // walk-up's sentence and false here (D8-2).
   showScreen(bridgelogic::kActivateWaitScreen, gClock.nowMs());
 
   char body[bridgelogic::kActivateBodyCap];
   if (bridgelogic::renderActivateBody(body, sizeof(body), gMacHex, token, scanAgeMs()) == 0U) {
+    miss = bridgelogic::OnlineMiss::Refused;
     return false;
   }
 
@@ -1957,6 +1965,7 @@ bool activateOnline(const char* token) {
   const bridgelogic::ActivationResult decision =
       gScanFlow.onActivateResponse(status, response, strlen(response), gCourtNumbers, gCourtCount);
   if (decision.fallbackToRoster) {
+    miss = bridgelogic::missFor(status);
     return false;
   }
   // Sampled AFTER the blocking call, not at the top of the pass: the held-since

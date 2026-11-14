@@ -4759,6 +4759,47 @@ void test_a_fraction_or_exponent_in_a_mega_setting_is_drift_and_keeps_the_value(
   }
 }
 
+/// BR-08: a busy or unreachable server is not an unknown member.
+void test_a_server_that_decided_nothing_is_never_read_as_not_recognised(void) {
+  TEST_ASSERT_TRUE(bridgelogic::missFor(0U) == bridgelogic::OnlineMiss::Unreachable);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(429U) == bridgelogic::OnlineMiss::Busy);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(500U) == bridgelogic::OnlineMiss::Busy);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(503U) == bridgelogic::OnlineMiss::Busy);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(200U) == bridgelogic::OnlineMiss::Busy);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(401U) == bridgelogic::OnlineMiss::Refused);
+
+  court::Outcome unknown;
+  unknown.action = court::Action::Refuse;
+  unknown.recognised = false;
+  court::detail::setLine(unknown.line1, "NOT RECOGNISED");
+  court::detail::setLine(unknown.line2, "SEE THE DESK");
+
+  court::Outcome o = unknown;
+  TEST_ASSERT_TRUE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(429U), true));
+  TEST_ASSERT_EQUAL_STRING("BUSY", o.line1);
+  TEST_ASSERT_EQUAL_STRING("SCAN AGAIN", o.line2);
+  TEST_ASSERT_FALSE(o.recognised);
+  o = unknown;
+  TEST_ASSERT_TRUE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), true));
+  TEST_ASSERT_EQUAL_STRING("NO CONNECTION", o.line1);
+  TEST_ASSERT_EQUAL_STRING("BOOKINGS ONLY", o.line2);
+  o = unknown;
+  TEST_ASSERT_TRUE(bridgelogic::explainNoDecision(o, bridgelogic::OnlineMiss::NotAsked, true));
+  TEST_ASSERT_EQUAL_STRING("NO CONNECTION", o.line1);
+
+  // Not a possible member (a stale roster, a wrong code): untouched.
+  o = unknown;
+  TEST_ASSERT_FALSE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), false));
+  TEST_ASSERT_EQUAL_STRING("NOT RECOGNISED", o.line1);
+  // A grant or a recognised refusal: untouched.
+  o = unknown;
+  o.recognised = true;
+  TEST_ASSERT_FALSE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), true));
+  o = unknown;
+  o.action = court::Action::TurnOn;
+  TEST_ASSERT_FALSE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), true));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
@@ -4899,5 +4940,6 @@ int main(int, char**) {
   RUN_TEST(test_plan_extension_caps_the_relay_and_holds_the_rest_for_relight);
   RUN_TEST(test_a_known_member_with_nothing_booked_is_invited_to_walk_up);
 
+  RUN_TEST(test_a_server_that_decided_nothing_is_never_read_as_not_recognised);
   return UNITY_END();
 }

@@ -576,6 +576,54 @@ void test_offline_v1_code_used_once_is_refused_the_second_time_and_says_so(void)
   TEST_ASSERT_FALSE(r.outcome.recognised);
 }
 
+/// MCV1-08 / BR-08: offline, a verified member with nothing booked here, and a
+/// code the box holds no key for, are not unknown codes. They read NO
+/// CONNECTION / BOOKINGS ONLY offline and BUSY / SCAN AGAIN when the server was
+/// too busy — never NOT RECOGNISED — and arm nothing. A wrong code keeps its
+/// own words.
+void test_offline_unbooked_or_keyless_member_is_told_the_box_is_offline(void) {
+  Offline f;
+  f.cache.beginReplace(0U);
+  f.cache.commitReplace();
+  char token[memcode::kTokenLen + 1U] = {};
+  f.token(1000U, token);
+  bridgelogic::MemberScanResult r =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 10000U);
+  TEST_ASSERT_EQUAL(memcode::Status::Ok, r.verdict.status);
+  TEST_ASSERT_TRUE(r.couldBeMember);
+  TEST_ASSERT_EQUAL_STRING("NOT RECOGNISED", r.outcome.line1);
+  TEST_ASSERT_TRUE(
+      bridgelogic::explainNoDecision(r.outcome, bridgelogic::OnlineMiss::NotAsked, r.couldBeMember));
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kBookingsOnlyLine1, r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kBookingsOnlyLine2, r.outcome.line2);
+  TEST_ASSERT_FALSE(r.outcome.recognised);
+
+  // Server answered 503: busy, scan again.
+  f.uses = memcode::ReplayRing<bridgelogic::kCourtReplaySlots>();
+  r = bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 10000U);
+  TEST_ASSERT_TRUE(bridgelogic::explainNoDecision(r.outcome, bridgelogic::missFor(503U), r.couldBeMember));
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kServerBusyLine1, r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kServerBusyLine2, r.outcome.line2);
+
+  // No key for this REF: the box cannot tell, so it is not called unknown.
+  char keyless[memcode::kTokenLen + 1U] = {};
+  TEST_ASSERT_TRUE(memcode::format(0x0B111U, 12345678U, memcode::offCode(f.key.key, 1000U), keyless,
+                                   memcode::kTokenLen + 1U));
+  r = bridgelogic::decideOfflineMemberCode(keyless, f.codes(), f.cache, f.session, f.box(), 10000U);
+  TEST_ASSERT_EQUAL(memcode::Status::NoKey, r.verdict.status);
+  TEST_ASSERT_TRUE(r.couldBeMember);
+  TEST_ASSERT_TRUE(bridgelogic::explainNoDecision(r.outcome, bridgelogic::missFor(0U), r.couldBeMember));
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kBookingsOnlyLine1, r.outcome.line1);
+
+  // A wrong code for a REF the box holds is an unknown code.
+  char wrong[memcode::kTokenLen + 1U] = {};
+  TEST_ASSERT_TRUE(memcode::format(0x0A3C9U, 12345678U, 999999U, wrong, memcode::kTokenLen + 1U));
+  r = bridgelogic::decideOfflineMemberCode(wrong, f.codes(), f.cache, f.session, f.box(), 10000U);
+  TEST_ASSERT_FALSE(r.couldBeMember);
+  TEST_ASSERT_FALSE(
+      bridgelogic::explainNoDecision(r.outcome, bridgelogic::OnlineMiss::NotAsked, r.couldBeMember));
+}
+
 /// Refuted 2026-09-28: a box that lit a court OFFLINE and got its link back
 /// before the activation was uploaded asked the server about a photo of the same
 /// code, and the server — which had not heard of the first use — acted again. A
@@ -1071,5 +1119,6 @@ int main(int, char**) {
   RUN_TEST(test_pay_for_labels_are_refused_rather_than_cut);
   RUN_TEST(test_pay_for_flow_arms_one_court_lapses_and_keeps_its_nonce_for_the_confirm);
   RUN_TEST(test_the_v1_token_fits_every_buffer_it_passes_through);
+  RUN_TEST(test_offline_unbooked_or_keyless_member_is_told_the_box_is_offline);
   return UNITY_END();
 }
