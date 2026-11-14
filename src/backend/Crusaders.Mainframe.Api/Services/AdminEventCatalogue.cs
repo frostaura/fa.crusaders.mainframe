@@ -73,6 +73,9 @@ public sealed record BookingsUnsettledPayload(int Count, string OldestLocal, int
 
 public sealed record ForgeryPayload(string DeviceCode, string? MemberName, string Detail);
 
+/// <summary>MCV1-09: the club's member-code rollout moved on by itself — from, to, and (on the cut-over) when old codes stop.</summary>
+public sealed record CodesPhaseMovedPayload(string From, string To, string? CutoffDueLocal, int CutoffDays);
+
 public sealed record CodesCapabilityLostPayload(Guid DeviceId, string DeviceName, string DeviceCode, string? FirmwareVersion, string Phase);
 
 /// <summary>
@@ -123,6 +126,7 @@ public static class AdminEventCatalogue
     public const string AdminRoleChanged = "admin.role_changed";
     public const string CodeForgerySuspected = "code.forgery_suspected";
     public const string CodesCapabilityLost = "device.codes_capability_lost";
+    public const string CodesPhaseMoved = "member_code.phase_moved";
     public const string MemberDeleted = "member.deleted";
     public const string EmailUndeliverable = "email.undeliverable";
     public const string BookingsUnsettled = "booking.unsettled";
@@ -165,6 +169,8 @@ public static class AdminEventCatalogue
             Security: true),
         new(CodesCapabilityLost, "A board stopped reading member codes",
             "After the club switched to member codes, a board reported firmware that does not check them offline."),
+        new(CodesPhaseMoved, "Member codes moved on by themselves",
+            "The club's switch to members' rotating codes moved to its next step on its own: every board was ready, or the cut-off date arrived."),
         new(MemberDeleted, "Deleted members",
             "Another administrator deleted a member's account."),
         new(EmailUndeliverable, "An email could not be delivered",
@@ -215,6 +221,7 @@ public static class AdminEventCatalogue
         [AdminRoleChanged] = ComposeAdminRole,
         [CodeForgerySuspected] = ComposeForgery,
         [CodesCapabilityLost] = ComposeCodesCapabilityLost,
+        [CodesPhaseMoved] = ComposeCodesPhaseMoved,
         [MemberDeleted] = ComposeMemberDeleted,
         [EmailUndeliverable] = ComposeEmailUndeliverable,
         [BookingsUnsettled] = ComposeBookingsUnsettled,
@@ -350,6 +357,12 @@ public static class AdminEventCatalogue
     {
         var p = c.Payload<ForgeryPayload>();
         return EmailTemplates.AdminCodeForgerySuspected(c.Club, c.To, new ForgeryNotice(p.DeviceCode, p.MemberName, p.Detail, c.ConsoleUrl));
+    }
+
+    private static EmailMessage ComposeCodesPhaseMoved(AdminMailContext c)
+    {
+        var p = c.Payload<CodesPhaseMovedPayload>();
+        return EmailTemplates.AdminCodesPhaseMoved(c.Club, c.To, new CodesPhaseMoved(p.From, p.To, p.CutoffDueLocal, p.CutoffDays, c.ConsoleUrl));
     }
 
     private static EmailMessage ComposeCodesCapabilityLost(AdminMailContext c)

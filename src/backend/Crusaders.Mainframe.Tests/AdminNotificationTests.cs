@@ -1028,6 +1028,7 @@ public class AdminNotificationTests
             [AdminEventCatalogue.AdminRoleChanged] = new AdminRolePayload("A", "B", true, null),
             [AdminEventCatalogue.CodeForgerySuspected] = new ForgeryPayload("box-1", null, "detail"),
             [AdminEventCatalogue.CodesCapabilityLost] = new CodesCapabilityLostPayload(Guid.NewGuid(), "Box", "box-1", "2.0.0", "v1"),
+            [AdminEventCatalogue.CodesPhaseMoved] = new CodesPhaseMovedPayload("legacy", "v1", "Sat 28 Nov 2026", 14),
             [AdminEventCatalogue.MemberDeleted] = new MemberDeletedPayload("A", "B", "moved away", true, 1, 30),
             [AdminEventCatalogue.EmailUndeliverable] = new EmailUndeliverablePayload("a@x.review.test", "Booking confirmed", "SmtpException: refused"),
             [AdminEventCatalogue.BookingsUnsettled] = new BookingsUnsettledPayload(3, "Mon 2 Nov 2026, 18:00", 7),
