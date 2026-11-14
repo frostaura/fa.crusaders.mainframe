@@ -356,8 +356,9 @@ void CourtBox::watchBridge(uint32_t nowMs) {
   if (!bridgeAlive_) {
     return;
   }
-  const uint32_t limit =
-      liveSeen_ ? static_cast<uint32_t>(livePeriodS_) * 3000UL + 1000UL : kLegacyLivenessMs;
+  const uint32_t limit = liveSeen_
+                             ? static_cast<uint32_t>(static_cast<uint32_t>(livePeriodS_) * 3000UL + 1000UL)
+                             : kLegacyLivenessMs;
   if (tb::since(nowMs, lastRxMs_) > limit) {
     bridgeAlive_ = false;
     screens_.setBridgeAlive(false, nowMs);

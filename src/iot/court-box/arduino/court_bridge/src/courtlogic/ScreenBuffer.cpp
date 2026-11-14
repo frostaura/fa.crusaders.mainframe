@@ -50,7 +50,7 @@ void fitInto(char* out, const char* text, uint8_t width) {
 
 /// Seconds to whole, rounded up, so a countdown never reads 0 while it runs.
 uint32_t ceilSeconds(uint32_t ms) {
-  return (ms + 999UL) / 1000UL;
+  return static_cast<uint32_t>((ms + 999UL) / 1000UL);
 }
 
 } // namespace
@@ -490,7 +490,8 @@ bool ScreenBuffer::clockText(uint32_t nowMs, char* out) const {
   if ((linkFlags_ & kLinkClockValid) == 0U || clockMinute_ == kNoClockMinute) {
     return false;
   }
-  const uint32_t minute = (clockMinute_ + tb::since(nowMs, clockStampMs_) / 60000UL) % 1440UL;
+  const uint32_t minute =
+      static_cast<uint32_t>((clockMinute_ + tb::since(nowMs, clockStampMs_) / 60000UL) % 1440UL);
   const uint32_t h = minute / 60U;
   const uint32_t m = minute % 60U;
   out[0] = static_cast<char>('0' + h / 10U);

@@ -1,0 +1,9 @@
+# GitGuardian: these paths hold the device contract's published TEST vectors (test device keys,
+# test bearer tokens, generated HMAC keys) and the firmware unit tests that replay them. They are
+# fixtures by design and sign nothing real; a real key never lives in the tree (secrets.h and .env
+# are gitignored).
+version: 2
+secret:
+  ignored_paths:
+    - "src/contracts/device-protocol/**"
+    - "src/iot/**/test/**"
