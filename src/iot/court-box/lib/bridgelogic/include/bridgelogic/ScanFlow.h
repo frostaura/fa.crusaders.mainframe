@@ -224,6 +224,14 @@ OnlineMiss missFor(uint16_t status);
 /// outcome stays unrecognised. True when the lines changed.
 bool explainNoDecision(court::Outcome& outcome, OnlineMiss miss, bool couldBeMember);
 
+/// An online grant onto a court this box ALREADY had lit before the grant:
+/// the member's own rescan of their game (FSF-06, MCV1-02). It keeps the scan
+/// buyable — the member rescanned to extend, and spending the scan on the
+/// re-grant looped every court press on SCAN TO EXTEND — and the caller puts
+/// the extend prompt up for that court. The server claims no court use for a
+/// repeat activation of the session in play (member-code.md, MCV1-02).
+bool regrantsLitCourt(const court::Outcome& outcome, bool courtWasLit);
+
 inline constexpr char kBookingsOnlyLine1[] = "NO CONNECTION";
 inline constexpr char kBookingsOnlyLine2[] = "BOOKINGS ONLY";
 inline constexpr char kServerBusyLine1[] = "BUSY";

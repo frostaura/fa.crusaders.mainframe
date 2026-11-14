@@ -43,6 +43,7 @@
 #include "bridgelogic/WalkUp.h"
 #include "bridgelogic/WallClock.h"
 #include "court/Session.h"
+#include "court/WalkUpPad.h"
 #include "devapi/DeviceClient.h"
 #include "devapi/Json.h"
 #include "devlink/Cadence.h"
@@ -4832,6 +4833,37 @@ void test_a_duration_prompt_lives_no_longer_than_the_scan_and_rearms_the_window(
   TEST_ASSERT_EQUAL_UINT32(0UL, auth.remainingMs(31000U));
 }
 
+/// FSF-06 / MCV1-02: an online re-grant of a court this box already had lit
+/// keeps the scan, and the pad is pre-selected so the next black button is an
+/// extension of that court — never a loop on SCAN TO EXTEND.
+void test_a_rescan_on_the_members_own_lit_court_keeps_the_scan_for_an_extension(void) {
+  court::Outcome grant;
+  grant.action = court::Action::TurnOn;
+  grant.court = 1U;
+  grant.recognised = true;
+  grant.durationMs = 1800000UL;
+  TEST_ASSERT_TRUE(bridgelogic::regrantsLitCourt(grant, true));
+  // A court that was dark is a new game: the grant spends the scan as before.
+  TEST_ASSERT_FALSE(bridgelogic::regrantsLitCourt(grant, false));
+  court::Outcome refusal;
+  refusal.recognised = true;
+  TEST_ASSERT_FALSE(bridgelogic::regrantsLitCourt(refusal, true));
+  grant.court = bridgelogic::kStateCourts;
+  TEST_ASSERT_FALSE(bridgelogic::regrantsLitCourt(grant, true));
+
+  court::ButtonMap map;
+  court::WalkUpPad pad(20000UL);
+  pad.select(1U, 5000U);
+  TEST_ASSERT_TRUE(pad.hasSelection());
+  // Button 4 is the first black button (15 min) on the default map.
+  TEST_ASSERT_TRUE(pad.press(map, 4U, 9000U) == court::PadResult::Requested);
+  TEST_ASSERT_EQUAL_UINT8(1U, pad.intent().court);
+  TEST_ASSERT_EQUAL_UINT16(15U, pad.intent().minutes);
+  // And the selection lapses on its own like a pressed one.
+  pad.select(2U, 10000U);
+  TEST_ASSERT_TRUE(pad.press(map, 4U, 30000U) == court::PadResult::Ignored);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
@@ -4974,5 +5006,6 @@ int main(int, char**) {
 
   RUN_TEST(test_a_server_that_decided_nothing_is_never_read_as_not_recognised);
   RUN_TEST(test_a_duration_prompt_lives_no_longer_than_the_scan_and_rearms_the_window);
+  RUN_TEST(test_a_rescan_on_the_members_own_lit_court_keeps_the_scan_for_an_extension);
   return UNITY_END();
 }

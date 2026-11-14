@@ -1173,8 +1173,16 @@ void noteOnlineLit(const court::Outcome& outcome, bool lit, const char* token) {
 /// longer than the relay cap for its `!EXT`. ONE function for the online and
 /// roster paths so the two cannot disagree about any of those. True when an
 /// `!ON` left on this call.
-bool settleScan(const court::Outcome& outcome, uint32_t nowMs) {
+bool settleScan(const court::Outcome& outcome, uint32_t nowMs, bool regrant = false) {
   const bool lit = applyOutcome(outcome, nowMs);
+  if (regrant) {
+    // The member's own lit court, re-granted (FSF-06): the scan stays buyable
+    // for the extension they rescanned for, and the window is bound to the
+    // court so their OFF works too.
+    gRelight.onGrant(outcome, nowMs);
+    applyAuth(gAuth.afterHeldCourtRescan(outcome.court, nowMs));
+    return lit;
+  }
   if (!bridgelogic::scanStaysBuyable(outcome)) {
     // A lit court spends the scan (review H1): the next walk-up must not buy
     // on this member's token. The window is the policy's, below — kept armed
@@ -2008,8 +2016,22 @@ bool activateOnline(const char* token, bridgelogic::OnlineMiss& miss) {
     bridgelogic::readGreeting(response, strlen(response), greeting);
     greet(greeting, gClock.nowMs());
   }
-  const bool lit = settleScan(decision.outcome, gClock.nowMs());
+  const bool regrant =
+      bridgelogic::regrantsLitCourt(decision.outcome, decision.outcome.court < bridgelogic::kStateCourts &&
+                                                          courtLit(decision.outcome.court, gClock.nowMs()));
+  const bool lit = settleScan(decision.outcome, gClock.nowMs(), regrant);
   noteOnlineLit(decision.outcome, lit, token);
+  if (regrant && lit) {
+    // Straight to the extend prompt for that court, the court already
+    // selected: the next black button extends it (FSF-06, MCV1-02).
+    const uint32_t now = gClock.nowMs();
+    bridgelogic::ScreenFacts facts = screenFacts(now);
+    facts.court = decision.outcome.court;
+    facts.minutes = (courtSecondsLeft(decision.outcome.court, now) + 59U) / 60U;
+    gPad.select(decision.outcome.court, now);
+    gExtendCourt = decision.outcome.court;
+    sendAfterGreeting(screenNow(bridgelogic::ScreenId::ExtendPrompt, facts));
+  }
   if (decision.invitesWalkUp && gLastScan[0] != '\0') {
     // A known member with nothing to light: invite the walk-up instead of
     // NO BOOKING / SEE THE DESK.

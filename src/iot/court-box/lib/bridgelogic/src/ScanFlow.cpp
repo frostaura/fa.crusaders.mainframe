@@ -208,6 +208,10 @@ size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* to
   return static_cast<size_t>(n);
 }
 
+bool regrantsLitCourt(const court::Outcome& outcome, bool courtWasLit) {
+  return courtWasLit && spendsScan(outcome) && outcome.court < kStateCourts;
+}
+
 OnlineMiss missFor(uint16_t status) {
   if (status == 0U) {
     return OnlineMiss::Unreachable;
