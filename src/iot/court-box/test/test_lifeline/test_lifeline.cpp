@@ -605,7 +605,7 @@ struct OtaRig {
     if (!ota.ready()) {
       return false;
     }
-    return ota.run(download, flash, modulus, g_work, g_buffer, sizeof(g_buffer), hooks, 2000U);
+    return ota.run(download, flash, modulus, {g_work, g_buffer, sizeof(g_buffer)}, hooks, 2000U);
   }
 };
 

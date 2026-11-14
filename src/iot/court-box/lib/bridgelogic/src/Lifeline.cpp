@@ -369,21 +369,27 @@ bool BridgeNet::tick(uint32_t nowMs, uint32_t fallbackMinutes) {
 
 namespace {
 
-void readClamped(const char* obj, size_t len, const char* key, uint32_t lo, uint32_t hi, uint32_t& value,
-                 Drift* drift) {
-  if (devapi::json::findTopLevelKey(obj, len, key) == devapi::json::kNotFound) {
+/// One lifeline setting: its `config` key and the bounds its value is clamped into.
+struct ClampedKey {
+  const char* key;
+  uint32_t lo;
+  uint32_t hi;
+};
+
+void readClamped(const char* obj, size_t len, const ClampedKey& k, uint32_t& value, Drift* drift) {
+  if (devapi::json::findTopLevelKey(obj, len, k.key) == devapi::json::kNotFound) {
     return;
   }
   uint32_t v = 0U;
-  if (!devapi::json::topLevelUnsignedField(obj, len, key, v)) {
+  if (!devapi::json::topLevelUnsignedField(obj, len, k.key, v)) {
     if (drift != nullptr) {
       char name[Drift::kNameLen] = "config.";
-      strncat(name, key, sizeof(name) - strlen(name) - 1U);
+      strncat(name, k.key, sizeof(name) - strlen(name) - 1U);
       drift->add(name);
     }
     return;
   }
-  value = v < lo ? lo : (v > hi ? hi : v);
+  value = v < k.lo ? k.lo : (v > k.hi ? k.hi : v);
 }
 
 } // namespace
@@ -398,10 +404,10 @@ void readLifelineSettings(const char* body, size_t len, LifelineSettings& curren
   // want the object with its braces.
   const char* obj = body + at - 1U;
   const size_t n = objLen + 2U;
-  readClamped(obj, n, "device_power_restore_trust_minutes", 0U, 120U, current.trustMinutes, drift);
-  readClamped(obj, n, "device_net_fallback_minutes", 3U, 60U, current.fallbackMinutes, drift);
-  readClamped(obj, n, "device_ota_probation_minutes", 3U, 60U, current.probationMinutes, drift);
-  readClamped(obj, n, "relay_reconcile_min_seconds", 30U, 600U, current.reconcileMinSeconds, drift);
+  readClamped(obj, n, {"device_power_restore_trust_minutes", 0U, 120U}, current.trustMinutes, drift);
+  readClamped(obj, n, {"device_net_fallback_minutes", 3U, 60U}, current.fallbackMinutes, drift);
+  readClamped(obj, n, {"device_ota_probation_minutes", 3U, 60U}, current.probationMinutes, drift);
+  readClamped(obj, n, {"relay_reconcile_min_seconds", 30U, 600U}, current.reconcileMinSeconds, drift);
 }
 
 // --- the stall watchdog ---------------------------------------------------------------
@@ -502,31 +508,33 @@ bool literalAt(const char* text, char* out, size_t cap, size_t& at) {
   return true;
 }
 
+/// A key's literal, then `value` escaped into the JSON string after it.
+bool pairAt(const char* literal, const char* value, char* out, size_t cap, size_t& at) {
+  return literalAt(literal, out, cap, at) && escapeAt(value, out, cap, at);
+}
+
+/// The form written as the `net` object the server would have sent.
+bool writePortalNet(const PortalForm& form, char* scratch, size_t cap, size_t& at) {
+  at = 0U;
+  bool ok = pairAt("{\"ver\":1,\"base\":\"", form.base, scratch, cap, at) &&
+            pairAt("\",\"wifi0_ssid\":\"", form.ssid, scratch, cap, at) &&
+            pairAt("\",\"wifi0_psk\":\"", form.psk, scratch, cap, at);
+  const bool second = form.ssid2 != nullptr && form.ssid2[0] != '\0';
+  if (ok && second) {
+    ok = pairAt("\",\"wifi1_ssid\":\"", form.ssid2, scratch, cap, at) &&
+         pairAt("\",\"wifi1_psk\":\"", form.psk2, scratch, cap, at);
+  }
+  return ok && literalAt("\"}", scratch, cap, at);
+}
+
 } // namespace
 
 devnet::Refusal validatePortalForm(const PortalForm& form, devnet::NetSet& out, char* scratch,
                                    size_t scratchCap) {
   // THE SAME RULES AS A SERVER `net`, by construction: the form is written as
   // the object the server would have sent and read by the same reader.
-  if (scratch == nullptr || scratchCap == 0U) {
-    return devnet::Refusal::TooLong;
-  }
-  const bool second = form.ssid2 != nullptr && form.ssid2[0] != '\0';
   size_t at = 0U;
-  bool ok = literalAt("{\"ver\":1,\"base\":\"", scratch, scratchCap, at) &&
-            escapeAt(form.base, scratch, scratchCap, at) &&
-            literalAt("\",\"wifi0_ssid\":\"", scratch, scratchCap, at) &&
-            escapeAt(form.ssid, scratch, scratchCap, at) &&
-            literalAt("\",\"wifi0_psk\":\"", scratch, scratchCap, at) &&
-            escapeAt(form.psk, scratch, scratchCap, at);
-  if (ok && second) {
-    ok = literalAt("\",\"wifi1_ssid\":\"", scratch, scratchCap, at) &&
-         escapeAt(form.ssid2, scratch, scratchCap, at) &&
-         literalAt("\",\"wifi1_psk\":\"", scratch, scratchCap, at) &&
-         escapeAt(form.psk2, scratch, scratchCap, at);
-  }
-  ok = ok && literalAt("\"}", scratch, scratchCap, at);
-  if (!ok) {
+  if (scratch == nullptr || scratchCap == 0U || !writePortalNet(form, scratch, scratchCap, at)) {
     return devnet::Refusal::TooLong;
   }
   devnet::NetSet staged;

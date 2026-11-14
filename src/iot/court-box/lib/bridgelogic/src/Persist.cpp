@@ -173,6 +173,37 @@ bool entryAt(IFiles& files, const char* path, uint16_t index, StoredEvent& out) 
          detail::eventSealed(out);
 }
 
+/// Entry `i` of the merge: the carried file's first, then the live file's.
+bool mergedEntryAt(IFiles& files, uint16_t carried, uint32_t i, StoredEvent& out) {
+  const bool fromCarried = i < carried;
+  return entryAt(files, fromCarried ? kFileCarried : kFileEvents,
+                 static_cast<uint16_t>(fromCarried ? i : i - carried), out);
+}
+
+/// Discardables among the first entries of the merge, counted no further than
+/// `excess` needs.
+uint32_t countDiscardables(IFiles& files, uint16_t carried, uint32_t total, uint32_t excess,
+                           StoredEvent& entry) {
+  uint32_t discardables = 0U;
+  for (uint32_t i = 0U; i < total && excess > 0U; ++i) {
+    if (mergedEntryAt(files, carried, i, entry) && eventq::isDiscardable(entry.event.kind)) {
+      ++discardables;
+    }
+  }
+  return discardables;
+}
+
+/// False when `entry` is shed: a discardable while discardables are owed,
+/// else one of the oldest of the rest while those are.
+bool keepEntry(const StoredEvent& entry, uint32_t& shedDiscardable, uint32_t& shedOldest) {
+  uint32_t& owed = eventq::isDiscardable(entry.event.kind) ? shedDiscardable : shedOldest;
+  if (owed > 0U) {
+    --owed;
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 void CarriedEvents::mergeLive(uint16_t carried, uint16_t live) {
@@ -181,16 +212,8 @@ void CarriedEvents::mergeLive(uint16_t carried, uint16_t live) {
   // any activation or release, and then the oldest.
   StoredEvent& entry = detail::eventScratch();
   const uint32_t total = static_cast<uint32_t>(carried) + live;
-  uint32_t excess = total > kCarriedSlots ? total - kCarriedSlots : 0U;
-  uint32_t discardables = 0U;
-  for (uint32_t i = 0U; i < total && excess > 0U; ++i) {
-    const bool fromCarried = i < carried;
-    if (entryAt(*files_, fromCarried ? kFileCarried : kFileEvents,
-                static_cast<uint16_t>(fromCarried ? i : i - carried), entry) &&
-        eventq::isDiscardable(entry.event.kind)) {
-      ++discardables;
-    }
-  }
+  const uint32_t excess = total > kCarriedSlots ? total - kCarriedSlots : 0U;
+  const uint32_t discardables = countDiscardables(*files_, carried, total, excess, entry);
   // Shed this many discardables, then this many of the oldest of the rest.
   uint32_t shedDiscardable = discardables < excess ? discardables : excess;
   uint32_t shedOldest = excess - shedDiscardable;
@@ -199,20 +222,10 @@ void CarriedEvents::mergeLive(uint16_t carried, uint16_t live) {
   }
   bool ok = true;
   for (uint32_t i = 0U; i < total && ok; ++i) {
-    const bool fromCarried = i < carried;
-    if (!entryAt(*files_, fromCarried ? kFileCarried : kFileEvents,
-                 static_cast<uint16_t>(fromCarried ? i : i - carried), entry)) {
-      continue; // torn or damaged: that one entry is lost, never the rest
+    // A torn or damaged entry is that one entry lost, never the rest.
+    if (mergedEntryAt(*files_, carried, i, entry) && keepEntry(entry, shedDiscardable, shedOldest)) {
+      ok = files_->append(&entry, sizeof(entry));
     }
-    if (eventq::isDiscardable(entry.event.kind) && shedDiscardable > 0U) {
-      --shedDiscardable;
-      continue;
-    }
-    if (!eventq::isDiscardable(entry.event.kind) && shedOldest > 0U) {
-      --shedOldest;
-      continue;
-    }
-    ok = files_->append(&entry, sizeof(entry));
   }
   if (ok && files_->end(true)) {
     files_->remove(kFileEvents);

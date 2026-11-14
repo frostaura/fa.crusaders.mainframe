@@ -393,6 +393,113 @@ dc::RsaWorkspace gWork;
 char gResponse[bridgelogic::kHeartbeatResponseCap];
 char gRequest[1536];
 
+/// The board's lifeline state, as setup() and loop() hold it.
+struct SimBox {
+  DirFiles files;
+  SimFlash flash;
+  NoHooks hooks;
+  bridgelogic::BridgeOta ota;
+  bridgelogic::BridgeKeys keys;
+  bridgelogic::BridgeNet net;
+  bridgelogic::LifelineSettings life;
+  uint8_t modulus[dc::kRsa2048Bytes] = {};
+  bool haveKey = false;
+};
+
+/// Not an exit: the board keeps running.
+constexpr int kKeepRunning = -1;
+
+/// First thing, as setup() does: probation counts this boot, and the fourth
+/// boot in probation rolls back.
+int bootOta(SimBox& box, const std::string& version, const char* crashOn) {
+  if (box.ota.begin(&box.files, version.c_str()) == bridgelogic::BridgeOta::Boot::RollBack) {
+    printf("[sim] %s: fourth boot in probation, rolling back\n", version.c_str());
+    if (box.ota.rollBack(box.flash, gBuffer, sizeof(gBuffer), box.hooks, "probation")) {
+      printf("[sim] rollback armed\n");
+      return kExitRestart;
+    }
+    printf("[sim] rollback impossible: %s\n", box.ota.error() == nullptr ? "-" : box.ota.error());
+  }
+  printf("[sim] running %s fw_state=%s\n", version.c_str(), bridgelogic::fwStateName(box.ota.state()));
+  if (crashOn[0] != '\0' && version == crashOn) {
+    printf("[sim] %s crashes before its first heartbeat\n", version.c_str());
+    return kExitCrash;
+  }
+  return kKeepRunning;
+}
+
+/// The beat's request into gRequest, as fillHeartbeatV3 renders it. False when
+/// it does not render.
+bool renderBeat(SimBox& box, const char* mac, const std::string& version, uint64_t uptimeMs,
+                devlink::HeartbeatV3& v3) {
+  v3.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapLcd2 | devlink::kCapOta | devlink::kCapKey |
+            devlink::kCapNet;
+  v3.megaVersion = "3.0.0";
+  v3.fwState = bridgelogic::fwStateName(box.ota.state());
+  v3.fwFailed = box.ota.failedVersion();
+  v3.fwError = box.ota.error();
+  v3.netReported = true;
+  v3.netVer = box.net.version();
+  v3.netSrc = bridgelogic::netSourceName(box.net.source());
+  devlink::HeartbeatReport report;
+  report.v3 = &v3;
+  return devlink::renderHeartbeatBody(gRequest, sizeof(gRequest), mac, version.c_str(), uptimeMs, report) !=
+         0U;
+}
+
+/// One accepted answer, through the readers court_bridge's loop() uses.
+void adoptAnswer(SimBox& box, const std::string& body) {
+  if (body.size() >= sizeof(gResponse)) {
+    return;
+  }
+  memcpy(gResponse, body.data(), body.size());
+  gResponse[body.size()] = '\0';
+  const size_t len = body.size();
+  if (!devapi::json::isCompleteObject(gResponse, len)) {
+    return;
+  }
+  box.ota.heartbeatAccepted(true);
+  box.net.heartbeatAccepted();
+  bridgelogic::readLifelineSettings(gResponse, len, box.life, nullptr);
+  const char* object = nullptr;
+  size_t objectLen = 0U;
+  if (devnet::json::topLevelObjectText(gResponse, len, "key_next", object, objectLen)) {
+    printf("[sim] key_next: %s\n", devnet::refusalName(box.keys.adopt(object, objectLen)));
+  }
+  if (devnet::json::topLevelObjectText(gResponse, len, "net", object, objectLen)) {
+    printf("[sim] net: %s\n", devnet::refusalName(box.net.adopt(object, objectLen, nowMs()).reason));
+  }
+  if (devnet::json::topLevelObjectText(gResponse, len, "ota", object, objectLen)) {
+    box.ota.offer(object, objectLen, nowMs());
+    printf("[sim] ota offer %s\n", box.ota.verifyDue() ? box.ota.pendingOffer().version : "not taken");
+  }
+}
+
+/// After a beat, as loop() does: verify a pending offer, run a verified one,
+/// and count probation's window.
+int otaPass(SimBox& box, SimDownload& download) {
+  if (box.ota.verifyDue() && box.haveKey) {
+    box.ota.verifyOffer(box.modulus, gWork);
+    printf("[sim] signature %s\n",
+           box.ota.ready() ? "verified" : (box.ota.error() == nullptr ? "-" : box.ota.error()));
+  }
+  if (box.ota.ready()) {
+    if (box.ota.run(download, box.flash, box.modulus, {gWork, gBuffer, sizeof(gBuffer)}, box.hooks,
+                    nowMs())) {
+      printf("[sim] staged, verified and armed %s; restarting\n", box.ota.record().version);
+      return kExitRestart;
+    }
+    printf("[sim] update failed: %s\n", box.ota.error() == nullptr ? "-" : box.ota.error());
+  }
+  if (box.ota.tick(nowMs(), box.life.probationMinutes) &&
+      box.ota.rollBack(box.flash, gBuffer, sizeof(gBuffer), box.hooks, "probation")) {
+    return kExitRestart;
+  }
+  return kKeepRunning;
+}
+
+SimBox gBox;
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -412,97 +519,36 @@ int main(int argc, char** argv) {
     fprintf(stderr, "no running image in %s\n", gDir.c_str());
     return 2;
   }
-  DirFiles files;
-  SimFlash flash;
-  NoHooks hooks;
-  bridgelogic::BridgeOta ota;
-  // First thing, as setup() does: probation counts this boot.
-  if (ota.begin(&files, version.c_str()) == bridgelogic::BridgeOta::Boot::RollBack) {
-    printf("[sim] %s: fourth boot in probation, rolling back\n", version.c_str());
-    if (ota.rollBack(flash, gBuffer, sizeof(gBuffer), hooks, "probation")) {
-      printf("[sim] rollback armed\n");
-      return kExitRestart;
-    }
-    printf("[sim] rollback impossible: %s\n", ota.error() == nullptr ? "-" : ota.error());
+  SimBox& box = gBox;
+  const int booted = bootOta(box, version, crashOn);
+  if (booted != kKeepRunning) {
+    return booted;
   }
-  printf("[sim] running %s fw_state=%s\n", version.c_str(), bridgelogic::fwStateName(ota.state()));
-  if (crashOn[0] != '\0' && version == crashOn) {
-    printf("[sim] %s crashes before its first heartbeat\n", version.c_str());
-    return kExitCrash;
-  }
-  uint8_t modulus[dc::kRsa2048Bytes];
-  const bool haveKey = devota::parseModulusHex(keyHex, modulus);
-
-  bridgelogic::BridgeKeys keys;
-  keys.begin(key, &files);
-  bridgelogic::BridgeNet net;
-  net.begin("SIM", "sim-password", base, &files);
-  bridgelogic::LifelineSettings life;
-  Http http(net, keys);
+  box.haveKey = devota::parseModulusHex(keyHex, box.modulus);
+  box.keys.begin(key, &box.files);
+  box.net.begin("SIM", "sim-password", base, &box.files);
+  Http http(box.net, box.keys);
   SimDownload download(http);
 
   const uint32_t started = nowMs();
   for (int beat = 0; beat < beats; ++beat) {
     devlink::HeartbeatV3 v3;
-    v3.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapLcd2 | devlink::kCapOta |
-              devlink::kCapKey | devlink::kCapNet;
-    v3.megaVersion = "3.0.0";
-    v3.fwState = bridgelogic::fwStateName(ota.state());
-    v3.fwFailed = ota.failedVersion();
-    v3.fwError = ota.error();
-    v3.netReported = true;
-    v3.netVer = net.version();
-    v3.netSrc = bridgelogic::netSourceName(net.source());
-    devlink::HeartbeatReport report;
-    report.v3 = &v3;
-    if (devlink::renderHeartbeatBody(gRequest, sizeof(gRequest), mac, version.c_str(),
-                                     static_cast<uint64_t>(nowMs() - started), report) == 0U) {
+    if (!renderBeat(box, mac, version, static_cast<uint64_t>(nowMs() - started), v3)) {
       fprintf(stderr, "heartbeat did not render\n");
       return 2;
     }
     std::string body;
     const int status = http.post("/api/v1/device/heartbeat", gRequest, body);
-    printf("[sim] heartbeat %d fw_state=%s key=%s\n", status, v3.fwState, keys.activeId());
-    if (status >= 200 && status < 300 && body.size() < sizeof(gResponse)) {
-      memcpy(gResponse, body.data(), body.size());
-      gResponse[body.size()] = '\0';
-      const size_t len = body.size();
-      if (devapi::json::isCompleteObject(gResponse, len)) {
-        ota.heartbeatAccepted(true);
-        net.heartbeatAccepted();
-        bridgelogic::readLifelineSettings(gResponse, len, life, nullptr);
-        const char* object = nullptr;
-        size_t objectLen = 0U;
-        if (devnet::json::topLevelObjectText(gResponse, len, "key_next", object, objectLen)) {
-          printf("[sim] key_next: %s\n", devnet::refusalName(keys.adopt(object, objectLen)));
-        }
-        if (devnet::json::topLevelObjectText(gResponse, len, "net", object, objectLen)) {
-          printf("[sim] net: %s\n", devnet::refusalName(net.adopt(object, objectLen, nowMs()).reason));
-        }
-        if (devnet::json::topLevelObjectText(gResponse, len, "ota", object, objectLen)) {
-          ota.offer(object, objectLen, nowMs());
-          printf("[sim] ota offer %s\n", ota.verifyDue() ? ota.pendingOffer().version : "not taken");
-        }
-      }
+    printf("[sim] heartbeat %d fw_state=%s key=%s\n", status, v3.fwState, box.keys.activeId());
+    if (status >= 200 && status < 300) {
+      adoptAnswer(box, body);
     }
-    if (ota.verifyDue() && haveKey) {
-      ota.verifyOffer(modulus, gWork);
-      printf("[sim] signature %s\n", ota.ready() ? "verified" : (ota.error() == nullptr ? "-" : ota.error()));
-    }
-    if (ota.ready()) {
-      if (ota.run(download, flash, modulus, gWork, gBuffer, sizeof(gBuffer), hooks, nowMs())) {
-        printf("[sim] staged, verified and armed %s; restarting\n", ota.record().version);
-        return kExitRestart;
-      }
-      printf("[sim] update failed: %s\n", ota.error() == nullptr ? "-" : ota.error());
-    }
-    if (ota.tick(nowMs(), life.probationMinutes)) {
-      if (ota.rollBack(flash, gBuffer, sizeof(gBuffer), hooks, "probation")) {
-        return kExitRestart;
-      }
+    const int exitCode = otaPass(box, download);
+    if (exitCode != kKeepRunning) {
+      return exitCode;
     }
     usleep(static_cast<useconds_t>(gapMs) * 1000U);
   }
-  printf("[sim] done: running %s fw_state=%s\n", version.c_str(), bridgelogic::fwStateName(ota.state()));
+  printf("[sim] done: running %s fw_state=%s\n", version.c_str(), bridgelogic::fwStateName(box.ota.state()));
   return 0;
 }

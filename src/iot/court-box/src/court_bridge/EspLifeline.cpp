@@ -204,6 +204,37 @@ void EspImageFlash::abort() {
 
 // --- the download ----------------------------------------------------------------------
 
+namespace {
+
+/// Up to `left` bytes of `stream` into `sink`, `cap` at a time through `buffer`:
+/// until the server closes, the sink refuses, or ten seconds pass with nothing.
+void pumpBody(WiFiClient* stream, uint32_t left, uint8_t* buffer, size_t cap, bridgelogic::IChunkSink& sink) {
+  uint32_t quietSince = millis();
+  while (left > 0U && stream != nullptr && (stream->connected() || stream->available() > 0)) {
+    const size_t avail = static_cast<size_t>(stream->available());
+    if (avail == 0U) {
+      if (!sink.chunk(nullptr, 0U) || millis() - quietSince > 10000UL) {
+        return;
+      }
+      delay(1);
+      continue;
+    }
+    const size_t want = avail < cap ? avail : cap;
+    const size_t take = want < left ? want : left;
+    const int got = stream->read(buffer, take);
+    if (got <= 0) {
+      continue;
+    }
+    quietSince = millis();
+    if (!sink.chunk(buffer, static_cast<size_t>(got))) {
+      return;
+    }
+    left -= static_cast<uint32_t>(got);
+  }
+}
+
+} // namespace
+
 uint16_t EspDownload::get(const char* path, uint32_t expectBytes, bridgelogic::IChunkSink& sink) {
   char url[devnet::kBaseUrlMax + devota::kPathCap + 2U];
   const int n = snprintf(url, sizeof(url), "%s%s", baseUrl_(), path);
@@ -229,30 +260,7 @@ uint16_t EspDownload::get(const char* path, uint32_t expectBytes, bridgelogic::I
     http.end();
     return 0U;
   }
-  WiFiClient* stream = http.getStreamPtr();
-  uint32_t left = expectBytes;
-  uint32_t quietSince = millis();
-  while (left > 0U && stream != nullptr && (stream->connected() || stream->available() > 0)) {
-    const size_t avail = static_cast<size_t>(stream->available());
-    if (avail == 0U) {
-      if (!sink.chunk(nullptr, 0U) || millis() - quietSince > 10000UL) {
-        break;
-      }
-      delay(1);
-      continue;
-    }
-    const size_t want = avail < cap_ ? avail : cap_;
-    const size_t take = want < left ? want : left;
-    const int got = stream->read(buffer_, take);
-    if (got <= 0) {
-      continue;
-    }
-    quietSince = millis();
-    if (!sink.chunk(buffer_, static_cast<size_t>(got))) {
-      break;
-    }
-    left -= static_cast<uint32_t>(got);
-  }
+  pumpBody(http.getStreamPtr(), expectBytes, buffer_, cap_, sink);
   http.end();
   return 200U;
 }

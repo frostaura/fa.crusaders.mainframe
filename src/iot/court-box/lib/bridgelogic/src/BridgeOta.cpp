@@ -270,7 +270,7 @@ bool BridgeOta::backUpRunning(IImageFlash& flash, uint8_t* buffer, size_t buffer
 }
 
 bool BridgeOta::run(IDownload& download, IImageFlash& flash, const uint8_t modulus[dc::kRsa2048Bytes],
-                    dc::RsaWorkspace& work, uint8_t* buffer, size_t bufferCap, Hooks& hooks, uint32_t nowMs) {
+                    const Lent& lent, Hooks& hooks, uint32_t nowMs) {
   if (!ready_) {
     return false;
   }
@@ -285,7 +285,7 @@ bool BridgeOta::run(IDownload& download, IImageFlash& flash, const uint8_t modul
     retryLater("space");
     return false;
   }
-  if (!backUpRunning(flash, buffer, bufferCap, hooks)) {
+  if (!backUpRunning(flash, lent.buffer, lent.bufferCap, hooks)) {
     // No copy of the running image is no way back: nothing is fetched.
     retryLater("space");
     return false;
@@ -314,7 +314,7 @@ bool BridgeOta::run(IDownload& download, IImageFlash& flash, const uint8_t modul
     retryLater("http");
     return false;
   }
-  OfferCheck check(offer_, modulus, work);
+  OfferCheck check(offer_, modulus, lent.work);
   if (!flash.commit(check)) {
     if (check.asked() && check.refusal() != devota::Refusal::Ok) {
       // What this server serves for that version is not what was signed.
