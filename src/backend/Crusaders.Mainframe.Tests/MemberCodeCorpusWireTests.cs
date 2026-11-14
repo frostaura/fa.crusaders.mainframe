@@ -423,7 +423,10 @@ public partial class MemberCodeCorpusTests
     {
         var device = new Device
         {
-            DeviceCode = "box-" + new string('c', 12), Name = "x", MacAddress = "5ccf7f0a1b2c", CourtNumbers = [1, 2, 3, 4],
+            DeviceCode = "box-" + new string('c', 12),
+            Name = "x",
+            MacAddress = "5ccf7f0a1b2c",
+            CourtNumbers = [1, 2, 3, 4],
         };
         var s = WidestSettings();
         var roster = Enumerable.Range(0, 16)
@@ -446,8 +449,11 @@ public partial class MemberCodeCorpusTests
     {
         var device = new Device
         {
-            DeviceCode = "gate-" + new string('c', 12), Name = "x", MacAddress = "5ccf7f0a1b2c",
-            Kind = DeviceKind.Gate, GateKey = new string('g', 64),
+            DeviceCode = "gate-" + new string('c', 12),
+            Name = "x",
+            MacAddress = "5ccf7f0a1b2c",
+            Kind = DeviceKind.Gate,
+            GateKey = new string('g', 64),
         };
         var roster = Enumerable.Range(0, 48)
             .Select(i => $"m{Ref(i * 4)}{Ref((i * 4) + 1)}{Ref((i * 4) + 2)}{Ref((i * 4) + 3)}|0|-864000|999999")
@@ -493,8 +499,14 @@ public partial class MemberCodeCorpusTests
         240, 30, 60, 15, 14, "Africa/Johannesburg", 60, "16:00-19:00", 1, 2, 0, 1440, 7,
         ButtonMap.Default())
     {
-        WalkUpMaxMinutes = 90, HeartbeatSeconds = 300,
-        LcdRevertSeconds = 60, LcdChoiceSeconds = 60, LcdCardSeconds = 10, LcdHintSeconds = 10,
-        ScanMemorySeconds = 300, ClockTrustMinutes = 1440, DeviceFaultMaxPerHour = 120,
+        WalkUpMaxMinutes = 90,
+        HeartbeatSeconds = 300,
+        LcdRevertSeconds = 60,
+        LcdChoiceSeconds = 60,
+        LcdCardSeconds = 10,
+        LcdHintSeconds = 10,
+        ScanMemorySeconds = 300,
+        ClockTrustMinutes = 1440,
+        DeviceFaultMaxPerHour = 120,
     };
 }

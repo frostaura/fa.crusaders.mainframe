@@ -448,8 +448,11 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<Post
 
         var ident = new AccessCode
         {
-            TenantId = club.TenantId, Code = AccessCodeService.NewCode(), Purpose = AccessCodePurpose.MemberIdent,
-            UserId = club.Pam, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
+            TenantId = club.TenantId,
+            Code = AccessCodeService.NewCode(),
+            Purpose = AccessCodePurpose.MemberIdent,
+            UserId = club.Pam,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10),
         };
         await club.WriteAsync(app, db => { db.AccessCodes.Add(ident); return Task.CompletedTask; });
 

@@ -774,9 +774,16 @@ public class BookingCapAndGroupTests
             host.Courts[0].Id, host.LeaguePlayerUser.Id, host.LeaguePlayerUser.Id, NextWeekAt(9), 1, default));
         db.BookingParticipants.Add(new BookingParticipant
         {
-            TenantId = host.Tenant.Id, BookingId = game.Booking.Id, Seat = 2, UserId = host.PlayerUser.Id,
-            Status = ParticipantStatus.Accepted, ShareMinutes = 0, ShareWeight = 1,
-            InvitedAt = DateTimeOffset.UtcNow, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            TenantId = host.Tenant.Id,
+            BookingId = game.Booking.Id,
+            Seat = 2,
+            UserId = host.PlayerUser.Id,
+            Status = ParticipantStatus.Accepted,
+            ShareMinutes = 0,
+            ShareWeight = 1,
+            InvitedAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
         });
         await db.SaveChangesAsync();
 

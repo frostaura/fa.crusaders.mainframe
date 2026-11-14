@@ -97,7 +97,10 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(Adjust(club, club.Organiser), new { amountMinutes = 5, reason = "Sorry", reasonCode = "goodwill" })).StatusCode);
         var onBehalf = await admin.PostAsJsonAsync("/api/v1/admin/bookings", new
         {
-            courtId = club.CourtId, userId = club.Organiser, startsAt = PlayersClub.Tomorrow(12), sliceCount = 2,
+            courtId = club.CourtId,
+            userId = club.Organiser,
+            startsAt = PlayersClub.Tomorrow(12),
+            sliceCount = 2,
         });
         Assert.True(onBehalf.IsSuccessStatusCode, await onBehalf.Content.ReadAsStringAsync());
 

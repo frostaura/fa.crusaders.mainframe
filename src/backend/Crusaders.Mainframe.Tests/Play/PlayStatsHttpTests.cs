@@ -64,7 +64,10 @@ public sealed class PlayStatsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var door = await club.GameAsync(f, start.AddDays(2), club.Bystander, [], checkIn: false);
         await club.WriteAsync(f, db => db.AuditLogs.Add(new AuditLog
         {
-            TenantId = club.TenantId, ActorUserId = club.Bystander, SubjectUserId = club.Bystander, Action = "gate.opened",
+            TenantId = club.TenantId,
+            ActorUserId = club.Bystander,
+            SubjectUserId = club.Bystander,
+            Action = "gate.opened",
             DetailsJson = $$"""{"booking_id":"{{door}}"}""",
         }));
 

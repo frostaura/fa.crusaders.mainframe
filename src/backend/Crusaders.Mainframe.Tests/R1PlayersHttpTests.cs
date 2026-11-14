@@ -168,7 +168,9 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         {
             var bulk = await JsonAsync(await admin.PostAsJsonAsync("/api/v1/admin/bookings/bulk-cancel", new
             {
-                idempotencyKey = $"r5-late-{id:N}", reason = "Leak", items = new[] { new { bookingId = id } },
+                idempotencyKey = $"r5-late-{id:N}",
+                reason = "Leak",
+                items = new[] { new { bookingId = id } },
             }));
             return Assert.Single(bulk.GetProperty("results").EnumerateArray());
         }, 12);
@@ -203,7 +205,9 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var bulkOne = await SplitGameAsync(10);
         var bulk = await JsonAsync(await admin.PostAsJsonAsync("/api/v1/admin/bookings/bulk-cancel", new
         {
-            idempotencyKey = "r1-bulk-split", reason = "Court resurfacing", items = new[] { new { bookingId = bulkOne } },
+            idempotencyKey = "r1-bulk-split",
+            reason = "Court resurfacing",
+            items = new[] { new { bookingId = bulkOne } },
         }));
         var row = Assert.Single(bulk.GetProperty("results").EnumerateArray());
         Assert.Equal(16, row.GetProperty("net_minutes").GetInt32());

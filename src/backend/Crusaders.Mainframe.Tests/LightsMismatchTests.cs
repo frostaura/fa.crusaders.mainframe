@@ -18,12 +18,21 @@ public sealed class LightsMismatchClassifyTests
 
     private static CourtLightState Confirmed(LightState said, DateTimeOffset at, LightState believed = LightState.Unknown, DateTimeOffset? onSince = null) => new()
     {
-        CourtId = Guid.NewGuid(), State = believed, OnSince = onSince, ConfirmedAt = at, ConfirmedState = said, LastEventAt = at,
+        CourtId = Guid.NewGuid(),
+        State = believed,
+        OnSince = onSince,
+        ConfirmedAt = at,
+        ConfirmedState = said,
+        LastEventAt = at,
     };
 
     private static Booking Current(DateTimeOffset? checkedIn) => new()
     {
-        CourtId = Guid.NewGuid(), StartsAt = Now.AddMinutes(-30), EndsAt = Now.AddMinutes(15), SliceMinutes = 15, SliceCount = 3,
+        CourtId = Guid.NewGuid(),
+        StartsAt = Now.AddMinutes(-30),
+        EndsAt = Now.AddMinutes(15),
+        SliceMinutes = 15,
+        SliceCount = 3,
         CheckedInAt = checkedIn,
     };
 

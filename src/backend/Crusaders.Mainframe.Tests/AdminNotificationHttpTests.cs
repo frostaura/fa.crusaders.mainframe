@@ -239,7 +239,10 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
 
         var covered = await admin.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
-            courtId = club.CourtId, userId = club.AdminUserId, startsAt = new DateTimeOffset(day.AddHours(8), TimeSpan.Zero), sliceCount = 1,
+            courtId = club.CourtId,
+            userId = club.AdminUserId,
+            startsAt = new DateTimeOffset(day.AddHours(8), TimeSpan.Zero),
+            sliceCount = 1,
             allowNegativeBalance = true,
         });
         // The admin holds nothing, so even one slice overdraws; the member-paid control is below.
@@ -257,8 +260,10 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         await FundAsync(app, club, club.MemberUserId, 100);
         var onBehalf = await admin.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
-            courtId = club.CourtId, userId = club.MemberUserId,
-            startsAt = new DateTimeOffset(day.AddHours(9), TimeSpan.Zero), sliceCount = 1,
+            courtId = club.CourtId,
+            userId = club.MemberUserId,
+            startsAt = new DateTimeOffset(day.AddHours(9), TimeSpan.Zero),
+            sliceCount = 1,
         });
         Assert.Equal(HttpStatusCode.OK, onBehalf.StatusCode);
         Assert.Single(await NoticesAsync(app, club.TenantId, AdminEventCatalogue.OverdraftAuthorised));
@@ -283,13 +288,20 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
 
         var first = await admin.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
-            courtId = club.CourtId, userId = club.MemberUserId, startsAt = at, sliceCount = 1,
+            courtId = club.CourtId,
+            userId = club.MemberUserId,
+            startsAt = at,
+            sliceCount = 1,
         });
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
 
         var clash = await admin.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
-            courtId = club.CourtId, userId = club.AdminUserId, startsAt = at, sliceCount = 1, allowNegativeBalance = true,
+            courtId = club.CourtId,
+            userId = club.AdminUserId,
+            startsAt = at,
+            sliceCount = 1,
+            allowNegativeBalance = true,
         });
         Assert.NotEqual(HttpStatusCode.OK, clash.StatusCode);
         Assert.Empty(await NoticesAsync(factory, club.TenantId, AdminEventCatalogue.OverdraftAuthorised));
@@ -304,8 +316,11 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         db.Users.Add(user);
         db.Memberships.Add(new Membership
         {
-            TenantId = club.TenantId, UserId = user.Id, FullName = "Colleague Admin",
-            MembershipNumber = $"{club.Slug}-c", Status = MembershipStatus.Active,
+            TenantId = club.TenantId,
+            UserId = user.Id,
+            FullName = "Colleague Admin",
+            MembershipNumber = $"{club.Slug}-c",
+            Status = MembershipStatus.Active,
         });
         await db.SaveChangesAsync();
         return email;
@@ -317,8 +332,12 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = userId, Type = LedgerEntryType.TopUp,
-            AmountMinutes = credits, ActorUserId = Guid.Empty, Reason = "fixture float",
+            TenantId = club.TenantId,
+            UserId = userId,
+            Type = LedgerEntryType.TopUp,
+            AmountMinutes = credits,
+            ActorUserId = Guid.Empty,
+            Reason = "fixture float",
         });
         await db.SaveChangesAsync();
     }
@@ -519,7 +538,8 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.UserPreferences.Add(new UserPreferences
             {
-                TenantId = club.TenantId, UserId = admin,
+                TenantId = club.TenantId,
+                UserId = admin,
                 AdminNotificationOptoutsJson = JsonSerializer.Serialize(new[] { AdminEventCatalogue.AdminRoleChanged, AdminEventCatalogue.DeviceOffline }),
             });
             await db.SaveChangesAsync();
@@ -614,8 +634,14 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         // The PUT carries the booking basics every save carries; the six ride along on it.
         Dictionary<string, object> Body() => new()
         {
-            ["sliceMinutes"] = 15, ["slicePriceCredits"] = 8, ["advanceBookingDays"] = 14, ["dayStartMinute"] = 360,
-            ["dayEndMinute"] = 1320, ["penaltyPct"] = 30m, ["graceWindowMinutes"] = 5, ["penaltyWindowMinutes"] = 15,
+            ["sliceMinutes"] = 15,
+            ["slicePriceCredits"] = 8,
+            ["advanceBookingDays"] = 14,
+            ["dayStartMinute"] = 360,
+            ["dayEndMinute"] = 1320,
+            ["penaltyPct"] = 30m,
+            ["graceWindowMinutes"] = 5,
+            ["penaltyWindowMinutes"] = 15,
         };
         var outOfRange = Body();
         outOfRange["fault_spike_count"] = AdminNotificationSettings.MaxFaultSpikeCount + 1;

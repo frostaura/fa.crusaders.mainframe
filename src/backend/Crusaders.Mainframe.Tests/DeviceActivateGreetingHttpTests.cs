@@ -96,8 +96,12 @@ public sealed class DeviceActivateGreetingHttpTests(PostgresFixture pg) : IClass
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = c.TenantId, UserId = c.Pam, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = -37,
-                ActorUserId = c.AdminId, Reason = "test: a debit since the seed",
+                TenantId = c.TenantId,
+                UserId = c.Pam,
+                Type = LedgerEntryType.AdminAdjustment,
+                AmountMinutes = -37,
+                ActorUserId = c.AdminId,
+                Reason = "test: a debit since the seed",
             });
             return Task.CompletedTask;
         });
@@ -123,7 +127,9 @@ public sealed class DeviceActivateGreetingHttpTests(PostgresFixture pg) : IClass
         var foreignQr = await SendAsync(device, a.Activate(await TestAccessCodes.MintIdentAsync(app.Services, b.TenantId, b.Slug, b.Pam)));
         var pin = await SendAsync(device, a.Device("/api/v1/device/activate", new JsonObject
         {
-            ["mac"] = a.BoxMac, ["method"] = "pin", ["token"] = "1234",
+            ["mac"] = a.BoxMac,
+            ["method"] = "pin",
+            ["token"] = "1234",
         }));
 
         foreach (var (status, body) in new[] { unknown, foreignCode, foreignQr, pin })
@@ -146,7 +152,9 @@ public sealed class DeviceActivateGreetingHttpTests(PostgresFixture pg) : IClass
 
         var (status, body) = await SendAsync(app.CreateClient(), c.Device("/api/v1/device/activate", new JsonObject
         {
-            ["mac"] = c.DoorMac, ["method"] = "qr", ["token"] = c.Code(c.Pam),
+            ["mac"] = c.DoorMac,
+            ["method"] = "qr",
+            ["token"] = c.Code(c.Pam),
         }));
 
         Assert.Equal(HttpStatusCode.OK, status);

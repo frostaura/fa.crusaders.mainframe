@@ -69,11 +69,22 @@ public sealed class R16LightsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var minutes = (int)(slot.End - slot.Start).TotalMinutes;
         var booking = new Booking
         {
-            TenantId = r.Club.TenantId, CourtId = r.Club.CourtId, UserId = slot.Who, BookedByUserId = slot.Who,
-            PaidByUserId = slot.Who, ActorUserId = slot.Who, StartsAt = s, EndsAt = slot.End.Storable(),
-            SliceMinutes = minutes, SliceCount = 1, AmountChargedMinutes = minutes, Status = BookingStatus.Booked,
-            ChargedAt = s.AddDays(-1), CheckedInAt = slot.CheckedIn?.Storable(),
-            LightsOffCuedAt = slot.CuedOff?.Storable(), NoShowReversedAt = slot.ReversedAt?.Storable(),
+            TenantId = r.Club.TenantId,
+            CourtId = r.Club.CourtId,
+            UserId = slot.Who,
+            BookedByUserId = slot.Who,
+            PaidByUserId = slot.Who,
+            ActorUserId = slot.Who,
+            StartsAt = s,
+            EndsAt = slot.End.Storable(),
+            SliceMinutes = minutes,
+            SliceCount = 1,
+            AmountChargedMinutes = minutes,
+            Status = BookingStatus.Booked,
+            ChargedAt = s.AddDays(-1),
+            CheckedInAt = slot.CheckedIn?.Storable(),
+            LightsOffCuedAt = slot.CuedOff?.Storable(),
+            NoShowReversedAt = slot.ReversedAt?.Storable(),
         };
         await r.Club.WriteAsync(r.App, db => db.Bookings.Add(booking));
         return booking.Id;
@@ -144,7 +155,9 @@ public sealed class R16LightsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var sweptOff = now.AddMinutes(-2);
         var a = await SeedAsync(r, new Slot(now.AddMinutes(-10), now.AddMinutes(20), r.Club.Organiser)
         {
-            CheckedIn = scan, CuedOff = sweptOff.AddSeconds(5), ReversedAt = now.AddSeconds(-1),
+            CheckedIn = scan,
+            CuedOff = sweptOff.AddSeconds(5),
+            ReversedAt = now.AddSeconds(-1),
         });
 
         var before = DateTimeOffset.UtcNow.Storable();
@@ -203,7 +216,9 @@ public sealed class R16LightsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var scan = now.AddMinutes(-5);
         var a = await SeedAsync(r, new Slot(now.AddMinutes(-10), now.AddMinutes(20), r.Club.Organiser)
         {
-            CheckedIn = scan, CuedOff = now.AddMinutes(-6), ReversedAt = now.AddSeconds(-1),
+            CheckedIn = scan,
+            CuedOff = now.AddMinutes(-6),
+            ReversedAt = now.AddSeconds(-1),
         });
 
         await EmitReversalAsync(r, a);
@@ -229,7 +244,9 @@ public sealed class R16LightsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var end = now.AddMinutes(-2);
         var a = await SeedAsync(r, new Slot(end.AddMinutes(-15), end, r.Club.Organiser)
         {
-            CheckedIn = end.AddMinutes(-5), CuedOff = end.AddMinutes(-8), ReversedAt = now.AddSeconds(-5),
+            CheckedIn = end.AddMinutes(-5),
+            CuedOff = end.AddMinutes(-8),
+            ReversedAt = now.AddSeconds(-5),
         });
         await EmitReversalAsync(r, a);
         var on = Assert.Single(Of(r, "booking.lights_on", a));
@@ -256,7 +273,9 @@ public sealed class R16LightsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var now = DateTimeOffset.UtcNow;
         var a = await SeedAsync(r, new Slot(now.AddMinutes(-10), now.AddMinutes(20), r.Club.Organiser)
         {
-            CheckedIn = now.AddMinutes(-9), CuedOff = now.AddMinutes(-2), ReversedAt = now.AddSeconds(-1),
+            CheckedIn = now.AddMinutes(-9),
+            CuedOff = now.AddMinutes(-2),
+            ReversedAt = now.AddSeconds(-1),
         });
         await EmitReversalAsync(r, a);
         var on = Assert.Single(Of(r, "booking.lights_on", a));

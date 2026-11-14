@@ -36,8 +36,13 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         {
             db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = $"box-{mac[^6..]}", Name = "Box two", Kind = DeviceKind.CourtBox,
-                MacAddress = mac, CourtNumbers = [.. courts], AutoRegistered = false,
+                TenantId = club.TenantId,
+                DeviceCode = $"box-{mac[^6..]}",
+                Name = "Box two",
+                Kind = DeviceKind.CourtBox,
+                MacAddress = mac,
+                CourtNumbers = [.. courts],
+                AutoRegistered = false,
             });
             return Task.CompletedTask;
         });

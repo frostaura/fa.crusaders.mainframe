@@ -214,8 +214,11 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
         {
             db.WebAuthnCredentials.Add(new WebAuthnCredential
             {
-                TenantId = club.TenantId, UserId = user, CredentialId = Guid.NewGuid().ToByteArray(),
-                PublicKey = [1, 2, 3], UserHandle = user.ToByteArray(),
+                TenantId = club.TenantId,
+                UserId = user,
+                CredentialId = Guid.NewGuid().ToByteArray(),
+                PublicKey = [1, 2, 3],
+                UserHandle = user.ToByteArray(),
             });
             return Task.CompletedTask;
         });
@@ -437,8 +440,11 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
         {
             db.AuthTokens.Add(new AuthToken
             {
-                TenantId = club.TenantId, UserId = club.Pam, Kind = TokenKind.PasswordReset,
-                TokenHash = Crusaders.Mainframe.Api.Security.TokenHashing.Hash(link), ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                TenantId = club.TenantId,
+                UserId = club.Pam,
+                Kind = TokenKind.PasswordReset,
+                TokenHash = Crusaders.Mainframe.Api.Security.TokenHashing.Hash(link),
+                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
             });
             return Task.CompletedTask;
         });

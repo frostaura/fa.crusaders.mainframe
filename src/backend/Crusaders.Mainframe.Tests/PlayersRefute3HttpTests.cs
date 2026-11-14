@@ -43,8 +43,13 @@ public sealed class PlayersRefute3HttpTests(PostgresFixture pg) : IClassFixture<
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
-                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountMinutes = posting.AmountMinutes,
-                    ActorUserId = posting.ActorUserId, RelatedBookingId = bookingId, ExternalReference = posting.ExternalReference,
+                    TenantId = club.TenantId,
+                    UserId = posting.UserId,
+                    Type = posting.Type,
+                    AmountMinutes = posting.AmountMinutes,
+                    ActorUserId = posting.ActorUserId,
+                    RelatedBookingId = bookingId,
+                    ExternalReference = posting.ExternalReference,
                 });
             }
         });
@@ -201,8 +206,12 @@ public sealed class PlayersRefute3HttpTests(PostgresFixture pg) : IClassFixture<
             await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock({0})", PayerLock.KeyFor(club.TenantId, club.Organiser));
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = club.Organiser, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = -16,
-                ActorUserId = club.Admin, Reason = "spent elsewhere, in the race",
+                TenantId = club.TenantId,
+                UserId = club.Organiser,
+                Type = LedgerEntryType.AdminAdjustment,
+                AmountMinutes = -16,
+                ActorUserId = club.Admin,
+                Reason = "spent elsewhere, in the race",
             });
             await db.SaveChangesAsync();
 

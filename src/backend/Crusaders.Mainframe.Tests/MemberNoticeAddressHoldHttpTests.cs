@@ -66,8 +66,11 @@ public sealed class MemberNoticeAddressHoldHttpTests(PostgresFixture pg) : IClas
         {
             db.AuthTokens.Add(new AuthToken
             {
-                TenantId = club.TenantId, UserId = club.Sam, Kind = TokenKind.EmailVerification,
-                TokenHash = TokenHashing.Hash(token), ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+                TenantId = club.TenantId,
+                UserId = club.Sam,
+                Kind = TokenKind.EmailVerification,
+                TokenHash = TokenHashing.Hash(token),
+                ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
             });
             return Task.CompletedTask;
         });

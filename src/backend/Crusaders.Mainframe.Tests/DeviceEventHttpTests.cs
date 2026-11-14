@@ -191,8 +191,12 @@ public abstract partial class DeviceEventHttpTests
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.Users.Add(new User
             {
-                Id = adminId, TenantId = box.TenantId, Email = $"adm-{box.Slug}@test.local", PasswordHash = "x",
-                EmailVerified = true, IsAdmin = true,
+                Id = adminId,
+                TenantId = box.TenantId,
+                Email = $"adm-{box.Slug}@test.local",
+                PasswordHash = "x",
+                EmailVerified = true,
+                IsAdmin = true,
             });
             await db.SaveChangesAsync();
         }
@@ -236,15 +240,15 @@ public abstract partial class DeviceEventHttpTests
     /// </summary>
     private static object Activation(
         long seq, string subject = "tok-alice", int court = 0, long uptimeMs = 300_000, long durationMs = 2_700_000) => new
-    {
-        seq,
-        uptime_ms = uptimeMs,
-        kind = "activation",
-        court,
-        method = "qr",
-        subject,
-        duration_ms = durationMs,
-    };
+        {
+            seq,
+            uptime_ms = uptimeMs,
+            kind = "activation",
+            court,
+            method = "qr",
+            subject,
+            duration_ms = durationMs,
+        };
 
     /// <summary>
     /// The event a box queues when a relay opened again: a relay index and how long it was
@@ -490,8 +494,13 @@ public abstract partial class DeviceEventHttpTests
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.BookingCharge,
-                AmountMinutes = -booking.AmountChargedMinutes, ActorUserId = userId, RelatedBookingId = booking.Id, Reason = "seed charge",
+                TenantId = box.TenantId,
+                UserId = userId,
+                Type = LedgerEntryType.BookingCharge,
+                AmountMinutes = -booking.AmountChargedMinutes,
+                ActorUserId = userId,
+                RelatedBookingId = booking.Id,
+                Reason = "seed charge",
             });
         }
         if (status == BookingStatus.NoShow)
@@ -499,13 +508,23 @@ public abstract partial class DeviceEventHttpTests
             // As the sweep would have left it: refunded in full, penalised 30%.
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.CancellationRefund,
-                AmountMinutes = booking.AmountChargedMinutes, ActorUserId = Guid.Empty, RelatedBookingId = booking.Id, Reason = "No-show — booking refunded",
+                TenantId = box.TenantId,
+                UserId = userId,
+                Type = LedgerEntryType.CancellationRefund,
+                AmountMinutes = booking.AmountChargedMinutes,
+                ActorUserId = Guid.Empty,
+                RelatedBookingId = booking.Id,
+                Reason = "No-show — booking refunded",
             });
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.NoShowPenalty,
-                AmountMinutes = -(int)Math.Floor(booking.AmountChargedMinutes * 0.3m), ActorUserId = Guid.Empty, RelatedBookingId = booking.Id, Reason = "No-show penalty",
+                TenantId = box.TenantId,
+                UserId = userId,
+                Type = LedgerEntryType.NoShowPenalty,
+                AmountMinutes = -(int)Math.Floor(booking.AmountChargedMinutes * 0.3m),
+                ActorUserId = Guid.Empty,
+                RelatedBookingId = booking.Id,
+                Reason = "No-show penalty",
             });
         }
         await db.SaveChangesAsync();
@@ -524,12 +543,20 @@ public abstract partial class DeviceEventHttpTests
         db.Users.Add(other);
         db.Memberships.Add(new Membership
         {
-            TenantId = box.TenantId, UserId = other.Id, FullName = "Second Buyer",
-            MembershipNumber = $"o-{Guid.NewGuid():N}"[..20], Status = MembershipStatus.Active,
+            TenantId = box.TenantId,
+            UserId = other.Id,
+            FullName = "Second Buyer",
+            MembershipNumber = $"o-{Guid.NewGuid():N}"[..20],
+            Status = MembershipStatus.Active,
         });
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = box.TenantId, UserId = other.Id, Type = LedgerEntryType.TopUp, AmountMinutes = credits, ActorUserId = other.Id, Reason = "seed",
+            TenantId = box.TenantId,
+            UserId = other.Id,
+            Type = LedgerEntryType.TopUp,
+            AmountMinutes = credits,
+            ActorUserId = other.Id,
+            Reason = "seed",
         });
         await db.SaveChangesAsync();
         return other.Id;

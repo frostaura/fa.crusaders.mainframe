@@ -63,8 +63,12 @@ public sealed class DeviceErrorRetentionTests : IClassFixture<PostgresFixture>
             factory, club, DeviceErrorCodes.LcdResync,
             new ErrorRow
             {
-                DeviceId = box, FirstSeenAt = now.AddDays(-40), LastSeenAt = now.AddDays(-40),
-                ResolvedAt = now.AddDays(-30), ResolvedByUserId = club.AdminUserId, ResolutionNote = "reseated it",
+                DeviceId = box,
+                FirstSeenAt = now.AddDays(-40),
+                LastSeenAt = now.AddDays(-40),
+                ResolvedAt = now.AddDays(-30),
+                ResolvedByUserId = club.AdminUserId,
+                ResolutionNote = "reseated it",
             });
         var forgotten = await MonitoringFixture.AddErrorAsync(
             factory, club, DeviceErrorCodes.MegaLinkLost,
@@ -135,8 +139,11 @@ public sealed class DeviceErrorRetentionTests : IClassFixture<PostgresFixture>
             factory, club, DeviceErrorCodes.LcdResync,
             new ErrorRow
             {
-                DeviceId = box, FirstSeenAt = now.AddDays(-6), LastSeenAt = now.AddDays(-6),
-                ResolvedAt = now.AddDays(-6), ResolvedByUserId = club.AdminUserId,
+                DeviceId = box,
+                FirstSeenAt = now.AddDays(-6),
+                LastSeenAt = now.AddDays(-6),
+                ResolvedAt = now.AddDays(-6),
+                ResolvedByUserId = club.AdminUserId,
             });
 
         await TickAsync(factory);

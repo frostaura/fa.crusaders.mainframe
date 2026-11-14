@@ -40,14 +40,19 @@ public class AdminNotificationTests
         db.Users.Add(user);
         db.Memberships.Add(new Membership
         {
-            TenantId = host.Tenant.Id, UserId = user.Id, FullName = handle,
-            MembershipNumber = $"{handle}-{Guid.NewGuid():N}"[..20], Status = MembershipStatus.Active,
+            TenantId = host.Tenant.Id,
+            UserId = user.Id,
+            FullName = handle,
+            MembershipNumber = $"{handle}-{Guid.NewGuid():N}"[..20],
+            Status = MembershipStatus.Active,
         });
         if (optouts.Length > 0)
         {
             db.UserPreferences.Add(new UserPreferences
             {
-                TenantId = host.Tenant.Id, UserId = user.Id, AdminNotificationOptoutsJson = JsonSerializer.Serialize(optouts),
+                TenantId = host.Tenant.Id,
+                UserId = user.Id,
+                AdminNotificationOptoutsJson = JsonSerializer.Serialize(optouts),
             });
         }
         await db.SaveChangesAsync();
@@ -317,7 +322,8 @@ public class AdminNotificationTests
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.UserPreferences.Add(new UserPreferences
             {
-                TenantId = host.Tenant.Id, UserId = host.AdminUser.Id,
+                TenantId = host.Tenant.Id,
+                UserId = host.AdminUser.Id,
                 AdminNotificationOptoutsJson = $"[\"{AdminEventCatalogue.MemberRegistered}\"]",
             });
             await db.SaveChangesAsync();
@@ -462,8 +468,12 @@ public class AdminNotificationTests
         db.Users.Add(user);
         db.Memberships.Add(new Membership
         {
-            TenantId = host.Tenant.Id, UserId = user.Id, FullName = name, MembershipNumber = $"P-{Guid.NewGuid():N}"[..12],
-            Status = MembershipStatus.PendingApproval, CreatedAt = createdAt,
+            TenantId = host.Tenant.Id,
+            UserId = user.Id,
+            FullName = name,
+            MembershipNumber = $"P-{Guid.NewGuid():N}"[..12],
+            Status = MembershipStatus.PendingApproval,
+            CreatedAt = createdAt,
         });
         await db.SaveChangesAsync();
     }
@@ -507,9 +517,16 @@ public class AdminNotificationTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         db.Bookings.Add(new Booking
         {
-            TenantId = host.Tenant.Id, CourtId = host.Courts[0].Id, UserId = host.PlayerUser.Id,
-            StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30), SliceMinutes = 30, SliceCount = 1,
-            AmountChargedMinutes = 30, Status = status, CheckedInAt = checkedIn ? startsAt : null,
+            TenantId = host.Tenant.Id,
+            CourtId = host.Courts[0].Id,
+            UserId = host.PlayerUser.Id,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(30),
+            SliceMinutes = 30,
+            SliceCount = 1,
+            AmountChargedMinutes = 30,
+            Status = status,
+            CheckedInAt = checkedIn ? startsAt : null,
         });
         await db.SaveChangesAsync();
     }
@@ -580,9 +597,14 @@ public class AdminNotificationTests
         {
             db.DeviceErrors.Add(new DeviceError
             {
-                TenantId = host.Tenant.Id, Code = $"E{i}", Fingerprint = $"fp-{Guid.NewGuid():N}",
-                ClaimedDeviceCode = $"box-{i % 2}", Severity = severity, Source = DeviceErrorSource.Device,
-                FirstSeenAt = firstSeen ?? lastSeen, LastSeenAt = lastSeen,
+                TenantId = host.Tenant.Id,
+                Code = $"E{i}",
+                Fingerprint = $"fp-{Guid.NewGuid():N}",
+                ClaimedDeviceCode = $"box-{i % 2}",
+                Severity = severity,
+                Source = DeviceErrorSource.Device,
+                FirstSeenAt = firstSeen ?? lastSeen,
+                LastSeenAt = lastSeen,
             });
         }
         await db.SaveChangesAsync();
@@ -647,9 +669,14 @@ public class AdminNotificationTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var gate = new Device
         {
-            TenantId = host.Tenant.Id, DeviceCode = $"gate-{Guid.NewGuid():N}"[..12], Name = "Front door",
-            MacAddress = Guid.NewGuid().ToString("N")[..12], Kind = DeviceKind.Gate, GateKey = "front-door",
-            AutoRegistered = !acknowledged, LastSeenAt = T0,
+            TenantId = host.Tenant.Id,
+            DeviceCode = $"gate-{Guid.NewGuid():N}"[..12],
+            Name = "Front door",
+            MacAddress = Guid.NewGuid().ToString("N")[..12],
+            Kind = DeviceKind.Gate,
+            GateKey = "front-door",
+            AutoRegistered = !acknowledged,
+            LastSeenAt = T0,
         };
         db.Devices.Add(gate);
         await db.SaveChangesAsync();
@@ -664,8 +691,10 @@ public class AdminNotificationTests
         {
             db.AuditLogs.Add(new AuditLog
             {
-                TenantId = host.Tenant.Id, Action = $"{DoorTrail.DeniedPrefix}no_booking",
-                DetailsJson = JsonSerializer.Serialize(new { device_id = gate.Id }), CreatedAt = at.AddSeconds(i),
+                TenantId = host.Tenant.Id,
+                Action = $"{DoorTrail.DeniedPrefix}no_booking",
+                DetailsJson = JsonSerializer.Serialize(new { device_id = gate.Id }),
+                CreatedAt = at.AddSeconds(i),
             });
         }
         await db.SaveChangesAsync();
@@ -950,8 +979,13 @@ public class AdminNotificationTests
 
         var pending = new PendingTopup
         {
-            Id = Guid.NewGuid(), UserId = Guid.NewGuid(), AmountZar = 495m, IdempotencyKey = "idem-1",
-            ExternalReference = "pf-77", PackageName = "5 hours", Minutes = 300,
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            AmountZar = 495m,
+            IdempotencyKey = "idem-1",
+            ExternalReference = "pf-77",
+            PackageName = "5 hours",
+            Minutes = 300,
         };
         var notice = AdminNotices.TopUpFailed("amount_mismatch", pending.Id.ToString("N"), "Naledi Khoza", pending);
         Assert.Equal("topup.failed", notice.Kind);
@@ -1045,7 +1079,10 @@ public class AdminNotificationTests
 
             var row = new AdminNotification
             {
-                Kind = kind.Kind, DedupeKey = "k", Headline = "h", Link = "/admin",
+                Kind = kind.Kind,
+                DedupeKey = "k",
+                Headline = "h",
+                Link = "/admin",
                 PayloadJson = JsonSerializer.Serialize(samples[kind.Kind], samples[kind.Kind].GetType(), AdminEventCatalogue.Json),
             };
             foreach (var toSubject in new[] { false, true })

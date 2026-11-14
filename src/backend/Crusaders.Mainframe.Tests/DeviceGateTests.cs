@@ -1705,12 +1705,12 @@ public class DeviceGateTests
     /// </summary>
     [Theory]
     //        roster,  cue,  early        what a hand-edited column looks like
-    [InlineData(120,    10,     30)]   // the defaults
-    [InlineData(-600,   10,     30)]   // the executed probe: a negative window emptied the door
-    [InlineData(120,    10,   -600)]
+    [InlineData(120, 10, 30)]   // the defaults
+    [InlineData(-600, 10, 30)]   // the executed probe: a negative window emptied the door
+    [InlineData(120, 10, -600)]
     [InlineData(100000, 10, 100000)]
-    [InlineData(0,      10,    241)]   // one past the door's own ceiling
-    [InlineData(1,      10,      0)]   // one under the roster's floor
+    [InlineData(0, 10, 241)]   // one past the door's own ceiling
+    [InlineData(1, 10, 0)]   // one under the roster's floor
     public async Task Every_window_the_gate_roster_reads_is_clamped_on_read(int roster, int cue, int early)
     {
         var f = await CreateAsync();

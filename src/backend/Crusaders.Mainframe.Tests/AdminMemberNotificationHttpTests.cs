@@ -83,14 +83,20 @@ public sealed class AdminMemberNotificationHttpTests : IClassFixture<PostgresFix
 
         var applicantMembership = new Membership
         {
-            TenantId = tenant.Id, UserId = applicant.Id, FullName = "Ada Lovelace",
-            MembershipNumber = $"M-{slug}"[..12], Status = MembershipStatus.PendingApproval,
+            TenantId = tenant.Id,
+            UserId = applicant.Id,
+            FullName = "Ada Lovelace",
+            MembershipNumber = $"M-{slug}"[..12],
+            Status = MembershipStatus.PendingApproval,
         };
         db.Memberships.AddRange(
             new Membership
             {
-                TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin",
-                MembershipNumber = $"A-{slug}"[..12], Status = MembershipStatus.Active,
+                TenantId = tenant.Id,
+                UserId = admin.Id,
+                FullName = "Desk Admin",
+                MembershipNumber = $"A-{slug}"[..12],
+                Status = MembershipStatus.Active,
             },
             applicantMembership);
 

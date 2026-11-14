@@ -71,25 +71,41 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
 
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = tenant.Id, UserId = victim.Id, Type = LedgerEntryType.TopUp,
-            AmountMinutes = 500, ActorUserId = victim.Id, Reason = "seed",
+            TenantId = tenant.Id,
+            UserId = victim.Id,
+            Type = LedgerEntryType.TopUp,
+            AmountMinutes = 500,
+            ActorUserId = victim.Id,
+            Reason = "seed",
         });
 
         // Charged at booking, like every row CreateAsync writes.
         var startsAt = DateTimeOffset.UtcNow.AddHours(4);
         var booking = new Booking
         {
-            TenantId = tenant.Id, CourtId = court.Id, UserId = victim.Id,
-            BookedByUserId = victim.Id, PaidByUserId = victim.Id,
-            StartsAt = startsAt, EndsAt = startsAt.AddMinutes(60),
-            SliceMinutes = 15, SliceCount = 4, AmountChargedMinutes = 200,
-            Status = BookingStatus.Booked, ChargedAt = DateTimeOffset.UtcNow,
+            TenantId = tenant.Id,
+            CourtId = court.Id,
+            UserId = victim.Id,
+            BookedByUserId = victim.Id,
+            PaidByUserId = victim.Id,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(60),
+            SliceMinutes = 15,
+            SliceCount = 4,
+            AmountChargedMinutes = 200,
+            Status = BookingStatus.Booked,
+            ChargedAt = DateTimeOffset.UtcNow,
         };
         db.Bookings.Add(booking);
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = tenant.Id, UserId = victim.Id, Type = LedgerEntryType.BookingCharge,
-            AmountMinutes = -200, ActorUserId = victim.Id, RelatedBookingId = booking.Id, Reason = "seed charge",
+            TenantId = tenant.Id,
+            UserId = victim.Id,
+            Type = LedgerEntryType.BookingCharge,
+            AmountMinutes = -200,
+            ActorUserId = victim.Id,
+            RelatedBookingId = booking.Id,
+            Reason = "seed charge",
         });
 
         await db.SaveChangesAsync();

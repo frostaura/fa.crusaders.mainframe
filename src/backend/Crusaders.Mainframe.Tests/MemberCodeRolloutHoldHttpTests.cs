@@ -28,8 +28,13 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
     {
         var body = JsonSerializer.SerializeToNode(new
         {
-            sliceMinutes = 15, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
-            penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15,
+            sliceMinutes = 15,
+            advanceBookingDays = 14,
+            dayStartMinute = 0,
+            dayEndMinute = 1440,
+            penaltyPct = 30,
+            graceWindowMinutes = 5,
+            penaltyWindowMinutes = 15,
         })!.AsObject();
         foreach (var p in JsonSerializer.SerializeToNode(extra)!.AsObject().ToList()) body[p.Key] = p.Value?.DeepClone();
         return (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode;
@@ -140,8 +145,13 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
         {
             db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = $"box-{spare[^6..]}", Name = "Spare", Kind = DeviceKind.CourtBox,
-                MacAddress = spare, CourtNumbers = [1], AutoRegistered = true,
+                TenantId = club.TenantId,
+                DeviceCode = $"box-{spare[^6..]}",
+                Name = "Spare",
+                Kind = DeviceKind.CourtBox,
+                MacAddress = spare,
+                CourtNumbers = [1],
+                AutoRegistered = true,
             });
             return Task.CompletedTask;
         });
@@ -220,8 +230,14 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
             var stranger = Guid.NewGuid().ToString("N")[..12];
             db.Devices.Add(new Device
             {
-                TenantId = other.TenantId, DeviceCode = $"box-{stranger[^6..]}", Name = "Stranger", Kind = DeviceKind.CourtBox,
-                MacAddress = stranger, CourtNumbers = [1], AutoRegistered = true, Capabilities = ["codes:m1"],
+                TenantId = other.TenantId,
+                DeviceCode = $"box-{stranger[^6..]}",
+                Name = "Stranger",
+                Kind = DeviceKind.CourtBox,
+                MacAddress = stranger,
+                CourtNumbers = [1],
+                AutoRegistered = true,
+                Capabilities = ["codes:m1"],
             });
         });
         var strangerMac = await other.ReadAsync(app, db => db.Devices.IgnoreQueryFilters()

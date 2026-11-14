@@ -63,7 +63,10 @@ public sealed class AdminExportHttpTests(PostgresFixture pg) : IClassFixture<Pos
             db.Users.Add(user);
             db.Memberships.Add(new Membership
             {
-                TenantId = club.TenantId, UserId = user.Id, FullName = "=HYPERLINK(\"x\")", MembershipNumber = "Z-9",
+                TenantId = club.TenantId,
+                UserId = user.Id,
+                FullName = "=HYPERLINK(\"x\")",
+                MembershipNumber = "Z-9",
                 Status = MembershipStatus.Suspended,
             });
         });

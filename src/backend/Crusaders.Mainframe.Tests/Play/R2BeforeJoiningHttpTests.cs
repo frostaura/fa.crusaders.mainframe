@@ -26,7 +26,11 @@ public sealed class R2BeforeJoiningHttpTests(PostgresFixture pg) : IClassFixture
         // Joined five weeks ago: the approval is the audit trail's.
         await club.WriteAsync(f, db => db.AuditLogs.Add(new AuditLog
         {
-            TenantId = club.TenantId, ActorUserId = club.Admin, SubjectUserId = club.Sam, Action = "member.approved", CreatedAt = now.AddDays(-35),
+            TenantId = club.TenantId,
+            ActorUserId = club.Admin,
+            SubjectUserId = club.Sam,
+            Action = "member.approved",
+            CreatedAt = now.AddDays(-35),
         }));
 
         var play = await (await club.Client(f, club.Sam).GetAsync("/api/v1/me/play")).Content.ReadFromJsonAsync<JsonElement>();

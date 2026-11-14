@@ -100,8 +100,10 @@ internal sealed class MemberCodeClub
         var slug = $"{(prefix.Length > 10 ? prefix[..10] : prefix)}-{Guid.NewGuid():N}"[..24];
         var tenant = new Tenant
         {
-            Slug = slug, DisplayName = $"Club {slug}",
-            DeviceApiKey = DeviceApiKey.Generate(), DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
+            Slug = slug,
+            DisplayName = $"Club {slug}",
+            DeviceApiKey = DeviceApiKey.Generate(),
+            DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
         };
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = settings });
@@ -130,30 +132,54 @@ internal sealed class MemberCodeClub
         var doorMac = Guid.NewGuid().ToString("N")[..12];
         db.Devices.Add(new Device
         {
-            TenantId = tenant.Id, DeviceCode = $"box-{boxMac[^6..]}", Name = "Box", Kind = DeviceKind.CourtBox,
-            MacAddress = boxMac, CourtNumbers = [1, 2, 3, 4], AutoRegistered = false,
+            TenantId = tenant.Id,
+            DeviceCode = $"box-{boxMac[^6..]}",
+            Name = "Box",
+            Kind = DeviceKind.CourtBox,
+            MacAddress = boxMac,
+            CourtNumbers = [1, 2, 3, 4],
+            AutoRegistered = false,
         });
         db.Devices.Add(new Device
         {
-            TenantId = tenant.Id, DeviceCode = $"gate-{doorMac[^6..]}", Name = "Front door", Kind = DeviceKind.Gate,
-            Hardware = DeviceHardware.Esp32, MacAddress = doorMac, GateKey = "front-door",
+            TenantId = tenant.Id,
+            DeviceCode = $"gate-{doorMac[^6..]}",
+            Name = "Front door",
+            Kind = DeviceKind.Gate,
+            Hardware = DeviceHardware.Esp32,
+            MacAddress = doorMac,
+            GateKey = "front-door",
         });
 
         foreach (var p in new[] { olga, pam, sid })
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = p, Type = LedgerEntryType.TopUp, AmountMinutes = 200,
-                ActorUserId = p, Reason = "seed",
+                TenantId = tenant.Id,
+                UserId = p,
+                Type = LedgerEntryType.TopUp,
+                AmountMinutes = 200,
+                ActorUserId = p,
+                Reason = "seed",
             });
         }
 
         await db.SaveChangesAsync();
         return new MemberCodeClub
         {
-            TenantId = tenant.Id, Slug = slug, DeviceKey = tenant.DeviceApiKey!, AdminId = admin,
-            Olga = olga, Pam = pam, Sid = sid, OlgaMembership = olgaM, SidMembership = sidM,
-            Courts = [.. courts.Select(c => c.Id)], BoxMac = boxMac, DoorMac = doorMac, Refs = refMap,
+            TenantId = tenant.Id,
+            Slug = slug,
+            DeviceKey = tenant.DeviceApiKey!,
+            AdminId = admin,
+            Olga = olga,
+            Pam = pam,
+            Sid = sid,
+            OlgaMembership = olgaM,
+            SidMembership = sidM,
+            Courts = [.. courts.Select(c => c.Id)],
+            BoxMac = boxMac,
+            DoorMac = doorMac,
+            Refs = refMap,
             Zone = JsonDocument.Parse(settings).RootElement.TryGetProperty("timezone", out var tz) ? tz.GetString()! : "UTC",
         };
     }
@@ -173,13 +199,20 @@ internal sealed class MemberCodeClub
     {
         var user = new User
         {
-            TenantId = tenantId, Email = $"{handle}-{slug}@test.local", PasswordHash = new Pbkdf2PasswordHasher().Hash("OldPass!123"),
-            EmailVerified = true, IsAdmin = admin,
+            TenantId = tenantId,
+            Email = $"{handle}-{slug}@test.local",
+            PasswordHash = new Pbkdf2PasswordHasher().Hash("OldPass!123"),
+            EmailVerified = true,
+            IsAdmin = admin,
         };
         db.Users.Add(user);
         var m = new Membership
         {
-            TenantId = tenantId, UserId = user.Id, FullName = name, MembershipNumber = $"{handle}-{slug}", Status = MembershipStatus.Active,
+            TenantId = tenantId,
+            UserId = user.Id,
+            FullName = name,
+            MembershipNumber = $"{handle}-{slug}",
+            Status = MembershipStatus.Active,
         };
         db.Memberships.Add(m);
         return (user.Id, m.Id);
@@ -240,14 +273,24 @@ internal sealed class MemberCodeClub
     public HttpRequestMessage WalkUp(string token, int court, string nonce, int minutes = 15) =>
         Device("/api/v1/device/walkup", new JsonObject
         {
-            ["mac"] = BoxMac, ["minutes"] = minutes, ["method"] = "qr", ["token"] = token, ["court"] = court, ["nonce"] = nonce,
+            ["mac"] = BoxMac,
+            ["minutes"] = minutes,
+            ["method"] = "qr",
+            ["token"] = token,
+            ["court"] = court,
+            ["nonce"] = nonce,
         });
 
     public HttpRequestMessage PayFor(string token, int court, string nonce, bool confirm, string? label = null, string? mac = null)
     {
         var body = new JsonObject
         {
-            ["mac"] = mac ?? BoxMac, ["method"] = "qr", ["token"] = token, ["court"] = court, ["nonce"] = nonce, ["confirm"] = confirm,
+            ["mac"] = mac ?? BoxMac,
+            ["method"] = "qr",
+            ["token"] = token,
+            ["court"] = court,
+            ["nonce"] = nonce,
+            ["confirm"] = confirm,
         };
         if (label is not null) body["amount_label"] = label;
         return Device("/api/v1/device/pay-for", body);
@@ -258,11 +301,18 @@ internal sealed class MemberCodeClub
     {
         return Device("/api/v1/device/events", new JsonObject
         {
-            ["mac"] = mac, ["boot_id"] = bootId, ["uptime_ms"] = 100_000_000,
+            ["mac"] = mac,
+            ["boot_id"] = bootId,
+            ["uptime_ms"] = 100_000_000,
             ["events"] = new JsonArray(new JsonObject
             {
-                ["seq"] = seq, ["uptime_ms"] = 100_000_000 - agoMs, ["kind"] = kind, ["court"] = court, ["method"] = "qr",
-                ["subject"] = subject, ["duration_ms"] = 600_000,
+                ["seq"] = seq,
+                ["uptime_ms"] = 100_000_000 - agoMs,
+                ["kind"] = kind,
+                ["court"] = court,
+                ["method"] = "qr",
+                ["subject"] = subject,
+                ["duration_ms"] = 600_000,
             }),
         });
     }
@@ -308,16 +358,31 @@ internal sealed class MemberCodeClub
         var startsAt = DateTimeOffset.UtcNow.AddMinutes(startsInMinutes).Storable();
         var booking = new Booking
         {
-            TenantId = TenantId, CourtId = Courts[courtIndex], UserId = user, BookedByUserId = user, PaidByUserId = user,
-            ActorUserId = user, StartsAt = startsAt, EndsAt = startsAt.AddMinutes(minutes), SliceMinutes = 15,
-            SliceCount = minutes / 15, AmountChargedMinutes = 15 * (minutes / 15), Status = BookingStatus.Booked,
-            ChargedAt = DateTimeOffset.UtcNow, CheckedInAt = checkedIn ? DateTimeOffset.UtcNow.Storable() : null,
+            TenantId = TenantId,
+            CourtId = Courts[courtIndex],
+            UserId = user,
+            BookedByUserId = user,
+            PaidByUserId = user,
+            ActorUserId = user,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(minutes),
+            SliceMinutes = 15,
+            SliceCount = minutes / 15,
+            AmountChargedMinutes = 15 * (minutes / 15),
+            Status = BookingStatus.Booked,
+            ChargedAt = DateTimeOffset.UtcNow,
+            CheckedInAt = checkedIn ? DateTimeOffset.UtcNow.Storable() : null,
         };
         db.Bookings.Add(booking);
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = TenantId, UserId = user, Type = LedgerEntryType.BookingCharge, AmountMinutes = -booking.AmountChargedMinutes,
-            ActorUserId = user, RelatedBookingId = booking.Id, Reason = "seed charge",
+            TenantId = TenantId,
+            UserId = user,
+            Type = LedgerEntryType.BookingCharge,
+            AmountMinutes = -booking.AmountChargedMinutes,
+            ActorUserId = user,
+            RelatedBookingId = booking.Id,
+            Reason = "seed charge",
         });
         await db.SaveChangesAsync();
         return booking;

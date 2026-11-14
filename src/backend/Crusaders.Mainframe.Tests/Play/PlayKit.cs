@@ -60,8 +60,14 @@ public static class PlayKit
     {
         var row = new BookingParticipant
         {
-            TenantId = club.TenantId, BookingId = bookingId, Seat = seat, GuestName = name, Status = ParticipantStatus.Accepted,
-            InvitedAt = DateTimeOffset.UtcNow, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            TenantId = club.TenantId,
+            BookingId = bookingId,
+            Seat = seat,
+            GuestName = name,
+            Status = ParticipantStatus.Accepted,
+            InvitedAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
         await club.WriteAsync(f, db => db.BookingParticipants.Add(row));
         return row.Id;
@@ -78,7 +84,11 @@ public static class PlayKit
         HttpClient client, Guid bookingId, string[] sideA, string[] sideB, object[]? games = null, string? key = null, string format = "best_of_5") =>
         client.PostAsJsonAsync($"/api/v1/bookings/{bookingId}/result", new
         {
-            idempotencyKey = key ?? Guid.NewGuid().ToString("N"), format, sideA, sideB, games = games ?? ThreeOne,
+            idempotencyKey = key ?? Guid.NewGuid().ToString("N"),
+            format,
+            sideA,
+            sideB,
+            games = games ?? ThreeOne,
         });
 
     public static Task<HttpResponseMessage> ActAsync(HttpClient client, Guid bookingId, string action, int version, string? note = null) =>

@@ -57,9 +57,15 @@ public sealed class R13SweepFrameHttpTests(PostgresFixture pg) : IClassFixture<P
         {
             await club.WriteAsync(app, db => db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = $"box-{prefix}", Name = "Box", Kind = DeviceKind.CourtBox,
-                MacAddress = Guid.NewGuid().ToString("N")[..12], CourtNumbers = [1], AutoRegistered = false,
-                CreatedAt = DateTimeOffset.UtcNow.AddDays(-3), LastSeenAt = DateTimeOffset.UtcNow.AddDays(-1),
+                TenantId = club.TenantId,
+                DeviceCode = $"box-{prefix}",
+                Name = "Box",
+                Kind = DeviceKind.CourtBox,
+                MacAddress = Guid.NewGuid().ToString("N")[..12],
+                CourtNumbers = [1],
+                AutoRegistered = false,
+                CreatedAt = DateTimeOffset.UtcNow.AddDays(-3),
+                LastSeenAt = DateTimeOffset.UtcNow.AddDays(-1),
             }));
         }
         var who = new[] { club.Sam, club.Alex }.Take(partners).ToArray();

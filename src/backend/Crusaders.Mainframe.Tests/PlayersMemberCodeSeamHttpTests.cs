@@ -168,8 +168,11 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
         // A legacy ident code reaches the same refusal: the seam decides, not the credential.
         var ident = new AccessCode
         {
-            TenantId = c.TenantId, Code = AccessCodeService.NewCode(), Purpose = AccessCodePurpose.MemberIdent,
-            UserId = c.Sid, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
+            TenantId = c.TenantId,
+            Code = AccessCodeService.NewCode(),
+            Purpose = AccessCodePurpose.MemberIdent,
+            UserId = c.Sid,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
         };
         await c.WriteAsync(app, db => { db.AccessCodes.Add(ident); return Task.CompletedTask; });
         Assert.Contains("split_booking", await (await device.SendAsync(c.PayFor(ident.Code, 2, "1212121212121212", confirm: false))).Content.ReadAsStringAsync());
@@ -222,8 +225,10 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
     {
         var user = new User
         {
-            TenantId = club.TenantId, Email = $"{handle}-{club.Slug}@test.local",
-            PasswordHash = new Pbkdf2PasswordHasher().Hash("OldPass!123"), EmailVerified = true,
+            TenantId = club.TenantId,
+            Email = $"{handle}-{club.Slug}@test.local",
+            PasswordHash = new Pbkdf2PasswordHasher().Hash("OldPass!123"),
+            EmailVerified = true,
         };
         var used = club.Refs.Values.ToHashSet();
         var reference = Enumerable.Range(0, 64).Select(_ => Random.Shared.Next(1, MemberCodeMath.MaxRefValue)).First(r => !used.Contains(r));
@@ -232,8 +237,11 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
             db.Users.Add(user);
             db.Memberships.Add(new Membership
             {
-                TenantId = club.TenantId, UserId = user.Id, FullName = $"{handle} Player",
-                MembershipNumber = $"{handle}-{club.Slug}", Status = MembershipStatus.Active,
+                TenantId = club.TenantId,
+                UserId = user.Id,
+                FullName = $"{handle} Player",
+                MembershipNumber = $"{handle}-{club.Slug}",
+                Status = MembershipStatus.Active,
             });
             db.MemberCodes.Add(new MemberCode { TenantId = club.TenantId, UserId = user.Id, Ref = reference });
             return Task.CompletedTask;
@@ -252,10 +260,18 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
             {
                 db.BookingParticipants.Add(new BookingParticipant
                 {
-                    TenantId = club.TenantId, BookingId = bookingId, Seat = seat, UserId = user, Status = status,
-                    ShareMinutes = share, ConsentedMinutes = status == ParticipantStatus.Accepted && seat > 1 ? share : 0,
-                    ShareWeight = 1, SplitMode = seat == 1 ? SplitModes.Equal : null,
-                    InvitedAt = now, CreatedAt = now, UpdatedAt = now,
+                    TenantId = club.TenantId,
+                    BookingId = bookingId,
+                    Seat = seat,
+                    UserId = user,
+                    Status = status,
+                    ShareMinutes = share,
+                    ConsentedMinutes = status == ParticipantStatus.Accepted && seat > 1 ? share : 0,
+                    ShareWeight = 1,
+                    SplitMode = seat == 1 ? SplitModes.Equal : null,
+                    InvitedAt = now,
+                    CreatedAt = now,
+                    UpdatedAt = now,
                     RespondedAt = status == ParticipantStatus.Invited ? null : now,
                 });
             }

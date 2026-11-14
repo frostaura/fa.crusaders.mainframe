@@ -90,14 +90,21 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         db.MemberGroups.Add(group);
         db.MemberGroupMembers.Add(new MemberGroupMember
         {
-            TenantId = club.TenantId, GroupId = group.Id, UserId = club.MemberUserId, AddedByUserId = club.AdminUserId,
+            TenantId = club.TenantId,
+            GroupId = group.Id,
+            UserId = club.MemberUserId,
+            AddedByUserId = club.AdminUserId,
         });
         if (memberMinutes != 0)
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = club.MemberUserId, Type = LedgerEntryType.TopUp,
-                AmountMinutes = memberMinutes, ActorUserId = Guid.Empty, Reason = "fixture float",
+                TenantId = club.TenantId,
+                UserId = club.MemberUserId,
+                Type = LedgerEntryType.TopUp,
+                AmountMinutes = memberMinutes,
+                ActorUserId = Guid.Empty,
+                Reason = "fixture float",
             });
         }
         await db.SaveChangesAsync();
@@ -150,7 +157,10 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
 
         var (bookStatus, booked) = await ReadAsync(admin.PostAsJsonAsync(BookPath, new
         {
-            courtId = club.CourtId, userId = club.MemberUserId, startsAt = Slot(10), sliceCount = 4,
+            courtId = club.CourtId,
+            userId = club.MemberUserId,
+            startsAt = Slot(10),
+            sliceCount = 4,
             allowNegativeBalance = true,
         }));
 
@@ -196,7 +206,10 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         // And the admin's own booking, overdrawn, charges what the self-quote said.
         var (status, _) = await ReadAsync(admin.PostAsJsonAsync(BookPath, new
         {
-            courtId = club.CourtId, userId = club.AdminUserId, startsAt = Slot(11), sliceCount = 4,
+            courtId = club.CourtId,
+            userId = club.AdminUserId,
+            startsAt = Slot(11),
+            sliceCount = 4,
             allowNegativeBalance = true,
         }));
         Assert.Equal(HttpStatusCode.OK, status);
@@ -238,7 +251,10 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
 
         var (status, _) = await ReadAsync(admin.PostAsJsonAsync(BookPath, new
         {
-            courtId = club.CourtId, userId = club.MemberUserId, startsAt = Slot(8), sliceCount = 4,
+            courtId = club.CourtId,
+            userId = club.MemberUserId,
+            startsAt = Slot(8),
+            sliceCount = 4,
         }));
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.DoesNotContain(await ChangesAsync(factory, club.TenantId),
@@ -260,7 +276,10 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
 
         var (bookStatus, _) = await ReadAsync(admin.PostAsJsonAsync(BookPath, new
         {
-            courtId = club.CourtId, userId = club.MemberUserId, startsAt = Slot(12), sliceCount = 4,
+            courtId = club.CourtId,
+            userId = club.MemberUserId,
+            startsAt = Slot(12),
+            sliceCount = 4,
         }));
         Assert.Equal(HttpStatusCode.OK, bookStatus);
 
@@ -479,13 +498,16 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
 
         var (_, refused) = await ReadAsync(admin.PostAsJsonAsync(BulkBookPath, new
         {
-            idempotencyKey = "gm_self_1", items = Items(),
+            idempotencyKey = "gm_self_1",
+            items = Items(),
         }));
         Assert.Equal("insufficient_balance", refused.GetProperty("halted_reason").GetString());
 
         var (_, booked) = await ReadAsync(admin.PostAsJsonAsync(BulkBookPath, new
         {
-            idempotencyKey = "gm_self_2", allowNegativeBalance = true, items = Items(),
+            idempotencyKey = "gm_self_2",
+            allowNegativeBalance = true,
+            items = Items(),
         }));
         Assert.Equal("booked", booked.GetProperty("results")[0].GetProperty("status").GetString());
         Assert.Equal(-SliceMinutes * 4, booked.GetProperty("payer").GetProperty("balance_after_minutes").GetInt32());

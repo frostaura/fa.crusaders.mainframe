@@ -91,8 +91,13 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
         {
             db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = $"box-{otherBox[^6..]}", Name = "Box 2", Kind = DeviceKind.CourtBox,
-                MacAddress = otherBox, CourtNumbers = [1, 2, 3, 4], AutoRegistered = false,
+                TenantId = club.TenantId,
+                DeviceCode = $"box-{otherBox[^6..]}",
+                Name = "Box 2",
+                Kind = DeviceKind.CourtBox,
+                MacAddress = otherBox,
+                CourtNumbers = [1, 2, 3, 4],
+                AutoRegistered = false,
             });
             return Task.CompletedTask;
         });
@@ -138,8 +143,13 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
         {
             db.MemberCodeUses.Add(new MemberCodeUse
             {
-                TenantId = club.TenantId, Ref = club.Refs[club.Olga], Step = MemberCodeMath.StepOf(at), UseClass = MemberCodeUseClass.Court,
-                DeviceId = boxId, Kind = "activation_event", ClaimKey = "evt:7:1",   // this very event: boot 7, seq 1
+                TenantId = club.TenantId,
+                Ref = club.Refs[club.Olga],
+                Step = MemberCodeMath.StepOf(at),
+                UseClass = MemberCodeUseClass.Court,
+                DeviceId = boxId,
+                Kind = "activation_event",
+                ClaimKey = "evt:7:1",   // this very event: boot 7, seq 1
             });
             return Task.CompletedTask;
         });
@@ -244,8 +254,13 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
         {
             db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = "gate-2", Name = "Side door", Kind = DeviceKind.Gate,
-                Hardware = DeviceHardware.Esp32, MacAddress = secondDoor, GateKey = "side",
+                TenantId = club.TenantId,
+                DeviceCode = "gate-2",
+                Name = "Side door",
+                Kind = DeviceKind.Gate,
+                Hardware = DeviceHardware.Esp32,
+                MacAddress = secondDoor,
+                GateKey = "side",
             });
             return Task.CompletedTask;
         });

@@ -57,8 +57,12 @@ public sealed class MemberDeleteHttpTests(PostgresFixture pg) : IClassFixture<Po
             db.Users.Add(user);
             db.Memberships.Add(new Membership
             {
-                TenantId = club.TenantId, UserId = user.Id, FullName = name, MembershipNumber = $"{handle}-1",
-                Status = MembershipStatus.PendingApproval, PhotoUrl = "/uploads/x/photos/nope.jpg",
+                TenantId = club.TenantId,
+                UserId = user.Id,
+                FullName = name,
+                MembershipNumber = $"{handle}-1",
+                Status = MembershipStatus.PendingApproval,
+                PhotoUrl = "/uploads/x/photos/nope.jpg",
             });
             db.UserPreferences.Add(new UserPreferences { TenantId = club.TenantId, UserId = user.Id });
         });

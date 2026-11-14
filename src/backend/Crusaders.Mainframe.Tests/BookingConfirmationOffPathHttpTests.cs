@@ -48,7 +48,9 @@ public sealed class BookingConfirmationOffPathHttpTests(PostgresFixture pg) : IC
         {
             var answered = await olive.PostAsJsonAsync("/api/v1/bookings", new
             {
-                courtId = club.CourtId, startsAt = PlayersClub.Tomorrow(9), sliceCount = 2,
+                courtId = club.CourtId,
+                startsAt = PlayersClub.Tomorrow(9),
+                sliceCount = 2,
             }).WaitAsync(Generous);
 
             Assert.Equal(HttpStatusCode.OK, answered.StatusCode);

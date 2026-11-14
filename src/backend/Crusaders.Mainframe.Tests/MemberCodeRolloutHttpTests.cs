@@ -225,8 +225,14 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         {
             var body = JsonSerializer.SerializeToNode(new
             {
-                sliceMinutes = 15, slicePriceCredits = 8, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
-                penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15,
+                sliceMinutes = 15,
+                slicePriceCredits = 8,
+                advanceBookingDays = 14,
+                dayStartMinute = 0,
+                dayEndMinute = 1440,
+                penaltyPct = 30,
+                graceWindowMinutes = 5,
+                penaltyWindowMinutes = 15,
             })!.AsObject();
             foreach (var p in JsonSerializer.SerializeToNode(extra)!.AsObject().ToList()) body[p.Key] = p.Value?.DeepClone();
             return (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode;
@@ -307,8 +313,13 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         {
             db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = "gate-2", Name = "Side door", Kind = DeviceKind.Gate,
-                Hardware = DeviceHardware.Esp32, MacAddress = secondDoor, GateKey = "side",
+                TenantId = club.TenantId,
+                DeviceCode = "gate-2",
+                Name = "Side door",
+                Kind = DeviceKind.Gate,
+                Hardware = DeviceHardware.Esp32,
+                MacAddress = secondDoor,
+                GateKey = "side",
             });
             return Task.CompletedTask;
         });

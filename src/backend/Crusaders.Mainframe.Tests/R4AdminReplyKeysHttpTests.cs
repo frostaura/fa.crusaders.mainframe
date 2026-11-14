@@ -41,14 +41,21 @@ public sealed class R4AdminReplyKeysHttpTests(PostgresFixture pg) : IClassFixtur
         {
             db.DeviceOutages.Add(new DeviceOutage
             {
-                Id = outage, TenantId = club.TenantId, DeviceId = front,
-                StartedAt = now.AddMinutes(-50).ToUniversalTime(), DetectedAt = now.AddMinutes(-48).ToUniversalTime(),
+                Id = outage,
+                TenantId = club.TenantId,
+                DeviceId = front,
+                StartedAt = now.AddMinutes(-50).ToUniversalTime(),
+                DetectedAt = now.AddMinutes(-48).ToUniversalTime(),
                 EndedAt = now.AddMinutes(-20).ToUniversalTime(),
             });
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = club.MemberUserId, Type = LedgerEntryType.TopUp,
-                AmountMinutes = 10, ActorUserId = club.MemberUserId, CreatedAt = now.AddMinutes(-5).ToUniversalTime(),
+                TenantId = club.TenantId,
+                UserId = club.MemberUserId,
+                Type = LedgerEntryType.TopUp,
+                AmountMinutes = 10,
+                ActorUserId = club.MemberUserId,
+                CreatedAt = now.AddMinutes(-5).ToUniversalTime(),
             });
             await db.SaveChangesAsync();
         });

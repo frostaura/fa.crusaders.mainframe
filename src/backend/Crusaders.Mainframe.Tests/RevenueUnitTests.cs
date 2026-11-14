@@ -76,28 +76,44 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
             db.LedgerEntries.AddRange(
                 new LedgerEntry
                 {
-                    TenantId = tenant.Id, UserId = regular.Id, Type = LedgerEntryType.TopUp,
-                    AmountMinutes = 600, ZarPaid = 1000m,
-                    ActorUserId = regular.Id, Reason = "PayFast purchase: 10 hours",
+                    TenantId = tenant.Id,
+                    UserId = regular.Id,
+                    Type = LedgerEntryType.TopUp,
+                    AmountMinutes = 600,
+                    ZarPaid = 1000m,
+                    ActorUserId = regular.Id,
+                    Reason = "PayFast purchase: 10 hours",
                 },
                 new LedgerEntry
                 {
-                    TenantId = tenant.Id, UserId = league.Id, Type = LedgerEntryType.TopUp,
-                    AmountMinutes = 300, ZarPaid = 495m,
-                    ActorUserId = league.Id, Reason = "PayFast purchase: 5 hours",
+                    TenantId = tenant.Id,
+                    UserId = league.Id,
+                    Type = LedgerEntryType.TopUp,
+                    AmountMinutes = 300,
+                    ZarPaid = 495m,
+                    ActorUserId = league.Id,
+                    Reason = "PayFast purchase: 5 hours",
                 },
                 new LedgerEntry
                 {
-                    TenantId = tenant.Id, UserId = league.Id, Type = LedgerEntryType.AdminTopUp,
-                    AmountMinutes = 60, ZarPaid = 100m,
-                    ActorUserId = admin.Id, Reason = "Paid cash at the bar — 1 hour",
+                    TenantId = tenant.Id,
+                    UserId = league.Id,
+                    Type = LedgerEntryType.AdminTopUp,
+                    AmountMinutes = 60,
+                    ZarPaid = 100m,
+                    ActorUserId = admin.Id,
+                    Reason = "Paid cash at the bar — 1 hour",
                 },
                 // Court time spent is neither: it funds nothing and reverses nothing, so it
                 // must not appear in either total.
                 new LedgerEntry
                 {
-                    TenantId = tenant.Id, UserId = regular.Id, Type = LedgerEntryType.BookingCharge,
-                    AmountMinutes = -200, ActorUserId = regular.Id, Reason = "a court",
+                    TenantId = tenant.Id,
+                    UserId = regular.Id,
+                    Type = LedgerEntryType.BookingCharge,
+                    AmountMinutes = -200,
+                    ActorUserId = regular.Id,
+                    Reason = "a court",
                 });
 
             await db.SaveChangesAsync();

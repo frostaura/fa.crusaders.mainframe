@@ -42,7 +42,11 @@ public sealed class PlayTenancyHttpTests(PostgresFixture pg) : IClassFixture<Pos
         Assert.Equal(HttpStatusCode.NotFound, (await RecordAsync(me, b, [U(mine.Organiser)], [U(other.Club.Sam)])).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await me.PutAsJsonAsync($"/api/v1/bookings/{b}/result", new
         {
-            expectedVersion = other.Version, format = "best_of_5", sideA = new[] { U(mine.Organiser) }, sideB = new[] { U(other.Club.Sam) }, games = ThreeOne,
+            expectedVersion = other.Version,
+            format = "best_of_5",
+            sideA = new[] { U(mine.Organiser) },
+            sideB = new[] { U(other.Club.Sam) },
+            games = ThreeOne,
         })).StatusCode);
         foreach (var action in new[] { "confirm", "dispute", "withdraw" })
         {

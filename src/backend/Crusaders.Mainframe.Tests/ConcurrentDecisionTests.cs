@@ -167,8 +167,13 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         db.Bookings.Add(booking);
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = club.MemberId, Type = LedgerEntryType.BookingCharge,
-            AmountMinutes = -BookingCost, ActorUserId = club.MemberId, RelatedBookingId = booking.Id, Reason = "seed charge",
+            TenantId = club.TenantId,
+            UserId = club.MemberId,
+            Type = LedgerEntryType.BookingCharge,
+            AmountMinutes = -BookingCost,
+            ActorUserId = club.MemberId,
+            RelatedBookingId = booking.Id,
+            Reason = "seed charge",
         });
         await db.SaveChangesAsync();
         return booking.Id;
@@ -210,8 +215,13 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
             db.Bookings.Add(booking);
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = club.MemberId, Type = LedgerEntryType.BookingCharge,
-                AmountMinutes = -BookingCost, ActorUserId = club.MemberId, RelatedBookingId = booking.Id, Reason = "seed charge",
+                TenantId = club.TenantId,
+                UserId = club.MemberId,
+                Type = LedgerEntryType.BookingCharge,
+                AmountMinutes = -BookingCost,
+                ActorUserId = club.MemberId,
+                RelatedBookingId = booking.Id,
+                Reason = "seed charge",
             });
             ids.Add(booking.Id);
         }
@@ -789,8 +799,13 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = payer, Type = LedgerEntryType.BookingCharge,
-                AmountMinutes = -BookingCost, ActorUserId = payer, RelatedBookingId = booking.Id, Reason = "seed charge",
+                TenantId = club.TenantId,
+                UserId = payer,
+                Type = LedgerEntryType.BookingCharge,
+                AmountMinutes = -BookingCost,
+                ActorUserId = payer,
+                RelatedBookingId = booking.Id,
+                Reason = "seed charge",
             });
         }
         await db.SaveChangesAsync();

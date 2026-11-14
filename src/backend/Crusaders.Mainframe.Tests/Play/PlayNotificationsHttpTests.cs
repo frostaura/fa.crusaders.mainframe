@@ -65,7 +65,11 @@ public sealed class PlayNotificationsHttpTests(PostgresFixture pg) : IClassFixtu
 
         var edited = await olive.PutAsJsonAsync($"/api/v1/bookings/{booking}/result", new
         {
-            expectedVersion = v, format = "best_of_3", sideA = new[] { U(club.Organiser) }, sideB = new[] { U(club.Sam) }, games = G((11, 2), (11, 3)),
+            expectedVersion = v,
+            format = "best_of_3",
+            sideA = new[] { U(club.Organiser) },
+            sideB = new[] { U(club.Sam) },
+            games = G((11, 2), (11, 3)),
         });
         Assert.True(edited.IsSuccessStatusCode);
         await ActAsync(olive, booking, "withdraw", v + 1);

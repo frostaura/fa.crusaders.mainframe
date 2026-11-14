@@ -177,15 +177,25 @@ public sealed class PlayersRefute5HttpTests(PostgresFixture pg) : IClassFixture<
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
-                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountMinutes = posting.AmountMinutes,
-                    ActorUserId = posting.ActorUserId, RelatedBookingId = bookingId, ExternalReference = posting.ExternalReference,
+                    TenantId = club.TenantId,
+                    UserId = posting.UserId,
+                    Type = posting.Type,
+                    AmountMinutes = posting.AmountMinutes,
+                    ActorUserId = posting.ActorUserId,
+                    RelatedBookingId = bookingId,
+                    ExternalReference = posting.ExternalReference,
                 });
             }
             // The desk's goodwill credit naming the game: what the organiser owes falls to nothing.
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = club.Organiser, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = 32,
-                ActorUserId = club.Admin, RelatedBookingId = bookingId, Reason = "Court flooded",
+                TenantId = club.TenantId,
+                UserId = club.Organiser,
+                Type = LedgerEntryType.AdminAdjustment,
+                AmountMinutes = 32,
+                ActorUserId = club.Admin,
+                RelatedBookingId = bookingId,
+                Reason = "Court flooded",
             });
         });
         await club.CreditAsync(f, club.Sam, 16);   // Sam at 0 after paying
@@ -231,8 +241,13 @@ public sealed class PlayersRefute5HttpTests(PostgresFixture pg) : IClassFixture<
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
-                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountMinutes = posting.AmountMinutes,
-                    ActorUserId = posting.ActorUserId, RelatedBookingId = bookingId, ExternalReference = posting.ExternalReference,
+                    TenantId = club.TenantId,
+                    UserId = posting.UserId,
+                    Type = posting.Type,
+                    AmountMinutes = posting.AmountMinutes,
+                    ActorUserId = posting.ActorUserId,
+                    RelatedBookingId = bookingId,
+                    ExternalReference = posting.ExternalReference,
                 });
             }
         });

@@ -89,8 +89,16 @@ public sealed class PlayWorkerHttpTests(PostgresFixture pg) : IClassFixture<Post
         // A booking born checked in (a walk-up) carries the marker in its own INSERT.
         var walkUp = new Booking
         {
-            TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.Jo, BookedByUserId = club.Jo, PaidByUserId = club.Jo, ActorUserId = club.Jo,
-            StartsAt = DateTimeOffset.UtcNow.AddDays(-2), EndsAt = DateTimeOffset.UtcNow.AddDays(-2).AddMinutes(30), SliceMinutes = 15, SliceCount = 2,
+            TenantId = club.TenantId,
+            CourtId = club.CourtId,
+            UserId = club.Jo,
+            BookedByUserId = club.Jo,
+            PaidByUserId = club.Jo,
+            ActorUserId = club.Jo,
+            StartsAt = DateTimeOffset.UtcNow.AddDays(-2),
+            EndsAt = DateTimeOffset.UtcNow.AddDays(-2).AddMinutes(30),
+            SliceMinutes = 15,
+            SliceCount = 2,
             CheckedInAt = DateTimeOffset.UtcNow.AddDays(-2).Storable(),
         };
         await club.WriteAsync(f, db => db.Bookings.Add(walkUp));
@@ -98,8 +106,15 @@ public sealed class PlayWorkerHttpTests(PostgresFixture pg) : IClassFixture<Post
 
         var block = new Booking
         {
-            TenantId = club.TenantId, CourtId = club.CourtId, UserId = null, ActorUserId = club.Admin, Status = BookingStatus.AdminBlock,
-            StartsAt = DateTimeOffset.UtcNow.AddDays(3), EndsAt = DateTimeOffset.UtcNow.AddDays(3).AddHours(1), SliceMinutes = 15, SliceCount = 4,
+            TenantId = club.TenantId,
+            CourtId = club.CourtId,
+            UserId = null,
+            ActorUserId = club.Admin,
+            Status = BookingStatus.AdminBlock,
+            StartsAt = DateTimeOffset.UtcNow.AddDays(3),
+            EndsAt = DateTimeOffset.UtcNow.AddDays(3).AddHours(1),
+            SliceMinutes = 15,
+            SliceCount = 4,
         };
         await club.WriteAsync(f, db => db.Bookings.Add(block));
         await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == block.Id).CheckedInAt = DateTimeOffset.UtcNow);

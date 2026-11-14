@@ -46,8 +46,13 @@ public sealed class PlayersRefuteHttpTests(PostgresFixture pg) : IClassFixture<P
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
-                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountMinutes = posting.AmountMinutes,
-                    ActorUserId = posting.ActorUserId, RelatedBookingId = bookingId, ExternalReference = posting.ExternalReference,
+                    TenantId = club.TenantId,
+                    UserId = posting.UserId,
+                    Type = posting.Type,
+                    AmountMinutes = posting.AmountMinutes,
+                    ActorUserId = posting.ActorUserId,
+                    RelatedBookingId = bookingId,
+                    ExternalReference = posting.ExternalReference,
                 });
             }
         });
@@ -209,7 +214,10 @@ public sealed class PlayersRefuteHttpTests(PostgresFixture pg) : IClassFixture<P
         var alexBooks = await club.Client(f, club.Alex).PostAsJsonAsync("/api/v1/bookings", new
         {
             // The day after: the organiser's own game tomorrow already fills their daily cap.
-            courtId = club.CourtId, startsAt = PlayersClub.Tomorrow(12).AddDays(1), sliceCount = 4, players = new object[] { new { userId = club.Organiser } },
+            courtId = club.CourtId,
+            startsAt = PlayersClub.Tomorrow(12).AddDays(1),
+            sliceCount = 4,
+            players = new object[] { new { userId = club.Organiser } },
         });
         var b = (await JsonAsync(alexBooks)).GetProperty("booking_id").GetGuid();
 

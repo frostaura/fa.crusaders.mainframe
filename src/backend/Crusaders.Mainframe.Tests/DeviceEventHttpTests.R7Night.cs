@@ -105,9 +105,14 @@ public abstract partial class DeviceEventHttpTests
                 {
                     db.BookingParticipants.Add(new BookingParticipant
                     {
-                        TenantId = box.TenantId, BookingId = booked.BookingId, Seat = seat, UserId = user,
-                        Status = ParticipantStatus.Accepted, InvitedAt = DateTimeOffset.UtcNow,
-                        CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+                        TenantId = box.TenantId,
+                        BookingId = booked.BookingId,
+                        Seat = seat,
+                        UserId = user,
+                        Status = ParticipantStatus.Accepted,
+                        InvitedAt = DateTimeOffset.UtcNow,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        UpdatedAt = DateTimeOffset.UtcNow,
                     });
                 }
                 await db.SaveChangesAsync();

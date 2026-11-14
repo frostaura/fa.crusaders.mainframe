@@ -180,8 +180,10 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             var stray = new User
             {
-                TenantId = club.TenantId, Email = $"{club.Slug}-stray@test.local",
-                PasswordHash = "x", EmailVerified = true,
+                TenantId = club.TenantId,
+                Email = $"{club.Slug}-stray@test.local",
+                PasswordHash = "x",
+                EmailVerified = true,
             };
             db.Users.Add(stray);
             await db.SaveChangesAsync();
@@ -212,11 +214,18 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.Bookings.Add(new Booking
             {
-                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
-                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
-                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
-                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId,
+                PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt,
+                EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15,
+                SliceCount = 2,
+                Status = BookingStatus.Booked,
+                AmountChargedMinutes = 16,
+                ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -257,11 +266,18 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.Bookings.Add(new Booking
             {
-                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
-                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
-                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
-                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId,
+                PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt,
+                EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15,
+                SliceCount = 2,
+                Status = BookingStatus.Booked,
+                AmountChargedMinutes = 16,
+                ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -295,11 +311,18 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.Bookings.Add(new Booking
             {
-                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
-                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
-                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
-                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId,
+                PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt,
+                EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15,
+                SliceCount = 2,
+                Status = BookingStatus.Booked,
+                AmountChargedMinutes = 16,
+                ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -523,8 +546,10 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             var stray = new User
             {
-                TenantId = club.TenantId, Email = $"{club.Slug}-stray2@test.local",
-                PasswordHash = "x", EmailVerified = true,
+                TenantId = club.TenantId,
+                Email = $"{club.Slug}-stray2@test.local",
+                PasswordHash = "x",
+                EmailVerified = true,
             };
             db.Users.Add(stray);
             await db.SaveChangesAsync();
@@ -617,11 +642,18 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.Bookings.Add(new Booking
             {
-                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
-                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
-                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
-                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId,
+                PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt,
+                EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15,
+                SliceCount = 2,
+                Status = BookingStatus.Booked,
+                AmountChargedMinutes = 16,
+                ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -671,11 +703,18 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.Bookings.Add(new Booking
             {
-                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
-                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
-                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
-                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId,
+                PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt,
+                EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15,
+                SliceCount = 2,
+                Status = BookingStatus.Booked,
+                AmountChargedMinutes = 16,
+                ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }

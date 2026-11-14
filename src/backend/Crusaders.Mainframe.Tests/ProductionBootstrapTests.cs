@@ -358,8 +358,11 @@ public class ProductionBootstrapTests
             db.Users.Add(user);
             db.Memberships.Add(new Api.Domain.Membership
             {
-                TenantId = tenant.Id, UserId = user.Id, FullName = "Holder",
-                MembershipNumber = "ADMIN-0001", Status = Api.Domain.MembershipStatus.Active,
+                TenantId = tenant.Id,
+                UserId = user.Id,
+                FullName = "Holder",
+                MembershipNumber = "ADMIN-0001",
+                Status = Api.Domain.MembershipStatus.Active,
             });
             await db.SaveChangesAsync();
         }

@@ -168,9 +168,15 @@ public sealed class R4ChangeRecordWritersHttpTests(PostgresFixture pg) : IClassF
             {
                 db.DeviceErrors.Add(new DeviceError
                 {
-                    Id = id, TenantId = club.TenantId, DeviceId = box, Code = "relay_stuck", Fingerprint = $"fp-{id:N}",
-                    Severity = DeviceErrorSeverity.Error, Source = DeviceErrorSource.Device,
-                    FirstSeenAt = DateTimeOffset.UtcNow, LastSeenAt = DateTimeOffset.UtcNow,
+                    Id = id,
+                    TenantId = club.TenantId,
+                    DeviceId = box,
+                    Code = "relay_stuck",
+                    Fingerprint = $"fp-{id:N}",
+                    Severity = DeviceErrorSeverity.Error,
+                    Source = DeviceErrorSource.Device,
+                    FirstSeenAt = DateTimeOffset.UtcNow,
+                    LastSeenAt = DateTimeOffset.UtcNow,
                 });
             }
             await db.SaveChangesAsync();

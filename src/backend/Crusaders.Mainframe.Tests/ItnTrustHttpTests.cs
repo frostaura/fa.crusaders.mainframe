@@ -303,8 +303,13 @@ public sealed class ItnTrustHttpTests(PostgresFixture pg) : IClassFixture<Postgr
 
         var second = new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = club.MemberUserId, Type = LedgerEntryType.TopUp, AmountMinutes = 60,
-            ActorUserId = club.MemberUserId, ExternalReference = $"topup:{club.TenantId:N}:7700002", PurchaseId = bought.Id,
+            TenantId = club.TenantId,
+            UserId = club.MemberUserId,
+            Type = LedgerEntryType.TopUp,
+            AmountMinutes = 60,
+            ActorUserId = club.MemberUserId,
+            ExternalReference = $"topup:{club.TenantId:N}:7700002",
+            PurchaseId = bought.Id,
         };
         var ex = await Assert.ThrowsAsync<DbUpdateException>(() => WriteAsync(factory, db => { db.LedgerEntries.Add(second); return Task.CompletedTask; }));
         Assert.Equal("IX_ledger_entries_TenantId_PurchaseId", ((Npgsql.PostgresException)ex.InnerException!).ConstraintName);

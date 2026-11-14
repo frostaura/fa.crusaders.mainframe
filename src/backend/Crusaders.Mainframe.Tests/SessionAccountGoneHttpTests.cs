@@ -104,14 +104,19 @@ public sealed class SessionAccountGoneHttpTests(PostgresFixture pg) : IClassFixt
     {
         var user = new User
         {
-            TenantId = club.TenantId, Email = $"{handle}-{club.Slug}@test.local",
-            PasswordHash = new Pbkdf2PasswordHasher().Hash("OldPass!123"), EmailVerified = true,
+            TenantId = club.TenantId,
+            Email = $"{handle}-{club.Slug}@test.local",
+            PasswordHash = new Pbkdf2PasswordHasher().Hash("OldPass!123"),
+            EmailVerified = true,
         };
         db.Users.Add(user);
         db.Memberships.Add(new Membership
         {
-            TenantId = club.TenantId, UserId = user.Id, FullName = "Gone Member",
-            MembershipNumber = $"{handle}-{club.Slug}", Status = MembershipStatus.Active,
+            TenantId = club.TenantId,
+            UserId = user.Id,
+            FullName = "Gone Member",
+            MembershipNumber = $"{handle}-{club.Slug}",
+            Status = MembershipStatus.Active,
         });
         await db.SaveChangesAsync();
         return user.Id;

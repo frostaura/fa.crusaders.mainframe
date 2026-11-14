@@ -90,7 +90,10 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
 
         var response = await club.Client(f, club.Organiser).PostAsJsonAsync("/api/v1/bookings", new
         {
-            courtId = club.CourtId, startsAt = PlayersClub.Tomorrow(), sliceCount = 4, splitMode = "amount",
+            courtId = club.CourtId,
+            startsAt = PlayersClub.Tomorrow(),
+            sliceCount = 4,
+            splitMode = "amount",
             players = new object[] { new { userId = club.Sam, amount = 40 } },
         });
 
@@ -402,7 +405,11 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         // Sam spends the refund elsewhere.
         await club.WriteAsync(f, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = club.Sam, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = -12, ActorUserId = club.Admin,
+            TenantId = club.TenantId,
+            UserId = club.Sam,
+            Type = LedgerEntryType.AdminAdjustment,
+            AmountMinutes = -12,
+            ActorUserId = club.Admin,
         }));
 
         await club.InClubAsync(f, async sp =>
@@ -440,8 +447,13 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
             b.CancellationReason = BookingService.ResoldTailRefunded;
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = club.Organiser, Type = LedgerEntryType.CancellationRefund,
-                AmountMinutes = 32, ActorUserId = Guid.Empty, RelatedBookingId = bookingId, Reason = BookingService.ResoldTailRefunded,
+                TenantId = club.TenantId,
+                UserId = club.Organiser,
+                Type = LedgerEntryType.CancellationRefund,
+                AmountMinutes = 32,
+                ActorUserId = Guid.Empty,
+                RelatedBookingId = bookingId,
+                Reason = BookingService.ResoldTailRefunded,
             });
         });
         await SettleAsync(club, f, bookingId);
@@ -685,8 +697,14 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
             };
             var door = new Device
             {
-                TenantId = club.TenantId, DeviceCode = "gate-pl", Name = "Door", Kind = DeviceKind.Gate,
-                Hardware = DeviceHardware.Esp32, MacAddress = "ff0000000177", CourtNumbers = [], GateKey = "front",
+                TenantId = club.TenantId,
+                DeviceCode = "gate-pl",
+                Name = "Door",
+                Kind = DeviceKind.Gate,
+                Hardware = DeviceHardware.Esp32,
+                MacAddress = "ff0000000177",
+                CourtNumbers = [],
+                GateKey = "front",
             };
             return await GateAccess.DecideAsync(
                 sp.GetRequiredService<MainframeDbContext>(), codes, new GateContext(door, settings, "qr", code.Code, DateTimeOffset.UtcNow), default);

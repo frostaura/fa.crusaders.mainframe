@@ -457,8 +457,12 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
 
         await club.WriteAsync(f, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = club.Bystander, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = 0,
-            ActorUserId = club.Admin, ExternalReference = ShareLedger.Reference(sam, 1, "in"),
+            TenantId = club.TenantId,
+            UserId = club.Bystander,
+            Type = LedgerEntryType.AdminAdjustment,
+            AmountMinutes = 0,
+            ActorUserId = club.Admin,
+            ExternalReference = ShareLedger.Reference(sam, 1, "in"),
         }));
 
         var collect = await admin.PostAsJsonAsync($"{path}/collect", new { reason = "Owed", allowNegativeBalance = true });
@@ -540,8 +544,13 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
-                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountMinutes = posting.AmountMinutes,
-                    ActorUserId = posting.ActorUserId, RelatedBookingId = bookingId, ExternalReference = posting.ExternalReference,
+                    TenantId = club.TenantId,
+                    UserId = posting.UserId,
+                    Type = posting.Type,
+                    AmountMinutes = posting.AmountMinutes,
+                    ActorUserId = posting.ActorUserId,
+                    RelatedBookingId = bookingId,
+                    ExternalReference = posting.ExternalReference,
                 });
             }
         });
@@ -549,7 +558,10 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
 
         var adjust = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/minutes/{club.Organiser}/adjust", new
         {
-            amountMinutes = 32, reason = "Court was flooded", relatedBookingId = bookingId, reasonCode = "goodwill",
+            amountMinutes = 32,
+            reason = "Court was flooded",
+            relatedBookingId = bookingId,
+            reasonCode = "goodwill",
         });
 
         Assert.True(adjust.IsSuccessStatusCode, await adjust.Content.ReadAsStringAsync());

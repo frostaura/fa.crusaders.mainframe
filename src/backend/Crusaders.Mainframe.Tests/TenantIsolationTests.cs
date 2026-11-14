@@ -354,12 +354,17 @@ public class TenantIsolationTests
             db.MemberGroups.Add(group);
             db.MemberGroupWindows.Add(new MemberGroupWindow
             {
-                TenantId = hostA.Tenant.Id, GroupId = group.Id,
-                DayOfWeek = DayOfWeek.Tuesday, StartMinute = 60, EndMinute = 120,
+                TenantId = hostA.Tenant.Id,
+                GroupId = group.Id,
+                DayOfWeek = DayOfWeek.Tuesday,
+                StartMinute = 60,
+                EndMinute = 120,
             });
             db.MemberGroupMembers.Add(new MemberGroupMember
             {
-                TenantId = hostA.Tenant.Id, GroupId = group.Id, UserId = hostA.PlayerUser.Id,
+                TenantId = hostA.Tenant.Id,
+                GroupId = group.Id,
+                UserId = hostA.PlayerUser.Id,
             });
             await db.SaveChangesAsync();
             groupInA = group.Id;
@@ -404,7 +409,9 @@ public class TenantIsolationTests
             // takes when two clubs' tables share a store.
             db.MemberGroupMembers.Add(new MemberGroupMember
             {
-                TenantId = hostA.Tenant.Id, GroupId = group.Id, UserId = hostB.PlayerUser.Id,
+                TenantId = hostA.Tenant.Id,
+                GroupId = group.Id,
+                UserId = hostB.PlayerUser.Id,
             });
             await db.SaveChangesAsync();
         }

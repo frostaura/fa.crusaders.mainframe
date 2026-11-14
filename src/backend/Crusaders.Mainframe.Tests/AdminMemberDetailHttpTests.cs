@@ -204,8 +204,14 @@ public sealed class AdminMemberDetailHttpTests : IClassFixture<PostgresFixture>
             {
                 db.BookingParticipants.Add(new BookingParticipant
                 {
-                    TenantId = club.TenantId, BookingId = booking.Id, Seat = 2, UserId = member, Status = status,
-                    InvitedAt = now.AddDays(-7), CreatedAt = now.AddDays(-7), UpdatedAt = now.AddDays(-7),
+                    TenantId = club.TenantId,
+                    BookingId = booking.Id,
+                    Seat = 2,
+                    UserId = member,
+                    Status = status,
+                    InvitedAt = now.AddDays(-7),
+                    CreatedAt = now.AddDays(-7),
+                    UpdatedAt = now.AddDays(-7),
                 });
             }
         });

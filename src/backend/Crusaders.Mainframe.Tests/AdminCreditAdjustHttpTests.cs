@@ -76,13 +76,19 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         db.Memberships.AddRange(
             new Membership
             {
-                TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin",
-                MembershipNumber = $"A-{slug}"[..12], Status = MembershipStatus.Active,
+                TenantId = tenant.Id,
+                UserId = admin.Id,
+                FullName = "Desk Admin",
+                MembershipNumber = $"A-{slug}"[..12],
+                Status = MembershipStatus.Active,
             },
             new Membership
             {
-                TenantId = tenant.Id, UserId = member.Id, FullName = "Naledi Khoza",
-                MembershipNumber = $"M-{slug}"[..12], Status = MembershipStatus.Active,
+                TenantId = tenant.Id,
+                UserId = member.Id,
+                FullName = "Naledi Khoza",
+                MembershipNumber = $"M-{slug}"[..12],
+                Status = MembershipStatus.Active,
             });
 
         await db.SaveChangesAsync();

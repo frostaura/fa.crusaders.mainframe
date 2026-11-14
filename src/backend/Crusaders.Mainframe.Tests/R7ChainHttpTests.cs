@@ -85,13 +85,25 @@ public sealed class R7ChainHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         var key = $"share:{Guid.NewGuid():N}:{seq}";
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = c.TenantId, UserId = from, Type = LedgerEntryType.ShareTransfer, AmountMinutes = -15,
-            ActorUserId = actor, RelatedBookingId = booking, Reason = "Share of a split booking", ExternalReference = $"{key}:out",
+            TenantId = c.TenantId,
+            UserId = from,
+            Type = LedgerEntryType.ShareTransfer,
+            AmountMinutes = -15,
+            ActorUserId = actor,
+            RelatedBookingId = booking,
+            Reason = "Share of a split booking",
+            ExternalReference = $"{key}:out",
         });
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = c.TenantId, UserId = to, Type = LedgerEntryType.ShareTransfer, AmountMinutes = 15,
-            ActorUserId = actor, RelatedBookingId = booking, Reason = "Share of a split booking", ExternalReference = $"{key}:in",
+            TenantId = c.TenantId,
+            UserId = to,
+            Type = LedgerEntryType.ShareTransfer,
+            AmountMinutes = 15,
+            ActorUserId = actor,
+            RelatedBookingId = booking,
+            Reason = "Share of a split booking",
+            ExternalReference = $"{key}:in",
         });
     }
 
@@ -239,8 +251,13 @@ public sealed class R7ChainHttpTests(PostgresFixture pg) : IClassFixture<Postgre
     private static void Row(MainframeDbContext db, MemberCodeClub c, LedgerEntryType type, int minutes, Guid? booking) =>
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = c.TenantId, UserId = c.Pam, Type = type, AmountMinutes = minutes,
-            ActorUserId = c.AdminId, RelatedBookingId = booking, Reason = type.ToString(),
+            TenantId = c.TenantId,
+            UserId = c.Pam,
+            Type = type,
+            AmountMinutes = minutes,
+            ActorUserId = c.AdminId,
+            RelatedBookingId = booking,
+            Reason = type.ToString(),
         });
 
     /// <summary>

@@ -201,12 +201,20 @@ internal static class PurchaseKit
             {
                 db.MemberGroups.Add(new MemberGroup
                 {
-                    Id = id, TenantId = club.TenantId, Name = name!, PackageDiscountBps = discountBps, Status = status, SortOrder = 3,
+                    Id = id,
+                    TenantId = club.TenantId,
+                    Name = name!,
+                    PackageDiscountBps = discountBps,
+                    Status = status,
+                    SortOrder = 3,
                 });
             }
             db.MemberGroupMembers.Add(new MemberGroupMember
             {
-                TenantId = club.TenantId, GroupId = id, UserId = userId, AddedByUserId = club.AdminUserId,
+                TenantId = club.TenantId,
+                GroupId = id,
+                UserId = userId,
+                AddedByUserId = club.AdminUserId,
             });
             return Task.CompletedTask;
         });
@@ -225,8 +233,13 @@ internal static class PurchaseKit
     {
         var package = new MinutePackage
         {
-            TenantId = club.TenantId, Name = name, Minutes = minutes, PriceZar = price, GroupId = groupId,
-            SortOrder = 9, CreatedByUserId = club.AdminUserId,
+            TenantId = club.TenantId,
+            Name = name,
+            Minutes = minutes,
+            PriceZar = price,
+            GroupId = groupId,
+            SortOrder = 9,
+            CreatedByUserId = club.AdminUserId,
         };
         await WriteAsync(factory, db => { db.MinutePackages.Add(package); return Task.CompletedTask; });
         return package.Id;
