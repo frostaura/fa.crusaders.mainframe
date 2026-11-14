@@ -4,12 +4,12 @@
 
 #include <Arduino.h>
 #include <ESP8266HTTPClient.h>
-#include <ESP8266WebServer.h>
 #include <ESP8266WiFi.h>
 
 #include <LittleFS.h>
 #include <Updater.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "devcrypto/Sha256.h"
@@ -304,16 +304,28 @@ uint64_t RtcEpoch::tick(uint32_t nowMs) {
 }
 
 // --- the setup portal ------------------------------------------------------------------------
+//
+// A WiFiServer and one bounded parse, not ESP8266WebServer: that server's form
+// parser has an unbounded (VLA) frame, which the stack gate refuses on a 4 KB
+// continuation stack, and its templates cost RAM the heap floor does not have.
+// One request at a time, read into the caller's scratch, fields decoded by
+// bridgelogic::urlDecode and validated by the provision/ rules.
 
 namespace {
 
-ESP8266WebServer* gServer = nullptr;
+WiFiServer* gServer = nullptr;
 SetupPortal::Save gSave = nullptr;
 char* gScratch = nullptr;
 size_t gScratchCap = 0U;
 bool gSaved = false;
 
-const char kPage[] PROGMEM =
+constexpr size_t kRequestCap = 1536U;
+constexpr size_t kFieldCap = 100U;
+constexpr uint8_t kFields = 7U;
+constexpr size_t kValidateAt = kRequestCap + kFieldCap * kFields;
+
+const char kPageHead[] PROGMEM =
+    "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
     "<!doctype html><meta name=viewport content='width=device-width'><title>Court box setup</title>"
     "<h1>Court box setup</h1><form method=post action=/save>"
     "<p>WiFi name<br><input name=ssid maxlength=32 required>"
@@ -325,44 +337,119 @@ const char kPage[] PROGMEM =
     "<input name=key maxlength=43>"
     "<p><button>Save and restart</button></form>";
 
-void sendPage(int status, const char* note) {
-  String body = FPSTR(kPage);
+void sendPage(WiFiClient& client, const char* note) {
+  client.write_P(kPageHead, sizeof(kPageHead) - 1U);
   if (note != nullptr) {
-    body += "<p><b>";
-    body += note;
-    body += "</b>";
+    client.print("<p><b>");
+    client.print(note);
+    client.print("</b>");
   }
-  gServer->send(status, "text/html", body);
+  client.flush();
 }
 
-void handleSave() {
-  const String ssid = gServer->arg("ssid");
-  const String psk = gServer->arg("psk");
-  const String ssid2 = gServer->arg("ssid2");
-  const String psk2 = gServer->arg("psk2");
-  const String base = gServer->arg("base");
-  const String keyId = gServer->arg("key_id");
-  const String key = gServer->arg("key");
+/// The value of `name` in an x-www-form-urlencoded body, decoded into `out`.
+bool formField(const char* body, size_t len, const char* name, char* out, size_t cap) {
+  out[0] = '\0';
+  const size_t nameLen = strlen(name);
+  size_t at = 0U;
+  while (at < len) {
+    size_t end = at;
+    while (end < len && body[end] != '&') {
+      ++end;
+    }
+    if (end - at > nameLen && memcmp(body + at, name, nameLen) == 0 && body[at + nameLen] == '=') {
+      const size_t from = at + nameLen + 1U;
+      return bridgelogic::urlDecode(body + from, end - from, out, cap);
+    }
+    at = end + 1U;
+  }
+  return true; // absent is empty
+}
+
+/// Reads one request into the scratch: true with the body located.
+bool readRequest(WiFiClient& client, size_t& bodyAt, size_t& bodyLen, bool& isPost) {
+  size_t got = 0U;
+  const uint32_t started = millis();
+  size_t headEnd = 0U;
+  long contentLength = 0;
+  while (client.connected() && millis() - started < 3000UL && got + 1U < kRequestCap) {
+    if (client.available() <= 0) {
+      delay(1);
+      continue;
+    }
+    gScratch[got] = static_cast<char>(client.read());
+    ++got;
+    gScratch[got] = '\0';
+    if (headEnd == 0U && got >= 4U && memcmp(gScratch + got - 4U, "\r\n\r\n", 4U) == 0) {
+      headEnd = got;
+      const char* cl = strstr(gScratch, "Content-Length:");
+      contentLength = cl != nullptr ? atol(cl + 15) : 0;
+      if (contentLength < 0 || headEnd + static_cast<size_t>(contentLength) + 1U >= kRequestCap) {
+        return false;
+      }
+    }
+    if (headEnd > 0U && got >= headEnd + static_cast<size_t>(contentLength)) {
+      break;
+    }
+  }
+  if (headEnd == 0U) {
+    return false;
+  }
+  isPost = strncmp(gScratch, "POST /save", 10) == 0;
+  bodyAt = headEnd;
+  bodyLen = got - headEnd;
+  return true;
+}
+
+void handle(WiFiClient& client) {
+  size_t bodyAt = 0U;
+  size_t bodyLen = 0U;
+  bool isPost = false;
+  if (!readRequest(client, bodyAt, bodyLen, isPost)) {
+    client.stop();
+    return;
+  }
+  if (!isPost) {
+    sendPage(client, nullptr);
+    client.stop();
+    return;
+  }
+  static const char* const kNames[kFields] = {"ssid", "psk", "ssid2", "psk2", "base", "key_id", "key"};
+  char* field[kFields];
+  bool ok = true;
+  for (uint8_t i = 0U; i < kFields; ++i) {
+    field[i] = gScratch + kRequestCap + kFieldCap * i;
+    ok = ok && formField(gScratch + bodyAt, bodyLen, kNames[i], field[i], kFieldCap);
+  }
+  if (!ok) {
+    sendPage(client, "Not saved: a field could not be read");
+    client.stop();
+    return;
+  }
   bridgelogic::PortalForm form;
-  form.ssid = ssid.c_str();
-  form.psk = psk.c_str();
-  form.ssid2 = ssid2.c_str();
-  form.psk2 = psk2.c_str();
-  form.base = base.c_str();
+  form.ssid = field[0];
+  form.psk = field[1];
+  form.ssid2 = field[2];
+  form.psk2 = field[3];
+  form.base = field[4];
   devnet::NetSet net;
-  const devnet::Refusal r = bridgelogic::validatePortalForm(form, net, gScratch, gScratchCap);
+  const devnet::Refusal r =
+      bridgelogic::validatePortalForm(form, net, gScratch + kValidateAt, gScratchCap - kValidateAt);
   if (r != devnet::Refusal::Ok) {
-    char note[64];
+    char note[48];
     snprintf(note, sizeof(note), "Not saved: %s", devnet::refusalName(r));
-    sendPage(400, note);
+    sendPage(client, note);
+    client.stop();
     return;
   }
-  const char* id = keyId.length() > 0U ? keyId.c_str() : nullptr;
-  if (gSave == nullptr || !gSave(net, id, key.c_str())) {
-    sendPage(500, "Not saved: the box could not store it, or the key is not 43 characters");
+  const char* id = field[5][0] != '\0' ? field[5] : nullptr;
+  if (gSave == nullptr || !gSave(net, id, field[6])) {
+    sendPage(client, "Not saved: the box could not store it, or the key is not 43 characters");
+    client.stop();
     return;
   }
-  sendPage(200, "Saved. The box restarts now.");
+  sendPage(client, "Saved. The box restarts now.");
+  client.stop();
   gSaved = true;
 }
 
@@ -373,6 +460,9 @@ bool SetupPortal::open(const char* apName, const char* apPassword, Save save, ch
   if (open_) {
     return true;
   }
+  if (scratch == nullptr || scratchCap < kValidateAt + 1536U) {
+    return false;
+  }
   gSave = save;
   gScratch = scratch;
   gScratchCap = scratchCap;
@@ -381,10 +471,7 @@ bool SetupPortal::open(const char* apName, const char* apPassword, Save save, ch
   if (!WiFi.softAP(apName, apPassword)) {
     return false;
   }
-  gServer = new ESP8266WebServer(80);
-  gServer->on("/", HTTP_GET, []() { sendPage(200, nullptr); });
-  gServer->on("/save", HTTP_POST, handleSave);
-  gServer->onNotFound([]() { sendPage(200, nullptr); });
+  gServer = new WiFiServer(80);
   gServer->begin();
   open_ = true;
   return true;
@@ -394,7 +481,10 @@ bool SetupPortal::pump() {
   if (!open_ || gServer == nullptr) {
     return false;
   }
-  gServer->handleClient();
+  WiFiClient client = gServer->accept();
+  if (client) {
+    handle(client);
+  }
   saved_ = saved_ || gSaved;
   return saved_;
 }

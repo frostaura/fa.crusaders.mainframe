@@ -1,21 +1,22 @@
 {
-  "about": "Stack budgets read by src/iot/tools/stack_budget.py (ESPR-4). A ratchet: each number is what the code used when it was set, lowered as the code shrinks and raised only in the commit that needs it, with the reason. `goal` is where the 2026-11-13 analysis says the bridge should be on its 4 KB cont stack (an interrupt adds >= 256 B at peak); the gate runs loop() on an 8 KB task stack. The path budget carries 48 B over the measured 3088 B for toolchain variance between hosts; frames carry none. The ESP32's GCC 8 cannot write a call graph, so the gate has no path budget.",
+  "about": "Stack budgets read by src/iot/tools/stack_budget.py (ESPR-4). A ratchet: each number is what the code used when it was set, lowered as the code shrinks and raised only in the commit that needs it, with the reason. `goal` is where the 2026-11-13 analysis says the bridge should be on its 4 KB cont stack (an interrupt adds >= 256 B at peak); the gate runs loop() on an 8 KB task stack. The path budget carries 48 B over the measured path for toolchain variance between hosts; frames carry none. The ESP32's GCC 8 cannot write a call graph, so the gate has no path budget.",
   "targets": {
     "court_bridge": {
-      "loop_frame": 928,
+      "loop_frame": 208,
       "max_frame": 928,
-      "worst_path": 3136,
+      "worst_path": 2656,
       "measured": {
-        "at": "fix/ironclad (bridge 3.0.0)",
-        "loop_frame": 928,
+        "at": "fix/bridge-ota (bridge 3.1.0, phase B)",
+        "loop_frame": 208,
         "max_frame": 928,
-        "worst_path": 3136
+        "worst_path": 2608
       },
       "goal": {
         "loop_frame": 256,
         "max_frame": 512,
         "worst_path": 3000
-      }
+      },
+      "lowered": "Bridge 3.1.0 moved the lifeline (OTA, persistence, supervisor) out of loop()'s own frame into functions called from its top, and the heartbeat/reply/RSA buffers into one static: loop()'s frame went 928 -> 208 B and the deepest path 3,136 -> 2,608 B, so both budgets were lowered with it."
     },
     "door_gate": {
       "loop_frame": 32,

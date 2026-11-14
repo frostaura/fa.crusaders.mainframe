@@ -148,6 +148,11 @@ uint32_t sealEvent(StoredEvent& entry) {
   return crc32(&entry, offsetof(StoredEvent, crc));
 }
 
+StoredEvent& eventScratch() {
+  static StoredEvent scratch;
+  return scratch;
+}
+
 bool eventSealed(const StoredEvent& entry) {
   return entry.magic == kEventMagic && entry.crc == crc32(&entry, offsetof(StoredEvent, crc));
 }
@@ -174,7 +179,7 @@ void CarriedEvents::mergeLive(uint16_t carried, uint16_t live) {
   // The older carried entries, then the previous boot's, at most
   // kCarriedSlots — shedding discardables (a fault, an unknown scan) before
   // any activation or release, and then the oldest.
-  static StoredEvent entry; // never a frame (ESPR-1)
+  StoredEvent& entry = detail::eventScratch();
   const uint32_t total = static_cast<uint32_t>(carried) + live;
   uint32_t excess = total > kCarriedSlots ? total - kCarriedSlots : 0U;
   uint32_t discardables = 0U;

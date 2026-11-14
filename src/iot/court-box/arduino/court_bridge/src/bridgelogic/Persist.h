@@ -164,6 +164,9 @@ bool writeLiveEvents(IFiles& files, const Queue& queue, uint32_t bootId, uint64_
 namespace detail {
 uint32_t sealEvent(StoredEvent& entry);
 bool eventSealed(const StoredEvent& entry);
+/// The one StoredEvent every writer and reader stages through: one loop,
+/// never re-entered, so they share it (a static, never a frame: ESPR-1).
+StoredEvent& eventScratch();
 } // namespace detail
 
 template <class Queue>
@@ -175,7 +178,7 @@ bool writeLiveEvents(IFiles& files, const Queue& queue, uint32_t bootId, uint64_
   if (!files.begin(kFileEvents)) {
     return false;
   }
-  static StoredEvent entry; // one loop, never re-entered; never a frame (ESPR-1)
+  StoredEvent& entry = detail::eventScratch();
   for (uint16_t i = 0U; i < queue.size(); ++i) {
     entry = StoredEvent();
     if (!queue.at(i, entry.event)) {
