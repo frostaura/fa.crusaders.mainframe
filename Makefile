@@ -327,12 +327,11 @@ test-classes:
 # to gain it silently.
 MEMBERCODE_CORPUS = src/contracts/device-protocol/membercode
 #
-# THE V3 FAMILIES — `ota/`, `provision/`, `display/` — are each the reference
-# implementation of what they pin (signing, adoption, landing composition), so a
-# generator edited and not run is a contract nobody implements. Whole directories,
-# for the same reason as membercode/.
-V3_CORPUS = src/contracts/device-protocol/ota \
-	src/contracts/device-protocol/provision \
+# THE V3 FAMILIES — `provision/`, `display/`, `compat/` — are each the reference
+# implementation of what they pin (adoption, landing composition, how a frozen
+# board reads a body), so a generator edited and not run is a contract nobody
+# implements. Whole directories, for the same reason as membercode/.
+V3_CORPUS = src/contracts/device-protocol/provision \
 	src/contracts/device-protocol/display \
 	src/contracts/device-protocol/compat
 CORPUS_GENERATED = $(IOT_DIR)/court-box/test/test_protocol/corpus_generated.h \
@@ -345,7 +344,6 @@ corpus-check:
 	$(PY) $(IOT_TOOLS)/gen_corpus.py
 	$(PY) src/contracts/device-protocol/gate/gen_cases.py
 	$(PY) $(IOT_SHARED_TOOLS)/membercode_vectors.py
-	$(PY) src/contracts/device-protocol/ota/gen_cases.py
 	$(PY) src/contracts/device-protocol/provision/gen_cases.py
 	$(PY) src/contracts/device-protocol/display/gen_cases.py
 	$(PY) src/contracts/device-protocol/compat/gen_cases.py
@@ -533,8 +531,6 @@ test-e2e-device:
 	DOTNET="$${DOTNET:-dotnet}" PIO="$(PIO)" "$(PY)" test/e2e-device/scenario.py
 	"$(PIO)" run -d $(IOT_DIR)/door-gate -e simulator
 	DOTNET="$${DOTNET:-dotnet}" "$(PY)" test/e2e-device/door_evening.py
-	"$(PIO)" run -d $(IOT_DIR)/court-box -e bridge_sim
-	DOTNET="$${DOTNET:-dotnet}" PIO="$(PIO)" "$(PY)" test/e2e-device/ota_e2e.py
 
 # Service virtualization as plain processes.
 #

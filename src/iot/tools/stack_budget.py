@@ -6,7 +6,7 @@ The ESP8266 bridge runs loop() on a 4 KB `cont` stack, and the 2026-11-13 binary
 worst static path at 3,776-3,968 B before an interrupt adds at least 256 B more on the same stack.
 Nothing in CI looked at stack use, so one more 320-byte local inlined into loop() -- exactly what
 layout and landing work tends to produce -- would close that margin with nothing to flag it before
-the last cable flash. This reads what GCC itself reports and compares it with
+a box is flashed. This reads what GCC itself reports and compares it with
 src/iot/tools/stack_budget.json:
 
 * `-fstack-usage` writes a `.su` per translation unit: every function's frame and whether it is
