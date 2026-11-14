@@ -4946,6 +4946,15 @@ void test_grants_and_refusals_paint_their_designed_four_row_screens(void) {
   }
 }
 
+/// FSF-11: a press the pad ignores is still answered on the glass.
+void test_an_ignored_press_is_answered_with_what_comes_first(void) {
+  TEST_ASSERT_TRUE(bridgelogic::pressFirst(true) == bridgelogic::ScreenId::PickCourt);
+  TEST_ASSERT_TRUE(bridgelogic::pressFirst(false) == bridgelogic::ScreenId::ScanFirst);
+  court::ButtonMap map;
+  court::WalkUpPad pad(20000UL);
+  TEST_ASSERT_TRUE(pad.press(map, 4U, 1000U) == court::PadResult::Ignored);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
@@ -5091,5 +5100,6 @@ int main(int, char**) {
   RUN_TEST(test_a_rescan_on_the_members_own_lit_court_keeps_the_scan_for_an_extension);
   RUN_TEST(test_a_whole_http_call_ends_inside_the_wait_screen);
   RUN_TEST(test_grants_and_refusals_paint_their_designed_four_row_screens);
+  RUN_TEST(test_an_ignored_press_is_answered_with_what_comes_first);
   return UNITY_END();
 }

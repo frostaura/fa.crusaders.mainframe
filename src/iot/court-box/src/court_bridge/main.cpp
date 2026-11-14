@@ -1738,6 +1738,10 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
   case court::PadResult::Ignored:
+    // A black button (or OFF) with no court selected was answered by
+    // nothing, and the Mega's 1.5 s hint said ONE MOMENT about a press that
+    // was never going anywhere (FSF-11). Say what comes first.
+    sendScreen(screenNow(bridgelogic::pressFirst(gLastScan[0] != '\0'), screenFacts(nowMs)));
     return;
   }
 }

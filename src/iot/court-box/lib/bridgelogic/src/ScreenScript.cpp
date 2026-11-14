@@ -636,6 +636,10 @@ void renderActionRow(const court::ButtonMap& map, uint8_t from, char* out, size_
   }
 }
 
+ScreenId pressFirst(bool scanned) {
+  return scanned ? ScreenId::PickCourt : ScreenId::ScanFirst;
+}
+
 bool verdictScreen(const court::Outcome& outcome, ScreenId& id, ScreenFacts& facts) {
   if (outcome.action == court::Action::TurnOn) {
     if (outcome.court >= 4U) {

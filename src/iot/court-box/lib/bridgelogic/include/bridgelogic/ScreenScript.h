@@ -402,6 +402,11 @@ Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettin
 /// the layout.
 bool verdictScreen(const court::Outcome& outcome, ScreenId& id, ScreenFacts& facts);
 
+/// The answer to a press the pad ignored — a black button or OFF with no court
+/// selected, or a button mapped to nothing (FSF-11: every input gets a visible
+/// answer): PICK A COURT when a scan is remembered, SCAN YOUR CODE when not.
+ScreenId pressFirst(bool scanned);
+
 /// Renders one action row: four cells of kActionCellCols columns, taken from
 /// physical buttons `from`..`from+3` of `map`. A SelectCourt cell renders its
 /// letter, a GrantMinutes cell its minutes, and an `off`- or `none`-mapped slot
