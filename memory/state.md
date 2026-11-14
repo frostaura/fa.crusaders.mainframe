@@ -1,19 +1,20 @@
 ---
 name: crusaders-mainframe-state
-description: "Ironclad passes 1 and 2 integrated on fix/ironclad over a77a1d72, not pushed (2026-11-14). Mega 3.0.0, bridge 3.1.0 (OTA-capable) and gate 2.0.0 are the last cable images. Production last seen down (1033)."
+description: "Ironclad passes 1 and 2 on fix/ironclad over a77a1d72, pushed as PR #15, not merged (2026-11-14). Mega 3.0.0, bridge 3.1.0 (OTA-capable) and gate 2.0.0 are the last cable images. Production last seen down (1033)."
 type: state
 last_verified: 2026-11-14
 ---
 
 # Current state
 
-Re-measured **2026-11-14** by hand (`git fetch`, `rev-list --left-right --count`, `ls-remote`,
-`status --porcelain`). Git claims decay fastest — re-run them, never inherit them.
+Re-measured **2026-11-14** by hand (`fetch`, `rev-list`, `ls-remote`, `status`); re-run, never inherit.
 
 **The code.** The ironclad pre-go-live pass (Dean: "fix any and all, full e2e testing") ran its
 fix lanes in `~/src/.crusaders-wt/` worktrees, in two passes, both integrated on **`fix/ironclad`**
-(worktree `…/integration`): ahead of `origin/main` = `a77a1d72`, 0 behind, no upstream, **not
-pushed** — Dean's call. Integrations:
+(worktree `…/integration`): ahead of `origin/main` = `a77a1d72`, 0 behind, **pushed to
+`origin/fix/ironclad` and open as PR #15** (not merged; Auto-fix is switched on from the PR bar).
+Later commit: V-1/V-2 fixed, re-walked in Chrome. Dispositions: `https://claude.ai/artifact/DcXVM42d3H3nhxoztN8BPA`.
+The iCloud clone of this repo is still at `64ec7f43` (2026-10-22), untouched. Integrations:
 [`decisions-ironclad-integration.md`](decisions-ironclad-integration.md) (pass 1, nine lanes) and
 [`decisions-ironclad-integration-pass2.md`](decisions-ironclad-integration-pass2.md) (bridge-ota,
 app-rest). The lanes' own decisions are in `decisions-bridge-ota`, `decisions-app-rest-pass2`,
@@ -32,7 +33,7 @@ round trip per box before sealing). **Running here:** the `crusaders-int` stack 
 1. Generate the release key with `src/iot/tools/ota_sign.py keygen`, and keep the private half in
    the password manager. Its modulus is both `OTA_PUBLIC_KEY_N` and `DeviceOta__PublicKeyModulus`.
    Choose `SETUP_AP_PASSWORD` and label every enclosure with it.
-2. Review and push `fix/ironclad`. Redeploy with the **new** `docker-compose.prod.yml`
+2. Review and merge PR #15. Redeploy with the **new** `docker-compose.prod.yml`
    (sha-tagged images, `volume-init`, `backup`). Migrations run on start: PlatformTenantOnboarding,
    AddLedgerPurchaseId, AddLedgerReversesEntryId, DeviceContractV3.
 3. **Manual step at that redeploy:** a club whose stored PayFast account has no passphrase, or a
@@ -51,9 +52,7 @@ round trip per box before sealing). **Running here:** the `crusaders-int` stack 
   behind a scanning PLAYER still count as attended.
 - Toasts never tried with a real screen reader ([`decisions-frontend-shell-r19.md`](decisions-frontend-shell-r19.md)).
 
-**The blueprint** `docs/system-blueprint.html` was corrected in place on 2026-11-14 (relay drive,
-versions) but **not republished**. Its stable URL is
-`https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4`; keep it on every republish.
+**Blueprint** `docs/system-blueprint.html`: fixed in place 2026-11-14, **not republished** (keep URL `https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4`).
 
 **Still outside code:** the relay safety question ([`safety-relays.md`](safety-relays.md)), Carl's
 two lock facts ([`watch-doors.md`](watch-doors.md)), committee sign-off on charge-at-booking, and
