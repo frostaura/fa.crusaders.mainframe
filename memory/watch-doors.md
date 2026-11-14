@@ -23,10 +23,10 @@ was decided and why is [`decisions-door-gate.md`](decisions-door-gate.md) and
    reset, and the pre-`setup()` window where the pin is hi-Z and the relay module's input bias
    decides. **Do not close this by reasoning about the flags** — an earlier pass asserted "Carl's
    board is wired fail-secure" and prescribed a rewire, unverified and against wiring-is-fixed.
-2. **No gate has run on hardware, and 2.0.0's flash is the last cable one.** Bench one board first:
-   a real signed OTA round trip, a power cut with the server down, the BOOT-button portal, the RTC
-   image across a watchdog reset, and whether the bootloader has app rollback. Fire egress must be
-   mechanical; nothing here is a life-safety device.
+2. **No gate has run on hardware, and every gate change is a cable flash** (no OTA since
+   2026-11-14). Bench one board first: a power cut with the server down, the BOOT-button portal and
+   the RTC image across a watchdog reset. Fire egress must be mechanical; nothing here is a
+   life-safety device.
 3. **A court box's roster is a door key, and nothing gates it — open question for the owner.**
    A gate is pushed no roster until an admin names the door, which stops anyone holding the club
    device key self-registering a board and being handed the club's live codes. **A court box has

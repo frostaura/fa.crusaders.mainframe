@@ -50,5 +50,5 @@ BP-01, browser BM-01/03/20/21, all reproduced before the fix.
   method, a new mirror event needs the picker, `feature-spec.md` §9 and the blueprint (pinned by
   `RepositoryPostureTests`), and "credit" in an identifier fails `MinutesSourceScanTests`.
 - **Not done here:** BM-9 (mixed wire case) needs the frontend lanes to switch reads first; the
-  binding founder decisions of this pass (last physical flash, OTA, snapshot) live in the device-v3
-  decisions topic, not in this lane.
+  binding founder decisions of this pass (the v3 flash, the snapshot, and OTA — decided then and
+  removed on 2026-11-14) live in the device-v3 decisions topic, not in this lane.

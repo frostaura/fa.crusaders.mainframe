@@ -7,9 +7,10 @@ last_verified: 2026-11-13
 
 # Decisions — the admin console for device contract v3 (lane frontend-admin, 2026-11-13)
 
-Founder rulings that bind it: the next USB flash is the last; nothing an operator does may force a
-reflash; the backend is the source of truth for hardware state. So every lever an operator needs
-after that flash is on Boards or in Settings — never a cable, never a raw API call.
+Founder rulings that bind it: nothing an operator does may force a reflash; the backend is the
+source of truth for hardware state; and (2026-11-14) no board updates over the air, so a firmware
+change is a cable flash. Every other lever an operator needs is on Boards or in Settings — never a
+cable, never a raw API call.
 
 - **Every v3 panel is presence-gated and three-stated** (`components/devices/useServedRead`):
   reading, failed (a failure, never an empty answer), data — and a `404` means "this API has no
@@ -41,17 +42,16 @@ after that flash is on Boards or in Settings — never a cable, never a raw API 
   read just before, so a colleague's settings save is never undone.
 - **Club network passwords are write-only**: `psk: null` keeps the stored one, `""` is an open
   network only when ticked. The confirm names the club's `device_net_fallback_minutes`.
-- **Firmware rollout is off / one board / all, pausable**; per-board progress is each board's own
-  `fw_state`; the Mega is never a target. Upload reads back by target+version after a lost reply.
+- *Superseded 2026-11-14 —* the firmware rollout and upload panel (`FirmwarePanel`) is deleted with
+  OTA (`c307583f`); a board's status line names the firmware it runs and nothing about an update.
 - **Control board**: a lit court counts down to `lights.until` (else `seconds_remaining` re-based
   on the view's `generated_at` — *not* `as_of`, which is the last event; FA-8). "Lights on, nothing
   booked" / "checked in, lights off" need the box's CONFIRMED state and the club's grace window
   (BA-04). No remote switch-off — deferred by `device-api.md` §14; the copy now says paid courts
   are put back on from the club's record, which never switches one off (FA-9, BA-27).
 - **Field names the console reads, pending the backend lane** (device view): `capabilities`,
-  `lcd_layout`, `lcd_marquee_enabled`, `lcd_layout_acknowledged(_at)`, `fw_state`, `fw_failed`,
-  `fw_error`, `net_ver`, `net_src`, `key_id`, `restore`, the five `hw_*`, `mega`, `diag`,
-  `telemetry_at`, `drift`; rollout `keys: [{id, name, keys_sent, keys_trimmed, keys_sent_at}]`;
+  `lcd_layout`, `lcd_marquee_enabled`, `lcd_layout_acknowledged(_at)`, `net_ver`, `net_src`,
+  `key_id`, `restore`, the five `hw_*`, `mega`, `diag`, `telemetry_at`, `drift`; rollout `keys: [{id, name, keys_sent, keys_trimmed, keys_sent_at}]`;
   a door's online replay as activity reason `replayed` (MCV1-10). Types: `lib/api.ts` `AdminDevice`.
 
 Rejected: client-side enumerations "until the API serves them" (the drift the rule exists for);

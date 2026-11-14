@@ -43,5 +43,5 @@ last_verified: 2026-11-14
   be flaky while they remain.
 - **Not changed, by decision:** BD-9 (a booking code buying at `/extend` reopens threat-model #19;
   every shipped phone shows v1, which extends); FC-8's 1.x-gate corner (§1 byte-identical bodies;
-  every door gets 2.0.0 at the last flash); BA-17 (the rail names the page, recorded design);
+  every door gets 2.0.0 at its cable flash); BA-17 (the rail names the page, recorded design);
   BM-9 (needs every reader on both sides switched in one change).

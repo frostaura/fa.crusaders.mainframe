@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-device
-description: "The device contract: one per-tenant API key, auto-registration, no discovery; the brains are on the ESP8266 because the Mega cannot be flashed over WiFi; the wiring is fixed. OTA and runtime credentials arrived with v3."
+description: "The device contract: one per-tenant API key, auto-registration, no discovery; the brains are on the ESP8266; the wiring is fixed. Runtime credentials arrived with v3; OTA came with it and left again (2026-11-14)."
 type: decision
 last_verified: 2026-10-03
 ---
@@ -15,21 +15,15 @@ that needs a wire moved is the wrong fix.
   claim codes, per-device keys or device clock — one per-tenant bearer key, and a box auto-registers
   on its first heartbeat. *Why:* box and backend share a LAN and only the frontend is public, and
   that machinery defended a threat model that does not exist here. Requests are still unsigned.
-  **Its "no OTA, no runtime credential store" clauses were reversed on 2026-11-13** — signed OTA,
-  key rotation and runtime WiFi/server settings are [`decisions-device-v3.md`](decisions-device-v3.md).
-  *Why:* their premise was that a USB reflash costs nothing; the last-flash rule removed it. **`devcrypto` regained
+  **Its "no runtime credential store" clause was reversed on 2026-11-13** (key rotation, runtime
+  WiFi/server — `decisions-device-v3.md`): a box sealed at the court makes every reflash a visit.
+  **Its "no OTA" clause stands:** v3 reversed it, the founder restored it on 2026-11-14. **`devcrypto` regained
   SHA-256, HMAC, HKDF and base64url on 2026-09-23** for one narrower job — verifying the member
   code's OFF half offline ([`decisions-member-code.md`](decisions-member-code.md)) — not for
   device auth (still one bearer key).
-- **The firmware tree is one PlatformIO project per device plus `shared/`** (2026-09-19).
-  `timebase hal hal_fakes devcrypto fwversion devapi eventq roster` and the new `devlink` (heartbeat
-  body + adopted interval, event-upload body, roster push, API breaker — lifted out of
-  `bridgelogic`) live in `src/iot/shared/lib`, reached with `lib_extra_dirs = ../shared/lib`. *Why:*
-  a second device needs all of it; the alternatives were a copy that drifts or a package versioned
-  for two consumers of one repo. **A module belongs in `shared/` only if a second, unrelated device
-  would want it UNCHANGED** — "could be shared" admits everything. Where a shared and a device
-  constant must agree the assert lives on the device side, in
-  `court-box/lib/bridgelogic/RosterTokenFits.h`.
+- **The firmware tree is one PlatformIO project per device plus `shared/`** (2026-09-19; the rule
+  for what goes in `shared/lib` is CLAUDE.md's). *Why:* a second device needs all of it; the
+  alternatives were a copy that drifts or a package versioned for two consumers of one repo.
 - **Flashing is the Arduino IDE**, from the generated sketches in `src/iot/court-box/arduino/`;
   PlatformIO stays the tested build and `court_mega` compiles byte-identical between the two. *Why:*
   the founder flashes these boards, and a Makefile target is not how that happens at a squash club.
@@ -37,12 +31,11 @@ that needs a wire moved is the wrong fix.
 - **The brains live on the ESP8266.** The ATmega2560 cannot be flashed over WiFi — its ESP sits on
   Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET — so the Mega is a thin I/O
   layer with an **independent per-relay auto-off timer** and everything volatile runs on the ESP.
-  *Why:* USB-only flashing of the Mega becomes a non-event rather than a trip to the club, and the
+  *Why:* the Mega image stays frozen while the bridge carries what the server steers (since
+  2026-11-14 neither chip updates over the air, so a bridge change is a cable flash too), and the
   independent timer is the fail-safe — nothing strands a lit court when the network goes away.
-- **The LCD layout is a runtime setting from Mega 3.0.0** (compact 16×2 / expanded 20×4, booting and
-  falling back to compact) — [`decisions-device-v3.md`](decisions-device-v3.md). *Why:* the fitted
-  panel is unknown (a "2004A from a build photo" here, "a 16x2" in the code's own comments) and a
-  compile-time guess cannot be corrected after the last flash. Still look at the panel first.
+- **The LCD layout is a runtime setting from Mega 3.0.0** (`decisions-device-v3.md`). *Why:* the
+  fitted panel is unknown (a "2004A" in a build photo, "a 16x2" in code comments). Look at it.
 - **The legacy single-byte serial dialect is refused on the production Mega** (`LegacyDialect::
   Refuse`; the simulator opts in). The bare `A` closed a relay with no checksum on a UART that
   receives the ESP's 74880-baud boot banner at every reset — a phantom ninety-minute lighting with

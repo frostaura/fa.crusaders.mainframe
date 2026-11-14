@@ -37,5 +37,5 @@ was cross-checked on ~17,000 generated cases with zero disagreements and is safe
 - **A placeholder master key refuses to start outside Development.** *Why:* production's compose
   held `CHANGE-ME`, and a key changed after enrolment rotates every member secret (MCV1-09). Before
   any production redeploy: set it once, record each board's `running_version` and caps,
-  acknowledge the court boxes, hold the rollout until the last flash is verified. Since pass 2 an
+  acknowledge the court boxes, hold the rollout until the flash is verified. Since pass 2 an
   automatic move also raises `member_code.phase_moved` the day it happens.

@@ -36,9 +36,9 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
 - **A device that loses its key entitlement is sent EMPTY `code_days`/`code_keys`, never an
   omission** — an absent key means "no member codes here" and keeps the old ring.
 - **D10 pay-for is out of the court-box image from bridge 3.1.0** (founder, 2026-11-13; 3.0.0
-  still linked it, BR-17). *Why:* the panel stopped reaching it at 2.3.0, and dead code in a last-flash image is debt. The server keeps
+  still linked it, BR-17). *Why:* the panel stopped reaching it at 2.3.0, and dead code in a long-lived image is debt. The server keeps
   `/pay-for` (three-row glass, online only, `amount_label` echo — spec §9), held to
-  `membercode/payfor.json`, read by the server only: it can return by bridge OTA, no Mega change.
+  `membercode/payfor.json`, read by the server only: it can return with a bridge cable flash, no Mega change.
 - **A code the device already acted on is refused LOCALLY before any online call**
   (`memcode::knownReplay`, both ESP boards). *Why:* offline open, link back, photo scanned before
   the open was uploaded — the server had not heard of the first use (refute round 2, 2026-09-28).
@@ -52,8 +52,8 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   pay-for forgets the scan ONLY for `code_used`/`not_recognised`** (2.2.4, D9-1, in bridgelogic's
   `WalkUpResult::forgetsScan`) — never on `recognised`, false for every refusal made before the
   token resolves (TOO LONG lost the scan); `code_used` reads `CODE USED` at pay-for too (D9-2).
-- **Versions** are the device contract's, not this topic's: the v3 last flash (Mega 3.0.0, bridge
-  3.0.0, door 2.0.0) is [`decisions-device-v3.md`](decisions-device-v3.md); the flash order and
+- **Versions** are the device contract's, not this topic's: the v3 images (Mega 3.0.0, bridge
+  3.1.0, door 2.0.0, all by cable) is [`decisions-device-v3.md`](decisions-device-v3.md); the flash order and
   what is owed are in [`state.md`](state.md). The bridge unflags `[common]`'s MINOR/PATCH by its
   own tokens. Server half: `decisions-member-code-backend.md`; keys in every phase, the cut-over's
   blockers and the v1 extend fix (2026-11-13): `decisions-member-code-cutover.md`.

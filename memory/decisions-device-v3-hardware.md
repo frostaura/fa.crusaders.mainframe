@@ -31,8 +31,10 @@ procedure in `lights-controller.md`.
   completed a scan. The Mega never writes to the scanner, so it cannot configure one.
 - **Which keys are court keys is a `KEYS` mask the bridge derives from `button_map`.** *Why:* 2.1.0
   hard-coded pins 30–36 as duration keys for unarmed presses, outside the backend's remap.
-- **The gate's hardware facts stay compiled.** *Why:* the gate has no frozen half — an OTA image
-  corrects them — so a setting would be code with no case to serve.
+- **The gate's hardware facts stay compiled.** *Why:* the gate has no frozen half — a cable flash
+  of the gate corrects them, the same visit any gate firmware change is — so a setting would be
+  code with no case to serve (`door-gate.md` §14.6). The why was "an OTA image corrects them"
+  until 2026-11-14; the decision survived the removal.
 - **Still physical, still owed by a person:** the relay module's part number, trigger level, rating
   and output type, and whether it switches a contactor coil or the load (`safety-relays.md`); the
   button order; the panel's geometry; the bootloader surviving a watchdog reset (FWM-11).

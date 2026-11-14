@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-door-gate-v3
-description: "Gate 2.0.0 (2026-11-13), the last cable flash: what survives a reset and where, signed OTA with probation, key ring, runtime network and portal, the v3 readers, and why each choice was made."
+description: "Gate 2.0.0 (2026-11-13), flashed by cable like every gate change (OTA removed 2026-11-14): what survives a reset and where, key ring, runtime network and portal, the v3 readers, and why."
 type: decision
 last_verified: 2026-11-13
 ---
@@ -27,16 +27,13 @@ addendum topics; the spec is `docs/specs/door-gate.md` §14. These are the door'
   was lost is a no-op; re-queuing under the new boot would duplicate it and misdate it.
 - **Records are written at the top of a pass, never inside a decision**, and no record buffer is
   a stack local. *Why:* the first stack measurement (stackan.py, windowed ABI, from `loopTask`)
-  read 8464 B against an 8 KB task — two `= Record()` temporaries. Now 4576 B, worst path
-  heartbeat → OTA offer → RSA verify, inside the contract's 6000.
-- **The release signature is checked before a byte is downloaded**, and again over what arrived.
-  *Why:* an unsigned offer costs nothing and an unsigned 900 KB download costs a minute of a busy
-  door's loop. A cut or refused download is retried after 10 min and never failed-listed; a hash or
-  signature mismatch is failed-listed for good.
-- **Probation is the firmware's own** (NVS record: boots counted from `setup()`, rollback on the
-  fourth or when the window passes, the other slot reselected). Arduino's default marks the app
-  valid at boot. *Why:* the bootloader's own rollback would roll back on the FIRST crash; the
-  contract says three. Whether the prebuilt bootloader has rollback at all is a bench check.
+  read 8464 B against an 8 KB task — two `= Record()` temporaries. Then 4576 B, worst path
+  heartbeat → OTA offer → RSA verify, inside the contract's 6000; that path left with OTA and the
+  new worst path has not been re-measured (`stack_budget.json` still quotes 4,576).
+- *Superseded 2026-11-14 — signed OTA removed* (`31cc8113`: GateOta, the slot and download
+  drivers, probation and its LED pattern, the OTA record, `ota:1`). Its two choices, for a restore:
+  the signature was checked before a byte was downloaded, and probation was the firmware's own
+  because the bootloader's rollback fires on the FIRST crash. RAM 110,412 → 104,588 B.
 - **A 401 is retried once with the other key, and the key that worked is tried first after.**
   *Why:* a 401 is as likely a server restored from an old backup as a retired key; never erasing
   and remembering the working key costs one extra call once, not on every request.
@@ -49,11 +46,10 @@ addendum topics; the spec is `docs/specs/door-gate.md` §14. These are the door'
 - **The scanner's idle gap is 150 ms and only ends a line on a pass that found the UART empty**;
   a gap-ended line needs 8+ characters. *Why:* a gap measured across a 4-second call would cut a
   member's scan in two; 8 is the Mega's own rule, so both devices treat suffix-less scanners alike.
-- **The gate's hardware facts stay compiled** (§14.6): an OTA image corrects any of them.
+- **The gate's hardware facts stay compiled** (§14.6): a cable flash corrects any of them.
 - **MCV1-10's wire form is the gate's proposal, not yet a corpus vector:** a replay refusal's event
   carries `"reason":"replayed","online":<bool>` after `duration_ms`. The server ignores unknown
   event fields today; the contract and backend lanes own pinning and rendering it.
-- **The simulator has no OTA slot and no portal** (a process cannot replace its own image or open
-  an access point); both are proven against the same `GateApp` in `test_gate_v3` with simulated
-  power cuts, warm resets and OTA reboots. It gained `--warm`, file-backed records and exit 75 on
+- **The simulator has no portal** (a process cannot open an access point); it is proven against
+  the same `GateApp` in `test_gate_v3` with simulated power cuts and warm resets. It gained `--warm`, file-backed records and exit 75 on
   a restart request.

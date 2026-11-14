@@ -11,9 +11,10 @@ Taken by the orchestrator under Dean's "fix any and all" go-ahead, after four la
 (FC-1…13, ESPR-1…8, HW-1…11, MCV1-01…11) that the first v3 draft never saw. Spec:
 `docs/specs/device-api.md` §11 and §13; corpus `src/contracts/device-protocol/compat/`.
 
-- **The lifeline is frozen append-only: bearer key + `key_next`, `net`, the `ota` offer and the
-  firmware download.** *Why:* the Mega can never be reflashed and each ESP image is only updatable
-  while those keep working; one incompatible server change there strands the fleet for good. A
+- **The lifeline is frozen append-only: bearer key + `key_next` and `net`** (the `ota` offer and
+  the firmware download left it with OTA on 2026-11-14). *Why:* a board can be steered without a
+  visit only while those keep working; one incompatible server change there strands the fleet
+  until every board is cable-flashed. A
   board reads them from any complete body even when the rest has drifted, and the server never
   sheds them (it would alternate a lifeline-only body first).
 - **Element grammars only grow at the end; readers take the first N fields.** *Why:* 2.3.0 refused
@@ -41,9 +42,9 @@ Taken by the orchestrator under Dean's "fix any and all" go-ahead, after four la
 - **`make device-replay-check` runs the server's real replies through both firmwares'
   host-compiled parsers.** *Why:* the corpus holds bytes someone wrote; the live server had already
   drifted from it (19-char `server_time`, a 120 cap) and no test noticed (FC-9).
-- **Every board reports `diag` (reset reason, heap, largest block, stack low-water, OTA space) and
-  the box forwards the Mega's `!BOOT`/`!HW`/`!DIAG` as `mega`.** *Why:* after the last cable flash
-  the heartbeat is the only window; a brown-out, a wedged LCD and a stack overflow all looked like
+- **Every board reports `diag` (reset reason, heap, largest block, stack low-water) and the box
+  forwards the Mega's `!BOOT`/`!HW`/`!DIAG` as `mega`.** *Why:* between cable flashes the
+  heartbeat is the only window; a brown-out, a wedged LCD and a stack overflow all looked like
   "unreliable hardware" (HW-3, HW-6, ESPR-2). Floors: largest block 4096, stack 512.
 - **A CI gate fails the build on stack and RAM budgets** (bridge worst path 3000 of 4096, loop frame
   256, any frame 512; gate 6000 of 8192; Mega static RAM 4096). *Why:* the bridge's worst static
