@@ -1,6 +1,6 @@
 // Crusaders Mainframe — reading ONE member of ONE small JSON object, with its
-// type and its escapes, for the three v3 objects a heartbeat can carry: `ota`,
-// `net` and `key_next` (docs/specs/device-api.md §6–§8).
+// type and its escapes, for the two v3 objects a heartbeat can carry: `net`
+// and `key_next` (docs/specs/device-api.md §6, §8).
 //
 // WHY NOT devapi::json ALONE
 // --------------------------

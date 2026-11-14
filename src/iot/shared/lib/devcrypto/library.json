@@ -1,7 +1,7 @@
 {
   "name": "devcrypto",
   "version": "2.2.0",
-  "description": "Lowercase hex, strict base64url, SHA-256, HMAC-SHA-256, HKDF-SHA-256 and RSA-2048 PKCS#1 v1.5 signature verification — the primitives under the member code's offline verification and signed OTA. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
+  "description": "Lowercase hex, strict base64url, SHA-256, HMAC-SHA-256, and HKDF-SHA-256 — the primitives under the member code's offline verification. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
   "keywords": "hex, base64url, sha256, hmac, hkdf, embedded",
   "frameworks": "*",
   "platforms": "*",
