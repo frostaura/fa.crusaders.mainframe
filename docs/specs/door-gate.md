@@ -3,9 +3,9 @@
 The behaviour oracle for a door controller: what it is told, what it decides, what it may
 never do, and what it does when the network is gone.
 
-> **Gate 2.0.0 (device contract v3, 2026-11-13) is the image flashed by cable for the last time.**
-> From it on the gate updates itself from signed releases, rotates its key, changes its WiFi and
-> server address without a visit, and keeps its roster across a reset — [§14](#14-v3--gate-200-what-survives-a-reset-and-fixing-a-door-without-a-cable).
+> **Gate 2.0.0 (device contract v3, 2026-11-13) is the image to flash by cable.** From it on the
+> gate rotates its key, changes its WiFi and server address without a visit, and keeps its roster
+> across a reset. It has no remote firmware update: a new gate image is another cable flash — [§14](#14-v3--gate-200-what-survives-a-reset-and-fixing-a-door-without-a-cable).
 > Where a sentence below describes 1.x behaviour that §14 changes, §14 wins and the sentence says so.
 
 `src/contracts/device-protocol/gate/manifest.json` names this file as its authority, so a
@@ -2007,7 +2007,7 @@ five device routes, which would go red the moment an admin route joined that gro
 The founder's decisions of 2026-11-13 ([`device-api.md`](device-api.md), the preamble) apply to
 the door exactly as to the court box; this section is what they mean on a board with a scanner,
 one relay, one lamp and no screen. Wire shapes: `gate/` `gate-heartbeat-request-v3*` and
-`gate-heartbeat-response-v3*`, `ota/`, `provision/`.
+`gate-heartbeat-response-v3*`, `provision/`.
 
 ### 14.1 What survives a reset
 
@@ -2020,18 +2020,11 @@ The first accepted heartbeat replaces all of it, and its `restore` field tells t
 case the board ran in (DG-2, DG-11). Undelivered events are written on push and cleared by the
 server's `accepted_through`, so an offline evening survives a power cut.
 
-### 14.2 OTA
+### 14.2 No remote firmware update
 
-[`device-api.md`](device-api.md) §7 in full, for target `door_gate`. On the gate: the image goes
-into the **other app slot** of the default partition table (two 1.25 MB slots; the image is about
-800 KB); the download feeds the task watchdog per chunk so the 15 s bound of §11a.2 still holds;
-it starts only with the lock engaged, no release window open and no scan waiting in the
-assembler; the boot partition is switched only after size, SHA-256 and the signature all agree;
-and a new image that has not had a heartbeat accepted within `device_ota_probation_minutes`, or
-resets three times first, switches back to the previous slot — which still holds the previous
-image, so the gate's rollback needs no copy. The lamp shows the update (14.5). Whether the pinned
-core's prebuilt bootloader also has app rollback enabled is a bench check; the firmware's own
-probation does not depend on it.
+[`device-api.md`](device-api.md) §7, for the door as for the court box: the gate is never offered
+an image and downloads nothing, whatever it names in `caps`. A door is answered as v3 when it names
+`key:1` or `net:1`; `ota:1` alone unlocks nothing. A new gate image is a USB flash at the door.
 
 ### 14.3 Key rotation, network changes, the setup portal
 
@@ -2071,8 +2064,6 @@ cue.
 | **healthy idle** | dark (unchanged) |
 | **degraded idle**: the last heartbeat was not a 200, the roster is empty, or it is older than two intervals | one short blip every 5 s (DG-6) |
 | **setup portal open** | long-short, repeating |
-| **downloading an update** | 2 Hz |
-| **probation** (new image not yet committed) | one double-blip every 5 s |
 
 ### 14.6 Forward compatibility, budgets and telemetry (addendum, 2026-11-13)
 
@@ -2084,7 +2075,7 @@ gate-specific consequences:
   a later server's `"gate":{"lamp":{"unlock_seconds":30},…}` cannot drive the lock for thirty
   seconds. The server's test asserts the object has no nested value.
 - **`device_fault_reporting` and `device_fault_max_per_hour` are sent at last** (FC-8), inside
-  `gate` after the three v3 settings, from the tenant settings of the same names. Every gate image
+  `gate` after the two v3 settings (`power_restore_trust_minutes`, `net_fallback_minutes`), from the tenant settings of the same names. Every gate image
   has read them from there; no server sent them, so the fault channel ran on compiled defaults.
 - **Budgets** (`compat/` `budgets`): heartbeat 6144 of 8192, the scan decision **110 of 256** (1.x
   read it into 128 and turned anything longer into status 0, which taught the breaker the server
@@ -2096,8 +2087,8 @@ gate-specific consequences:
 - **The stall watchdog** of [`device-api.md`](device-api.md) §8: link up, no accepted heartbeat for
   six hours, restart when idle (lock engaged, nothing waiting).
 - **The gate's hardware facts stay compiled** — the lock relay's level, the lamp pin, the scanner's
-  baud. Unlike the Mega, the gate has no frozen half: an OTA image corrects any of them, so a
-  runtime setting would be code with no case to serve. The scanner already ends a suffix-less line
+  baud. A wrong one is corrected by flashing the gate by cable, the same visit any gate firmware
+  change needs (§14.2); no case has yet asked for a runtime setting. The scanner already ends a suffix-less line
   at the idle gap (§14.4, DG-5).
 - **A replay refused locally while online is uploaded as `replayed`**, with the board's link state
   as it was, not as an offline `unknown_scan` (MCV1-10). On the wire it is the `unknown_scan`

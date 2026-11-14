@@ -123,11 +123,6 @@ services:
       # After a database loss ONLY: the device key every board already holds, from the password
       # manager. Applied to a club with no key, never over a live one; empty does nothing.
       Bootstrap__DeviceApiKey: ""
-      # The club's firmware release key's PUBLIC modulus, 512 hex characters, printed by
-      # `src/iot/tools/ota_sign.py keygen` (the private half stays in the password manager). It is
-      # the same value compiled into every board as OTA_PUBLIC_KEY_N. Empty = signed OTA is off:
-      # uploads are refused and no board is offered anything. The corpus TEST key refuses to start.
-      DeviceOta__PublicKeyModulus: ""
       # ---- Inherent administrators ----
       # Whoever is listed here holds club-admin rights in every club on this deployment where
       # that address ALREADY has an account. It is applied at sign-in, so an address added
@@ -177,7 +172,7 @@ services:
       # moves images and nothing else, so the image still carries the old 172.29.83.0/24
       # default. Without this line the gateway is an untrusted peer, X-Forwarded-For/-Proto/
       # -Host are ignored, the whole club lands in one rate-limit bucket, and every absolute
-      # URL the API composes (verification links, PayFast returns, OTA and provisioning URLs)
+      # URL the API composes (verification links, PayFast returns, provisioning URLs)
       # is built from the gateway's port-less host instead of the public one.
       # Comma-delimited SCALAR, never the indexed form — .NET merges arrays by index, so the
       # indexed form cannot narrow a default, only add to it.

@@ -113,10 +113,8 @@ services:
       Bootstrap__AdminEmail: ${BOOTSTRAP_ADMIN_EMAIL:-}
       Bootstrap__AdminPassword: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       Bootstrap__Courts: ${BOOTSTRAP_COURTS:-4}
-      # Device contract v3 (device keys only, docs/specs/device-api.md §6–§7): the boards' key on a
-      # rebuilt stack, and the OTA verification modulus (empty = OTA off).
+      # Device contract v3 (docs/specs/device-api.md §6): the boards' key on a rebuilt stack.
       Bootstrap__DeviceApiKey: ${BOOTSTRAP_DEVICE_API_KEY:-}
-      DeviceOta__PublicKeyModulus: ${DEVICE_OTA_PUBLIC_KEY_MODULUS:-}
       # Inherent administrators of the deployment — club-admin rights in every club where that
       # address already has an account. Deployment-owned, not club-owned; not a secret, but
       # security-relevant. The full note is in docker-compose.prod.yml and appsettings.json.

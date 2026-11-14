@@ -503,9 +503,9 @@ with old firmware) raises an admin notice; online it still works.
 
 ### 8.1 Flashing, which only Dean can do
 
-**Superseded for the v3 flash** ([`device-api.md`](device-api.md), the preamble): the next USB
-flash is the last and **the Mega is flashed too** — Mega 3.0.0 first, then bridge 3.0.0, then each
-door at 2.0.0; after that every ESP update is a signed OTA. What follows is the 2.x procedure,
+**Superseded for the v3 flash** ([`device-api.md`](device-api.md), the preamble): **the Mega is
+flashed too** — Mega 3.0.0 first, then bridge 3.0.0, then each door at 2.0.0. There is no remote
+update ([`device-api.md`](device-api.md) §7), so every later image is a cable flash as well. What follows is the 2.x procedure,
 kept because its DIP positions and its *proof it landed* check still apply to the bridge half.
 
 - **Court box bridge (ESP8266)**: Arduino IDE, sketch `src/iot/court-box/arduino/court_bridge/`
@@ -526,7 +526,7 @@ kept because its DIP positions and its *proof it landed* check still apply to th
 > reaching this flow at 2.3.0 and the last-flash image drops it. The server keeps serving
 > `/api/v1/device/pay-for` exactly as below, held to `membercode/payfor.json` (read by the server
 > only), because the flow needs nothing from the Mega that v3 does not render and can return by a
-> bridge OTA alone ([`device-api.md`](device-api.md) §7).
+> bridge flash alone.
 
 ### 9.1 The flow
 
