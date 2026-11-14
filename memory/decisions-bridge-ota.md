@@ -28,7 +28,8 @@ Contract and its why: `decisions-device-v3*.md`. These are the bridge's own choi
   flash-resident** (`bridgelogic/FlashTable.h`, `memcpy_P` copies of rows with byte fields;
   pointer/word tables read in place). **The roster and the 64-key ring replace in place**, each
   deciding an all-unreadable array in a first pass (FC-1). *Why:* phase B added ~8 KB of static
-  RAM to an image 240 B above the 24 KB heap floor. Result: static 57,272 → heap 24,648 B.
+  RAM to an image 240 B above the 24 KB heap floor. Result: static 57,272 → heap 24,648 B
+  (57,288 / 24,632 after integration's lizard splits — see the pass-2 integration topic).
 - **The last accepted answer is persisted WHOLE and re-adopted through the live readers.**
   *Why:* one adoption path; a restored box cannot read its own flash differently from the wire.
   Once a minute, at once when the lit set changes. Warm = RTC-memory epoch (exact ages); cold =

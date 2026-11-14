@@ -67,7 +67,14 @@ when all six builds passed and only forward. The redeploy is
 - [ ] Before that redeploy: `make migrations-pending REF=<commit> PSQL=…` run against the club's
       database (IO-06). At least `AddSeatShortfall` is owed, and probably `AddDemoClubs`,
       `AddDemoMemberView`, `AddEmailOutbox` and `FindableByDefault`, which turns every member's
-      *not findable* choice back on — count those members first.
+      *not findable* choice back on — count those members first. The ironclad pass adds four
+      more, in this order: `PlatformTenantOnboarding`, `AddLedgerPurchaseId`,
+      `AddLedgerReversesEntryId`, `DeviceContractV3`; a fresh database and one at `a77a1d72`'s
+      schema migrate to identical schemas (`pg_dump --schema-only`, 2026-11-14).
+- [ ] **Manual step at that redeploy — PayFast.** A club whose stored PayFast account has no
+      passphrase, or a placeholder one, now reads as *not configured* and top-ups are off until
+      it is entered under **Settings › Money › PayFast account** (§3). Check it straight after
+      the stack is up, before a member tries to pay.
 - [ ] A manual redeploy of the club stack performed once, end to end, by the runbook, pinned to
       a `sha-` tag, and the commit recorded in the memory store's state topic.
 - [ ] **Production reachable**: `https://crusaders.frostaura.net/healthz` answers. On
@@ -588,6 +595,12 @@ it has only ever been reasoned about.
       stopped sending `!AUTH`, and it is invisible any other way.
 - [ ] A `device.relay_restore_failed` row treated as urgent rather than informational — it
       means a court is dark that should not be.
+- [ ] The two server-filed light faults read with the club's habits in mind (BA-04):
+      `lights_on_nothing_booked` (a court lit with nothing booked — a coach's session nobody
+      booked, or a relay that did not open) and `checked_in_lights_off` (a member checked in on a
+      dark court — the error that costs a member their game). Both wait out the grace window,
+      ignore offline or out-of-service boxes, and clear themselves ("Cleared on its own") once the
+      box and the bookings agree, so a long-standing one is real.
 
 ---
 

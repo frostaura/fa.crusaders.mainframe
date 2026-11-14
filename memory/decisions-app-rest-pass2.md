@@ -33,7 +33,7 @@ last_verified: 2026-11-14
 - **An automatic member-code move raises `member_code.phase_moved`** (MCV1-09), once per move;
   the legacy phase's console words no longer claim phones show the old code (MCV1-04).
 - **The widest v3 vector writes `device_fault_max_per_hour` 120**, 4086 bytes (the C++ test binds
-  only fit and parse). `V3Heartbeat.h` and test_bridgelogic comments still say 4087 — court-box's.
+  only fit and parse); the court box's buffer comments were corrected to 4086 at integration.
 - **FM-12:** `vite.config.ts` stops every gate over a stale install (`src/depsFreshness.ts`).
 - **FM-7, measured:** 1,492 act warnings → fixed chart-theme (813, unmount the animating chart),
   AdminDoorsLog, AdminLedger and nine more (`vi.waitFor` never leaves act; RTL `waitFor` does),

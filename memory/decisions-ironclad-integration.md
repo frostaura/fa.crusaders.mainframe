@@ -45,13 +45,13 @@ contract's reference verifier.
 out of service (door commits an empty roster). That is what suspending a club means, and it
 is declared the one other 403 source in `DeviceForbiddenMeansOutOfServiceTests`.
 
-**Owed at integration, since built on `fix/bridge-ota` (bridge 3.1.0, `decisions-bridge-ota.md`): bridge phase B** — signed OTA, key_next,
-runtime network, setup portal, supervisor, stall watchdog and LittleFS persistence. Bridge
-3.0.0 announces `codes:m1 hb:3 lcd:2` only. The Mega 3.0.0 and gate 2.0.0 flashes are final;
-the bridge's is not (go-live checklist §2c, §5). Box halves of FC-11 (fractions report no
-drift), MCV1-07 (24-key ring, not 64) and `test_compat` are also owed.
+**Owed after pass 1, delivered in pass 2:** bridge phase B (bridge 3.1.0, `ota:1 key:1 net:1`;
+[`decisions-bridge-ota.md`](decisions-bridge-ota.md)) and the box halves of FC-11 and MCV1-07
+(64-key ring). Merged and gated in
+[`decisions-ironclad-integration-pass2.md`](decisions-ironclad-integration-pass2.md);
+`test_compat` is still owed.
 
-**Gates on the integrated tree:** backend 4,501/4,501 on Postgres; vitest 6,638 + 2 expected
+**Pass 1's gates on its integrated tree:** backend 4,501/4,501 on Postgres; vitest 6,638 + 2 expected
 fail; Playwright 2,376 passed (1 large-text flake, green on rerun); firmware native and ASAN
 188/386/183; corpus-check, arduino-check, complexity, stack budgets, device-replay-check and
 infra 71/71 green. Device e2e: everything but the two harness gaps in the state topic.
