@@ -177,6 +177,10 @@ void CourtBox::poll() {
   flushTx();
 }
 
+void CourtBox::sampleButtons() {
+  panel_.sample(clock_.nowMs());
+}
+
 // --- one pass --------------------------------------------------------------
 
 void CourtBox::drainBridge(uint32_t nowMs) {

@@ -4,7 +4,8 @@
 
 namespace courtlogic {
 
-ButtonPanel::ButtonPanel(hal::IButtonPort& buttons) : buttons_(buttons), settle_(), candidate_(), stable_() {
+ButtonPanel::ButtonPanel(hal::IButtonPort& buttons)
+    : buttons_(buttons), settle_(), candidate_(), stable_(), latched_(0U) {
   for (uint8_t i = 0U; i < hal::kButtonCount; ++i) {
     candidate_[i] = kInitialPressed;
     stable_[i] = kInitialPressed;
@@ -12,7 +13,14 @@ ButtonPanel::ButtonPanel(hal::IButtonPort& buttons) : buttons_(buttons), settle_
 }
 
 uint8_t ButtonPanel::poll(uint32_t nowMs) {
-  uint8_t pressed = 0U;
+  sample(nowMs);
+  const uint8_t pressed = latched_;
+  latched_ = 0U;
+  return pressed;
+}
+
+void ButtonPanel::sample(uint32_t nowMs) {
+  uint8_t pressed = latched_;
   for (uint8_t i = 0U; i < hal::kButtonCount; ++i) {
     // INPUT_PULLUP: the switch shorts to ground, so LOW is pressed. The
     // inversion is read out of hal/Button.h rather than written again here.
@@ -37,7 +45,7 @@ uint8_t ButtonPanel::poll(uint32_t nowMs) {
       pressed = static_cast<uint8_t>(pressed | buttonBit(i));
     }
   }
-  return pressed;
+  latched_ = pressed;
 }
 
 bool ButtonPanel::isPressed(uint8_t channel) const {

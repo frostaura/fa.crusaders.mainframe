@@ -136,6 +136,14 @@ public:
   /// once. Safe to call as fast as the CPU allows.
   void poll();
 
+  /// Look at the buttons between passes (DL-15): the debounce rule applied to
+  /// one more sample, any press it completes latched for the next poll(). The
+  /// LCD driver calls this between bus transactions so a pass spent painting
+  /// the glass is not a pass in which a tap can come and go unseen. Touches
+  /// the button panel and the clock and nothing else, so it is safe from
+  /// inside poll()'s own paint.
+  void sampleButtons();
+
   // --- diagnostics ---------------------------------------------------------
   //
   // Counters rather than logs: an 8-bit part has nowhere to keep a log, and the
