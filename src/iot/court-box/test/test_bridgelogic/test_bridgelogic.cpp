@@ -4762,12 +4762,33 @@ void setUp() {
 void tearDown() {
 }
 
+// FC-11 (box half): a fraction or an exponent in a Mega setting is drift, and
+// the setting keeps its value. 3.0.0 read `60.5` as 60 and said nothing — the
+// replay check's fraction mutation found it.
+void test_a_fraction_or_exponent_in_a_mega_setting_is_drift_and_keeps_the_value() {
+  static const char* const kBodies[] = {
+      "{\"config\":{\"lcd_reinit_seconds\":120.5,\"lcd_landing_page_seconds\":9}}",
+      "{\"config\":{\"lcd_reinit_seconds\":1.2e2,\"lcd_landing_page_seconds\":9}}",
+      "{\"config\":{\"lcd_reinit_seconds\":\"120\",\"lcd_landing_page_seconds\":9}}",
+  };
+  for (const char* body : kBodies) {
+    bridgelogic::Drift drift;
+    bridgelogic::MegaConfig cfg;
+    bridgelogic::readMegaConfig(body, strlen(body), bridgelogic::defaultMegaConfig(), cfg, drift);
+    expectCfg(cfg, "REINIT", 60U); // the boot default, kept
+    expectCfg(cfg, "PAGE", 9U);    // its neighbour adopted
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, drift.count, body);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("config.lcd_reinit_seconds", drift.names[0], body);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
   RUN_TEST(test_corpus_v3_a_release_says_why_the_relay_opened);
   RUN_TEST(test_corpus_v3_the_snapshot_and_its_settings_are_read_from_config_only);
   RUN_TEST(test_corpus_v3_display_and_hardware_settings_clamp_independently);
+  RUN_TEST(test_a_fraction_or_exponent_in_a_mega_setting_is_drift_and_keeps_the_value);
   RUN_TEST(test_corpus_v3_lifeline_answers_still_carry_the_snapshot);
   RUN_TEST(test_corpus_v3_the_widest_answer_fits_the_buffer_and_is_read_whole);
   RUN_TEST(test_corpus_v3_activate_arms_relighting_from_the_uncapped_remainder);
