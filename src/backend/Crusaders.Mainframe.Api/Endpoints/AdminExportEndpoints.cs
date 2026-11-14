@@ -108,10 +108,10 @@ public static class AdminExportEndpoints
     /// box on its court could be reached is listed and says so (E6-6): it is not held against anyone.
     /// </summary>
     public static async Task<IResult> NoShowsAsync(
-        DateOnly? from, DateOnly? to, HttpContext ctx, MainframeDbContext db, ITenantContext tenant,
-        TenantSettingsAccessor settings, CancellationToken ct)
+        DateOnly? from, DateOnly? to, HttpContext ctx, [AsParameters] ExportServices services, CancellationToken ct)
     {
-        var view = await settings.GetAsync(ct);
+        var (db, tenant) = (services.Db, services.Tenant);
+        var view = await services.Settings.GetAsync(ct);
         var zone = ClubClock.ZoneOf(view);
         var last = to ?? ClubClock.Today(view);
         var first = from ?? last.AddDays(-30);
@@ -139,18 +139,29 @@ public static class AdminExportEndpoints
         var csv = new StringBuilder(NoShowsHeader).Append("\r\n");
         foreach (var b in rows)
         {
-            var local = TimeZoneInfo.ConvertTime(b.StartsAt, zone);
-            var who = b.UserId is { } id && members.TryGetValue(id, out var m) ? m : (FullName: null, MembershipNumber: null);
-            csv.Append(CsvCell.Line(
-                local.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), local.ToString("HH:mm", CultureInfo.InvariantCulture), timezone,
-                courts.GetValueOrDefault(b.CourtId), who.FullName, who.MembershipNumber,
-                b.AmountChargedMinutes.ToString(CultureInfo.InvariantCulture),
-                penalties.GetValueOrDefault(b.Id).ToString(CultureInfo.InvariantCulture),
-                NoShows.IsRefundedForOutage(b) ? "yes" : "no"));
+            csv.Append(NoShowLine(b, TimeZoneInfo.ConvertTime(b.StartsAt, zone), timezone, courts.GetValueOrDefault(b.CourtId),
+                MemberOf(b.UserId, members), penalties.GetValueOrDefault(b.Id)));
         }
 
         await RecordAsync(db, tenant, ctx, NoShowsExportedAction, new { from = first, to = last, rows = rows.Count }, ct);
         return File(ctx, csv, $"no-shows-{first:yyyy-MM-dd}-{last:yyyy-MM-dd}.csv", rows.Count);
+    }
+
+    private static (string? FullName, string? MembershipNumber) MemberOf(Guid? userId, Dictionary<Guid, (string FullName, string MembershipNumber)> members)
+    {
+        if (userId is not Guid id || !members.TryGetValue(id, out var m)) return (null, null);
+        return (m.FullName, m.MembershipNumber);
+    }
+
+    private static string NoShowLine(
+        Booking b, DateTimeOffset local, string timezone, string? court, (string? FullName, string? MembershipNumber) who, int penalty)
+    {
+        return CsvCell.Line(
+            local.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), local.ToString("HH:mm", CultureInfo.InvariantCulture), timezone,
+            court, who.FullName, who.MembershipNumber,
+            b.AmountChargedMinutes.ToString(CultureInfo.InvariantCulture),
+            penalty.ToString(CultureInfo.InvariantCulture),
+            NoShows.IsRefundedForOutage(b) ? "yes" : "no");
     }
 
     /// <summary>Who took the file, what they asked for and how much came back — never who is in it.</summary>
@@ -176,3 +187,6 @@ public static class AdminExportEndpoints
         return Results.File(bytes, "text/csv; charset=utf-8");
     }
 }
+
+/// <summary>The services the no-shows file reads, bound as one parameter (lizard's six-parameter gate).</summary>
+public sealed record ExportServices(MainframeDbContext Db, ITenantContext Tenant, TenantSettingsAccessor Settings);

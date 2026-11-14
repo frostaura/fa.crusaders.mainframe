@@ -307,24 +307,41 @@ function ReversalCheck({ flow, entry, balance }: { flow: Flow; entry: Reversible
   const after = balance === null ? null : balance - minutes;
   return (
     <>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border bg-bg-muted p-4 text-sm">
-        <dt className="text-text-secondary">{COPY.purchaseRow}</dt>
-        <dd className="text-right text-text-primary">{entry.reason ?? formatMoney(entry.zar_paid)}</dd>
-        <dt className="text-text-secondary">{COPY.zarRow}</dt>
-        <dd className="text-right font-semibold tabular-nums text-text-primary">{zar}</dd>
-        <div aria-hidden="true" className="col-span-2 my-1 h-px bg-border" />
-        <dt className="text-text-secondary">{COPY.balanceNow}</dt>
-        <dd className="text-right text-text-primary">{balance === null ? "—" : <Minutes value={balance} />}</dd>
-        <dt className="text-text-secondary">{COPY.takenBack}</dt>
-        <dd className="text-right text-text-primary"><Minutes value={-minutes} signed /></dd>
-        <dt className="font-semibold text-text-primary">{COPY.balanceAfter}</dt>
-        <dd className="text-right font-semibold text-text-primary">{after === null ? "—" : <Minutes value={after} />}</dd>
-      </dl>
-      <p className="text-sm text-text-secondary">“{flow.note.trim()}”</p>
-      {after !== null && after < 0 ? <Alert tone="warning">{COPY.overdraws}</Alert> : null}
+      <CheckFigures purchase={entry.reason ?? formatMoney(entry.zar_paid)} zar={zar} balance={balance} minutes={minutes} />
+      <p className="text-sm text-text-secondary">{quoted(flow.note)}</p>
+      {after !== null && 0 > after ? <Alert tone="warning">{COPY.overdraws}</Alert> : null}
       <p className="text-sm text-text-muted">{COPY.revenueLine(zar)}</p>
       <p className="text-sm text-text-muted">{COPY.mailLine}</p>
     </>
+  );
+}
+
+/** The note as the check says it back, in quotation marks. */
+function quoted(note: string): string {
+  return "\u201C" + note.trim() + "\u201D";
+}
+
+/** A balance, or a dash where it could not be read — never a zero standing in for it. */
+function MaybeMinutes({ value }: { value: number | null }) {
+  if (value === null) return <span>—</span>;
+  return <Minutes value={value} />;
+}
+
+function CheckFigures({ purchase, zar, balance, minutes }: { purchase: string; zar: string; balance: number | null; minutes: number }) {
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border bg-bg-muted p-4 text-sm">
+      <dt className="text-text-secondary">{COPY.purchaseRow}</dt>
+      <dd className="text-right text-text-primary">{purchase}</dd>
+      <dt className="text-text-secondary">{COPY.zarRow}</dt>
+      <dd className="text-right font-semibold tabular-nums text-text-primary">{zar}</dd>
+      <div aria-hidden="true" className="col-span-2 my-1 h-px bg-border" />
+      <dt className="text-text-secondary">{COPY.balanceNow}</dt>
+      <dd className="text-right text-text-primary"><MaybeMinutes value={balance} /></dd>
+      <dt className="text-text-secondary">{COPY.takenBack}</dt>
+      <dd className="text-right text-text-primary"><Minutes value={-minutes} signed /></dd>
+      <dt className="font-semibold text-text-primary">{COPY.balanceAfter}</dt>
+      <dd className="text-right font-semibold text-text-primary"><MaybeMinutes value={balance === null ? null : balance - minutes} /></dd>
+    </dl>
   );
 }
 

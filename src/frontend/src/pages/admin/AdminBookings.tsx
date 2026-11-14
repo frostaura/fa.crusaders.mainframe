@@ -18,6 +18,7 @@ import { UNSETTLED_COPY as COPY } from "@/lib/unsettledCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { usePagedFocus } from "@/lib/usePagedFocus";
 import { useRead } from "@/lib/useRead";
+import { firstName } from "@/pages/admin/member/useMemberDetail";
 
 /**
  * `/admin/bookings` — where the daily `booking.unsettled` notice sends an admin (BM-11, pass 2). Its
@@ -67,7 +68,7 @@ function toGridBooking(row: UnsettledBooking, timezone: string): GridBooking {
     endsAt: row.ends_at,
     whenLabel: clubDayAndClock(row.starts_at, timezone),
     mine: false,
-    memberFirstName: name.split(/\s+/)[0] || name,
+    memberFirstName: firstName(name),
     memberPhotoUrl: row.member?.photo_url ?? null,
     checkedIn: false,
     amountChargedMinutes: row.charged_minutes,
@@ -75,17 +76,27 @@ function toGridBooking(row: UnsettledBooking, timezone: string): GridBooking {
   };
 }
 
-export default function AdminBookingsPage() {
-  const list = useUnsettled();
+/** Which row the desk's cancel is open on, and what a finished cancel does to the list. */
+function useCancelling(list: ReturnType<typeof useUnsettled>, timezone: string) {
   const [cancelling, setCancelling] = useState<GridBooking | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const timezone = list.page?.timezone ?? "UTC";
   const done = (outcome: CancelledOutcome) => {
     if (outcome.cancelledIds.length === 0) return;
     list.drop(outcome.cancelledIds);
     setNotice(COPY.cancelled);
     list.retry();
   };
+  return {
+    cancelling, notice, done,
+    open: (row: UnsettledBooking) => setCancelling(toGridBooking(row, timezone)),
+    close: (open: boolean) => { if (!open) setCancelling(null); },
+  };
+}
+
+export default function AdminBookingsPage() {
+  const list = useUnsettled();
+  const timezone = list.page?.timezone ?? "UTC";
+  const cancel = useCancelling(list, timezone);
   return (
     <PageShell width="full">
       <PageHeader
@@ -94,25 +105,34 @@ export default function AdminBookingsPage() {
         actions={<RefreshButton onRefresh={list.retry} loading={list.loading} label={COPY.refresh} />}
         freshness={<Freshness at={list.readAt} />}
       />
-      <ToggleGroup type="single" aria-label={COPY.filterLabel} value="unsettled" className="w-fit rounded-lg bg-bg-muted p-1">
-        <ToggleGroupItem value="unsettled">
-          {COPY.filters.unsettled}
-          {list.page ? <Badge tone="warning" className="ml-2">{list.page.total}</Badge> : null}
-        </ToggleGroupItem>
-      </ToggleGroup>
-      {list.page ? <p className="max-w-prose text-sm text-text-secondary">{COPY.explain(list.page.lookback_days)}</p> : null}
-      <p aria-live="polite" className="sr-only">{notice ?? ""}</p>
-      {notice ? <Alert tone="success" live="off">{notice}</Alert> : null}
-      <UnsettledList list={list} timezone={timezone} onCancel={(row) => setCancelling(toGridBooking(row, timezone))} />
+      <UnsettledFilter page={list.page} />
+      <p aria-live="polite" className="sr-only">{cancel.notice ?? ""}</p>
+      {cancel.notice ? <Alert tone="success" live="off">{cancel.notice}</Alert> : null}
+      <UnsettledList list={list} timezone={timezone} onCancel={cancel.open} />
       <CancelSheet
-        open={cancelling !== null}
-        onOpenChange={(open) => { if (!open) setCancelling(null); }}
-        bookings={cancelling ? [cancelling] : []}
+        open={cancel.cancelling !== null}
+        onOpenChange={cancel.close}
+        bookings={cancel.cancelling ? [cancel.cancelling] : []}
         isAdmin
-        onCancelled={done}
+        onCancelled={cancel.done}
         onStale={list.retry}
       />
     </PageShell>
+  );
+}
+
+/** The filter (today one: never settled) with its count, and what deciding a row means. */
+function UnsettledFilter({ page }: { page: UnsettledBookingsPage | null }) {
+  return (
+    <>
+      <ToggleGroup type="single" aria-label={COPY.filterLabel} value="unsettled" className="w-fit rounded-lg bg-bg-muted p-1">
+        <ToggleGroupItem value="unsettled">
+          {COPY.filters.unsettled}
+          {page ? <Badge tone="warning" className="ml-2">{page.total}</Badge> : null}
+        </ToggleGroupItem>
+      </ToggleGroup>
+      {page ? <p className="max-w-prose text-sm text-text-secondary">{COPY.explain(page.lookback_days)}</p> : null}
+    </>
   );
 }
 
@@ -141,7 +161,9 @@ function UnsettledList({ list, timezone, onCancel }: ListProps) {
   );
 }
 
-function UnsettledRow({ row, timezone, onCancel }: { row: UnsettledBooking; timezone: string; onCancel: (row: UnsettledBooking) => void }) {
+type RowProps = { row: UnsettledBooking; timezone: string; onCancel: (row: UnsettledBooking) => void };
+
+function UnsettledRow({ row, timezone, onCancel }: RowProps) {
   const name = row.member?.name ?? COPY.unknownMember;
   const court = row.court_name ?? COPY.unknownCourt;
   const when = clubDayAndClock(row.starts_at, timezone);
@@ -154,7 +176,7 @@ function UnsettledRow({ row, timezone, onCancel }: { row: UnsettledBooking; time
         </Avatar>
         <div className="flex min-w-0 flex-col">
           <span className="font-semibold text-text-primary">{name}</span>
-          <span className="text-sm text-text-secondary">{`${court} · ${when}`}</span>
+          <span className="text-sm text-text-secondary">{court + " · " + when}</span>
           <span className="text-sm text-text-secondary">{COPY.charged(row.charged_minutes)}</span>
           {row.payer?.name ? <span className="text-sm text-text-muted">{COPY.paidBy(row.payer.name)}</span> : null}
         </div>

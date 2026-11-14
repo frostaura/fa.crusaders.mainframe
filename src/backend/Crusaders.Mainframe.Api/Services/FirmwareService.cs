@@ -151,12 +151,19 @@ public sealed class FirmwareService
     /// A target as the change record says it: the board, in words, never the wire code
     /// (<c>court_bridge</c> reached the console's change log raw).
     /// </summary>
-    public static string TargetWords(string target) => target switch
+    /// <remarks>
+    /// A block body with a switch STATEMENT: lizard reads the braces of an expression-bodied switch
+    /// as the end of the class and counts the rest of the file as one 313-line global function.
+    /// </remarks>
+    public static string TargetWords(string target)
     {
-        DeviceOta.CourtBridge => "Court box bridge",
-        DeviceOta.DoorGate => "Door gate",
-        _ => "Board",
-    };
+        switch (target)
+        {
+            case DeviceOta.CourtBridge: return "Court box bridge";
+            case DeviceOta.DoorGate: return "Door gate";
+            default: return "Board";
+        }
+    }
 
     /// <summary><c>GET …/firmware</c>: every release, newest first, with its rollout and the boards of its target by state.</summary>
     public async Task<object> ListAsync(CancellationToken ct)
