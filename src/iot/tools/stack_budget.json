@@ -30,7 +30,7 @@
         "loop_frame": 256,
         "max_frame": 512
       },
-      "raised": "Gate 2.0.0's network adoption (devnet::adoptNet: a staged NetSet and the base URL decoded with headroom) is an 832 B frame. The integration first took the 2.0.0 gate from 3,904 B down to this by moving every whole-image temporary off the stack; the gate's loop task is 8 KB and its worst path, measured with the analysis's call-graph tool, is 4,576 B of the 6,000 B the contract allows (device-api.md section 13)."
+      "raised": "Gate 2.0.0's network adoption (devnet::adoptNet: a staged NetSet and the base URL decoded with headroom) is an 832 B frame. The integration first took the 2.0.0 gate from 3,904 B down to this by moving every whole-image temporary off the stack; the gate's loop task is 8 KB and its worst path, measured with the analysis's call-graph tool, was 4,576 B of the 6,000 B the contract allows (device-api.md section 13), measured while that path still ran through the OTA signature check; OTA has since been removed, so the worst path is no deeper than that."
     }
   }
 }
