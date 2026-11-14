@@ -25,13 +25,18 @@ public sealed partial class DemoDataGenerator
         }
     }
 
-    /// <summary>One notice on the admins' feed, delivered at <paramref name="at"/>.</summary>
+    /// <summary>
+    /// One notice on the admins' feed, finished at <paramref name="at"/> as a demo club's always is:
+    /// suppressed, mailed to nobody (BA-12). It was written "Sent" to the admin mirrors, so the demo
+    /// Overview read "Emailed 1 admin" about mail that never existed.
+    /// </summary>
     private void Feed(DemoWorld w, AdminNotice notice, DateTimeOffset at)
     {
         var row = AdminNotices.Stage(_db, w.TenantId, notice, at);
-        row.State = AdminNotificationState.Sent;
+        row.State = AdminNotificationState.Suppressed;
         row.SentAt = at.AddMinutes(1).Storable();
-        row.RecipientCount = Math.Max(1, w.AdminMirrors.Count());
+        row.LastError = AdminNotificationDispatcher.DemoModeCause;
+        row.RecipientCount = 0;
     }
 
     /// <summary>

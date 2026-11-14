@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import AdminLedgerPage from "./AdminLedger";
 import { formatClubDayLabel } from "../components/ui/date-picker-day";
@@ -44,7 +44,7 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
     // The date filters are club-day DatePickers (P3, R7); "unbounded" is their clear ×.
     fireEvent.click(screen.getByRole("button", { name: "Clear From" }));
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const last = stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger")).at(-1)!;
       // The malformed value, gone — and the parameter gone with it, because "no lower
       // bound" is an absent parameter, not an empty one.
@@ -69,7 +69,7 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear To" }));
 
     // Nothing stale survives: not the rows, and not the totals computed from them.
-    await vi.waitFor(() => expect(screen.queryByText("Desk goodwill")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Desk goodwill")).not.toBeInTheDocument());
     expect(screen.queryByText("Booking charge")).not.toBeInTheDocument();
     expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger")).length).toBeGreaterThan(0);
     // And the admin is told ON THE PAGE, where the table was, in a sentence that says what to
@@ -125,7 +125,7 @@ describe("Admin ledger — the filters are the URL", () => {
     rememberClubZone("Africa/Johannesburg");
     const stub = renderAt("/admin/ledger?from=2026-01-01&to=2026-01-31&type=TopUp&userId=abc-123&q=Naledi");
 
-    await vi.waitFor(() => expect(ledgerCalls(stub).length).toBeGreaterThan(0));
+    await waitFor(() => expect(ledgerCalls(stub).length).toBeGreaterThan(0));
     const call = ledgerCalls(stub).at(-1)!;
 
     // `userId` is answered by the API and had no way in from the screen at all, so a link
@@ -150,27 +150,27 @@ describe("Admin ledger — the filters are the URL", () => {
 
   it("writes a filter chosen in the page back into the URL", async () => {
     const stub = renderAt("/admin/ledger?from=2026-01-01&to=2026-01-31");
-    await vi.waitFor(() => expect(ledgerCalls(stub).length).toBeGreaterThan(0));
+    await waitFor(() => expect(ledgerCalls(stub).length).toBeGreaterThan(0));
 
     pickType(LEDGER_TYPE_LABEL.TopUp);
-    await vi.waitFor(() => expect(search()).toContain("type=TopUp"));
+    await waitFor(() => expect(search()).toContain("type=TopUp"));
 
     fireEvent.change(screen.getByLabelText("Search (name)"), { target: { value: "Naledi" } });
-    await vi.waitFor(() => expect(search()).toContain("q=Naledi"));
+    await waitFor(() => expect(search()).toContain("q=Naledi"));
 
     // Cleared is cleared: the key goes rather than sitting there empty, which would read
     // back as "unset" and silently restore a default.
     pickType("All types");
-    await vi.waitFor(() => expect(search()).not.toContain("type="));
+    await waitFor(() => expect(search()).not.toContain("type="));
   });
 
   it("pins the window it is actually showing, so a bookmark means the same thing next week", async () => {
     const stub = renderAt("/admin/ledger");
-    await vi.waitFor(() => expect(ledgerCalls(stub).length).toBeGreaterThan(0));
+    await waitFor(() => expect(ledgerCalls(stub).length).toBeGreaterThan(0));
 
     // "The last 30 days" resolves to a different period every day. What the admin copies
     // has to be the dates on screen.
-    await vi.waitFor(() => expect(search()).toContain("from="));
+    await waitFor(() => expect(search()).toContain("from="));
     const pinned = new URLSearchParams(search());
     expect(screen.getByRole("button", { name: /^From: / })).toHaveAccessibleName(`From: ${formatClubDayLabel(pinned.get("from"))}`);
     expect(screen.getByRole("button", { name: /^To: / })).toHaveAccessibleName(`To: ${formatClubDayLabel(pinned.get("to"))}`);
@@ -386,7 +386,7 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
 
     await screen.findByText("Charge 2");
     // The range holds 1664 even though two rows are on the page: never a sum over what was read.
-    await vi.waitFor(() => expect(totalsShown()[0]).toBe("1664"));
+    await waitFor(() => expect(totalsShown()[0]).toBe("1664"));
     expect(screen.queryByText("Charge 3")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show more movements" }));
     expect(await screen.findByText("Charge 3")).toBeInTheDocument();
@@ -413,7 +413,7 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
     more.focus();
     fireEvent.click(more);
     expect(await screen.findByText("Charge 3")).toBeInTheDocument();
-    await vi.waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     expect(document.activeElement?.closest("[data-ledger-row]")?.getAttribute("data-ledger-row")).toBe("r3");
   });
 
@@ -430,7 +430,7 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
     ]);
     renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });
     await screen.findByText("Charge 3");
-    await vi.waitFor(() => expect(totalsShown()[0]).toBe("3"));
+    await waitFor(() => expect(totalsShown()[0]).toBe("3"));
     expect(totalsShown()[2]).toBe("−30 min");
   });
 

@@ -33,8 +33,6 @@ minutes of light, so the member guide says exactly that (`onboardingCopy` box st
   docked bars; pixels because `schedule-grid-bugs` pins a pixel ceiling (a rem grows with big text).
 - **Welcome wizard: a step rail from lg** (BM-07), not a jump list. **Lone-verb docked bars hug
   the verb** (BM-08).
-- **Not done, and why:** FM-7 (act() warnings, ~1,430 in a dot-reporter full run). Two global
-  remedies were measured and reverted: an `afterEach` settle (no change — the updates land between
-  a test's end and its hooks) and next-task stub replies (no change, 3 → 13 failures). The warnings
-  are per-file patterns (`vi.waitFor` instead of RTL's, unawaited reads; chart-theme's 813 only
-  under full-suite load). The default reporter hides them; run `--reporter=dot` to see them.
+- **FM-7 (act() warnings)** was 1,492 in a dot-reporter full run; pass 2 removed the largest
+  sources and the Node/jsdom noise — what remains and why: `decisions-app-rest-pass2.md`. The
+  default reporter hides them; run `--reporter=dot` to see them.

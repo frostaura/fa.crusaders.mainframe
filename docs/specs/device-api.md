@@ -64,7 +64,7 @@ v3 response field on the caps of **this** request:
   `key_next` or `net` means nothing changes. Absent is always "no opinion", never "off".
 - **Body budgets.** Court box: **2048** bytes for a 2.x box (unchanged; bridge 2.3.0 reads into
   2560), **4096** for a `hb:3` box (a 3.0.0 bridge reads into 5120; widest vector
-  `v3-heartbeat-response-widest`, 4087 bytes — every v3 key at its widest and as many of the 64
+  `v3-heartbeat-response-widest`, 4086 bytes — every v3 key at its widest and as many of the 64
   member-code keys as fit, 42). Gate: **4096** for a 1.x gate (unchanged), **6144** for a v3 gate
   (a 2.0.0 gate reads into 8192; the widest — `membercode/gate.json`'s
   `gate-heartbeat-response-codes-full` plus every v3 object at its bound, the gate object's two
@@ -229,6 +229,16 @@ beats of an acknowledged `hb:3` box with restore enabled files `restore_not_conf
 court (BD-6: v2 recorded a partial restore as a full one). The v2 "first heartbeat inside an uptime
 window" rule does not apply to v3 boxes, so a late first beat after a long outage is still
 recorded (BD-5).
+
+**Bookings against the box's word (BA-04, 2026-11-14).** Once a minute the admin sweep compares
+each court's bookings with what its box last CONFIRMED, by the control-board tile's own rule: a
+court the box says is lit with nothing booked on it, lit since before the grace window began,
+files `lights_on_nothing_booked` (warning); a court somebody checked in on before the grace window
+began and the box has since said is dark files `checked_in_lights_off` (error). Both are server
+faults on the box that drives the court, so they reach Faults, the Overview's "Needs attention"
+and the fault-spike mail; nothing is said about a court whose box is offline or out of service;
+and each resolves itself (no resolver, note "Cleared on its own") on the first sweep after the
+disagreement ends (`Services/LightsMismatch.cs`).
 
 ---
 

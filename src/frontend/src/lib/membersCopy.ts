@@ -378,3 +378,19 @@ export const RELATED_BOOKING = {
     "Only for a movement that genuinely compensates this member for that booking. It does not stand in for the automatic reversal: when the court box reports the member did attend, the refund and the penalty are reversed on their own, and what you post here is netted against that reversal one leg at a time — a positive adjustment reduces the penalty the reversal gives back, a negative one reduces the refund it takes away. Netting stops at zero per leg, so anything beyond what a leg is worth stands as posted and is not clawed back.",
   notAGuid: "That booking ID is not one — it should look like 8-4-4-4-12 hex characters. Pick one from the list or leave it blank.",
 } as const;
+
+/**
+ * BA-08: the status the members FILE is cut to — a membership status as the API binds it, or none
+ * (every membership) for "All" and for "Admins", which is not a membership status.
+ */
+export function exportStatus(filter: StatusFilter): string | null {
+  return filter === "all" || filter === "admins" ? null : filter;
+}
+
+/** The export button's words: which members the file holds, so "Admins" never reads as an admins-only file. */
+export function membersExportLabel(filter: StatusFilter): string {
+  const status = exportStatus(filter);
+  if (status === null) return "Export all members (CSV)";
+  const word = STATUS_FILTERS.find((f) => f.value === filter)?.label.toLowerCase() ?? status;
+  return `Export ${word} members (CSV)`;
+}

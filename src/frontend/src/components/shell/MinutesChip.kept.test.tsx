@@ -1,4 +1,4 @@
-import { render, within } from "@testing-library/react";
+import { render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../../App";
 import { resetRefreshBackoff, tokenStore } from "@/lib/api";
@@ -45,7 +45,7 @@ async function keptChip(): Promise<HTMLElement> {
   vi.setSystemTime(READ_AT + 60_000);
   vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
   render(<App />);
-  const header = await vi.waitFor(() => {
+  const header = await waitFor(() => {
     const found = document.querySelector<HTMLElement>("[data-app-header]");
     if (!found) throw new Error("no app header yet");
     return found;

@@ -71,6 +71,9 @@ public sealed class AdminNotificationSweep
         await RemindAboutApplicationsAsync(db, tenant.Id, settings, now, ct);
         await RemindAboutUnsettledBookingsAsync(db, tenant.Id, settings, now, ct);
         await DetectRefusalSpikesAsync(db, tenant.Id, settings, now, ct);
+        // BA-04: lights on with nothing booked, or a check-in on a dark court, filed as faults
+        // BEFORE the spike check, so a club-wide relay failure is also the spike it is.
+        await LightsMismatch.SweepAsync(db, scope.ServiceProvider.GetRequiredService<DeviceErrorService>(), settings, now, ct);
         await DetectFaultSpikeAsync(db, tenant.Id, settings, now, ct);
         await PruneAsync(db, settings, now, ct);
     }
@@ -115,9 +118,8 @@ public sealed class AdminNotificationSweep
         var local = TimeZoneInfo.ConvertTime(now, zone);
         if (local.Hour * 60 + local.Minute < settings.DayStartMinute) return;
 
-        var floor = now.AddDays(-settings.NoShowLookbackDays);
-        var stranded = db.Bookings.AsNoTracking()
-            .Where(b => b.Status == BookingStatus.Booked && b.CheckedInAt == null && b.UserId != null && b.StartsAt < floor);
+        // The list the notice links to reads the same query, so the two can never disagree.
+        var stranded = AdminUnsettledBookingsEndpoint.Query(db, settings, now);
         var count = await stranded.CountAsync(ct);
         if (count == 0) return;
 

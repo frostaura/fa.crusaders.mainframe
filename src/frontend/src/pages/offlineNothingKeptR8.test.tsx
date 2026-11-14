@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { renderPage, signIn, signOut } from "@/test/harness";
 import InvitesPage from "@/pages/Invites";
@@ -75,7 +75,7 @@ describe("X8-2 — Bookings on a cold start with nothing kept", () => {
   it("says offline once — no red schedule, no red games lists", async () => {
     lieFiPhone();
     renderPage(<BookingsPage />, { initialEntries: ["/bookings"] });
-    await vi.waitFor(() => expect(document.querySelector(NOTHING_KEPT)).not.toBeNull(), WAIT);
+    await waitFor(() => expect(document.querySelector(NOTHING_KEPT)).not.toBeNull(), WAIT);
     expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
     expect(screen.queryByText(/Couldn't load your (upcoming|recent) games/i)).toBeNull();
     expect(document.querySelectorAll(NOTHING_KEPT)).toHaveLength(1);
@@ -86,7 +86,7 @@ describe("X8-2 — Bookings on a cold start with nothing kept", () => {
     lieFiPhone();
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     renderPage(<BookingsPage />, { initialEntries: ["/bookings"] });
-    await vi.waitFor(() => expect(document.querySelector(NOTHING_KEPT)).not.toBeNull(), WAIT);
+    await waitFor(() => expect(document.querySelector(NOTHING_KEPT)).not.toBeNull(), WAIT);
     expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
   });
 });

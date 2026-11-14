@@ -90,6 +90,8 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   // P12 — disputed results and removing a wrong one.
   ["/admin/results", "Match results"],
   ["/admin/transactions", "Transactions"],
+  // BM-11 — the bookings the club has to decide on.
+  ["/admin/bookings", "Bookings"],
   ["/admin/reports", "Reports"],
   // Monitoring (R17: courts, hardware and control). The section index is the control board, so
   // it is named for what an admin opens it to look at rather than for the section.

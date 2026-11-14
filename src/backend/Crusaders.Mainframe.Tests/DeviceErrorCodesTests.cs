@@ -103,6 +103,8 @@ public sealed class DeviceErrorCodesTests
         [DeviceErrorCodes.StackLow] = DeviceErrorSeverity.Warning,
         [DeviceErrorCodes.AnswerDrift] = DeviceErrorSeverity.Warning,
         [DeviceErrorCodes.CodeKeysTrimmed] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.LightsOnNothingBooked] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.CheckedInLightsOff] = DeviceErrorSeverity.Error,
         [DeviceErrorCodes.NetFallback] = DeviceErrorSeverity.Warning,
 
         // Info — worth counting, not worth waking anybody.

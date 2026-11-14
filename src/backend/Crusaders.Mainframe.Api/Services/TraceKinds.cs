@@ -630,6 +630,9 @@ public static class TraceKinds
         Endpoints.AdminDoorLogEndpoint.ExportedAction,
         Endpoints.AdminMonitoringEndpoints.ResolvedAction,
         Endpoints.AdminMonitoringEndpoints.ExportedAction,
+        // BA-08: the members and no-shows files are a range of rows, never one person's night.
+        Endpoints.AdminExportEndpoints.MembersExportedAction,
+        Endpoints.AdminExportEndpoints.NoShowsExportedAction,
         MemberCodeRollout.PhaseChangedAction,
         // The retention sweep's own record — its actor is the anonymised sentinel, never a person.
         "retention.anonymised",

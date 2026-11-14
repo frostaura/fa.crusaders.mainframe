@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { renderPage, signOut } from "@/test/harness";
@@ -6,6 +7,10 @@ import { RESULT_READABLE } from "@/lib/bookingLink";
 import { RESULT_CARD } from "@/lib/playCopy";
 import BookingDetailPage from "./BookingDetail";
 import { BOOKING, DETAIL_PATH, renderDetail, serve } from "@/components/players/__tests__/detailKit";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 vi.mock("@/components/players/PlayerPicker", () => ({ PlayerPicker: () => null, PlayerPickerDialog: () => null }));
 

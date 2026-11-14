@@ -110,6 +110,13 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         Assert.Equal(0, await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters().CountAsync(c => c.BookingId == later.Id)));
         Assert.Single(await club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
             .Where(a => a.TenantId == club.TenantId && a.Action == MemberCodeRollout.PhaseChangedAction).ToListAsync()));
+        // MCV1-09: the club is told of the automatic cut-over, once, with the date old codes stop.
+        var moved = Assert.Single(await club.ReadAsync(app, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == club.TenantId && n.Kind == AdminEventCatalogue.CodesPhaseMoved).ToListAsync()));
+        var payload = JsonSerializer.Deserialize<CodesPhaseMovedPayload>(moved.PayloadJson, AdminEventCatalogue.Json)!;
+        Assert.Equal(("legacy", "v1"), (payload.From, payload.To));
+        Assert.NotNull(payload.CutoffDueLocal);
+        Assert.StartsWith("The club moved to new member codes; old codes stop on ", moved.Headline);
     }
 
     [SkippableFact]
@@ -182,9 +189,18 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         await BeatAsync(device, club, club.BoxMac, m1: true);
         Assert.Equal("v1", await PhaseAsync(club, app));
 
+        // Not moved yet, so nobody has been told anything.
+        Assert.Empty(await club.ReadAsync(app, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == club.TenantId && n.Kind == AdminEventCatalogue.CodesPhaseMoved).ToListAsync()));
+
         await club.SetPhaseAsync(app, MemberCodeSettings.V1, DateTimeOffset.UtcNow.AddDays(-14).AddMinutes(-1));
         await BeatAsync(device, club, club.BoxMac, m1: true);
         Assert.Equal("v1_only", await PhaseAsync(club, app));
+        // MCV1-09: the automatic cut-off is said the day it happens, and a second beat says it no twice.
+        await BeatAsync(device, club, club.BoxMac, m1: true);
+        var cutoff = Assert.Single(await club.ReadAsync(app, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == club.TenantId && n.Kind == AdminEventCatalogue.CodesPhaseMoved).ToListAsync()));
+        Assert.Equal("Old member codes stopped working: the club is on new codes only", cutoff.Headline);
 
         // A board still on legacy firmware in v1_only is sent no legacy roster at all.
         await club.BookAsync(app, club.Olga, courtIndex: 0, startsInMinutes: -5);

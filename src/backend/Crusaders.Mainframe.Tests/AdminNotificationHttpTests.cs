@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
@@ -478,6 +479,9 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(1, items["sent"].GetProperty("recipients").GetInt32());
         Assert.Equal(JsonValueKind.Null, items["suppressed"].GetProperty("sent_at").ValueKind);
         Assert.Equal(JsonValueKind.String, items["suppressed"].GetProperty("finished_at").ValueKind);
+        // BA-12: a suppressed notice says why — here the kind's cooldown — and a sent one says nothing.
+        Assert.Equal(AdminNotificationEndpoints.ReasonToldRecently, items["suppressed"].GetProperty("reason").GetString());
+        Assert.Equal(JsonValueKind.Null, items["sent"].GetProperty("reason").ValueKind);
     }
 
     /// <summary>

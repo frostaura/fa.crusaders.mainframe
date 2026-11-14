@@ -904,6 +904,12 @@ Each is a server behaviour; none changes a byte the corpus holds.
   back because v1 misbehaved, and the legacy codes are exactly the fallback it rolled back to.
 - **A board losing `codes:m1` after cut-over** raises `device.codes_capability_lost` (non-security,
   once per board per firmware version).
+- **An automatic move raises `member_code.phase_moved` (MCV1-09, 2026-11-14)** — the cut-over with
+  the club-local date old codes stop, the cut-off with what it means — once per move, mailed to the
+  admins and on the Overview's alerts, naming the hold as the one control that stops the next
+  automatic step. *Why:* the cut-off expires every legacy code at once; a club that learns of it
+  from a member turned away at the door has not governed it. A move made by hand raises nothing
+  (the admin who made it is the one who would be told).
 - **The court box's body writes `relays` before `roster`**, matching both corpora; the firmware
   scans by key and does not care.
 - **`member_code_phase`, `member_code_cutover_at`, `member_code_cutoff_at`,

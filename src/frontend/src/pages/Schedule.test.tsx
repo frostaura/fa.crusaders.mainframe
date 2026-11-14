@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
 import { BOOKINGS_COPY, CELL_TEXT, PENDING_CELL } from "../lib/bookingsCopy";
@@ -6,6 +7,10 @@ import { liftWithReason } from "../test/liftHold";
 import { HOLD_LIFTED, HOLD_LIFT_FAILED } from "../lib/scheduleEnd";
 import { signOut, refuse } from "../test/harness";
 import { COURT_A, COURT_B, ME, dayFixture, openBookings, singleTap, resetSheets, sast, scheduleCalls, sheets, slotRow } from "../test/bookingsKit";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);

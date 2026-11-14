@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { clearNavigationPending, noteChunk } from "@/routeChunks";
 import { RoutePendingBar } from "./RoutePending";
 
@@ -45,7 +45,7 @@ describe("the pending cue", () => {
     renderWithLink();
     fireEvent.click(screen.getByRole("link", { name: "Kept by its own handler" }));
     expect(document.querySelector("[data-route-pending]"), "marked at the tap").not.toBeNull();
-    await vi.waitFor(() => expect(document.querySelector("[data-route-pending]")).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-route-pending]")).toBeNull());
     fireEvent.click(screen.getByRole("link", { name: "Elsewhere" }));
     fireEvent.click(screen.getByRole("link", { name: "Wallet" }), { metaKey: true });
     expect(document.querySelector("[data-route-pending]")).toBeNull();

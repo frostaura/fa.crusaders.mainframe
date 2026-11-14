@@ -4,6 +4,8 @@ import {
 import { Button } from "../../components/ui/button";
 import { csvBlob, courtsCsv, dailyCsv } from "../../lib/csvExport";
 import { saveFile } from "../../lib/memberDetailApi";
+import { adminEndpoints } from "../../lib/adminApi";
+import { DownloadCsvButton } from "../../components/monitoring/parts";
 import { DownloadSimple } from "../../components/ui/icons";
 import { formatMinutes, formatMoney } from "../../lib/utils";
 import { AutoGrid } from "../../components/ui/auto-grid";
@@ -112,6 +114,12 @@ function ReportExports({ data, markers }: { data: ClubReport; markers: { from: s
         icon={<DownloadSimple aria-hidden="true" />}>
         Courts (CSV)
       </Button>
+      {/* BA-08: every no-show in the range, built by the server (names, penalties, outage refunds). */}
+      <DownloadCsvButton
+        path={adminEndpoints.noShowsCsvPath(markers.from, markers.to)}
+        fallbackName={`no-shows-${markers.from}-${markers.to}.csv`}
+        label={COPY.noShowsCsv}
+      />
     </>
   );
 }

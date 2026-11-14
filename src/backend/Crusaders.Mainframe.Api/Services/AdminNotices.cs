@@ -384,6 +384,23 @@ public static class AdminNotices
         };
     }
 
+    /// <summary>
+    /// MCV1-09: the rollout moved on by itself (member-code §8). Once per move — the dedupe key is the
+    /// move and its instant — so a club is told the day its codes changed, never by surprise later.
+    /// </summary>
+    public static AdminNotice CodesPhaseMoved(string from, string to, DateTimeOffset at, string? cutoffDueLocal, int cutoffDays)
+    {
+        var headline = to == MemberCodeSettings.V1Only
+            ? "Old member codes stopped working: the club is on new codes only"
+            : $"The club moved to new member codes; old codes stop {(cutoffDueLocal is null ? $"in {cutoffDays} days" : $"on {cutoffDueLocal}")}";
+        return new AdminNotice(
+            AdminEventCatalogue.CodesPhaseMoved,
+            $"{AdminEventCatalogue.CodesPhaseMoved}:{from}:{to}:{at.UtcTicks}",
+            new CodesPhaseMovedPayload(from, to, cutoffDueLocal, cutoffDays),
+            headline,
+            "/admin/monitoring/devices");
+    }
+
     private static string Iso(DateOnly d) => d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     /// <summary>A reason code as words for a headline: <c>amount_mismatch</c> → "amount mismatch".</summary>

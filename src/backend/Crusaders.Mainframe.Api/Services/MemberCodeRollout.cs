@@ -223,9 +223,25 @@ public sealed class MemberCodeRollout
             Action = PhaseChangedAction,
             DetailsJson = JsonSerializer.Serialize(new { from, to, at = now, automatic = true }),
         });
+        // MCV1-09: an automatic move is governed only if somebody hears of it the day it happens.
+        await AdminNotices.RaiseAsync(_db, _tenant.TenantId, await PhaseMovedNoticeAsync(from, to, now, ct), now, ct);
         await _db.SaveChangesAsync(ct);
         if (to == MemberCodeSettings.V1Only) await ExpireLegacyCodesAsync(_db, now, ct);
         return true;
+    }
+
+    /// <summary>The notice for an automatic move, with the cut-off date in the club's own zone on a cut-over.</summary>
+    private async Task<AdminNotice> PhaseMovedNoticeAsync(string from, string to, DateTimeOffset now, CancellationToken ct)
+    {
+        var settings = await new TenantSettingsAccessor(_db, _tenant).GetAsync(ct);
+        var days = MemberCodeSettings.CutoffDays(settings);
+        string? due = null;
+        if (to == MemberCodeSettings.V1)
+        {
+            var zone = ClubClock.ZoneOf(settings);
+            due = TimeZoneInfo.ConvertTime(now.AddDays(days), zone).ToString("ddd d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return AdminNotices.CodesPhaseMoved(from, to, now, due, days);
     }
 
     private async Task<bool> MoveInSqlAsync(string from, string to, string stampKey, string stamp, CancellationToken ct)

@@ -383,7 +383,7 @@ describe("Reports — the member's summary reconciles to their balance", () => {
 
     // R12: the download is an async action like any other — `Button pending` while it runs.
     fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const csv = stub.calls.find((c) => c.path.includes("/wallet.csv"));
       expect(csv, "the CSV endpoint was never called").toBeTruthy();
     });
@@ -397,7 +397,7 @@ describe("Reports — the member's summary reconciles to their balance", () => {
     expect(call.method).toBe("GET");
 
     // And a blob was actually produced, so the anchor had a file to save.
-    await vi.waitFor(() => expect(created.length).toBe(1));
+    await waitFor(() => expect(created.length).toBe(1));
   });
 });
 

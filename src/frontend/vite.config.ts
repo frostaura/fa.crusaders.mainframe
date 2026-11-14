@@ -6,6 +6,11 @@ import type { Plugin } from "vite";
 import { createHash } from "node:crypto";
 import { SHIPPED_ICON_WEIGHTS } from "./src/components/ui/iconWeights";
 import { stampServiceWorker } from "./src/swBuild";
+import { staleDependencies, staleDependenciesMessage } from "./src/depsFreshness";
+
+// FM-12: every gate that loads this config (build, vitest, dev) stops over a stale install.
+const stale = staleDependencies(__dirname);
+if (stale.length > 0) throw new Error(staleDependenciesMessage(stale));
 
 /**
  * F4.3 — `precache.json`: every JS and CSS file the build emitted, for the service worker to fetch
@@ -318,6 +323,10 @@ export default defineConfig({
     // would otherwise silently unpin every clock assertion in the product.
     env: { TZ: process.env.VITEST_TZ ?? "Africa/Johannesburg" },
     setupFiles: ["./src/test/setup.ts"],
+    // FM-7: Node 26 ships a flag-gated localStorage global that prints an ExperimentalWarning in
+    // every worker the first time anything touches it (557 lines in a full run). The suite's own
+    // in-memory Storage (test/setup.ts) is the one under test, so Node's is switched off.
+    execArgv: ["--no-experimental-webstorage"],
 
     // vitest's default include is `**/*.{test,spec}.?(c|m)[jt]s?(x)` from the project
     // root, which swallows the Playwright specs in e2e/ and then fails with

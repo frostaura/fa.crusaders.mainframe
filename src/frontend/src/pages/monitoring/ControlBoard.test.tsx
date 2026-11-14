@@ -1,9 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ControlBoardPage } from "./ControlBoard";
 import { renderPage, SETTINGS_FIXTURE, signIn, stubFetch, type StubRoute } from "../../test/harness";
 import { boardCourtFixture, boardFixture, EVENING } from "../../test/monitoringFixtures";
 import type { ControlBoardView } from "../../lib/adminApi";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 /**
  * The Control Board, held to what it is allowed to claim.

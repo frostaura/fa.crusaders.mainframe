@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ScheduleConflict } from "@/lib/adminApi";
 import { CONFLICT_REASON } from "@/lib/scheduleCopy";
 import { ConflictPanel } from "../ConflictPanel";
@@ -36,7 +36,7 @@ describe("R17 X17-7 — the conflict panel's cancel button is never dead", () =>
         expect(screen.queryByRole("dialog")).toBeNull();
         expect(await screen.findByText(CONFLICT_REASON.missing)).toBeInTheDocument();
         expect(field).toHaveAttribute("aria-invalid", "true");
-        await vi.waitFor(() => expect(field).toHaveFocus());
+        await waitFor(() => expect(field).toHaveFocus());
       });
     }
   }

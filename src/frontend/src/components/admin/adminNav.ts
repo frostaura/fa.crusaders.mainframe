@@ -98,6 +98,8 @@ export const ADMIN_NAV: readonly AdminNavGroup[] = [
       },
       {
         id: "transactions", label: "Transactions", path: "/admin/transactions", icon: Receipt,
+        // BM-11: past bookings nobody settled are a money decision, reached from the notice.
+        also: ["/admin/bookings"],
         description: "Every movement of members' minutes in the club's ledger.",
       },
       {

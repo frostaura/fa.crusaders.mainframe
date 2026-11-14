@@ -451,25 +451,23 @@ public sealed class DeviceV3CorpusTests
     }
 
     /// <summary>
-    /// The widest v3 body (4087 of 4096): the server, offered the vector's 42 keys plus 22 of lower
-    /// priority, sheds exactly the 22 and writes the vector's bytes.
+    /// The widest v3 body (4086 of 4096): the server, offered the vector's 42 keys plus 22 of lower
+    /// priority, sheds exactly the 22 and writes the vector's bytes — every value one the server can
+    /// really send. The vector once wrote <c>device_fault_max_per_hour</c> as 1000, a value the
+    /// server's 1–120 bound (BoxSettings) never emits; it is now the bound itself.
     /// </summary>
     [Fact]
     public void The_widest_v3_vector_is_the_servers_fit_at_4096()
     {
         var c = V3Responses("heartbeat").Single(v => v.GetProperty("id").GetString() == "v3-heartbeat-response-widest");
         var text = Text(c);
-        Assert.Equal(4087, Encoding.UTF8.GetByteCount(text));
+        Assert.Equal(4086, Encoding.UTF8.GetByteCount(text));
+        Assert.True(Encoding.UTF8.GetByteCount(text) <= DeviceHeartbeatBudget.CourtBoxV3);
         using var doc = JsonDocument.Parse(text);
         Assert.Equal(42, doc.RootElement.GetProperty("code_keys").GetArrayLength());
-
-        // The vector writes device_fault_max_per_hour as 1000, a value the server can never send:
-        // the setting is bounded 1-120 (BoxSettings) and clamped on read, so the server's true
-        // widest is three bytes narrower and still sheds to the same 42 keys. Reported to the
-        // contract lane; the corpus is read-only here.
-        var serverWidest = text.Replace("\"device_fault_max_per_hour\":1000", $"\"device_fault_max_per_hour\":{BoxSettings.MaxDeviceFaultMaxPerHour}", StringComparison.Ordinal);
-        Assert.Equal(serverWidest, Serialise(BoxOf(doc.RootElement), doc.RootElement, ViewOf(doc.RootElement), extraKeys: 22));
-        Assert.True(Encoding.UTF8.GetByteCount(serverWidest) <= DeviceHeartbeatBudget.CourtBoxV3);
+        Assert.Equal(BoxSettings.MaxDeviceFaultMaxPerHour,
+            doc.RootElement.GetProperty("config").GetProperty("device_fault_max_per_hour").GetInt32());
+        Assert.Equal(text, Serialise(BoxOf(doc.RootElement), doc.RootElement, ViewOf(doc.RootElement), extraKeys: 22));
     }
 
     /// <summary>The lifeline-only body (§11.1) is the server's, byte for byte — and Fit sends it only on the lifeline's turn of an over-budget body.</summary>

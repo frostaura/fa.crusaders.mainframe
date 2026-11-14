@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -16,6 +17,10 @@ import {
 import { BookSheet, type BookSheetProps } from "../BookSheet";
 import { splitShares } from "../splitMath";
 import type { SelectedSlot } from "../types";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 /**
  * The BookSheet's P11 steps (D11): Players → Split → Confirm for a member, the picker in place,

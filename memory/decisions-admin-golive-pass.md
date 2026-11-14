@@ -18,7 +18,8 @@ From `frontend-admin.json` (FA-1…FA-13) and `browser-admin.json` (BA-01…BA-2
   select (name search on top, cap 50 000, said), Reports exports its days and courts — in the
   API's `CsvCell` conventions, numbers as numbers (a defused `-30` cannot be summed). *Why not a
   server route:* the reads already exist and are tenant-scoped; XLSX/PDF were cut from
-  `reporting.md`. Members and no-show CSVs are not built.
+  `reporting.md`. Members and no-show CSVs came in pass 2, server-built and PII minimal
+  (`decisions-app-rest-pass2.md`).
 - **No admin write is direct — now true** (FA-11 found five that were): reject/suspend/reactivate
   read the member's status back like Approve; package Retire, door delete and fingerprint
   enrol/remove read their lists back. The R4 sentence in `decisions-admin-lost-replies` was false
@@ -38,6 +39,7 @@ From `frontend-admin.json` (FA-1…FA-13) and `browser-admin.json` (BA-01…BA-2
 - **Load-proof tests** (FA-13): vitest `testTimeout`/`hookTimeout` 20 s; relative-time assertions
   freeze `Date` only (`vi.useFakeTimers({ toFake: ["Date"] })`), never the page's timers.
 
-Not done here, with the reason in the lane report: Overview's "needs attention" for lights
-mismatches (server-side anomaly), the photo requirement on register (backend), HTTP/1.1
-connection starvation (gateway HTTP/2), the paint-grid density, Night-picker width, hidden H1s.
+Not done here, with the reason in the lane report: HTTP/1.1 connection starvation (gateway
+HTTP/2), the paint-grid density, hidden H1s. Pass 2 closed the lights-mismatch faults, the
+Night-picker width and the refund desk (`decisions-app-rest-pass2.md`); the photo requirement on
+register landed in the platform lane.

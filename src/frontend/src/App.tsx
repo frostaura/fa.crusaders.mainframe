@@ -113,6 +113,7 @@ const MemberNightTab = named(() => import("./pages/admin/member"), "MemberNightT
 const MemberAccess = named(() => import("./pages/admin/member"), "MemberAccess");
 const AdminGroupsPage = named(() => import("./pages/AdminGroups"), "AdminGroupsPage");
 const AdminResultsPage = lazy(() => import("./pages/admin/AdminResults"));
+const AdminBookingsPage = lazy(() => import("./pages/admin/AdminBookings"));
 const AdminLedgerPage = lazy(() => import("./pages/AdminLedger"));
 const ControlBoardPage = named(() => import("./pages/monitoring/ControlBoard"), "ControlBoardPage");
 const AdminDoorsLogPage = named(() => import("./pages/AdminDoorsLog"), "AdminDoorsLogPage");
@@ -263,6 +264,8 @@ export function AppRoutes() {
           {/* P12 — disputed results, and removing a wrong one. */}
           <Route path="/admin/results" element={<Lazy><AdminResultsPage /></Lazy>} />
           <Route path="/admin/transactions" element={<Lazy><AdminLedgerPage /></Lazy>} />
+          {/* BM-11 — the bookings the booking.unsettled notice links to. */}
+          <Route path="/admin/bookings" element={<Lazy><AdminBookingsPage /></Lazy>} />
           <Route path="/admin/reports" element={<Lazy><AdminReportsPage /></Lazy>} />
           <Route path="/admin/monitoring" element={<Lazy><ControlBoardPage /></Lazy>} />
           <Route path="/admin/monitoring/doors" element={<AdminDoorsPage />} />

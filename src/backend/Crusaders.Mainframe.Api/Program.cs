@@ -841,6 +841,8 @@ app.MapGet("/api/v1/whoami", async (HttpContext ctx, MainframeDbContext db) =>
 app.MapAuthEndpoints();
 app.MapClubEndpoints();
 app.MapAdminMemberEndpoints();
+app.MapAdminExportEndpoints();
+app.MapAdminUnsettledBookings();
 app.MapAdminRoleEndpoints();
 app.MapAdminModeEndpoints();
 app.MapDemoMemberViewEndpoints();

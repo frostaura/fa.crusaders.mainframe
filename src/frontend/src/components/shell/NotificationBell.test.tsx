@@ -1,10 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { resetUnread } from "@/components/inbox/useUnreadCount";
 import { INBOX_COPY, bellBadge, bellLabel } from "@/lib/playersCopy";
 import { renderPage, signIn, signOut, stubFetch, type StubRoute } from "@/test/harness";
 import { NotificationBell } from "./NotificationBell";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 /**
  * The bell in the top bar: a link to the inbox, named with the count in words, badged 1–9 then
