@@ -5,8 +5,8 @@ server it has never met.
 Run it as `python3 src/contracts/device-protocol/compat/gen_cases.py`. Standard library only.
 
 The Mega 3.0.0 image is the last one that chip will ever get, and each ESP image is only as
-updatable as its own heartbeat parser, its key ring and its OTA path keep working against every
-server that comes after it (docs/specs/device-api.md section 11, "the lifeline"). This file is the
+reachable as its own heartbeat parser and its key ring keep working against every server that
+comes after it (docs/specs/device-api.md section 11, "the lifeline"). This file is the
 reference implementation of the tolerance rules both ESP images apply to a server body, and of
 the budgets both sides hold a body to:
 
@@ -232,21 +232,6 @@ def button_map(value):
 
 
 # --- lifeline objects: adopted from any complete body, whatever else in it drifted -----------
-OTA_PATH = re.compile(r"^/api/v1/device/firmware/[A-Za-z0-9_-]{1,64}$")
-
-
-def ota_offer(o):
-    if not isinstance(o, dict):
-        return None
-    ok = (isinstance(o.get("target"), str) and isinstance(o.get("version"), str)
-          and re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", o.get("version", ""))
-          and is_uint(o.get("size")) and isinstance(o.get("sha256"), str)
-          and re.fullmatch(r"[0-9a-f]{64}", o["sha256"]) and isinstance(o.get("sig"), str)
-          and re.fullmatch(r"[A-Za-z0-9_-]{342}", o["sig"]) and isinstance(o.get("path"), str)
-          and OTA_PATH.match(o["path"]))
-    return o["version"] if ok else None
-
-
 def key_next(o):
     if (isinstance(o, dict) and isinstance(o.get("id"), str) and re.fullmatch(r"k[1-9][0-9]{0,5}", o["id"])
             and isinstance(o.get("key"), str) and re.fullmatch(r"[A-Za-z0-9_-]{43}", o["key"])):
@@ -304,12 +289,11 @@ GATE_SETTINGS = {
     "unlock_seconds": clamp(1, 30),
     "power_restore_trust_minutes": clamp(0, 120),
     "net_fallback_minutes": clamp(3, 60),
-    "ota_probation_minutes": clamp(3, 60),
     "device_fault_reporting": boolean,
     "device_fault_max_per_hour": clamp(1, 120),
 }
 GATE_DEFAULTS = {"unlock_seconds": 15, "power_restore_trust_minutes": 20, "net_fallback_minutes": 10,
-                 "ota_probation_minutes": 10, "device_fault_reporting": True, "device_fault_max_per_hour": 60}
+                 "device_fault_reporting": True, "device_fault_max_per_hour": 60}
 
 
 def read_settings(obj, table, prev, drift, name):
@@ -376,8 +360,7 @@ def adopt_court_box(prev, raw, status=200):
     if "code_keys" in body and isinstance(body.get("code_keys"), list):
         filled = len(st.get("code_days", []))
         st["code_keys"] = [k for k in st["code_keys"] if int(k[4]) < filled]
-    for key, reader, name in (("ota", ota_offer, "ota_version"), ("key_next", key_next, "key_next_id"),
-                              ("net", net_ver, "net_ver")):
+    for key, reader, name in (("key_next", key_next, "key_next_id"), ("net", net_ver, "net_ver")):
         st[name] = reader(body[key]) if key in body else None
     out["drift"] = sorted(drift)
     return st, out
@@ -409,8 +392,7 @@ def adopt_gate(prev, raw, status=200):
                     st[key] = got
                 if bad:
                     drift.add(key)
-    for key, reader, name in (("ota", ota_offer, "ota_version"), ("key_next", key_next, "key_next_id"),
-                              ("net", net_ver, "net_ver")):
+    for key, reader, name in (("key_next", key_next, "key_next_id"), ("net", net_ver, "net_ver")):
         st[name] = reader(body[key]) if key in body else None
     out["drift"] = sorted(drift)
     return st, out
@@ -423,9 +405,6 @@ def dump(o):
     return json.dumps(o, separators=(",", ":"), ensure_ascii=True).encode()
 
 
-_ota = json.loads((ROOT / "ota" / "cases.json").read_text())
-BRIDGE_OFFER = next(i["offer"] for i in _ota["images"] if i["id"] == "image-bridge")
-GATE_OFFER = next(i["offer"] for i in _ota["images"] if i["id"] == "image-gate")
 KEY_NEXT = {"id": "k2", "key": "Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr"}
 NET = {"ver": 4, "base": "http://192.168.1.20:8088", "wifi0_ssid": "CRUSADERS", "wifi0_psk": "squash-court-4",
        "wifi1_ssid": "CRUSADERS-NEW", "wifi1_psk": "new-router-pass"}
@@ -440,7 +419,7 @@ CONFIG = {
     "lcd_landing_dwell_seconds": 3, "lcd_after_lights_on_seconds": 15, "lcd_reinit_seconds": 60,
     "relay_authorisation_cap_minutes": 240, "relay_reconcile_min_seconds": 60,
     "device_power_restore_trust_minutes": 20, "device_net_fallback_minutes": 10,
-    "device_ota_probation_minutes": 10, "hw_relay_active_level": "high", "hw_lcd_i2c_address": 0,
+    "hw_relay_active_level": "high", "hw_lcd_i2c_address": 0,
     "hw_scanner_baud": 0, "hw_scanner_line_end": "auto", "hw_scanner_gap_ms": 150, "button_map": BUTTONS,
 }
 
@@ -472,12 +451,12 @@ def gate_base():
 def court_box_fresh():
     return {"court_numbers": [], "config": dict(COURT_BOX_DEFAULTS), "button_map": BUTTONS[:],
             "courts": [], "roster": [], "code_days": [], "code_keys": [], "relays": [],
-            "ota_version": None, "key_next_id": None, "net_ver": None}
+            "key_next_id": None, "net_ver": None}
 
 
 def gate_fresh():
     return {"gate": dict(GATE_DEFAULTS), "roster": [], "code_days": [], "code_keys": [],
-            "ota_version": None, "key_next_id": None, "net_ver": None}
+            "key_next_id": None, "net_ver": None}
 
 
 def with_key(obj, key, value, before=None, inside=None):
@@ -603,17 +582,17 @@ court_box_bodies = [
     ("cb-status-500", "a 500 adopts nothing", CB, 500),
     ("cb-status-401", "a 401 adopts nothing and retries once with the previous key", CB, 401),
     ("cb-lifeline-with-drifted-rest",
-     "the lifeline: ota, key_next and net are adopted from a complete body even when its roster, courts and "
+     "the lifeline: key_next and net are adopted from a complete body even when its roster, courts and "
      "config are in a grammar this board does not know",
-     with_key(with_key(with_key(replaced(replaced(replaced(CB, ["roster"], [{"t": 1}]), ["courts"], [{"r": 0}]),
-                                         ["config"], "v4"), "ota", BRIDGE_OFFER), "key_next", KEY_NEXT), "net", NET), 200),
+     with_key(with_key(replaced(replaced(replaced(CB, ["roster"], [{"t": 1}]), ["courts"], [{"r": 0}]),
+                                ["config"], "v4"), "key_next", KEY_NEXT), "net", NET), 200),
     ("cb-lifeline-only", "a lifeline-only body (the server's answer when everything would not fit): the lifeline is "
      "adopted and everything absent keeps its value",
      {"server_time": "2026-11-13T18:00:00", "tenant_slug": "crusaders", "device_code": "box-5ccf7f0a1b2c",
-      "heartbeat_seconds": 60, "ota": BRIDGE_OFFER, "key_next": KEY_NEXT, "net": NET}, 200),
-    ("cb-lifeline-extra-fields", "a future field inside ota, key_next or net is ignored",
-     with_key(with_key(with_key(CB, "ota", with_key(BRIDGE_OFFER, "channel", "stable")), "key_next",
-                       with_key(KEY_NEXT, "not_after", 1800000000)), "net", with_key(NET, "wifi2_ssid", "SPARE")), 200),
+      "heartbeat_seconds": 60, "key_next": KEY_NEXT, "net": NET}, 200),
+    ("cb-lifeline-extra-fields", "a future field inside key_next or net is ignored",
+     with_key(with_key(CB, "key_next", with_key(KEY_NEXT, "not_after", 1800000000)), "net",
+              with_key(NET, "wifi2_ssid", "SPARE")), 200),
     ("cb-relays-extra-field", "a v3 box on a pre-v3 server: relays elements with a fourth field are read",
      replaced(with_key(CB, "relays", ["0|1834|3fa85f64|x", "2|600|9c1d0e22|x"], before="roster"), ["courts"], []), 200),
 ]
@@ -634,10 +613,9 @@ gate_bodies = [
     ("gt-kind-not-gate", "DG-9: an answer whose kind is not gate adopts no roster, keys or settings",
      replaced(GB, ["kind"], "court_box"), 200),
     ("gt-number-kinds", "a fraction and a quoted number read as absent",
-     replaced(replaced(GB, ["gate", "unlock_seconds"], 12.5), ["gate", "ota_probation_minutes"], "30"), 200),
+     replaced(replaced(GB, ["gate", "unlock_seconds"], 12.5), ["gate", "net_fallback_minutes"], "30"), 200),
     ("gt-lifeline-with-drifted-rest", "the lifeline survives a roster and gate object it cannot read",
-     with_key(with_key(replaced(replaced(GB, ["roster"], [{"t": 1}]), ["gate"], [15]), "ota", GATE_OFFER),
-              "key_next", KEY_NEXT), 200),
+     with_key(replaced(replaced(GB, ["roster"], [{"t": 1}]), ["gate"], [15]), "key_next", KEY_NEXT), 200),
     ("gt-status-202", "every 2xx is a success", GB, 202),
     ("gt-html-200", "nothing adopted", b"<!doctype html><p>gateway</p>", 200),
     ("gt-at-budget-adopted", "a body of exactly 6144 bytes, the server's maximum: adopted", padded(GB, 6144), 200),

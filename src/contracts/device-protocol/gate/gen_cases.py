@@ -499,18 +499,14 @@ responses = [
 ]
 
 
-# --- Heartbeat v3 (gate 2.0.0): signed OTA, key rotation, network changes, and what
-# survives a reset. docs/specs/door-gate.md section 14 and docs/specs/device-api.md.
-# The OTA offer is ota/cases.json's image-gate offer verbatim, read from that file so
-# the two families cannot disagree about one object.
-_ota = json.loads((pathlib.Path(__file__).resolve().parent.parent / "ota" / "cases.json").read_text())
-GATE_OFFER = next(i["offer"] for i in _ota["images"] if i["id"] == "image-gate")
+# --- Heartbeat v3 (gate 2.0.0): key rotation, network changes, and what survives a
+# reset. docs/specs/door-gate.md section 14 and docs/specs/device-api.md.
 KEY_NEXT = {"id": "k2", "key": "Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr"}
 NET = {"ver": 4, "base": "http://192.168.1.20:8088", "wifi0_ssid": "CRUSADERS", "wifi0_psk": "squash-court-4",
        "wifi1_ssid": "CRUSADERS-NEW", "wifi1_psk": "new-router-pass"}
-V3_CAPS = ["codes:m1", "ota:1", "key:1", "net:1"]
+V3_CAPS = ["codes:m1", "key:1", "net:1"]
 V3_GATE = {"unlock_seconds": 15, "power_restore_trust_minutes": 20, "net_fallback_minutes": 10,
-           "ota_probation_minutes": 10, "device_fault_reporting": True, "device_fault_max_per_hour": 60}
+           "device_fault_reporting": True, "device_fault_max_per_hour": 60}
 # The gate's telemetry (docs/specs/device-api.md section 13): the same `diag` object as the court
 # box's, sent on every beat after the v3 fields and before caps.
 V3_DIAG = {"reset": "task_wdt", "exc": 0, "epc1": 0, "heap": 151552, "heap_min": 139264, "block": 110592,
@@ -519,8 +515,8 @@ V3_DIAG = {"reset": "task_wdt", "exc": 0, "epc1": 0, "heap": 151552, "heap_min":
 
 def heartbeat_v3(extra=(), gate=None):
     """Key order: the 1.x body, with the v3 settings appended INSIDE `gate` after
-    unlock_seconds (the three v3 ones, then the two fault settings), then the transient v3
-    objects (ota, key_next, net) after `roster`. The gate object holds scalars only, for the
+    unlock_seconds (the two v3 ones, then the two fault settings), then the transient v3
+    objects (key_next, net) after `roster`. The gate object holds scalars only, for the
     life of the frozen readers (FC-12): a nested object here is never a setting."""
     body = heartbeat("gate-0a1b2c", "front-door", [entry("7Q3F9KM2XZ8B", 1800, 5400)])
     body["gate"] = dict(gate or V3_GATE)
@@ -533,7 +529,7 @@ requests += [
     {
         "id": "gate-heartbeat-request-v3",
         "note": (
-            "gate 2.0.0 on a quiet beat. The 1.x fields, then fw_state, net_ver and net_src, then "
+            "gate 2.0.0 on a quiet beat. The 1.x fields, then net_ver and net_src, then "
             "caps LAST. `caps` names every v3 capability the image has; the server keys every new "
             "response field on it, so a 1.x gate is answered exactly as before."
         ),
@@ -542,7 +538,7 @@ requests += [
         "authorization": BEARER,
         "body_hex": body_hex({
             "mac": MAC, "firmware_version": "2.0.0", "uptime_ms": 86400000, "kind": "gate",
-            "fw_state": "committed", "net_ver": 4, "net_src": "server", "caps": V3_CAPS,
+            "net_ver": 4, "net_src": "server", "caps": V3_CAPS,
         }),
     },
     {
@@ -559,7 +555,7 @@ requests += [
         "authorization": BEARER,
         "body_hex": body_hex({
             "mac": MAC, "firmware_version": "2.0.0", "uptime_ms": 412000, "kind": "gate",
-            "fw_state": "committed", "net_ver": 4, "net_src": "server", "restore": "cold", "caps": V3_CAPS,
+            "net_ver": 4, "net_src": "server", "restore": "cold", "caps": V3_CAPS,
         }),
     },
     {
@@ -576,19 +572,7 @@ requests += [
         "authorization": BEARER,
         "body_hex": body_hex({
             "mac": MAC, "firmware_version": "2.0.0", "uptime_ms": 86400000, "kind": "gate",
-            "fw_state": "committed", "net_ver": 4, "net_src": "server", "diag": V3_DIAG, "caps": V3_CAPS,
-        }),
-    },
-    {
-        "id": "gate-heartbeat-request-v3-rolled-back",
-        "note": "2.0.1 failed probation; the gate is back on 2.0.0 in its other app slot and will never take 2.0.1 again.",
-        "method": "POST",
-        "path_and_query": "/api/v1/device/heartbeat",
-        "authorization": BEARER,
-        "body_hex": body_hex({
-            "mac": MAC, "firmware_version": "2.0.0", "uptime_ms": 86400000, "kind": "gate",
-            "fw_state": "rolled_back", "fw_failed": "2.0.1", "fw_error": "probation", "net_ver": 4,
-            "net_src": "server", "caps": V3_CAPS,
+            "net_ver": 4, "net_src": "server", "diag": V3_DIAG, "caps": V3_CAPS,
         }),
     },
 ]
@@ -600,26 +584,13 @@ responses += [
         "note": (
             "the gate's v3 settings, inside `gate` after unlock_seconds: power_restore_trust_minutes "
             "(tenant device_power_restore_trust_minutes, 0-120), net_fallback_minutes "
-            "(device_net_fallback_minutes, 3-60) and ota_probation_minutes "
-            "(device_ota_probation_minutes, 3-60), then device_fault_reporting and "
+            "(device_net_fallback_minutes, 3-60), then device_fault_reporting and "
             "device_fault_max_per_hour (the tenant settings of the same names, 1-120), which every gate "
             "firmware reads and no server sent before v3 (FC-8). Sent only to a gate whose caps include "
-            "ota:1, key:1 or net:1."
+            "key:1 or net:1."
         ),
         "body_hex": body_hex(heartbeat_v3()),
         "expect": {"kind": "gate", "gate": V3_GATE, "roster": ["7Q3F9KM2XZ8B|0|1800|5400"]},
-    },
-    {
-        "id": "gate-heartbeat-response-v3-ota-offer",
-        "kind": "heartbeat",
-        "note": (
-            "an OTA offer for the door_gate target: ota/cases.json image-gate's offer verbatim. The "
-            "gate takes it only while the lock is engaged and no scan is waiting, streams it into the "
-            "inactive app slot while hashing and feeding the watchdog, and switches the boot "
-            "partition only after size, SHA-256 and the signature over the manifest all agree."
-        ),
-        "body_hex": body_hex(heartbeat_v3([("ota", GATE_OFFER)])),
-        "expect": {"kind": "gate", "ota": GATE_OFFER, "roster": ["7Q3F9KM2XZ8B|0|1800|5400"]},
     },
     {
         "id": "gate-heartbeat-response-v3-key-next",
