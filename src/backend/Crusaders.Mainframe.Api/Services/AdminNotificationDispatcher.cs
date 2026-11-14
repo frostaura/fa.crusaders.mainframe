@@ -39,6 +39,9 @@ namespace Crusaders.Mainframe.Api.Services;
 /// </summary>
 public sealed class AdminNotificationDispatcher
 {
+    /// <summary>The cause a demo club's notice is suppressed with: a demo club mails nobody (BA-12 reads it).</summary>
+    public const string DemoModeCause = "demo_mode";
+
     /// <summary>Rows claimed per pass. Small: each costs one SMTP round trip per admin.</summary>
     public const int BatchSize = 20;
 
@@ -208,7 +211,7 @@ public sealed class AdminNotificationDispatcher
         var tenant = await db.Tenants.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(t => t.Id == row.TenantId, ct);
         if (tenant is null) return await FinishAsync(db, row, AdminNotificationState.Failed, now, "tenant_missing", ct);
         // Demo mode: a demo club mails nobody — its notices stay on its feed, finished as suppressed.
-        if (tenant.IsDemo) return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, "demo_mode", ct);
+        if (tenant.IsDemo) return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, DemoModeCause, ct);
         scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenant.Id, tenant.Slug);
 
         var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(ct);

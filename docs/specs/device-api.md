@@ -230,6 +230,16 @@ court (BD-6: v2 recorded a partial restore as a full one). The v2 "first heartbe
 window" rule does not apply to v3 boxes, so a late first beat after a long outage is still
 recorded (BD-5).
 
+**Bookings against the box's word (BA-04, 2026-11-14).** Once a minute the admin sweep compares
+each court's bookings with what its box last CONFIRMED, by the control-board tile's own rule: a
+court the box says is lit with nothing booked on it, lit since before the grace window began,
+files `lights_on_nothing_booked` (warning); a court somebody checked in on before the grace window
+began and the box has since said is dark files `checked_in_lights_off` (error). Both are server
+faults on the box that drives the court, so they reach Faults, the Overview's "Needs attention"
+and the fault-spike mail; nothing is said about a court whose box is offline or out of service;
+and each resolves itself (no resolver, note "Cleared on its own") on the first sweep after the
+disagreement ends (`Services/LightsMismatch.cs`).
+
 ---
 
 ## 5. The display and hardware settings

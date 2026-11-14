@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
@@ -117,6 +118,10 @@ public sealed class DemoDataTests : IClassFixture<PostgresFixture>
         Assert.True(await db.DeviceErrors.IgnoreQueryFilters().AnyAsync(e => e.TenantId == demo.Id && e.ResolvedAt == null));
         Assert.True(await db.AuditLogs.IgnoreQueryFilters().CountAsync(a => a.TenantId == demo.Id && a.Action == "gate.opened") > 20);
         Assert.True(await db.AdminNotifications.IgnoreQueryFilters().AnyAsync(n => n.TenantId == demo.Id && n.Kind == AdminEventCatalogue.MemberRegistered));
+        // BA-12: a demo club mails nobody, so none of its seeded notices may claim it emailed an admin.
+        var feed = await db.AdminNotifications.IgnoreQueryFilters().Where(n => n.TenantId == demo.Id).ToListAsync();
+        Assert.All(feed, n => Assert.Equal(AdminNotificationState.Suppressed, n.State));
+        Assert.All(feed, n => Assert.Equal(AdminNotificationEndpoints.ReasonDemoClub, AdminNotificationEndpoints.SuppressionReason(n.LastError)));
         Assert.Equal(2, await db.BookingSchedules.IgnoreQueryFilters().CountAsync(s => s.TenantId == demo.Id));
         Assert.True(await db.LedgerEntries.IgnoreQueryFilters().AnyAsync(l => l.TenantId == demo.Id && l.Type == LedgerEntryType.AdminTopUp));
     }

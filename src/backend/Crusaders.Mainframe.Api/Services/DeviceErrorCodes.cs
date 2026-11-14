@@ -146,6 +146,14 @@ public static class DeviceErrorCodes
     /// <summary>The server had to leave member-code keys out of a heartbeat (the ring's cap or the body budget, member-code.md §5.4).</summary>
     public const string CodeKeysTrimmed = "code_keys_trimmed";
 
+    // ---- What the bookings and the box disagree about (BA-04), raised by the server ----
+
+    /// <summary>The box says a court is lit and nothing is booked on it, past the grace window (<see cref="LightsMismatch"/>).</summary>
+    public const string LightsOnNothingBooked = "lights_on_nothing_booked";
+
+    /// <summary>Somebody checked in on a court and the box says its lights are off, past the grace window (<see cref="LightsMismatch"/>).</summary>
+    public const string CheckedInLightsOff = "checked_in_lights_off";
+
     /// <summary>
     /// What a code this server has never heard of is recorded as. The raw string goes into the
     /// row's detail, so a firmware ahead of this server is visible rather than silent.
@@ -188,7 +196,7 @@ public static class DeviceErrorCodes
                 or WdtReset or StoreWriteFailed or Http5xx or ApiBreakerOpen
                 or ScannerUartError or NvsWriteFailed or RelockOverdue
                 or AuthFailed or CourtNotMapped or Unknown or MegaUnacked or KindMismatch
-                or BoardRestarted or LcdAbsent => DeviceErrorSeverity.Error,
+                or BoardRestarted or LcdAbsent or CheckedInLightsOff => DeviceErrorSeverity.Error,
 
             // Warning — degraded, self-correcting, or a rule the club set being hit.
             LcdResync or QueueOverflow or RosterRejected or Http4xx or HttpTimeout
@@ -198,7 +206,8 @@ public static class DeviceErrorCodes
                 or SeqRegression or OutageOpened or WalkupRefused or ActivationRefused
                 or TooManyUnacknowledgedDevices or QueueNoPush or QueueEventsLost
                 or ErrorLogOverflow or ScreenDropped
-                or HeapLow or StackLow or AnswerDrift or CodeKeysTrimmed or NetFallback => DeviceErrorSeverity.Warning,
+                or HeapLow or StackLow or AnswerDrift or CodeKeysTrimmed or NetFallback
+                or LightsOnNothingBooked => DeviceErrorSeverity.Warning,
 
             // Info — worth counting, not worth waking anybody.
             MegaLinkBack or Boot => DeviceErrorSeverity.Info,
@@ -302,6 +311,8 @@ public static class DeviceErrorCodes
             AnswerDrift => "The board could not read part of the server's answer",
             LcdAbsent => "The court box's screen did not answer",
             CodeKeysTrimmed => "Some members' codes could not be sent to the board, so it cannot check them offline",
+            LightsOnNothingBooked => "A court's lights are on and nothing is booked on it",
+            CheckedInLightsOff => "Somebody checked in on a court and its lights are off",
             Unknown => "An error the club's software does not have a name for",
             _ => "An error the club's software does not have a name for",
         };
@@ -325,6 +336,7 @@ public static class DeviceErrorCodes
         Unknown, ErrorLogOverflow,
         MegaUnacked, RelightFailed, ScreenDropped, KindMismatch, NetFallback,
         BoardRestarted, HeapLow, StackLow, AnswerDrift, LcdAbsent, CodeKeysTrimmed,
+        LightsOnNothingBooked, CheckedInLightsOff,
     ];
 
     private static readonly HashSet<string> Known = new(All, StringComparer.Ordinal);

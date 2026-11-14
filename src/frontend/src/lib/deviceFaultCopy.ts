@@ -269,6 +269,17 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
       + " Online, everyone is checked as normal.",
     doThis: "Nothing while the club's network is up. If the box is often offline, ask whoever maintains it about the key limit.",
   },
+  lights_on_nothing_booked: {
+    means: "The box says this court's lights are on, and nothing is booked on it — past the grace window. It costs"
+      + " electricity, and it can mean a stuck relay or an auto-off that did not fire.",
+    doThis: "Look at the court. If nobody is playing, switch the lights off at the wall and look at the box's other faults."
+      + " This clears by itself once the lights go off or a booking starts.",
+  },
+  checked_in_lights_off: {
+    means: "Somebody checked in on this court and the box says its lights are off. They have paid for light they are not getting.",
+    doThis: "Ask at the court: they may have switched off early. If not, the relay did not close — try the box's buttons, and"
+      + " refund the session if it cannot be lit. This clears by itself once the lights come on or the booking ends.",
+  },
   error_log_overflow: {
     means: "This board is producing faults faster than the club's system will record them, so most of them are being counted rather than kept.",
     doThis: "A board in this state is in real trouble. The count below is how many were suppressed — go and look at the board itself.",
