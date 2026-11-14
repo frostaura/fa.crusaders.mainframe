@@ -118,9 +118,8 @@ public sealed class AdminNotificationSweep
         var local = TimeZoneInfo.ConvertTime(now, zone);
         if (local.Hour * 60 + local.Minute < settings.DayStartMinute) return;
 
-        var floor = now.AddDays(-settings.NoShowLookbackDays);
-        var stranded = db.Bookings.AsNoTracking()
-            .Where(b => b.Status == BookingStatus.Booked && b.CheckedInAt == null && b.UserId != null && b.StartsAt < floor);
+        // The list the notice links to reads the same query, so the two can never disagree.
+        var stranded = AdminUnsettledBookingsEndpoint.Query(db, settings, now);
         var count = await stranded.CountAsync(ct);
         if (count == 0) return;
 

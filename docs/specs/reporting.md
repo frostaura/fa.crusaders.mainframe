@@ -107,7 +107,17 @@ What is built (2026-11-13, FA-7/BA-08), and what is not:
   `transactions-<from>-to-<to>.csv`, `report-days-…`, `report-courts-…`.
 - **Not built, and cut from this spec:** XLSX, PDF with charts, the backend export job and the
   emailed link for >10k rows. A CSV opens in every spreadsheet, and a PDF of a Recharts page is a
-  browser print. Members and no-show exports are not built yet either.
+  browser print.
+- **Members and no-shows (BA-08, 2026-11-14)** — server-built files, admin only, tenant-scoped:
+  `GET /api/v1/admin/exports/members.csv?status=` (`membership_number,full_name,status,groups,joined_date,balance_minutes`,
+  by name; `groups` joined with `; `) and `GET /api/v1/admin/exports/no-shows.csv?from=&to=` (club days,
+  default the last 30, at most 366: `date,time,timezone,court,full_name,membership_number,booked_minutes,penalty_minutes,refunded_for_outage`,
+  oldest first; a no-show refunded for an outage is listed with `yes`). **PII minimal by decision:** a
+  saved file leaves the app's access control, so neither carries an email address, phone number,
+  photo, PIN or fingerprint — only what a committee list and a treasurer's reconciliation need. Both
+  are audited (`members.exported`, `no_shows.exported`: who, what was asked, how many rows — never
+  who is in it), carry `X-Crusaders-Rows`, a BOM and `CsvCell` defusing, and are offered on the
+  Members page and on Reports.
 
 ## The door log is not a report
 
