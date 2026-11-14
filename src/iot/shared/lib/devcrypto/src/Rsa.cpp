@@ -8,9 +8,8 @@ namespace {
 /// 2048 bits in 32-bit limbs, least significant limb first.
 constexpr size_t kLimbs = kRsa2048Bytes / 4U;
 
-struct Big {
-  uint32_t limb[kLimbs];
-};
+using Big = RsaBig;
+static_assert(sizeof(Big::limb) / sizeof(Big::limb[0]) == kLimbs, "2048 bits of 32-bit limbs");
 
 /// Big-endian bytes to little-endian limbs.
 void load(Big& out, const uint8_t* bytes) {
@@ -136,19 +135,20 @@ bool rsa2048InRange(const uint8_t modulus[kRsa2048Bytes], const uint8_t signatur
 
 bool rsa2048PublicOp(const uint8_t modulus[kRsa2048Bytes], const uint8_t input[kRsa2048Bytes],
                      uint8_t out[kRsa2048Bytes]) {
-  if (modulus == nullptr || input == nullptr || out == nullptr || !isRsa2048Modulus(modulus)) {
-    return false;
-  }
-
   // STATIC, NOT ON THE STACK: seven 256-byte numbers were a 1,840-byte frame,
   // and the ESP8266 runs loop() on a 4 KB stack (ESPR-1, the stack budget). Only
   // public values pass through here (a modulus, a signature), it is called from
-  // the one loop, never re-entered, and a board that never verifies an image
+  // the one loop, never re-entered, and a board that never calls THIS overload
   // links none of it (--gc-sections), so it costs RAM only where it is used.
-  static struct {
-    Big n, x, r2, xm, a, b, one;
-  } w;
+  static RsaWorkspace w;
+  return rsa2048PublicOp(modulus, input, out, w);
+}
 
+bool rsa2048PublicOp(const uint8_t modulus[kRsa2048Bytes], const uint8_t input[kRsa2048Bytes],
+                     uint8_t out[kRsa2048Bytes], RsaWorkspace& w) {
+  if (modulus == nullptr || input == nullptr || out == nullptr || !isRsa2048Modulus(modulus)) {
+    return false;
+  }
   load(w.n, modulus);
   load(w.x, input);
   if (compare(w.x, w.n) >= 0) {
@@ -173,18 +173,10 @@ bool rsa2048PublicOp(const uint8_t modulus[kRsa2048Bytes], const uint8_t input[k
   return true;
 }
 
-bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t digest[32],
-                         const uint8_t signature[kRsa2048Bytes]) {
-  if (modulus == nullptr || digest == nullptr || signature == nullptr) {
-    return false;
-  }
-  if (!rsa2048InRange(modulus, signature)) {
-    return false;
-  }
-  uint8_t decoded[kRsa2048Bytes];
-  if (!rsa2048PublicOp(modulus, signature, decoded)) {
-    return false;
-  }
+namespace {
+
+/// The scheme's one encoding of `digest`, compared whole against `decoded`.
+bool matchesEncoding(const uint8_t decoded[kRsa2048Bytes], const uint8_t digest[32]) {
   // The one encoding the scheme allows: 00 01, 0xFF padding, 00, DigestInfo,
   // digest. Built in full and compared in full — no parsing.
   uint8_t expected[kRsa2048Bytes];
@@ -200,6 +192,38 @@ bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t dig
     diff = static_cast<uint8_t>(diff | (decoded[i] ^ expected[i]));
   }
   return diff == 0U;
+}
+
+} // namespace
+
+bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t digest[32],
+                         const uint8_t signature[kRsa2048Bytes]) {
+  if (modulus == nullptr || digest == nullptr || signature == nullptr) {
+    return false;
+  }
+  if (!rsa2048InRange(modulus, signature)) {
+    return false;
+  }
+  uint8_t decoded[kRsa2048Bytes];
+  if (!rsa2048PublicOp(modulus, signature, decoded)) {
+    return false;
+  }
+  return matchesEncoding(decoded, digest);
+}
+
+bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t digest[32],
+                         const uint8_t signature[kRsa2048Bytes], RsaWorkspace& work) {
+  if (modulus == nullptr || digest == nullptr || signature == nullptr) {
+    return false;
+  }
+  if (!rsa2048InRange(modulus, signature)) {
+    return false;
+  }
+  uint8_t decoded[kRsa2048Bytes];
+  if (!rsa2048PublicOp(modulus, signature, decoded, work)) {
+    return false;
+  }
+  return matchesEncoding(decoded, digest);
 }
 
 } // namespace dc

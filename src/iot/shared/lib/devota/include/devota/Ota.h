@@ -149,12 +149,18 @@ size_t manifestText(const Offer& offer, char* out, size_t cap);
 /// under `modulus`: `sig_encoding`, then `sig_range`, then `sig`.
 Refusal verifySignature(const char* text, size_t textLen, const char* sigB64,
                         const uint8_t modulus[dc::kRsa2048Bytes]);
+/// The same, in a caller's workspace (dc::RsaWorkspace).
+Refusal verifySignature(const char* text, size_t textLen, const char* sigB64,
+                        const uint8_t modulus[dc::kRsa2048Bytes], dc::RsaWorkspace& work);
 
 /// After streaming: the byte count must equal the offer's size, the SHA-256 the
 /// offer's, and the signature must verify over the manifest built from the
 /// OFFER's fields. Only Ok may commit the image.
 Refusal verifyStaged(const Offer& offer, const uint8_t imageSha256[32], uint32_t bytes,
                      const uint8_t modulus[dc::kRsa2048Bytes]);
+/// The same, in a caller's workspace (dc::RsaWorkspace).
+Refusal verifyStaged(const Offer& offer, const uint8_t imageSha256[32], uint32_t bytes,
+                     const uint8_t modulus[dc::kRsa2048Bytes], dc::RsaWorkspace& work);
 
 /// A modulus written as hex — `OTA_PUBLIC_KEY_N` in `secrets.h`,
 /// `DeviceOta:PublicKeyModulus` on the server — into 256 big-endian bytes.

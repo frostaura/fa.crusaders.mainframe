@@ -302,8 +302,11 @@ size_t manifestText(const Offer& offer, char* out, size_t cap) {
   return manifestText(offer.target, offer.version, offer.size, offer.sha256, out, cap);
 }
 
-Refusal verifySignature(const char* text, size_t textLen, const char* sigB64,
-                        const uint8_t modulus[dc::kRsa2048Bytes]) {
+namespace {
+
+/// The signature check, in `work` when one is lent, else in devcrypto's own.
+Refusal verifySignatureIn(const char* text, size_t textLen, const char* sigB64,
+                          const uint8_t modulus[dc::kRsa2048Bytes], dc::RsaWorkspace* work) {
   if (sigB64 == nullptr || strlen(sigB64) != kSigB64Len || !allOf(sigB64, kSigB64Len, isB64Url)) {
     return Refusal::SigEncoding;
   }
@@ -317,11 +320,13 @@ Refusal verifySignature(const char* text, size_t textLen, const char* sigB64,
   }
   uint8_t digest[dc::kSha256Bytes];
   dc::sha256(reinterpret_cast<const uint8_t*>(text), textLen, digest);
-  return dc::rsa2048VerifySha256(modulus, digest, sig) ? Refusal::Ok : Refusal::Sig;
+  const bool ok = work != nullptr ? dc::rsa2048VerifySha256(modulus, digest, sig, *work)
+                                  : dc::rsa2048VerifySha256(modulus, digest, sig);
+  return ok ? Refusal::Ok : Refusal::Sig;
 }
 
-Refusal verifyStaged(const Offer& offer, const uint8_t imageSha256[32], uint32_t bytes,
-                     const uint8_t modulus[dc::kRsa2048Bytes]) {
+Refusal verifyStagedIn(const Offer& offer, const uint8_t imageSha256[32], uint32_t bytes,
+                       const uint8_t modulus[dc::kRsa2048Bytes], dc::RsaWorkspace* work) {
   if (bytes != offer.size) {
     return Refusal::Size;
   }
@@ -335,7 +340,29 @@ Refusal verifyStaged(const Offer& offer, const uint8_t imageSha256[32], uint32_t
   if (n == 0U) {
     return Refusal::Size;
   }
-  return verifySignature(text, n, offer.sig, modulus);
+  return verifySignatureIn(text, n, offer.sig, modulus, work);
+}
+
+} // namespace
+
+Refusal verifySignature(const char* text, size_t textLen, const char* sigB64,
+                        const uint8_t modulus[dc::kRsa2048Bytes]) {
+  return verifySignatureIn(text, textLen, sigB64, modulus, nullptr);
+}
+
+Refusal verifySignature(const char* text, size_t textLen, const char* sigB64,
+                        const uint8_t modulus[dc::kRsa2048Bytes], dc::RsaWorkspace& work) {
+  return verifySignatureIn(text, textLen, sigB64, modulus, &work);
+}
+
+Refusal verifyStaged(const Offer& offer, const uint8_t imageSha256[32], uint32_t bytes,
+                     const uint8_t modulus[dc::kRsa2048Bytes]) {
+  return verifyStagedIn(offer, imageSha256, bytes, modulus, nullptr);
+}
+
+Refusal verifyStaged(const Offer& offer, const uint8_t imageSha256[32], uint32_t bytes,
+                     const uint8_t modulus[dc::kRsa2048Bytes], dc::RsaWorkspace& work) {
+  return verifyStagedIn(offer, imageSha256, bytes, modulus, &work);
 }
 
 bool parseModulusHex(const char* hex, uint8_t out[dc::kRsa2048Bytes]) {
