@@ -57,6 +57,14 @@ AuthCommand AuthPolicy::afterUndecided(uint32_t nowMs) {
   return arm(court_, nowMs);
 }
 
+AuthCommand AuthPolicy::coverScan(uint32_t scanLeftMs, uint32_t nowMs) {
+  if (scanLeftMs == 0U) {
+    return disarm();
+  }
+  until_.arm(nowMs, scanLeftMs);
+  return AuthCommand::Arm;
+}
+
 bool AuthPolicy::allowsRelease(uint8_t court, uint32_t nowMs) const {
   return armed(nowMs) && court_ != kUnbound && court_ == court;
 }

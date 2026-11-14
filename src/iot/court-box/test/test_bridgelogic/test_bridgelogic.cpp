@@ -2377,10 +2377,11 @@ void test_a_court_press_invitation_never_outlives_the_scan() {
       bridgelogic::ScreenId::CourtInUse,    bridgelogic::ScreenId::NoTimeAvailable,
       bridgelogic::ScreenId::PurchaseEnded, bridgelogic::ScreenId::PayForPriceChanged,
       bridgelogic::ScreenId::PayForQuote,   bridgelogic::ScreenId::Busy,
-      bridgelogic::ScreenId::CardNoBooking,
+      bridgelogic::ScreenId::CardNoBooking, bridgelogic::ScreenId::ChooseTime,
+      bridgelogic::ScreenId::ExtendPrompt,  bridgelogic::ScreenId::MinutesOutOfRange,
   };
   for (const bridgelogic::ScreenId id : inviting) {
-    TEST_ASSERT_TRUE(bridgelogic::invitesCourtPress(id));
+    TEST_ASSERT_TRUE(bridgelogic::invitesPress(id));
     const bridgelogic::Screen full = bridgelogic::screenFor(id, facts, settings);
     // 12.9 s of scan left: the countdown is at most twelve whole seconds.
     const bridgelogic::Screen capped = bridgelogic::screenFor(id, facts, settings, 12900UL);
@@ -2403,9 +2404,9 @@ void test_a_court_press_invitation_never_outlives_the_scan() {
   // A screen that invites no court press keeps its whole hold.
   const bridgelogic::ScreenId reading[] = {bridgelogic::ScreenId::CodeUsed, bridgelogic::ScreenId::SeeTheDesk,
                                            bridgelogic::ScreenId::ScanAgain,
-                                           bridgelogic::ScreenId::ChooseTime};
+                                           bridgelogic::ScreenId::MinutesLeft};
   for (const bridgelogic::ScreenId id : reading) {
-    TEST_ASSERT_FALSE(bridgelogic::invitesCourtPress(id));
+    TEST_ASSERT_FALSE(bridgelogic::invitesPress(id));
     TEST_ASSERT_EQUAL_UINT16(bridgelogic::screenFor(id, facts, settings).holdSeconds,
                              bridgelogic::screenFor(id, facts, settings, 400UL).holdSeconds);
   }
@@ -4800,6 +4801,37 @@ void test_a_server_that_decided_nothing_is_never_read_as_not_recognised(void) {
   TEST_ASSERT_FALSE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), true));
 }
 
+/// BR-09 / DL-07: CHOOSE TIME and EXTEND:PICK TIME are held to the scan's
+/// life, and the window is re-armed for exactly that long — never longer, and
+/// a scan with nothing left shuts it.
+void test_a_duration_prompt_lives_no_longer_than_the_scan_and_rearms_the_window(void) {
+  bridgelogic::ScreenFacts facts;
+  devlink::LcdSettings settings;
+  settings.choiceMs = 20000UL;
+  settings.scanMemoryMs = 30000UL;
+  const bridgelogic::ScreenId prompts[] = {bridgelogic::ScreenId::ChooseTime,
+                                           bridgelogic::ScreenId::ExtendPrompt};
+  for (const bridgelogic::ScreenId id : prompts) {
+    TEST_ASSERT_EQUAL_UINT16(20U, bridgelogic::screenFor(id, facts, settings, 60000UL).holdSeconds);
+    TEST_ASSERT_EQUAL_UINT16(7U, bridgelogic::screenFor(id, facts, settings, 7999UL).holdSeconds);
+    const bridgelogic::Screen spent = bridgelogic::screenFor(id, facts, settings, 0UL);
+    TEST_ASSERT_EQUAL_STRING("SCAN WHEN READY", spent.rows[3]);
+  }
+
+  bridgelogic::AuthPolicy auth(30000UL);
+  court::Outcome noBooking;
+  noBooking.recognised = true;
+  TEST_ASSERT_TRUE(auth.afterScan(noBooking, 1000U) == bridgelogic::AuthCommand::Arm);
+  // The `!AUTH` after the scan was lost; the court press re-arms for what the
+  // scan has left (here 8 s), not the whole TTL.
+  TEST_ASSERT_TRUE(auth.coverScan(8000UL, 23000U) == bridgelogic::AuthCommand::Arm);
+  TEST_ASSERT_EQUAL_UINT32(8000UL, auth.remainingMs(23000U));
+  TEST_ASSERT_TRUE(auth.armed(30999U));
+  TEST_ASSERT_FALSE(auth.armed(31000U));
+  TEST_ASSERT_TRUE(auth.coverScan(0UL, 31000U) == bridgelogic::AuthCommand::Disarm);
+  TEST_ASSERT_EQUAL_UINT32(0UL, auth.remainingMs(31000U));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
@@ -4941,5 +4973,6 @@ int main(int, char**) {
   RUN_TEST(test_a_known_member_with_nothing_booked_is_invited_to_walk_up);
 
   RUN_TEST(test_a_server_that_decided_nothing_is_never_read_as_not_recognised);
+  RUN_TEST(test_a_duration_prompt_lives_no_longer_than_the_scan_and_rearms_the_window);
   return UNITY_END();
 }

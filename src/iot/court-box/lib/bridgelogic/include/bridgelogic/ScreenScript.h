@@ -374,8 +374,13 @@ proto::Frame screenFrame(const Screen& screen, size_t index);
 /// remembered.
 bool invitesCourtPress(ScreenId id);
 
+/// Whether `id`'s action row asks for ANY press — the court cells or the
+/// duration cells. Both only work while the scan behind them is remembered,
+/// so both are held to its remaining life (BR-09, DL-07).
+bool invitesPress(ScreenId id);
+
 /// The same screen, never inviting a court press past the scan's remaining
-/// life (R19). `scanLeftMs` is the remembered scan's time left
+/// life (R19), and never a duration press either (BR-09). `scanLeftMs` is the remembered scan's time left
 /// (bridgelogic::ScanMemory::remainingMs). A screen with court cells holds at
 /// most the whole seconds of it — the countdown ends no later than the scan,
 /// and the Mega then reverts to its idle screen — and with less than one

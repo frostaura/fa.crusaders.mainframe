@@ -983,6 +983,22 @@ bool holdForPressAgain(uint32_t nowMs) {
   return true;
 }
 
+/// A screen asking for a press on the remembered scan is about to go up:
+/// re-arm the Mega's window for what is left of the scan (BR-09, DL-07). False
+/// when not a whole second is left — SCAN AGAIN is then on the glass and
+/// nothing may invite a press.
+bool coverScanForPress(uint32_t nowMs) {
+  const uint32_t left = gScan.remainingMs(nowMs);
+  if (left < 1000UL) {
+    scanAgain(nowMs);
+    return false;
+  }
+  if (gAuth.coverScan(left, nowMs) == bridgelogic::AuthCommand::Arm) {
+    static_cast<void>(sendToMega(proto::Frame::auth(static_cast<uint16_t>(left / 1000UL))));
+  }
+  return true;
+}
+
 /// Learns this board's MAC and renders the one header every call carries.
 ///
 /// The MAC is available before the radio associates — it is a fact about the
@@ -1646,6 +1662,14 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
       gExtendCourt = kNoExtend;
       sendScreen(
           screenNow(lit ? bridgelogic::ScreenId::MinutesLeft : bridgelogic::ScreenId::ScanFirst, facts));
+      return;
+    }
+    // Both screens ask for a black button, which needs the scan AND the
+    // Mega's window: held to the scan's life (screenNow), the window re-armed
+    // for exactly that long so a lost `!AUTH` cannot strand the press, and
+    // with no second of scan left the glass asks for a fresh one (BR-09,
+    // DL-07).
+    if (!coverScanForPress(nowMs)) {
       return;
     }
     if (lit) {

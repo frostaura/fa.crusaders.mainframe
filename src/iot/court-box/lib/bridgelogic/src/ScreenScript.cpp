@@ -701,10 +701,21 @@ bool invitesCourtPress(ScreenId id) {
          specAt(static_cast<size_t>(id)).rows[proto::kMaxRows - 1U].arg == RowArg::CourtCells;
 }
 
+bool invitesPress(ScreenId id) {
+  if (static_cast<size_t>(id) >= kScreenCount) {
+    return false;
+  }
+  const RowArg action = specAt(static_cast<size_t>(id)).rows[proto::kMaxRows - 1U].arg;
+  return action == RowArg::CourtCells || action == RowArg::DurationCells;
+}
+
 Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings,
                  uint32_t scanLeftMs) {
   Screen screen = screenFor(id, facts, settings);
-  if (!invitesCourtPress(id)) {
+  // A DURATION press needs the scan as much as a court press does (BR-09,
+  // DL-07): CHOOSE TIME and EXTEND:PICK TIME counted their whole choice
+  // window down past the scan, and every black button after it was refused.
+  if (!invitesPress(id)) {
     return screen;
   }
   // WHOLE seconds, rounded down: the countdown may end before the scan, never
