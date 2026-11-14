@@ -813,7 +813,7 @@ void paintLines(const char* line1, const char* line2) {
 /// An outcome as its designed screen (BR-14) — composed for the acknowledged
 /// layout by sendScreen, held to the scan's life by screenNow — or as its two
 /// lines when no designed screen holds what they say. After the greeting.
-void paintOutcome(const court::Outcome& outcome, uint32_t nowMs) {
+__attribute__((noinline)) void paintOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   bridgelogic::ScreenFacts facts = screenFacts(nowMs);
   bridgelogic::ScreenId id = bridgelogic::ScreenId::SeeTheDesk;
   if (bridgelogic::verdictScreen(outcome, id, facts)) {
@@ -1006,7 +1006,9 @@ bool holdForPressAgain(uint32_t nowMs) {
 /// re-arm the Mega's window for what is left of the scan (BR-09, DL-07). False
 /// when not a whole second is left — SCAN AGAIN is then on the glass and
 /// nothing may invite a press.
-bool coverScanForPress(uint32_t nowMs) {
+/// Out of line, like answerIgnoredPress: handleButton's frame is on the
+/// deepest path from loop() and the stack budget gate holds it (ESPR-4).
+__attribute__((noinline)) bool coverScanForPress(uint32_t nowMs) {
   const uint32_t left = gScan.remainingMs(nowMs);
   if (left < 1000UL) {
     scanAgain(nowMs);
@@ -1663,6 +1665,12 @@ void handleState(const proto::Frame& frame, uint32_t nowMs) {
 /// the next booking — so it asks. That makes walk-ups the one thing that needs the
 /// network, which is the right way round: refusing to sell new time is a member at
 /// the desk, where refusing a booking they already paid for is a member in the dark.
+/// The glass's answer to a press the pad ignored (FSF-11). Out of line so its
+/// Screen and ScreenFacts stay out of handleButton's frame (ESPR-4).
+__attribute__((noinline)) void answerIgnoredPress(uint32_t nowMs) {
+  sendScreen(screenNow(bridgelogic::pressFirst(gLastScan[0] != '\0'), screenFacts(nowMs)));
+}
+
 void handleButton(const proto::Frame& frame, uint32_t nowMs) {
   // `!BTN` carries a key CHARACTER — 'A'-'D' then '1'-'4' — not a decimal index.
   // The translation lives in lib/court so the corpus tests it; see
@@ -1743,7 +1751,7 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     // A black button (or OFF) with no court selected was answered by
     // nothing, and the Mega's 1.5 s hint said ONE MOMENT about a press that
     // was never going anywhere (FSF-11). Say what comes first.
-    sendScreen(screenNow(bridgelogic::pressFirst(gLastScan[0] != '\0'), screenFacts(nowMs)));
+    answerIgnoredPress(nowMs);
     return;
   }
 }
