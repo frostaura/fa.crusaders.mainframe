@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AdminDevice, MemberCodeRollout } from "./api";
 import {
+  PHASE_WORDS,
   blockingWhy, isUnacknowledged, keysLine, phaseAfter, phaseBefore, rolloutLine, rolloutState,
 } from "./memberCodeRollout";
 
@@ -82,5 +83,15 @@ describe("the phases", () => {
     expect(phaseBefore("legacy")).toBeNull();
     expect(phaseBefore("v1_only")).toBe("v1");
     expect(phaseAfter("something")).toBeNull();
+  });
+});
+
+describe("the phase words (MCV1-04)", () => {
+  it("never tells an admin phones show the old code — they have shown only the new one since the cut to v1 codes", () => {
+    expect(PHASE_WORDS.legacy).not.toMatch(/phones still show the old code|old codes only/i);
+    expect(PHASE_WORDS.legacy).toMatch(/phones show the new code/);
+    expect(PHASE_WORDS.legacy).toMatch(/offline/);
+    // The title the move dialogs cut from it still reads as a name.
+    expect(PHASE_WORDS.legacy.split(" —")[0]).toBe("Before the switch");
   });
 });

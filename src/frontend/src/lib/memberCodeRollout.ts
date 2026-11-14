@@ -17,7 +17,10 @@ export const PHASES = ["legacy", "v1", "v1_only"] as const;
 export type Phase = (typeof PHASES)[number];
 
 export const PHASE_WORDS: Readonly<Record<string, string>> = {
-  legacy: "Old codes only — phones still show the old code; new codes are accepted where they are scanned",
+  // MCV1-04: phones have shown only the new code since 42d3990d, and acknowledged boards are sent its
+  // keys in every phase, so "legacy" is no longer "old codes only" — it is "old codes not yet cut off".
+  legacy: "Before the switch — phones show the new code, which every board acknowledged here checks, online or"
+    + " offline; old codes still work too",
   v1: "New codes — every board reads them; old codes still work online until the cut-off",
   v1_only: "New codes only — old codes are refused everywhere",
 };

@@ -44,6 +44,9 @@ export function deliveryBadge(delivery: AdminNotice["delivery"]): { label: strin
       if (typeof delivery.recipients !== "number") return { label: "Emailed", tone: "success" };
       return { label: `Emailed ${delivery.recipients} ${delivery.recipients === 1 ? "admin" : "admins"}`, tone: "success" };
     case "suppressed":
+      // BA-12: a demo club mails nobody, so its feed says what WOULD have happened, never "told recently".
+      if (delivery.reason === "demo_club") return { label: "Would have emailed the admins — a demo club sends no mail", tone: "neutral" };
+      if (delivery.reason === "recipient_inactive") return { label: "Not emailed — the account is not active", tone: "neutral" };
       return { label: "Not emailed — told recently", tone: "neutral" };
     case "failed":
       return { label: "Email failed", tone: "danger" };

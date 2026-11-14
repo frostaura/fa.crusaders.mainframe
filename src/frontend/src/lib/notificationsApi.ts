@@ -39,6 +39,11 @@ export type AdminNotice = {
     finished_at: string | null;
     /** Admins actually emailed so far; null from a server that does not count. */
     recipients: number | null;
+    /**
+     * BA-12: why a suppressed notice was not mailed — `demo_club` (a demo club mails nobody),
+     * `told_recently` (the kind's cooldown), or another stored cause. Absent from an older server.
+     */
+    reason?: string | null;
   };
 };
 

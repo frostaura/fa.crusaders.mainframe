@@ -50,6 +50,22 @@ describe("deliveryBadge", () => {
   });
 });
 
+describe("deliveryBadge — why a notice was held back (BA-12)", () => {
+  const held = (reason: string | null | undefined) =>
+    ({ state: "suppressed" as const, sent_at: null, finished_at: "2026-11-14T08:00:00Z", recipients: 0, reason });
+
+  it("says a demo club's notice would have been mailed, never that it was or that it was told recently", () => {
+    expect(deliveryBadge(held("demo_club")).label).toBe("Would have emailed the admins — a demo club sends no mail");
+    expect(deliveryBadge(held("demo_club")).label).not.toMatch(/^Emailed|told recently/);
+  });
+
+  it("names the cooldown, an inactive recipient, and an older server's unnamed hold apart", () => {
+    expect(deliveryBadge(held("told_recently")).label).toBe("Not emailed — told recently");
+    expect(deliveryBadge(held("recipient_inactive")).label).toBe("Not emailed — the account is not active");
+    expect(deliveryBadge(held(undefined)).label).toBe("Not emailed — told recently");
+  });
+});
+
 describe("lockedBecause", () => {
   it("gives each security kind its own reason, and any other a true one", () => {
     expect(lockedBecause("admin.role_changed")).toMatch(/admin rights/);

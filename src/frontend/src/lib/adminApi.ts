@@ -874,6 +874,27 @@ export type AdminSellResult = AdminAdjustResult & {
 // BM-6 — rand given back for a purchase (`WalletEndpoints.Reversal.cs`)
 // ---------------------------------------------------------------------------------------
 
+/** One booking past the no-show sweep's reach that nobody settled (`GET /admin/bookings/unsettled`). */
+export type UnsettledBooking = {
+  booking_id: string;
+  court_id: string;
+  court_name: string | null;
+  starts_at: string;
+  ends_at: string;
+  charged_minutes: number;
+  member: { user_id: string; name: string | null; photo_url: string | null } | null;
+  /** Only when somebody else paid for the court at the box: the refund is theirs. */
+  payer: { user_id: string; name: string | null; photo_url: string | null } | null;
+};
+
+export type UnsettledBookingsPage = {
+  total: number;
+  lookback_days: number;
+  timezone: string;
+  items: UnsettledBooking[];
+  next_cursor: string | null;
+};
+
 export const REVERSAL_KINDS = ["refund", "chargeback"] as const;
 export type ReversalKind = typeof REVERSAL_KINDS[number];
 
@@ -1190,6 +1211,16 @@ export const adminEndpoints = {
     ...(body.zarReceived !== undefined ? { zarReceived: body.zarReceived } : {}),
     ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
   }),
+
+  // --- BA-08: the members and no-shows files (fetched WITH the token, never an href — FA-1) ---
+  /** The members file's path, for one membership status or every one. */
+  membersCsvPath: (status?: string | null) => `/api/v1/admin/exports/members.csv${qs({ status: status ?? undefined })}`,
+  /** The no-shows file's path, for a range of club days (yyyy-mm-dd). */
+  noShowsCsvPath: (from: string, to: string) => `/api/v1/admin/exports/no-shows.csv${qs({ from, to })}`,
+
+  // --- BM-11: the bookings behind the booking.unsettled notice ------------------------------
+  unsettledBookings: (cursor?: string | null) =>
+    api.get<UnsettledBookingsPage>(`/api/v1/admin/bookings/unsettled${qs({ cursor: cursor ?? undefined })}`),
 
   // --- BM-6: rand given back (a refund or a recorded chargeback) ---------------------------
   /** The member's purchases that took rand, newest first, each with the rand and minutes still reversible. */
