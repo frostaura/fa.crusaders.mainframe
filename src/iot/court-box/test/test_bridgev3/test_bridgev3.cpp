@@ -12,6 +12,7 @@
 #include <string.h>
 #include <unity.h>
 
+#include "bridgelogic/MegaLink.h"
 #include "bridgelogic/MegaTx.h"
 #include "bridgelogic/V3Heartbeat.h"
 #include "courtlogic/CourtBox.h"
@@ -425,6 +426,44 @@ void setUp(void) {
 void tearDown(void) {
 }
 
+// A Mega-only reset whose `!BOOT` was lost: the uptime the next `!PONG`
+// reports moves the boot instant, even when the last figure was the 0 of a
+// heard `!BOOT` (soak SOAK_SEED=110498118 — a raw "less than" missed it).
+void test_a_pong_after_a_lost_boot_proves_the_reset_even_from_a_young_boot(void) {
+  bridgelogic::MegaBootClock clock;
+  TEST_ASSERT_FALSE(clock.observe(10000U, 0U)); // the !BOOT
+  TEST_ASSERT_FALSE(clock.observe(12000U, 2U)); // same boot, 2 s later
+  TEST_ASSERT_FALSE(clock.observe(14500U, 4U)); // same boot, rounding
+  TEST_ASSERT_TRUE(clock.observe(40000U, 0U));  // reset: 0 again, 30 s on
+  TEST_ASSERT_FALSE(clock.observe(41000U, 1U));
+  // The classic case still holds: an uptime that went backwards.
+  TEST_ASSERT_FALSE(clock.observe(400000U, 361U));
+  TEST_ASSERT_TRUE(clock.observe(401000U, 5U));
+  // A Mega that booted before the bridge (first observation) is no reset.
+  bridgelogic::MegaBootClock fresh;
+  TEST_ASSERT_FALSE(fresh.observe(500U, 86400U));
+  TEST_ASSERT_FALSE(fresh.observe(30500U, 86430U));
+}
+
+// A line that failed to decode earns a `!PING`, three at once and then one per
+// five seconds, so a reset's lost `!BOOT` and `!STATE` are each answered while
+// a cable garbling everything costs one exchange every five seconds.
+void test_a_lost_line_earns_a_ping_paced_by_a_small_bucket(void) {
+  bridgelogic::MegaProbe probe;
+  TEST_ASSERT_TRUE(probe.lineLost(1000U));
+  TEST_ASSERT_TRUE(probe.lineLost(1020U));
+  TEST_ASSERT_TRUE(probe.lineLost(1040U));
+  TEST_ASSERT_FALSE(probe.lineLost(1060U));
+  TEST_ASSERT_FALSE(probe.lineLost(5999U));
+  TEST_ASSERT_TRUE(probe.lineLost(6001U));
+  TEST_ASSERT_FALSE(probe.lineLost(6100U));
+  // A quiet minute refills the bucket, never more than three.
+  TEST_ASSERT_TRUE(probe.lineLost(70000U));
+  TEST_ASSERT_TRUE(probe.lineLost(70001U));
+  TEST_ASSERT_TRUE(probe.lineLost(70002U));
+  TEST_ASSERT_FALSE(probe.lineLost(70003U));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_a_fast_server_still_lights_the_court_behind_a_busy_fifo);
@@ -445,5 +484,7 @@ int main(int, char**) {
   RUN_TEST(test_each_relay_is_relit_at_most_once_a_minute_and_three_failures_are_reported);
   RUN_TEST(test_ages_never_go_negative);
   RUN_TEST(test_a_cut_or_unreadable_courts_array_is_never_applied);
+  RUN_TEST(test_a_pong_after_a_lost_boot_proves_the_reset_even_from_a_young_boot);
+  RUN_TEST(test_a_lost_line_earns_a_ping_paced_by_a_small_bucket);
   return UNITY_END();
 }

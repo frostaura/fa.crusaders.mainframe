@@ -25,6 +25,7 @@
 
 #include <new>
 
+#include "bridgelogic/MegaLink.h"
 #include "bridgelogic/MegaTx.h"
 #include "bridgelogic/V3Heartbeat.h"
 #include "courtlogic/CourtBox.h"
@@ -171,7 +172,15 @@ struct Sim {
   bool trace;
   Rng rng;
   uint32_t now;
+  /// The MEGA's millis(): it restarts at zero on every Mega reset, exactly as
+  /// the AVR's does, so a `!PONG` after a reset reports a smaller uptime. One
+  /// clock shared with the bridge made a Mega-only reset invisible to the
+  /// uptime-regression trigger the real bridge relies on when `!BOOT` is lost.
   fakes::FakeClock clock;
+  uint32_t megaEpoch = 0U;
+
+  uint32_t megaNow() const { return now - megaEpoch; }
+
   fakes::FakeRelay relay;
   fakes::FakeDisplay display;
   fakes::FakeScanner scanner;
@@ -184,6 +193,10 @@ struct Sim {
   bridgelogic::MegaTx tx;
   bridgelogic::Reconciler reconciler;
   bridgelogic::Snapshot snapshot;
+  /// The real bridge's answer to a line it could not decode: `!PING`, whose
+  /// `!PONG` uptime regression is a reset its `!BOOT` was lost for.
+  bridgelogic::MegaProbe probe;
+  bridgelogic::MegaBootClock megaBoot;
   proto::Decoder uplink;
   ServerCourt server[4];
   bool serverUp;
@@ -196,6 +209,10 @@ struct Sim {
   uint32_t rebootAtMs;
   bool rebootPending;
   bool healthySinceReboot;
+  /// The courts the snapshot owed at the instant of the Mega-only reset. I2 is
+  /// about what the reset darkened: a court the next beat newly lit is the
+  /// reconcile's ordinary work, judged by its own pace, not by the reset's.
+  uint8_t owedAtReset = 0U;
   uint32_t scanCheckAtMs = 0U;
   uint32_t scansWrittenBefore = 0U;
   uint32_t strayAtMs = 0U;
@@ -206,7 +223,7 @@ struct Sim {
 
   explicit Sim(uint32_t seed)
       : seed0(seed), start(1000U + (seed % 100000U)), trace(getenv("SOAK_TRACE") != nullptr),
-        rng{seed == 0U ? 1U : seed}, now(1000U + (seed % 100000U)), clock(now),
+        rng{seed == 0U ? 1U : seed}, now(1000U + (seed % 100000U)), clock(0U),
         relay(hal::RelayPolarity::kActiveHigh), display(), scanner(), buttons(), down(), up(), port(down, up),
         mega(nullptr), megaStore(), tx(), reconciler(), snapshot(), uplink(proto::Link::Uplink), server(),
         serverUp(true), linkCut(false), bridgeDead(false), nextBeatMs(now), nextLiveMs(now), stateMask(0U),
@@ -227,6 +244,8 @@ struct Sim {
     }
     relay.allOff();
     down.reset();
+    megaEpoch = now;
+    clock.setNow(megaNow());
     mega = new (megaStore)
         courtlogic::CourtBox(courtlogic::CourtPorts{relay, display, scanner, buttons, port, clock});
     mega->boot(0x01U);
@@ -282,13 +301,26 @@ struct Sim {
     bridgelogic::RelayView view[4];
     for (uint8_t i = 0U; i < 4U; ++i) {
       view[i].lit = (stateMask & (1U << i)) != 0U;
-      view[i].seconds = mega->relays().remainingSeconds(i, now);
+      view[i].seconds = mega->relays().remainingSeconds(i, megaNow());
     }
     bridgelogic::ReconcileSettings set;
     int32_t want[4];
     if (reconciler.plan(snapshot, view, set, now, force, want)) {
-      static_cast<void>(tx.command(proto::Frame::want(0U, want), now));
+      const bool queued = tx.command(proto::Frame::want(0U, want), now);
+      if (trace) {
+        printf("t+%lu want %ld %ld %ld %ld%s%s\n", static_cast<unsigned long>(now - start),
+               static_cast<long>(want[0]), static_cast<long>(want[1]), static_cast<long>(want[2]),
+               static_cast<long>(want[3]), force ? " forced" : "", queued ? "" : " NOT QUEUED");
+      }
     }
+  }
+
+  void megaBooted(const char* version) {
+    tx.setMegaVersion(version);
+    tx.megaBooted();
+    stateMask = 0U;
+    static_cast<void>(tx.plain(proto::Frame::live(5U)));
+    reconcile(true);
   }
 
   void bridgeRx() {
@@ -300,23 +332,35 @@ struct Sim {
       proto::Decoder::Result r;
       while (uplink.pop(r)) {
         if (!r.isFrame()) {
+          if (probe.lineLost(now)) {
+            const bool queued = tx.plain(proto::Frame::ping());
+            if (trace) {
+              printf("t+%lu line lost, ping%s\n", static_cast<unsigned long>(now - start),
+                     queued ? "" : " NOT QUEUED");
+            }
+          }
           continue;
         }
         const proto::Verb v = r.frame.verb();
-        if (trace && (v == proto::Verb::Ack || v == proto::Verb::Evt || v == proto::Verb::Scan ||
-                      v == proto::Verb::Boot)) {
+        if (trace && v != proto::Verb::State) {
           printf("t+%lu up %s %s %s\n", static_cast<unsigned long>(now - start), proto::verbName(v),
                  r.frame.arg(0), r.frame.arg(1));
         }
         if (v == proto::Verb::Ack) {
           tx.onAck(r.frame, now);
+        } else if (v == proto::Verb::Pong) {
+          const uint32_t seconds = static_cast<uint32_t>(strtoul(r.frame.arg(1), nullptr, 10));
+          if (megaBoot.observe(now, seconds)) {
+            megaBooted(r.frame.arg(0));
+          }
         } else if (v == proto::Verb::Boot) {
-          tx.setMegaVersion(r.frame.arg(0));
-          tx.megaBooted();
-          stateMask = 0U;
-          static_cast<void>(tx.plain(proto::Frame::live(5U)));
-          reconcile(true);
+          static_cast<void>(megaBoot.observe(now, 0U));
+          megaBooted(r.frame.arg(0));
         } else if (v == proto::Verb::State) {
+          if (trace) {
+            printf("t+%lu up STATE %s %s\n", static_cast<unsigned long>(now - start), r.frame.arg(0),
+                   r.frame.arg(1));
+          }
           stateMask = static_cast<uint8_t>(strtoul(r.frame.arg(0), nullptr, 10));
           for (uint8_t c = 0U; c < 4U; ++c) {
             if ((stateMask & (1U << c)) != 0U) {
@@ -389,9 +433,18 @@ struct Sim {
     if (rng.rare(4U)) {
       // A Mega-only reset: watchdog, brown-out, a loose lead.
       bootMega();
+      if (trace) {
+        printf("t+%lu MEGA RESET\n", static_cast<unsigned long>(now - start));
+      }
       rebootAtMs = now;
       rebootPending = true;
       healthySinceReboot = true;
+      owedAtReset = 0U;
+      for (uint8_t i = 0U; snapshot.valid && i < 4U; ++i) {
+        if (bridgelogic::Reconciler::paidSeconds(snapshot, i, now) > 90) {
+          owedAtReset = static_cast<uint8_t>(owedAtReset | (1U << i));
+        }
+      }
     }
     if (rng.rare(4U)) {
       // A power cut: both chips. The bridge's snapshot is RAM in this image.
@@ -401,6 +454,8 @@ struct Sim {
       reconciler.~Reconciler();
       new (&reconciler) bridgelogic::Reconciler();
       snapshot = bridgelogic::Snapshot();
+      probe = bridgelogic::MegaProbe();
+      megaBoot = bridgelogic::MegaBootClock();
       stateMask = 0U;
       rebootPending = false;
     }
@@ -413,7 +468,7 @@ struct Sim {
       if (!relay.isOn(i)) {
         continue;
       }
-      if (mega->relays().remainingSeconds(i, now) > proto::kRelayHardCapSeconds) {
+      if (mega->relays().remainingSeconds(i, megaNow()) > proto::kRelayHardCapSeconds) {
         fail("a relay deadline past the 90-minute cap");
       }
       // Only the reconcile lights a court here, from a snapshot of the
@@ -424,14 +479,21 @@ struct Sim {
       }
     }
     // I2: within seconds of a Mega-only reset the relays match the snapshot —
-    // judged only when the link and the bridge were up for the whole window.
+    // judged only when the link and the bridge were up for the whole window,
+    // and only for courts owed AT the reset and still owed (SOAK_SEED=50511693:
+    // a beat 5.01 s after the reset newly lit a court and the check, run in the
+    // same tick, called the reconcile's next !WANT late).
     healthySinceReboot = healthySinceReboot && !linkCut && !bridgeDead;
     if (rebootPending && now - rebootAtMs > 5000U) {
       rebootPending = false;
       if (snapshot.valid && healthySinceReboot) {
         for (uint8_t i = 0U; i < 4U; ++i) {
           const int32_t left = bridgelogic::Reconciler::paidSeconds(snapshot, i, now);
-          if (left > 90 && !relay.isOn(i) && !mega->relays().locked(i)) {
+          const bool owedThrough = (owedAtReset & (1U << i)) != 0U;
+          if (owedThrough && left > 90 && !relay.isOn(i) && !mega->relays().locked(i)) {
+            if (trace) {
+              printf("I2 relay %u owed %ld s, dark, mask %u\n", i, static_cast<long>(left), stateMask);
+            }
             fail("a court the snapshot owes is dark 5 s after a Mega reset");
           }
         }
@@ -456,7 +518,7 @@ struct Sim {
     const uint32_t step = 10U;
     for (uint32_t t = 0U; t < ms; t += step) {
       now += step;
-      clock.setNow(now);
+      clock.setNow(megaNow());
       if (static_cast<int32_t>(now - nextBeatMs) >= 0) {
         nextBeatMs = now + 30000U;
         serverEvolve();

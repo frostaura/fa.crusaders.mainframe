@@ -75,6 +75,57 @@ struct IdentityScreen {
 /// neither branch was reachable from a test and nothing said they had drifted.
 IdentityScreen identityScreen(bool wifiUp);
 
+/// When the Mega last booted, on THIS half's clock, from `!BOOT` (uptime 0)
+/// and every `!PONG` (uptime in seconds).
+///
+/// A raw "uptime went backwards" test misses a reset whenever the bridge's last
+/// figure was itself small — the `!BOOT` it just heard reads 0, so the next
+/// reset's `!PONG` at 0 is not "less" (soak SOAK_SEED=110498118). The instant
+/// the uptime implies (`now - uptime`) moves only when the Mega restarted, so a
+/// jump of more than kSlackMs is a reset however young the previous boot was.
+class MegaBootClock {
+public:
+  /// Seconds-resolution uptime plus a frame's transit: anything inside this is
+  /// the same boot.
+  static constexpr uint32_t kSlackMs = 3000UL;
+
+  /// A `!PONG` (or `!BOOT`, with 0). True when it proves a restart since the
+  /// previous observation.
+  bool observe(uint32_t nowMs, uint32_t uptimeSeconds);
+
+  bool seen() const { return seen_; }
+
+private:
+  uint32_t bootAtMs_ = 0U;
+  bool seen_ = false;
+};
+
+/// When to ask the Mega for a `!PONG` because a line from it was LOST.
+///
+/// A Mega-only reset announces itself with `!BOOT` and then `!STATE`; if the
+/// link garbles both, the bridge's next evidence used to be the Mega's own
+/// periodic `!STATE` ten seconds later, and a paid court sat dark that long
+/// (soak SOAK_SEED=114940677). A line that failed to decode is the one moment
+/// the bridge KNOWS it missed something, so it answers with `!PING`: the
+/// `!PONG`'s uptime regression is the reset trigger (`shouldRepaintIdentity`).
+/// Paced by a small bucket — three at once, one more every five seconds — so
+/// the losses a reset clusters (its `!BOOT`, its `!STATE`, a line just before)
+/// each get their `!PING`, while a cable that garbles everything costs at most
+/// one `!PONG` exchange (about 100 bytes) every five seconds, 2% of the link.
+class MegaProbe {
+public:
+  static constexpr uint8_t kBurst = 3U;
+  static constexpr uint32_t kRefillMs = 5000UL;
+
+  /// An uplink line did not decode. True when a `!PING` should go now.
+  bool lineLost(uint32_t nowMs);
+
+private:
+  uint8_t tokens_ = kBurst;
+  uint32_t refilledAtMs_ = 0U;
+  bool started_ = false;
+};
+
 } // namespace bridgelogic
 
 #endif // CRUSADERS_BRIDGELOGIC_MEGALINK_H

@@ -265,6 +265,12 @@ uint32_t gMegaUptime = 0U;
 /// finding 9). The rule is bridgelogic::shouldRepaintIdentity's.
 bool gMegaSeen = false;
 
+/// The Mega's boot instant on this half's clock, and the `!PING` a lost line
+/// earns (bridgelogic/MegaLink.h): together they find a Mega-only reset whose
+/// `!BOOT` and `!STATE` the link garbled, within a second instead of ten.
+bridgelogic::MegaBootClock gMegaBootClock;
+bridgelogic::MegaProbe gMegaProbe;
+
 bool gWifiUp = false;
 
 /// The three things that let a court work with no network.
@@ -972,7 +978,9 @@ void noteMegaPong(const proto::Frame& frame, uint32_t nowMs) {
   // The dialect follows the Mega's version (a 2.1.0 Mega sends no !BOOT).
   gTx.setMegaVersion(frame.arg(0));
   snprintf(gMegaVersion, sizeof(gMegaVersion), "%s", frame.arg(0));
-  const bool restarted = gMegaSeen && seconds < gMegaUptime;
+  // A restart is a boot instant that moved, not merely an uptime smaller than
+  // the last one: after a heard !BOOT the last figure is 0 (MegaBootClock).
+  const bool restarted = gMegaBootClock.observe(nowMs, seconds) && gMegaSeen;
   const bool first = !gMegaSeen;
   gMegaSeen = true;
   gMegaUptime = seconds;
@@ -997,6 +1005,7 @@ void noteMegaBoot(const proto::Frame& frame, uint32_t nowMs) {
   gMegaHeard = true;
   gMegaSeen = true;
   gMegaUptime = 0U;
+  static_cast<void>(gMegaBootClock.observe(nowMs, 0U));
   onMegaBoot(nowMs);
 }
 
@@ -1636,6 +1645,10 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     // switching relay coils, and the first week's numbers are expected to be
     // surprising.
     gFaults.note(faultForDecodeError(result.error), nowMs);
+    // The lost line may have been a `!BOOT`: ask for the uptime that proves it.
+    if (gMegaProbe.lineLost(nowMs)) {
+      static_cast<void>(sendToMega(proto::Frame::ping()));
+    }
     return;
   }
 
