@@ -33,7 +33,7 @@ constexpr uint8_t kRowOffset[4] = {0x00U, 0x40U, 0x14U, 0x54U};
 
 /// One bounded bus transaction: does anything ACK at `address`?
 bool addressAnswers(uint8_t address, void* context) {
-  static_cast<void>(context);
+  static_cast<LcdDisplay*>(context)->idle();
   Wire.beginTransmission(address);
   const uint8_t result = Wire.endTransmission();
   if (Wire.getWireTimeoutFlag()) {
@@ -91,22 +91,53 @@ void beginBus(bool slow) {
 } // namespace
 
 LcdDisplay::LcdDisplay()
-    : holdoff_(), requested_(0U), address_(0U), cellsPerPass_(8U), recoveries_(0U), glassLost_(true),
-      errorSinceProbe_(true), slowBus_(false) {
+    : holdoff_(), idleHook_(nullptr), idleContext_(nullptr), idleAtMicros_(0U), requested_(0U), address_(0U),
+      cellsPerPass_(8U), recoveries_(0U), glassLost_(true), errorSinceProbe_(true), slowBus_(false) {
+}
+
+void LcdDisplay::setIdleHook(IdleHook hook, void* context) {
+  idleHook_ = hook;
+  idleContext_ = context;
+}
+
+void LcdDisplay::idle() {
+  if (idleHook_ == nullptr) {
+    return;
+  }
+  const uint32_t now = micros();
+  if (now - idleAtMicros_ < kIdleEveryMicros) {
+    return;
+  }
+  idleAtMicros_ = now;
+  idleHook_(idleContext_);
+}
+
+void LcdDisplay::wait(uint32_t us) {
+  const uint32_t started = micros();
+  idle();
+  for (;;) {
+    const uint32_t spent = micros() - started;
+    if (spent >= us) {
+      return;
+    }
+    const uint32_t left = us - spent;
+    delayMicroseconds(static_cast<unsigned int>(left < kIdleEveryMicros ? left : kIdleEveryMicros));
+    idle();
+  }
 }
 
 void LcdDisplay::begin() {
   beginBus(slowBus_);
   // The HD44780 needs > 40 ms after VCC; the bootloader's second has normally
   // covered it, and a cold power-on is the case this is for.
-  delay(50);
+  wait(50000U);
   address_ = findAddress();
   if (address_ == 0U) {
     return;
   }
   initController();
   static_cast<void>(command(kClear));
-  delayMicroseconds(2000);
+  wait(2000U);
   glassLost_ = true;
 }
 
@@ -123,7 +154,7 @@ void LcdDisplay::setAddress(uint8_t address) {
 uint8_t LcdDisplay::findAddress() {
   errorSinceProbe_ = false;
   for (uint8_t pass = 0U; pass < 2U; ++pass) {
-    const uint8_t found = courtlogic::probeLcdAddress(requested_, addressAnswers, nullptr);
+    const uint8_t found = courtlogic::probeLcdAddress(requested_, addressAnswers, this);
     if (found != 0U) {
       return found;
     }
@@ -139,6 +170,7 @@ uint8_t LcdDisplay::findAddress() {
 }
 
 bool LcdDisplay::nibble(uint8_t data) {
+  idle();
   const uint8_t base = static_cast<uint8_t>(data | kBacklightBit);
   Wire.beginTransmission(address_);
   Wire.write(base);
@@ -169,9 +201,9 @@ void LcdDisplay::initController() {
   // library's second of power-on delays: this panel has been powered all
   // along and only needs its nibble phase re-established. ~10 ms in all.
   static_cast<void>(nibble(0x30U));
-  delayMicroseconds(4500);
+  wait(4500U);
   static_cast<void>(nibble(0x30U));
-  delayMicroseconds(4500);
+  wait(4500U);
   static_cast<void>(nibble(0x30U));
   delayMicroseconds(150);
   static_cast<void>(nibble(0x20U));
@@ -250,7 +282,7 @@ void LcdDisplay::clear() {
     return;
   }
   static_cast<void>(command(kClear));
-  delayMicroseconds(2000);
+  wait(2000U);
   glassLost_ = true;
 }
 

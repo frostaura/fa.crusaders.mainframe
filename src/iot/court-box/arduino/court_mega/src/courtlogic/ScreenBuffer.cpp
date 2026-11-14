@@ -59,10 +59,10 @@ ScreenBuffer::ScreenBuffer(hal::IDisplayPort& display, const MegaSettings& setti
     : display_(display), settings_(settings), staged_(), stageSeq_(kV2Seq), stagedMask_(0U), rows_(),
       overlayUp_(false), overlayMask_(0U), overlayFlags_(0U), hold_(), chainWait_(), overlayAtMs_(0U),
       ceiling_(), dwell_(), afton_(), memberSinceCeiling_(false), ceilingEvent_(false), hint_(Hint::None),
-      hintUntil_(), hintAllowedAt_(), hintFallback_(), courtNumbers_(), land_(), landAtMs_(0U), note_(),
-      noteUntil_(), idleSeen_(false), linkFlags_(0U), clockMinute_(kNoClockMinute), clockStampMs_(0U),
-      bridgeAlive_(true), landingSinceMs_(0U), desired_(), shadow_(), composeDue_(), reinitDue_(),
-      reinitNow_(false), composeNow_(true), ceilings_(0U), reinits_(0U), suppressedHints_(0U) {
+      pendingHint_(Hint::None), hintUntil_(), hintAllowedAt_(), hintFallback_(), courtNumbers_(), land_(),
+      landAtMs_(0U), note_(), noteUntil_(), idleSeen_(false), linkFlags_(0U), clockMinute_(kNoClockMinute),
+      clockStampMs_(0U), bridgeAlive_(true), landingSinceMs_(0U), desired_(), shadow_(), composeDue_(),
+      reinitDue_(), reinitNow_(false), composeNow_(true), ceilings_(0U), reinits_(0U), suppressedHints_(0U) {
   for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
     land_[i] = proto::kNoOpinion;
   }
@@ -91,6 +91,7 @@ void ScreenBuffer::begin(uint32_t nowMs) {
   dwell_.disarm();
   afton_.disarm();
   hint_ = Hint::None;
+  pendingHint_ = Hint::None;
   hintUntil_.disarm();
   hintAllowedAt_.disarm();
   hintFallback_.disarm();
@@ -374,8 +375,14 @@ void ScreenBuffer::showHint(Hint hint, uint32_t nowMs) {
     if (suppressedHints_ < UINT16_MAX) {
       ++suppressedHints_;
     }
+    // The same hint already on the glass is this press's answer; re-showing
+    // it would extend it, and a stuck contact would hold it up for ever.
+    if (hint != hint_) {
+      pendingHint_ = hint;
+    }
     return;
   }
+  pendingHint_ = Hint::None;
   hint_ = hint;
   hintUntil_.arm(nowMs, settings_.ms(Cfg::Hint));
   hintAllowedAt_.arm(nowMs, kHintRateLimitMs);
@@ -385,6 +392,8 @@ void ScreenBuffer::showHint(Hint hint, uint32_t nowMs) {
 
 void ScreenBuffer::bridgeAnswered() {
   hintFallback_.disarm();
+  // The bridge's own screen is the answer; a deferred hint would talk over it.
+  pendingHint_ = Hint::None;
 }
 
 bool ScreenBuffer::takeCeilingEvent() {
@@ -452,6 +461,11 @@ void ScreenBuffer::runOneShots(uint32_t nowMs) {
   }
   if (hintAllowedAt_.expired(nowMs)) {
     hintAllowedAt_.disarm();
+    if (pendingHint_ != Hint::None) {
+      const Hint deferred = pendingHint_;
+      pendingHint_ = Hint::None;
+      showHint(deferred, nowMs);
+    }
   }
   if (hintFallback_.expired(nowMs)) {
     hintFallback_.disarm();

@@ -60,7 +60,11 @@ inline constexpr char kHintNoConnection[] = "NO CONNECTION";
 /// Mega's own hint (spec rule 4).
 inline constexpr uint32_t kHintFallbackMs = 1500UL;
 
-/// Hints are rate-limited so a stuck contact cannot strobe the glass.
+/// Hints are rate-limited so a stuck contact cannot strobe the glass. A hint
+/// asked for inside the limit is DEFERRED to its end, not dropped (FSF-11): a
+/// press whose fallback fell in the window was otherwise never answered, and
+/// the glass went back to landing with nothing said to the member. The hint
+/// already showing is never deferred again: that would extend it (E-BTN-1).
 inline constexpr uint32_t kHintRateLimitMs = 2000UL;
 
 /// A chained screen's hold ends by waiting this long for the next commit.
@@ -156,6 +160,7 @@ public:
 
   uint16_t reinits() const { return reinits_; }
 
+  /// Hints asked for inside the rate limit (each deferred, not dropped).
   uint16_t suppressedHints() const { return suppressedHints_; }
 
   /// The glass as the Mega wants it (tests; the shadow converges to it).
@@ -215,6 +220,8 @@ private:
 
   // Hints.
   Hint hint_;
+  /// A hint asked for inside the rate limit, shown when the limit ends.
+  Hint pendingHint_;
   tb::Deadline hintUntil_;
   tb::Deadline hintAllowedAt_;
   tb::Deadline hintFallback_;

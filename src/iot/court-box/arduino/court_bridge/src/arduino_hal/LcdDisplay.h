@@ -31,6 +31,17 @@
 // or errors there. cellsPerPass() is derived from the measured cost of the
 // last writes, so the Mega's loop never spends more than ~8 ms of a pass on
 // the glass and the 64-byte Serial3 ring is drained every ~10 ms (DL-02).
+//
+// THE IDLE HOOK (DL-15)
+// ---------------------
+// Eight milliseconds of paint, ten of re-init, or a probe that waits out bus
+// timeouts are still time in which no pass looks at the buttons, and a short
+// tap with one of them in the wrong place was lost. setIdleHook() names a
+// function the driver calls between bus transactions and inside every wait,
+// at most once per kIdleEveryMicros; main.cpp points it at
+// CourtBox::sampleButtons, so the debounce rule sees the pins about every
+// half millisecond however long the glass takes. The hook must not touch the
+// display.
 
 #ifndef CRUSADERS_ARDUINO_HAL_LCDDISPLAY_H
 #define CRUSADERS_ARDUINO_HAL_LCDDISPLAY_H
@@ -50,6 +61,12 @@ inline constexpr uint32_t kWireTimeoutMicros = 25000UL;
 
 /// The per-pass paint budget.
 inline constexpr uint32_t kPaintBudgetMicros = 8000UL;
+
+/// The idle hook runs at most this often (a sample of eight pins is ~40 us).
+inline constexpr uint32_t kIdleEveryMicros = 500UL;
+
+/// What the driver calls between bus transactions; see setIdleHook().
+typedef void (*IdleHook)(void* context);
 
 class LcdDisplay final : public hal::IDisplayPort {
 public:
@@ -77,6 +94,13 @@ public:
 
   void setAddress(uint8_t address) override;
 
+  /// Called between bus transactions and during every wait, at most once per
+  /// kIdleEveryMicros. Store only: safe before begin(), from file scope.
+  void setIdleHook(IdleHook hook, void* context);
+
+  /// Runs the idle hook if one is set and kIdleEveryMicros have passed.
+  void idle();
+
 private:
   /// One nibble (already in the high four bits) with Rs as `mode`; false on a
   /// bus error, which is also noted.
@@ -90,8 +114,13 @@ private:
   void busError();
   bool ready();
   void recover();
+  /// delayMicroseconds(us), with the idle hook kept running through it.
+  void wait(uint32_t us);
 
   courtlogic::DisplayHoldoff holdoff_;
+  IdleHook idleHook_;
+  void* idleContext_;
+  uint32_t idleAtMicros_;
   uint8_t requested_;
   uint8_t address_;
   uint8_t cellsPerPass_;

@@ -442,7 +442,10 @@ loop and is what makes the line rate safe to use in full: painting is time-budge
 most 8 ms of blocking per pass** (I2C at 400 kHz, `Wire.setClock(400000)`, where the backpack
 allows it; diff-painting only the cells that changed), and the decoder runs between rows and
 between budgeted segments. v2 painted a whole screen synchronously, 110–150 ms at the 100 kHz
-default.
+default. **The buttons are sampled inside the paint** (DL-15): the LCD driver samples the panel
+between bus transactions and through every wait, at most every 0.5 ms, and a press the 80 ms
+debounce completes there is latched for the next pass — so no tap held 83 ms or more is lost to
+an 8 ms paint or a 10 ms re-init. The debounce rule itself is unchanged.
 
 ### Screens, staged by sequence and committed atomically
 
@@ -496,7 +499,9 @@ reintroduce a stuck screen.
    `AFTON` seconds, to end by then.
 4. **A forwarded press the bridge does not answer within 1.5 s gets the Mega's own hint**,
    whether or not the window was armed (FWM-15): `ONE MOMENT` while the bridge is alive,
-   `NO CONNECTION` when it is dead. The hint's rate-limit deadline is disarmed once it expires,
+   `NO CONNECTION` when it is dead. A hint asked for inside the 2 s rate limit is **deferred** to
+   the limit's end, never dropped, unless a bridge screen arrives first or the same hint is already on the glass, which is never extended (FSF-11, E-BTN-1). The hint's
+   rate-limit deadline is disarmed once it expires,
    so it cannot go silent for 24.8 days after a 2³¹ ms quiet spell (FWM-13).
 5. **The scan feedback** (`CHECKING CODE` / `PLEASE WAIT`) holds `SCANH` seconds, under the
    ceiling; with the bridge dead it is `NO CONNECTION` / `SEE THE DESK` instead, because there

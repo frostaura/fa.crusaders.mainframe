@@ -432,6 +432,47 @@ void test_a_forwarded_press_the_bridge_does_not_answer_gets_the_megas_own_hint(v
   TEST_ASSERT_TRUE(b.glass(1U, "ONE MOMENT"));
 }
 
+void test_a_press_whose_hint_falls_in_the_rate_limit_is_still_answered(void) {
+  // FSF-11: the hint rate limit DROPPED a hint asked for inside it. A dropped
+  // duration press painted SCAN CODE FIRST; a court press 200 ms later went
+  // unanswered, its 1.5 s fallback fell inside the 2 s limit, and the glass
+  // went back to landing with nothing said about it. Deferred, it is answered.
+  Box b(1000U);
+  b.press(4U);
+  TEST_ASSERT_TRUE(b.glass(1U, "SCAN CODE FIRST"));
+  b.press(kCourtA);
+  TEST_ASSERT_TRUE(sent(b.bridge, "!BTN,A"));
+  bool answered = false;
+  for (uint32_t waited = 0U; waited < 3000U && !answered; waited += kPassMs) {
+    b.pass();
+    answered = b.glass(1U, "ONE MOMENT");
+  }
+  TEST_ASSERT_TRUE(answered);
+  TEST_ASSERT_EQUAL_UINT16(1U, b.box.screens().suppressedHints());
+}
+
+void test_the_same_hint_inside_the_rate_limit_is_not_extended(void) {
+  // E-BTN-1: a second dropped press inside the limit paints nothing more, so a
+  // stuck contact cannot hold SCAN CODE FIRST on the glass.
+  Box b(1000U);
+  b.press(4U);
+  TEST_ASSERT_TRUE(b.glass(1U, "SCAN CODE FIRST"));
+  b.press(5U);
+  b.run(3000U);
+  TEST_ASSERT_FALSE(b.glass(1U, "SCAN CODE FIRST"));
+}
+
+void test_a_deferred_hint_never_talks_over_the_bridges_answer(void) {
+  Box b(1000U);
+  b.press(4U);
+  b.press(kCourtA);
+  b.run(1700U); // the fallback has fired inside the limit and been deferred
+  b.screen(1U, kVerdict, 0x03U, 10U, 0U);
+  b.run(1000U);
+  TEST_ASSERT_TRUE(b.glass(0U, "COURT B IS YOURS"));
+  TEST_ASSERT_FALSE(b.glass(1U, "ONE MOMENT"));
+}
+
 void test_a_chained_screen_waits_for_its_outcome_instead_of_flashing_landing(void) {
   // DL-14: a greeting followed by its outcome no longer flashes the landing.
   Box b(1000U);
@@ -772,6 +813,9 @@ int main(int, char**) {
   RUN_TEST(test_a_dropped_press_ends_the_overlay_with_the_hint);
   RUN_TEST(test_a_remapped_keys_mask_changes_which_unarmed_presses_are_forwarded);
   RUN_TEST(test_a_forwarded_press_the_bridge_does_not_answer_gets_the_megas_own_hint);
+  RUN_TEST(test_a_press_whose_hint_falls_in_the_rate_limit_is_still_answered);
+  RUN_TEST(test_the_same_hint_inside_the_rate_limit_is_not_extended);
+  RUN_TEST(test_a_deferred_hint_never_talks_over_the_bridges_answer);
   RUN_TEST(test_a_chained_screen_waits_for_its_outcome_instead_of_flashing_landing);
   RUN_TEST(test_a_lost_rw_paints_nothing_and_is_answered_incomplete);
   RUN_TEST(test_v2_show_clears_staging_so_an_unstaged_row_is_blank);

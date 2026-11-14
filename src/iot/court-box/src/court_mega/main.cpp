@@ -76,6 +76,13 @@ arduino_hal::ArduinoClock gClock;
 courtlogic::CourtBox gBox(courtlogic::CourtPorts{gRelay, gDisplay, gScanner, gButtons, gBridge, gClock},
                           proto::LegacyDialect::Refuse);
 
+/// The LCD driver's idle hook (DL-15): the buttons are sampled between bus
+/// transactions, so a pass spent on the glass cannot swallow a tap.
+void sampleButtonsWhilePainting(void* context) {
+  static_cast<void>(context);
+  gBox.sampleButtons();
+}
+
 #ifdef WDT_BENCH_STALL
 /// When the bench build stalls. See arduino_hal::watchdogBenchStall.
 tb::Deadline gBenchStall;
@@ -102,6 +109,7 @@ void setup() {
   gRelay.begin();
 
   gButtons.begin();
+  gDisplay.setIdleHook(sampleButtonsWhilePainting, nullptr);
   gScanner.begin();
   gBridge.begin();
 
