@@ -593,8 +593,8 @@ void test_transport_fake_write_failure_is_invisible_to_writable(void) {
   TEST_ASSERT_EQUAL_UINT8(1U, link.lineCount());
 }
 
-// The ESP restarts itself in service (the link supervisor, the stall watchdog,
-// a portal save), so the Mega sees the link go away. Queued RX bytes survive
+// The ESP restarts itself in service (the link supervisor, the stall watchdog),
+// so the Mega sees the link go away. Queued RX bytes survive
 // the outage so the recovery path can be driven; nothing is delivered while it
 // is down.
 void test_transport_fake_disconnection_stops_both_directions(void) {

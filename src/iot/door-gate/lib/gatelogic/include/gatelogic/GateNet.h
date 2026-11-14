@@ -3,7 +3,7 @@
 //
 //   * The compiled WIFI_SSID / WIFI_PASSWORD / API_BASE_URL are the FIRST-BOOT
 //     DEFAULTS only. A `net` object from the server (all or nothing, validated
-//     by devnet) or the setup portal replaces them, persisted.
+//     by devnet) replaces them, persisted.
 //   * The previous set is kept as the fallback. WiFi profiles are tried new
 //     first, then the previous set, then the compiled defaults — so a router
 //     migration is "add the new network as the second profile, wait for every
@@ -13,9 +13,6 @@
 //     is never re-adopted (a typo cannot strand the fleet, and cannot make it
 //     flap either: re-adopting the same bad URL every time the old one reached
 //     the server would be a ten-minute outage on a loop).
-//   * A `local` set (the portal's) is never replaced by the server's `net`
-//     unless the server sends one anyway, which it does only when an admin
-//     pushes the club's configuration to this board.
 //
 // No heap, no Arduino headers, valid C++11.
 
@@ -30,7 +27,7 @@
 
 namespace gatelogic {
 
-enum class NetSource : uint8_t { Compiled = 0U, Server = 1U, Local = 2U };
+enum class NetSource : uint8_t { Compiled = 0U, Server = 1U };
 
 const char* netSourceName(NetSource source);
 
@@ -72,9 +69,6 @@ public:
   /// caller restarts the radio on the new first profile.
   devnet::NetResult adopt(const char* object, size_t len, uint32_t nowMs);
 
-  /// The setup portal's set: source `local`, version 0.
-  bool adoptLocal(const devnet::NetSet& local);
-
   /// Starts the fallback window's clock at boot: a base persisted unproven is
   /// given its whole window again on every boot.
   void startClock(uint32_t nowMs) { adoptedAtMs_ = nowMs; }
@@ -109,51 +103,6 @@ private:
   uint8_t profileCount_ = 0U;
   uint8_t active_ = 0U;
   uint32_t adoptedAtMs_ = 0U;
-};
-
-// --- the setup portal's form -------------------------------------------------
-
-/// One submitted form, already URL-decoded field by field.
-struct PortalForm {
-  const char* ssid = nullptr;
-  const char* psk = nullptr;
-  const char* ssid2 = nullptr;
-  const char* psk2 = nullptr;
-  const char* base = nullptr;
-  const char* keyId = nullptr;
-  const char* key = nullptr;
-};
-
-/// Validates the form with the `provision/` rules (the same as a server `net`)
-/// into `out`. The reason names the first bad field, for the page to show.
-devnet::Refusal validatePortalForm(const PortalForm& form, devnet::NetSet& out);
-
-/// Decodes one `application/x-www-form-urlencoded` value. False if it does not
-/// fit or carries a bad `%xx`.
-bool urlDecode(const char* in, size_t inLen, char* out, size_t cap);
-
-/// The setup gesture: the BOOT button held for five seconds within 60 s of
-/// power-on, after the boot blinks (door-gate.md §14.3).
-class SetupGesture {
-public:
-  static constexpr uint32_t kWindowMs = 60000UL;
-  static constexpr uint32_t kHoldMs = 5000UL;
-
-  void begin(uint32_t nowMs) {
-    bootMs_ = nowMs;
-    heldSinceMs_ = 0U;
-    held_ = false;
-    fired_ = false;
-  }
-
-  /// True exactly once, on the pass the hold completes.
-  bool tick(uint32_t nowMs, bool pressed);
-
-private:
-  uint32_t bootMs_ = 0U;
-  uint32_t heldSinceMs_ = 0U;
-  bool held_ = false;
-  bool fired_ = false;
 };
 
 } // namespace gatelogic

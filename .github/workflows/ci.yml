@@ -642,9 +642,6 @@ jobs:
       # credentials a change to the other's. The court box has no such guard and
       # is unaffected by the values; it gets the same file because one loop is
       # easier to keep true than two.
-      #
-      # Bridge 3.1.0 and gate 2.0.0 also need the setup portal's password, and
-      # refuse secrets.h.example's placeholder for it at compile time.
       - name: Write a throwaway secrets.h for each board project
         run: |
           set -euo pipefail
@@ -655,7 +652,6 @@ jobs:
           #define WIFI_PASSWORD "ci-build-only"
           #define API_BASE_URL "http://192.0.2.10:8088"
           #define DEVICE_API_KEY "ci-build-only-not-a-real-key"
-          #define SETUP_AP_PASSWORD "ci-build-only"
           SECRETS
           done
 

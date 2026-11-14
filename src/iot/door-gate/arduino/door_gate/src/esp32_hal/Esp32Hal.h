@@ -273,29 +273,6 @@ public:
   void read(gatelogic::GateDiag& out) override;
 };
 
-/// The board's BOOT button (GPIO 0, active low).
-class Esp32BootButton final : public gatelogic::IButton {
-public:
-  void begin();
-  bool pressed() override;
-};
-
-/// The setup portal: a WPA2 access point and one page at 192.168.4.1.
-class Esp32Portal final : public gatelogic::ISetupPortal {
-public:
-  explicit Esp32Portal(const char* apPassword) : password_(apPassword) {}
-
-  void open(const char* apName) override;
-  bool service(gatelogic::PortalForm& form) override;
-  void refuse(const char* reason) override;
-  void accept() override;
-  void close() override;
-
-private:
-  const char* password_;
-  bool open_ = false;
-};
-
 } // namespace esp32_hal
 
 #endif // CRUSADERS_ESP32_HAL_ESP32HAL_H

@@ -1,6 +1,5 @@
 // Crusaders Mainframe — the ESP8266 side of bridge 3.1.0's lifeline: its files
-// on LittleFS, the warm epoch in RTC memory and the setup portal
-// (docs/specs/device-api.md §4, §8).
+// on LittleFS and the warm epoch in RTC memory (docs/specs/device-api.md §4).
 //
 // Each class is the thinnest bridge between one bridgelogic port and the core;
 // every decision is in lib/bridgelogic, where the host suite drives it. It sits
@@ -55,27 +54,6 @@ private:
   uint32_t bootMs_ = 0U;
   uint32_t writtenAtMs_ = 0U;
   bool written_ = false;
-};
-
-/// The setup portal: a WPA2 access point and one page (§8). Owns the web
-/// server only while open; the page's form is validated by
-/// bridgelogic::validatePortalForm and saved by the callback.
-class SetupPortal {
-public:
-  /// What the portal saves, validated: a local network set, and optionally a
-  /// device key. False when the save failed (the page says so).
-  using Save = bool (*)(const devnet::NetSet& net, const char* keyId, const char* key);
-
-  bool open(const char* apName, const char* apPassword, Save save, char* scratch, size_t scratchCap);
-  /// Serves; true once a save succeeded (the caller restarts).
-  bool pump();
-  void close();
-
-  bool isOpen() const { return open_; }
-
-private:
-  bool open_ = false;
-  bool saved_ = false;
 };
 
 } // namespace arduino_hal

@@ -99,8 +99,8 @@ CourtBox::CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy)
       rx_(proto::Link::Downlink, legacy), uptime_(), stateDue_(), lastMask_(0U), stateNow_(false), txBuf_(),
       txQueue_(), txHead_(0U), txCount_(0U), txDropped_(0U), rxErrors_(0U), unauthorised_(0U),
       oversizeScans_(0U), corruptScans_(0U), lastScanRejects_(0U), lastScanByteMs_(0U), lastRxMs_(0U),
-      livePeriodS_(0U), liveSeen_(false), bridgeAlive_(true), lastTag_(), lastTagAtMs_(), bootMs_(0U),
-      heldSinceMs_(0U), heldMask_(0U), heldSent_(false), hwSent_(), hwDue_(true) {
+      livePeriodS_(0U), liveSeen_(false), bridgeAlive_(true), lastTag_(), lastTagAtMs_(), hwSent_(),
+      hwDue_(true) {
 }
 
 void CourtBox::begin() {
@@ -134,9 +134,7 @@ void CourtBox::boot(uint8_t resetCause) {
   livePeriodS_ = 0U;
   bridgeAlive_ = true;
   begin();
-  bootMs_ = clock_.nowMs();
-  heldSent_ = false;
-  heldMask_ = 0U;
+  const uint32_t bootMs = clock_.nowMs();
 
   uint8_t held = 0U;
   for (uint8_t i = 0U; i < hal::kButtonCount; ++i) {
@@ -146,7 +144,7 @@ void CourtBox::boot(uint8_t resetCause) {
   }
   static_cast<void>(sendFrame(proto::Frame::boot(fw::kFirmwareVersion, resetCause, held)));
   stateNow_ = true;
-  publishState(bootMs_);
+  publishState(bootMs);
   hwDue_ = true;
   flushTx();
 }
@@ -160,7 +158,6 @@ void CourtBox::poll() {
   drainScanner(now);
   expireScanLine(now);
   pollButtons(now);
-  watchHeld(now);
   releaseExpired(now);
   noteAuthLapse(now);
   watchBridge(now);
@@ -306,34 +303,6 @@ void CourtBox::pollButtons(uint32_t nowMs) {
     screens_.pressUnsent(nowMs);
   } else if (dropped) {
     screens_.droppedPress(nowMs);
-  }
-}
-
-/// The setup gesture (`!HELD`): a set of keys held together continuously for
-/// five seconds by a hold that began within 60 s of Mega boot. Once per boot.
-void CourtBox::watchHeld(uint32_t nowMs) {
-  if (heldSent_) {
-    return;
-  }
-  uint8_t mask = 0U;
-  for (uint8_t i = 0U; i < hal::kButtonCount; ++i) {
-    if (panel_.isPressed(i)) {
-      mask = static_cast<uint8_t>(mask | buttonBit(i));
-    }
-  }
-  if (mask != heldMask_) {
-    heldMask_ = mask;
-    heldSinceMs_ = nowMs;
-    return;
-  }
-  // A single key held is a press, not a gesture.
-  const bool chord = (mask & static_cast<uint8_t>(mask - 1U)) != 0U;
-  if (!chord || tb::since(heldSinceMs_, bootMs_) > kHeldBootWindowMs) {
-    return;
-  }
-  if (tb::since(nowMs, heldSinceMs_) >= kHeldReportSeconds * 1000UL) {
-    heldSent_ = true;
-    static_cast<void>(sendFrame(proto::Frame::held(mask, kHeldReportSeconds)));
   }
 }
 

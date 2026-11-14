@@ -15,7 +15,7 @@
 // server — may need one (device-api.md §6, §8). The four
 // values compiled in from src/common/secrets.h (the WiFi SSID and password, the
 // API base URL and the device API key) are only the FIRST-BOOT DEFAULTS; what
-// the server or the setup portal sends since is kept in flash. There is still
+// the server sends since is kept in flash. There is still
 // no discovery and no claim flow. See src/iot/court-box/README.md's Flashing
 // section.
 //
@@ -135,9 +135,8 @@
 #include "roster/Roster.h"
 #include "timebase/TimeBase.h"
 
-// The five compiled-in values, all MANDATORY. The first four are first-boot
-// defaults (the runtime set in flash wins once there is one); the setup
-// portal's password is fixed for the life of the image.
+// The four compiled-in values, all MANDATORY, and all first-boot defaults:
+// the runtime set the server sends, kept in flash, wins once there is one.
 //
 // The build fails rather than producing an image with a blank in it — an image
 // that joins an empty SSID, or posts to an empty base URL with an empty bearer
@@ -168,26 +167,6 @@ static_assert(sizeof(API_BASE_URL) > 1U,
               "API_BASE_URL in secrets.h is empty — e.g. \"http://192.168.1.10:8088\"");
 static_assert(sizeof(DEVICE_API_KEY) > 1U,
               "DEVICE_API_KEY in secrets.h is empty — copy it from the admin Devices page");
-#ifndef SETUP_AP_PASSWORD
-#error "secrets.h does not define SETUP_AP_PASSWORD — see src/iot/court-box/src/common/secrets.h.example"
-#endif
-
-namespace secrets_check {
-
-// C++11-valid constexpr (one return each): the Arduino IDE builds at gnu++11.
-constexpr bool equals(const char* a, const char* b, unsigned i) {
-  return a[i] != b[i] ? false : (a[i] == '\0' ? true : equals(a, b, i + 1U));
-}
-
-} // namespace secrets_check
-
-// SETUP_AP_PASSWORD is the setup portal's WPA2 password, printed on the label
-// inside the enclosure (device-api.md §8).
-static_assert(sizeof(SETUP_AP_PASSWORD) >= 9U && sizeof(SETUP_AP_PASSWORD) <= 64U,
-              "SETUP_AP_PASSWORD must be 8 to 63 characters (WPA2)");
-static_assert(!secrets_check::equals(SETUP_AP_PASSWORD, "REPLACE_ME_SETUP_AP_PASSWORD", 0U),
-              "SETUP_AP_PASSWORD is still secrets.h.example's placeholder — choose one and print it on the "
-              "label inside the enclosure");
 static_assert(sizeof(DEVICE_API_KEY) - 1U <= devapi::kMaxApiKeyLen,
               "DEVICE_API_KEY is longer than devapi::kMaxApiKeyLen — a truncated key is a 401 that "
               "reads exactly like the wrong key");
@@ -599,8 +578,8 @@ bridgelogic::AuthPolicy gAuth(kScanMemoryMs);
 /// under an HTTP call is a crash that looks like a random reset.
 /// ONE 5 KB buffer for jobs that never overlap (bridge 3.1.0, the heap floor):
 /// the heartbeat ANSWER (from byte 0), the heartbeat REQUEST (its tail — sent
-/// before the answer is read over it), a member call's reply and the setup
-/// portal's scratch. Word-aligned, as the flash reads of a record want it.
+/// before the answer is read over it) and a member call's reply. Word-aligned, as the flash reads of a record
+/// want it.
 union BigBuffer {
   char text[bridgelogic::kHeartbeatResponseCap];
   uint32_t align;
@@ -620,7 +599,6 @@ constexpr size_t kHeartbeatRequestCap = devlink::kHeartbeatBodyCap;
 /// The flash: LittleFS records.
 arduino_hal::LittleFsFiles gFiles;
 arduino_hal::RtcEpoch gEpoch;
-arduino_hal::SetupPortal gPortal;
 
 /// The device keys and the network set.
 bridgelogic::BridgeKeys gKeys;
@@ -631,11 +609,6 @@ bridgelogic::BridgeNet gNet;
 devnet::Supervisor gSupervisor;
 bridgelogic::StallWatch gStall;
 bool gRestartWanted = false;
-
-/// The setup chord (`!HELD,09,5` within 60 s of power-on) and the portal.
-bridgelogic::SetupChord gChord;
-tb::Deadline gPortalUntil;
-constexpr uint32_t kPortalMs = 10UL * 60000UL;
 
 /// The four lifeline settings from `config`.
 bridgelogic::LifelineSettings gLife;
@@ -1045,7 +1018,6 @@ void noteMegaCounters(const proto::Frame& frame, uint32_t nowMs) {
 void sendMegaSettings();
 void sendLand(uint32_t nowMs);
 void onMegaBoot(uint32_t nowMs);
-void noteHeld(const proto::Frame& frame, uint32_t nowMs);
 void adoptLifeline(const char* response, size_t responseLen, uint32_t nowMs);
 void settleProvisional(uint32_t nowMs);
 
@@ -1742,11 +1714,6 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     return;
   case proto::Verb::Diag:
     noteMegaDiag(result.frame);
-    return;
-  case proto::Verb::Held:
-    // The setup gesture (court A + court D for five seconds, `!HELD,09,5`,
-    // within 60 s of power-on) opens the setup portal (device-api.md §8).
-    noteHeld(result.frame, nowMs);
     return;
   case proto::Verb::Scan:
     gLastInputMs = nowMs;
@@ -2809,47 +2776,6 @@ void persistEvents() {
   }
 }
 
-/// What the setup portal saves: a `local` network set, and optionally a key.
-bool savePortal(const devnet::NetSet& net, const char* keyId, const char* key) {
-  if (keyId != nullptr && !gKeys.adoptLocal(keyId, key)) {
-    return false;
-  }
-  return gNet.adoptLocal(net);
-}
-
-/// `!HELD,09,5` within 60 s of power-on: the setup portal (device-api.md §8).
-void noteHeld(const proto::Frame& frame, uint32_t nowMs) {
-  if (gPortal.isOpen() || !gChord.held(frame.arg(0), frame.arg(1), nowMs)) {
-    return;
-  }
-  char ap[32];
-  if (!bridgelogic::setupApName(gMacHex, ap, sizeof(ap))) {
-    return;
-  }
-  // The heartbeat buffer is the form's scratch: nothing else runs meanwhile.
-  if (!gPortal.open(ap, SETUP_AP_PASSWORD, savePortal, gBig.text, kHeartbeatBodyCap)) {
-    return;
-  }
-  gPortalUntil.arm(nowMs, kPortalMs);
-  char note[24];
-  snprintf(note, sizeof(note), "SETUP AP %s", ap + strlen(ap) - 4U);
-  static_cast<void>(sendToMega(proto::Frame::note(kPortalMs / 1000UL, note)));
-}
-
-/// The portal, while open: it serves, and it closes after ten minutes or a save
-/// — with a restart either way, onto whatever network the box now holds.
-bool pumpPortal(uint32_t nowMs) {
-  if (!gPortal.isOpen()) {
-    return false;
-  }
-  if (gPortal.pump() || gPortalUntil.expired(nowMs)) {
-    gPortal.close();
-    flushMega(300UL);
-    ESP.restart();
-  }
-  return true;
-}
-
 /// The link supervisor and the stall watchdog (device-api.md §8, HW-8), and an
 /// unproven base URL's fallback.
 void superviseLink(uint32_t nowMs) {
@@ -2887,18 +2813,14 @@ void superviseLink(uint32_t nowMs) {
 }
 
 /// Everything the lifeline does from the TOP of loop(), where a flash write is
-/// shallowest (ESPR-1). True while the setup portal owns the loop.
-bool pumpLifeline(uint32_t nowMs) {
+/// shallowest (ESPR-1).
+void pumpLifeline(uint32_t nowMs) {
   static_cast<void>(gEpoch.tick(nowMs));
   if (gBody.due()) {
     gBody.flush(gHeartbeatBody, strlen(gHeartbeatBody), nowMs);
   }
   persistEvents();
-  if (pumpPortal(nowMs)) {
-    return true;
-  }
   superviseLink(nowMs);
-  return false;
 }
 
 } // namespace
@@ -2952,7 +2874,6 @@ void setup() {
   restoreFromFlash(warm, now);
   gNet.startClock(now);
   gStall.begin(now);
-  gChord.begin(now);
   gLastInputMs = now - 60000UL;
 
   // LAST. A freshly flashed box should say what it is from the moment it comes
@@ -2969,14 +2890,8 @@ void loop() {
   const uint32_t now = gClock.nowMs();
   gUptime.tick(now);
 
-  // The lifeline from the TOP of the pass: flash writes, the portal, the
-  // supervisor. While the setup portal is open it owns the loop, and the Mega
-  // link is still served.
-  if (pumpLifeline(now)) {
-    pumpMegaLink(now);
-    pumpMegaV3(now);
-    return;
-  }
+  // The lifeline from the TOP of the pass: flash writes and the supervisor.
+  pumpLifeline(now);
 
   // EVERY "HOW OLD IS IT?" AGE, ON EVERY PASS, LINK OR NO LINK (review round
   // 18, D18-2). Each is a 32-bit difference, so one 2^32 ms + 1 s old reads

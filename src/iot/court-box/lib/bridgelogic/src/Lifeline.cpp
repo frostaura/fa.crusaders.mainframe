@@ -30,34 +30,6 @@ bool isCompiled(const char* id) {
   return strcmp(id, kCompiledId) == 0;
 }
 
-bool validKey(const char* key) {
-  if (key == nullptr || strlen(key) != devnet::kKeyLen) {
-    return false;
-  }
-  for (size_t i = 0U; i < devnet::kKeyLen; ++i) {
-    const char c = key[i];
-    const bool ok =
-        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
-    if (!ok) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool validId(const char* id) {
-  const size_t n = id == nullptr ? 0U : strlen(id);
-  if (n < 2U || n > 7U || id[0] != 'k' || id[1] < '1' || id[1] > '9') {
-    return false;
-  }
-  for (size_t i = 2U; i < n; ++i) {
-    if (id[i] < '0' || id[i] > '9') {
-      return false;
-    }
-  }
-  return true;
-}
-
 /// The ONE staging copy each kind of record is adopted through: one loop,
 /// never re-entered, so every adopt shares it (statics, never frames: ESPR-1).
 devnet::NetSet gStagedNet;
@@ -148,34 +120,12 @@ devnet::Refusal BridgeKeys::adopt(const char* object, size_t len) {
   return got;
 }
 
-bool BridgeKeys::adoptLocal(const char* id, const char* key) {
-  if (!validId(id) || !validKey(key)) {
-    return false;
-  }
-  devnet::KeyRing& next = gStagedRing;
-  next = devnet::KeyRing();
-  memcpy(next.currentId, id, strlen(id) + 1U);
-  memcpy(next.currentKey, key, devnet::kKeyLen + 1U);
-  next.hasPrevious = true;
-  memcpy(next.previousId, ring_.currentId, sizeof(next.previousId));
-  memcpy(next.previousKey, ring_.currentKey, sizeof(next.previousKey));
-  if (!persist(next)) {
-    return false;
-  }
-  ring_ = next;
-  onPrevious_ = false;
-  render();
-  return true;
-}
-
 // --- BridgeNet --------------------------------------------------------------------
 
 const char* netSourceName(NetSource source) {
   switch (source) {
   case NetSource::Server:
     return "server";
-  case NetSource::Local:
-    return "local";
   case NetSource::Compiled:
     break;
   }
@@ -315,31 +265,6 @@ devnet::NetResult BridgeNet::adopt(const char* object, size_t len, uint32_t nowM
   return result;
 }
 
-bool BridgeNet::adoptLocal(const devnet::NetSet& local) {
-  devnet::NetSet& staged = gStagedNet;
-  if (&staged != &local) {
-    staged = local;
-  }
-  staged.ver = 0U;
-  NetMeta meta = record_.meta;
-  const bool hadCurrent = meta.hasCurrent != 0U;
-  meta.hasPrevious = hadCurrent ? 1U : meta.hasPrevious;
-  meta.hasCurrent = 1U;
-  meta.source = static_cast<uint8_t>(NetSource::Local);
-  meta.baseUnproven = 0U;
-  const devnet::NetSet& previous = hadCurrent ? record_.current : record_.previous;
-  if (!persist(meta, staged, previous)) {
-    return false;
-  }
-  if (hadCurrent) {
-    record_.previous = record_.current;
-  }
-  record_.current = staged;
-  record_.meta = meta;
-  active_ = 0U;
-  return true;
-}
-
 void BridgeNet::heartbeatAccepted() {
   if (record_.meta.baseUnproven == 0U) {
     return;
@@ -421,145 +346,6 @@ bool StallWatch::stalled(uint32_t nowMs, bool linkUp) {
     return false;
   }
   return tb::since(nowMs, sinceMs_) >= kStallMs;
-}
-
-// --- the setup chord, the portal form -----------------------------------------------
-
-bool SetupChord::held(const char* maskHex, const char* secondsText, uint32_t nowMs) {
-  if (fired_ || maskHex == nullptr || secondsText == nullptr) {
-    return false;
-  }
-  const unsigned long mask = strtoul(maskHex, nullptr, 16);
-  const unsigned long seconds = strtoul(secondsText, nullptr, 10);
-  if (mask != kMask || seconds < kHoldSeconds) {
-    return false;
-  }
-  // The hold must have BEGUN inside the window: it ended now, `seconds` long.
-  const uint32_t heldMs = static_cast<uint32_t>(seconds) * 1000UL;
-  const uint32_t up = tb::since(nowMs, bootMs_);
-  if (up < heldMs || up - heldMs > kWindowMs) {
-    return false;
-  }
-  fired_ = true;
-  return true;
-}
-
-bool urlDecode(const char* in, size_t inLen, char* out, size_t cap) {
-  size_t n = 0U;
-  for (size_t i = 0U; i < inLen; ++i) {
-    char c = in[i];
-    if (c == '+') {
-      c = ' ';
-    } else if (c == '%') {
-      if (i + 2U >= inLen) {
-        return false;
-      }
-      unsigned v = 0U;
-      for (size_t k = 1U; k <= 2U; ++k) {
-        const char h = in[i + k];
-        v <<= 4;
-        if (h >= '0' && h <= '9') {
-          v |= static_cast<unsigned>(h - '0');
-        } else if (h >= 'a' && h <= 'f') {
-          v |= static_cast<unsigned>(h - 'a' + 10);
-        } else if (h >= 'A' && h <= 'F') {
-          v |= static_cast<unsigned>(h - 'A' + 10);
-        } else {
-          return false;
-        }
-      }
-      if (v == 0U) {
-        return false;
-      }
-      c = static_cast<char>(v);
-      i += 2U;
-    }
-    if (n + 1U >= cap) {
-      return false;
-    }
-    out[n] = c;
-    ++n;
-  }
-  out[n] = '\0';
-  return true;
-}
-
-namespace {
-
-/// `in` escaped into `out` at `at`; advances `at`. False when it does not fit.
-bool escapeAt(const char* in, char* out, size_t cap, size_t& at) {
-  const char* text = in != nullptr ? in : "";
-  if (at >= cap) {
-    return false;
-  }
-  if (!devapi::json::escapeInto(text, strlen(text), out + at, cap - at)) {
-    return false;
-  }
-  at += strlen(out + at);
-  return true;
-}
-
-bool literalAt(const char* text, char* out, size_t cap, size_t& at) {
-  const size_t n = strlen(text);
-  if (at + n + 1U > cap) {
-    return false;
-  }
-  memcpy(out + at, text, n + 1U);
-  at += n;
-  return true;
-}
-
-/// A key's literal, then `value` escaped into the JSON string after it.
-bool pairAt(const char* literal, const char* value, char* out, size_t cap, size_t& at) {
-  return literalAt(literal, out, cap, at) && escapeAt(value, out, cap, at);
-}
-
-/// The form written as the `net` object the server would have sent.
-bool writePortalNet(const PortalForm& form, char* scratch, size_t cap, size_t& at) {
-  at = 0U;
-  bool ok = pairAt("{\"ver\":1,\"base\":\"", form.base, scratch, cap, at) &&
-            pairAt("\",\"wifi0_ssid\":\"", form.ssid, scratch, cap, at) &&
-            pairAt("\",\"wifi0_psk\":\"", form.psk, scratch, cap, at);
-  const bool second = form.ssid2 != nullptr && form.ssid2[0] != '\0';
-  if (ok && second) {
-    ok = pairAt("\",\"wifi1_ssid\":\"", form.ssid2, scratch, cap, at) &&
-         pairAt("\",\"wifi1_psk\":\"", form.psk2, scratch, cap, at);
-  }
-  return ok && literalAt("\"}", scratch, cap, at);
-}
-
-} // namespace
-
-devnet::Refusal validatePortalForm(const PortalForm& form, devnet::NetSet& out, char* scratch,
-                                   size_t scratchCap) {
-  // THE SAME RULES AS A SERVER `net`, by construction: the form is written as
-  // the object the server would have sent and read by the same reader.
-  size_t at = 0U;
-  if (scratch == nullptr || scratchCap == 0U || !writePortalNet(form, scratch, scratchCap, at)) {
-    return devnet::Refusal::TooLong;
-  }
-  devnet::NetSet staged;
-  const devnet::NetResult r = devnet::adoptNet(scratch, at, 0U, staged);
-  if (!r.adopted()) {
-    return r.reason;
-  }
-  staged.ver = 0U;
-  out = staged;
-  return devnet::Refusal::Ok;
-}
-
-bool setupApName(const char* macHex, char* out, size_t cap) {
-  const size_t n = macHex == nullptr ? 0U : strlen(macHex);
-  if (n < 4U) {
-    return false;
-  }
-  char last4[5] = {};
-  for (uint8_t i = 0U; i < 4U; ++i) {
-    const char c = macHex[n - 4U + i];
-    last4[i] = (c >= 'a' && c <= 'f') ? static_cast<char>(c - 'a' + 'A') : c;
-  }
-  const int w = snprintf(out, cap, "CRUSADERS-SETUP-%s", last4);
-  return w > 0 && static_cast<size_t>(w) < cap;
 }
 
 } // namespace bridgelogic

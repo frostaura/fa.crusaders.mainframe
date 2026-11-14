@@ -35,8 +35,6 @@ const char* netSourceName(NetSource source) {
   switch (source) {
   case NetSource::Server:
     return "server";
-  case NetSource::Local:
-    return "local";
   case NetSource::Compiled:
     break;
   }
@@ -155,30 +153,6 @@ devnet::NetResult GateNet::adopt(const char* object, size_t len, uint32_t nowMs)
   return result;
 }
 
-bool GateNet::adoptLocal(const devnet::NetSet& local) {
-  // Static: the record is two whole network sets, and the copy kept for a
-  // failed persist() put this over the 8 KB loop task's frame budget.
-  static NetRecord before;
-  before = record_;
-  if (record_.hasCurrent) {
-    record_.previous = record_.current;
-    record_.hasPrevious = true;
-  }
-  record_.current = local;
-  record_.current.ver = 0U;
-  record_.hasCurrent = true;
-  record_.source = static_cast<uint8_t>(NetSource::Local);
-  // The technician typed it standing at the door: trusted, never auto-abandoned.
-  record_.baseUnproven = false;
-  if (!persist()) {
-    record_ = before;
-    return false;
-  }
-  active_ = 0U;
-  rebuild();
-  return true;
-}
-
 void GateNet::heartbeatAccepted() {
   if (record_.baseUnproven) {
     record_.baseUnproven = false;
@@ -202,124 +176,6 @@ bool GateNet::tick(uint32_t nowMs, uint32_t fallbackMinutes) {
   static_cast<void>(persist());
   rebuild();
   return true;
-}
-
-// --- the setup portal's form -------------------------------------------------
-
-bool urlDecode(const char* in, size_t inLen, char* out, size_t cap) {
-  size_t n = 0U;
-  for (size_t i = 0U; i < inLen; ++i) {
-    char c = in[i];
-    if (c == '+') {
-      c = ' ';
-    } else if (c == '%') {
-      if (i + 2U >= inLen) {
-        return false;
-      }
-      int v = 0;
-      for (size_t k = 1U; k <= 2U; ++k) {
-        const char h = in[i + k];
-        v <<= 4;
-        if (h >= '0' && h <= '9') {
-          v |= h - '0';
-        } else if (h >= 'a' && h <= 'f') {
-          v |= h - 'a' + 10;
-        } else if (h >= 'A' && h <= 'F') {
-          v |= h - 'A' + 10;
-        } else {
-          return false;
-        }
-      }
-      if (v == 0) {
-        return false;
-      }
-      c = static_cast<char>(v);
-      i += 2U;
-    }
-    if (n + 1U >= cap) {
-      return false;
-    }
-    out[n] = c;
-    ++n;
-  }
-  out[n] = '\0';
-  return true;
-}
-
-namespace {
-
-/// One form field, JSON-escaped; a missing field is the empty string.
-bool escapeField(const char* in, char* out, size_t cap) {
-  const char* text = in != nullptr ? in : "";
-  return devapi::json::escapeInto(text, strlen(text), out, cap);
-}
-
-} // namespace
-
-devnet::Refusal validatePortalForm(const PortalForm& form, devnet::NetSet& out) {
-  // THE SAME RULES AS A SERVER `net`, by construction: the form is written as
-  // the object the server would have sent and read by the same reader, so a
-  // value the portal accepts is one the server would have, and the reverse.
-  static char json[640];
-  // Static, as `json` is: the portal is served from the loop, one form at a time,
-  // and these were a 2 KB frame on the 8 KB loop task.
-  static char ssid[devnet::kSsidMax * devapi::json::kMaxEscapeExpansion + 1U];
-  static char psk[devnet::kPskMax * devapi::json::kMaxEscapeExpansion + 1U];
-  static char ssid2[sizeof(ssid)];
-  static char psk2[sizeof(psk)];
-  static char base[devnet::kBaseUrlMax * devapi::json::kMaxEscapeExpansion + 1U];
-  const bool second = form.ssid2 != nullptr && form.ssid2[0] != '\0';
-  if (!escapeField(form.ssid, ssid, sizeof(ssid)) || !escapeField(form.psk, psk, sizeof(psk)) ||
-      !escapeField(form.ssid2, ssid2, sizeof(ssid2)) || !escapeField(form.psk2, psk2, sizeof(psk2)) ||
-      !escapeField(form.base, base, sizeof(base))) {
-    return devnet::Refusal::TooLong;
-  }
-  int n = 0;
-  if (second) {
-    n = snprintf(
-        json, sizeof(json),
-        "{\"ver\":1,\"base\":\"%s\",\"wifi0_ssid\":\"%s\",\"wifi0_psk\":\"%s\",\"wifi1_ssid\":\"%s\","
-        "\"wifi1_psk\":\"%s\"}",
-        base, ssid, psk, ssid2, psk2);
-  } else {
-    n = snprintf(json, sizeof(json), "{\"ver\":1,\"base\":\"%s\",\"wifi0_ssid\":\"%s\",\"wifi0_psk\":\"%s\"}",
-                 base, ssid, psk);
-  }
-  if (n < 0 || static_cast<size_t>(n) >= sizeof(json)) {
-    return devnet::Refusal::TooLong;
-  }
-  devnet::NetSet staged;
-  const devnet::NetResult r = devnet::adoptNet(json, static_cast<size_t>(n), 0U, staged);
-  if (!r.adopted()) {
-    return r.reason;
-  }
-  staged.ver = 0U;
-  out = staged;
-  return devnet::Refusal::Ok;
-}
-
-bool SetupGesture::tick(uint32_t nowMs, bool pressed) {
-  if (fired_) {
-    return false;
-  }
-  if (!pressed) {
-    held_ = false;
-    return false;
-  }
-  if (!held_) {
-    // A hold must START inside the window; one begun after it never counts.
-    if (tb::since(nowMs, bootMs_) > kWindowMs) {
-      return false;
-    }
-    held_ = true;
-    heldSinceMs_ = nowMs;
-    return false;
-  }
-  if (tb::since(nowMs, heldSinceMs_) >= kHoldMs) {
-    fired_ = true;
-    return true;
-  }
-  return false;
 }
 
 } // namespace gatelogic

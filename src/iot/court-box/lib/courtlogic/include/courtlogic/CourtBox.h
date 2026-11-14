@@ -77,10 +77,6 @@ inline constexpr uint16_t kBytesPerPass = 64U;
 /// per heartbeat and sends nothing else on a quiet link.
 inline constexpr uint32_t kLegacyLivenessMs = 330000UL;
 
-/// The setup gesture's window and the hold that reports it (`!HELD`).
-inline constexpr uint32_t kHeldBootWindowMs = 60000UL;
-inline constexpr uint32_t kHeldReportSeconds = 5UL;
-
 /// A repeated tag inside this window is a retry whose first copy arrived.
 inline constexpr uint32_t kDuplicateWindowMs = 5000UL;
 
@@ -180,7 +176,6 @@ private:
   void pollButtons(uint32_t nowMs);
   void releaseExpired(uint32_t nowMs);
   void watchBridge(uint32_t nowMs);
-  void watchHeld(uint32_t nowMs);
   void noteAuthLapse(uint32_t nowMs);
   void reportHardware();
   void publishState(uint32_t nowMs);
@@ -262,12 +257,6 @@ private:
   static constexpr uint8_t kAuthSlot = 4U;
   uint8_t lastTag_[5];
   uint32_t lastTagAtMs_[5];
-
-  // The setup gesture: a chord held from inside the boot window.
-  uint32_t bootMs_;
-  uint32_t heldSinceMs_;
-  uint8_t heldMask_;
-  bool heldSent_;
 
   // What `!HW` last said, so a change re-sends it.
   uint8_t hwSent_[5];

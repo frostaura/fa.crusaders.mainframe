@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generates this directory's cases.json and manifest.json: what a board accepts when
-the server, or the setup portal, changes how it reaches the club.
+the server changes how it reaches the club.
 
 Run it as `python3 src/contracts/device-protocol/provision/gen_cases.py`. Standard
 library only; this file is the reference implementation of four rules both ESP
@@ -179,7 +179,7 @@ def main() -> int:
     nc("net-long-ssid", {"ver": 5, "wifi0_ssid": "S" * 33, "wifi0_psk": "squash-court-4"}, 4, False, "wifi0_ssid")
     nc("net-psk-without-ssid", {"ver": 5, "wifi0_psk": "squash-court-4"}, 4, False, "wifi0_ssid")
     nc("net-empty", {"ver": 5}, 4, False, "empty")
-    nc("net-ver-zero", dict(full, ver=0), 0, False, "ver", note="0 is the board's own (compiled or portal) configuration")
+    nc("net-ver-zero", dict(full, ver=0), 0, False, "ver", note="0 is the board's own (compiled) configuration")
     nc("net-ver-string", dict(full, ver="5"), 4, False, "ver")
 
     def kc(cid, key_next, current, held, adopt, reason, note=""):

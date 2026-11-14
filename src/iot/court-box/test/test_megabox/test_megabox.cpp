@@ -538,10 +538,10 @@ void test_a_dead_bridge_drops_to_compact_and_discards_the_note_and_land(void) {
   b.send(proto::Frame::cfg(1U, "LAYOUT", 1U));
   const int16_t map[4] = {1, 2, 3, 4};
   b.send(proto::Frame::map(map));
-  b.send(proto::Frame::note(600U, "SETUP CRUSADERS-BOX"));
+  b.send(proto::Frame::note(600U, "SERVICE VISIT"));
   b.run(500U);
   TEST_ASSERT_TRUE(b.glass(0U, "SCAN YOUR QR CODE"));
-  TEST_ASSERT_TRUE(b.glass(3U, "SETUP CRUSADERS-BOX") || b.glass(3U, "COURT 3"));
+  TEST_ASSERT_TRUE(b.glass(3U, "SERVICE VISIT") || b.glass(3U, "COURT 3"));
   b.run(8000U);
   TEST_ASSERT_TRUE(b.box.screens().effectiveLayout() == courtlogic::Layout::Compact);
   TEST_ASSERT_TRUE(b.glass(0U, "OUT OF SERVICE"));
@@ -685,7 +685,7 @@ void test_a_forced_sbaud_is_that_rate_only(void) {
   TEST_ASSERT_TRUE(sent(b.bridge, "!HW,27,0,2,0,0F"));
 }
 
-// --- the hardware facts and the setup gesture (HW-2, HW-6, !HELD) -------------
+// --- the hardware facts (HW-2, HW-6) -------------------------------------------
 
 void test_an_absent_backpack_reports_00(void) {
   Box b(1000U);
@@ -696,24 +696,13 @@ void test_an_absent_backpack_reports_00(void) {
   TEST_ASSERT_EQUAL_UINT8(0x3FU, b.display.requestedAddress());
 }
 
-void test_holding_courts_a_and_d_inside_the_boot_window_reports_held_once(void) {
+/// There is no setup gesture: two keys held together at power-on are two keys
+/// held, and nothing but the presses goes up the link.
+void test_holding_courts_a_and_d_at_power_on_is_no_gesture(void) {
   Box b(1000U);
   b.buttons.press(0U);
   b.buttons.press(3U);
-  b.run(4900U);
-  TEST_ASSERT_FALSE(sent(b.bridge, "!HELD"));
-  b.run(300U);
-  TEST_ASSERT_TRUE(sent(b.bridge, "!HELD,09,5"));
   b.run(10000U);
-  TEST_ASSERT_EQUAL_UINT16(1U, countLines(b.bridge, "!HELD"));
-}
-
-void test_a_chord_begun_after_the_boot_window_is_not_the_gesture(void) {
-  Box b(1000U);
-  b.run(61000U);
-  b.buttons.press(0U);
-  b.buttons.press(3U);
-  b.run(6000U);
   TEST_ASSERT_FALSE(sent(b.bridge, "!HELD"));
 }
 
@@ -801,8 +790,7 @@ int main(int, char**) {
   RUN_TEST(test_a_suffixless_scanner_at_115200_is_found_and_its_code_scanned);
   RUN_TEST(test_a_forced_sbaud_is_that_rate_only);
   RUN_TEST(test_an_absent_backpack_reports_00);
-  RUN_TEST(test_holding_courts_a_and_d_inside_the_boot_window_reports_held_once);
-  RUN_TEST(test_a_chord_begun_after_the_boot_window_is_not_the_gesture);
+  RUN_TEST(test_holding_courts_a_and_d_at_power_on_is_no_gesture);
   RUN_TEST(test_a_dead_bridge_still_loses_the_lights_at_the_deadline);
   RUN_TEST(test_the_clock_is_sampled_once_per_pass);
   RUN_TEST(test_pong_carries_the_counters_and_is_followed_by_diag_and_hw);

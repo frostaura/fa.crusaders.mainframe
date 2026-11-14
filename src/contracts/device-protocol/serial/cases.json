@@ -1029,11 +1029,11 @@
         "verb": "NOTE",
         "args": [
           "600",
-          "SETUP AP 1A2B"
+          "SERVICE VISIT"
         ]
       },
       "cap": 4096,
-      "bytes": "!NOTE,600,SETUP AP 1A2B*70\n"
+      "bytes": "!NOTE,600,SERVICE VISIT*0A\n"
     },
     {
       "id": "v3-enc-note-clear",
@@ -1127,20 +1127,6 @@
       },
       "cap": 4096,
       "bytes": "!BOOT,3.0.0,08,09*08\n"
-    },
-    {
-      "id": "v3-enc-held",
-      "kind": "encode_v2",
-      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). Uplink: keys A and D held together for 5 s inside the boot window — the setup-portal gesture.",
-      "frame": {
-        "verb": "HELD",
-        "args": [
-          "09",
-          "5"
-        ]
-      },
-      "cap": 4096,
-      "bytes": "!HELD,09,5*39\n"
     },
     {
       "id": "v3-enc-diag",
@@ -1298,19 +1284,6 @@
           "3.0.0",
           "01",
           "00"
-        ]
-      },
-      "cap": 4096,
-      "bytes": ""
-    },
-    {
-      "id": "v3-encl-held-has-no-legacy-form",
-      "kind": "encode_legacy",
-      "frame": {
-        "verb": "HELD",
-        "args": [
-          "01",
-          "5"
         ]
       },
       "cap": 4096,
@@ -3384,7 +3357,7 @@
       "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
       "link": "downlink",
       "chunks": [
-        "!NOTE,600,SETUP AP 1A2B*70\n"
+        "!NOTE,600,SERVICE VISIT*0A\n"
       ],
       "expect": [
         {
@@ -3392,7 +3365,7 @@
             "verb": "NOTE",
             "args": [
               "600",
-              "SETUP AP 1A2B"
+              "SERVICE VISIT"
             ]
           }
         }
@@ -3613,45 +3586,6 @@
       "expect": [
         {
           "error": "BADARG"
-        }
-      ]
-    },
-    {
-      "id": "v3-dec-held",
-      "kind": "decode",
-      "note": "Mega 3.0.0 / bridge 3.0.0 (docs/specs/device-serial-protocol.md, v3). ",
-      "link": "uplink",
-      "chunks": [
-        "!HELD,09,5*39\n"
-      ],
-      "expect": [
-        {
-          "frame": {
-            "verb": "HELD",
-            "args": [
-              "09",
-              "5"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "id": "v3-dec-held-clamp",
-      "kind": "decode",
-      "link": "uplink",
-      "chunks": [
-        "!HELD,09,99*0C\n"
-      ],
-      "expect": [
-        {
-          "frame": {
-            "verb": "HELD",
-            "args": [
-              "09",
-              "60"
-            ]
-          }
         }
       ]
     },
