@@ -5,8 +5,9 @@
 //
 // THE FOUNDER'S RULE
 // ------------------
-// The next USB flash is the last, and NOTHING an operator does may force a
-// reflash. So the four values compiled into `secrets.h` — the WiFi SSID and
+// NOTHING an operator does may force a reflash: the bridge is updated only by
+// cable, at the box, so a new router, a moved server or a rotated key must not
+// need one. So the four values compiled into `secrets.h` — the WiFi SSID and
 // password, the API base URL and the device key — are only the FIRST-BOOT
 // DEFAULTS here:
 //
@@ -171,20 +172,19 @@ private:
   uint32_t adoptedAtMs_ = 0U;
 };
 
-// --- the three lifeline settings (§5) ------------------------------------------
+// --- the lifeline settings (§5) -------------------------------------------------
 
 /// `device_power_restore_trust_minutes` (0–120, default 20),
-/// `device_net_fallback_minutes` (3–60, 10), `device_ota_probation_minutes`
-/// (3–60, 10) and `relay_reconcile_min_seconds` (30–600, 60): read from INSIDE
-/// `config`, each by its exact kind and clamped independently (§11.2).
+/// `device_net_fallback_minutes` (3–60, 10) and `relay_reconcile_min_seconds`
+/// (30–600, 60): read from INSIDE `config`, each by its exact kind and clamped
+/// independently (§11.2).
 struct LifelineSettings {
   uint32_t trustMinutes = 20U;
   uint32_t fallbackMinutes = 10U;
-  uint32_t probationMinutes = 10U;
   uint32_t reconcileMinSeconds = 60U;
 };
 
-/// Reads the four from `config` in `body` over `current`; every key present
+/// Reads the three from `config` in `body` over `current`; every key present
 /// but unreadable is named in `drift` (when not null) and keeps its value.
 void readLifelineSettings(const char* body, size_t len, LifelineSettings& current, Drift* drift);
 

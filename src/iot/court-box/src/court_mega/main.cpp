@@ -18,8 +18,8 @@
 // -------------------------------------------------------------
 // The ATmega cannot be flashed over WiFi: its ESP8266 sits on Serial3, not the
 // Serial0 bootloader port, and no GPIO reaches RESET. So the Mega is the
-// near-static half and the ESP — updated over the air from bridge 3.0.0 — is
-// the half that changes. Mega 3.0.0 is a generic renderer and relay guard the
+// near-static half and the ESP — reflashed by cable on its own — is the half
+// that changes. Mega 3.0.0 is a generic renderer and relay guard the
 // bridge steers (docs/specs/device-serial-protocol.md, chapter v3), with every
 // timeout bounded here: the relay deadline and authorisation cap, the screen
 // ceiling, the return to landing, the bridge-liveness verdict. Every hardware

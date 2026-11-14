@@ -643,10 +643,8 @@ jobs:
       # is unaffected by the values; it gets the same file because one loop is
       # easier to keep true than two.
       #
-      # Gate 2.0.0 also needs the release key's modulus and the setup portal's
-      # password, and refuses the contract corpus's TEST keys at compile time. The
-      # modulus here is 512 hex characters of nothing (c1 repeated): no image built
-      # from it can ever verify a signature, which is exactly right for a compile check.
+      # Bridge 3.1.0 and gate 2.0.0 also need the setup portal's password, and
+      # refuse secrets.h.example's placeholder for it at compile time.
       - name: Write a throwaway secrets.h for each board project
         run: |
           set -euo pipefail
@@ -657,7 +655,6 @@ jobs:
           #define WIFI_PASSWORD "ci-build-only"
           #define API_BASE_URL "http://192.0.2.10:8088"
           #define DEVICE_API_KEY "ci-build-only-not-a-real-key"
-          #define OTA_PUBLIC_KEY_N "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"
           #define SETUP_AP_PASSWORD "ci-build-only"
           SECRETS
           done

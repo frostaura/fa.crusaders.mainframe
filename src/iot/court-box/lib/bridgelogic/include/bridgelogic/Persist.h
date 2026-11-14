@@ -14,7 +14,7 @@
 //
 // WARM AND COLD
 // -------------
-//   * WARM (watchdog, exception, software restart, an OTA): the ESP8266's RTC
+//   * WARM (watchdog, exception, software restart): the ESP8266's RTC
 //     user memory survives, and the bridge keeps an epoch there — milliseconds
 //     that carry on across the reset — so the answer is aged exactly and every
 //     window, seconds-left and step continues (`restore: warm`).

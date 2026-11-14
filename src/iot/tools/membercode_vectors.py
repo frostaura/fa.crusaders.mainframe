@@ -1170,7 +1170,7 @@ def http_cases():
 def payfor_cases():
     """D10 pay-for at the box (member-code.md section 9): the server still serves /api/v1/device/pay-for and
     is held to these bodies; no shipped court-box image after 2.3.0 sends them. Kept, not deleted, because the
-    flow can return by a bridge OTA alone — it needs nothing from the Mega that v3 does not already render."""
+    flow can return in a bridge image alone — it needs nothing from the Mega that v3 does not already render."""
     doc = _court_box_http_all()
     return {"description": "D10 pay-for at the box: the two-step quote and confirm, held by the server only.",
             "device_mac": doc["device_mac"],

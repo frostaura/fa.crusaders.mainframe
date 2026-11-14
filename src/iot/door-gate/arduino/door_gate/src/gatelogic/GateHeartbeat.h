@@ -164,15 +164,12 @@ struct GateDiag {
   uint32_t heapMin = 0U;
   uint32_t block = 0U;
   uint32_t stackMin = 0U;
+  /// The size of the app slot an image is flashed into (ESP.getFreeSketchSpace()).
   uint32_t sketchFree = 0U;
   uint32_t flashMb = 0U;
 };
 
 struct GateReport {
-  const char* fwState = "committed";
-  /// With rolled_back / failed only.
-  const char* fwFailed = nullptr;
-  const char* fwError = nullptr;
   uint32_t netVer = 0U;
   const char* netSrc = "compiled";
   /// warm / cold / none: until the first accepted heartbeat of a boot only.
@@ -184,7 +181,7 @@ struct GateReport {
 
 /// Every v3 capability this image has. The server keys every new response
 /// field on it, so a 1.x gate is answered exactly as before.
-inline constexpr char kGateCapsV3[] = ",\"caps\":[\"codes:m1\",\"ota:1\",\"key:1\",\"net:1\"]";
+inline constexpr char kGateCapsV3[] = ",\"caps\":[\"codes:m1\",\"key:1\",\"net:1\"]";
 
 /// Everything one 2.0.0 heartbeat says about the board.
 struct GateBeat {

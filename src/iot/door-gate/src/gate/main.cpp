@@ -50,14 +50,13 @@
 // than the court box's and the contract says so: offline, only a member with a
 // rostered booking gets in.
 //
-// 2.0.0: THE LAST CABLE FLASH (door-gate.md §14)
-// ---------------------------------------------
+// 2.0.0: DEVICE CONTRACT v3 (door-gate.md §14)
+// --------------------------------------------
 // Everything below secrets.h's four values is now a FIRST-BOOT DEFAULT: the
-// keys rotate over the heartbeat, the WiFi and the server URL change from the
-// server or at the BOOT-button setup portal, and the image itself is replaced by
-// signed OTA into the other app slot. What survives a reset is in RTC memory
-// (warm) and NVS (cold). This file wires the ports for all of it; GateApp
-// decides.
+// keys rotate over the heartbeat, and the WiFi and the server URL change from
+// the server or at the BOOT-button setup portal. The image itself changes only
+// by cable. What survives a reset is in RTC memory (warm) and NVS (cold). This
+// file wires the ports for all of it; GateApp decides.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -70,9 +69,7 @@
 
 #include "devapi/DeviceClient.h"
 #include "devcrypto/Hex.h"
-#include "devcrypto/Rsa.h"
 #include "devlink/ApiBreaker.h"
-#include "devota/Ota.h"
 #include "esp32_hal/Esp32Hal.h"
 #include "fwversion/Version.h"
 #include "gatelogic/ApiBaseUrl.h"
@@ -110,7 +107,7 @@
     "the gate's firmware version did not reach the compiler — see [env:door_gate] in src/iot/door-gate/platformio.ini"
 #endif
 // 2.0.0 is device contract v3 (door-gate.md §14): persisted state, key
-// rotation, runtime network, signed OTA, the v3 readers. The Devices page
+// rotation, runtime network, the v3 readers. The Devices page
 // showing 2.0.0 is how the person who flashed it knows it landed.
 #if (FW_VERSION_MAJOR != 2) || (FW_VERSION_MINOR != 0) || (FW_VERSION_PATCH != 0)
 #error "this image is not reporting the gate's own firmware version (2.0.0)"
@@ -193,27 +190,13 @@ static_assert(gatelogic::isValidApiBaseUrl(API_BASE_URL),
 static_assert(gatelogic::apiBaseUrlFits(API_BASE_URL),
               "API_BASE_URL does not fit the URL buffer together with the longest device path");
 
-// 2.0.0's TWO NEW VALUES, mandatory like the four above (device-api.md §7, §8).
+// 2.0.0's ONE NEW VALUE, mandatory like the four above (device-api.md §8).
 //
-// OTA_PUBLIC_KEY_N is the release key's RSA-2048 modulus, 512 hex characters:
-// the ONLY key whose signature this board will boot. It is refused if it is the
-// corpus's TEST key (src/contracts/device-protocol/ota/), whose private half is
-// in the repository, so an image signed by anybody could otherwise be booted.
 // SETUP_AP_PASSWORD is the setup portal's WPA2 password, printed on the label
 // inside the enclosure: 8 to 63 characters.
-#ifndef OTA_PUBLIC_KEY_N
-#error "secrets.h does not define OTA_PUBLIC_KEY_N — see src/iot/door-gate/src/common/secrets.h.example"
-#endif
 #ifndef SETUP_AP_PASSWORD
 #error "secrets.h does not define SETUP_AP_PASSWORD — see src/iot/door-gate/src/common/secrets.h.example"
 #endif
-static_assert(sizeof(OTA_PUBLIC_KEY_N) == 513U && gatelogic::text::isHexRange(OTA_PUBLIC_KEY_N, 0U, 512U),
-              "OTA_PUBLIC_KEY_N must be the release key's RSA-2048 modulus as exactly 512 hex characters "
-              "(ota_sign.py prints it)");
-static_assert(!gatelogic::text::startsWith(OTA_PUBLIC_KEY_N, "d9ce9d8aeba6c19446077d6c0802c56f") &&
-                  !gatelogic::text::startsWith(OTA_PUBLIC_KEY_N, "a5105de8c0eeb5d3a8ddc78a4bc8a385"),
-              "OTA_PUBLIC_KEY_N is one of the contract corpus's TEST keys — their private halves are in the "
-              "repository. Put the club's own release key here");
 static_assert(sizeof(SETUP_AP_PASSWORD) >= 9U && sizeof(SETUP_AP_PASSWORD) <= 64U,
               "SETUP_AP_PASSWORD must be 8 to 63 characters (WPA2)");
 static_assert(!gatelogic::text::equals(SETUP_AP_PASSWORD, "REPLACE_ME_SETUP_AP_PASSWORD"),
@@ -381,11 +364,8 @@ esp32_hal::Esp32RtcClock gRtc;
 esp32_hal::Esp32Radio gRadio;
 esp32_hal::Esp32System gSystem;
 esp32_hal::Esp32Diag gDiag;
-esp32_hal::Esp32OtaSlot gOtaSlot;
-esp32_hal::Esp32Download gDownload(gNet.baseUrl(), gKeys.header(), gClock);
 esp32_hal::Esp32BootButton gBootButton;
 esp32_hal::Esp32Portal gPortal(SETUP_AP_PASSWORD);
-uint8_t gOtaModulus[dc::kRsa2048Bytes] = {};
 
 // THE WARM IMAGE, in RTC slow memory that no reset but a power-on clears. Raw
 // bytes rather than a WarmImage: an object here would be constructed — zeroed —
@@ -444,9 +424,6 @@ GateApp::Ports wire() {
   ports.radio = &gRadio;
   ports.system = &gSystem;
   ports.diag = &gDiag;
-  ports.otaSlot = &gOtaSlot;
-  ports.download = &gDownload;
-  ports.otaModulus = gOtaModulus;
   ports.setupButton = &gBootButton;
   ports.portal = &gPortal;
   return ports;
@@ -509,12 +486,6 @@ void setup() {
   // watchdog reset causes at 3am.
   gApp.beginOutputs();
 
-  // SECOND: an image on probation counts this boot, and on its fourth is rolled
-  // back to the other slot before anything else runs (§14.2). It needs only the
-  // flash, so the flash opens here and nothing else does.
-  static_cast<void>(gBlobs.begin());
-  static_cast<void>(gApp.checkFirmwareAtBoot());
-
   // Retried inside begin(); false here means three attempts all refused. The
   // board still runs and still opens doors — a door that admits nobody is far
   // worse than one on the core's five seconds — but it says so, on the boot
@@ -526,10 +497,10 @@ void setup() {
   // driver is installed, because afterwards both are ignored.
   gScanner.begin(kGateConfig.scannerBaud, kGateConfig.scannerRxPin, kGateConfig.scannerTxPin);
   static_cast<void>(gStore.begin());
+  // The records of §14.1. Opened before gApp.begin(), which restores from them.
+  static_cast<void>(gBlobs.begin());
 
   gBootButton.begin();
-  // The release key, from its compile-time-checked hex.
-  static_cast<void>(devota::parseModulusHex(OTA_PUBLIC_KEY_N, gOtaModulus));
 
   // persistent(false) keeps the core from writing a second, invisible copy of
   // the credential in its own flash record, which would outlive a reflash and

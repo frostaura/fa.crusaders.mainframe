@@ -11,8 +11,8 @@
 // events readers — and asserts the body fits the buffer it lands in, nothing
 // drifted, and every value the server sent was adopted.
 //
-// The lifeline objects (`ota`, `key_next`, `net`) are read by the SHARED
-// readers (devota, devnet) every v3 board's lifeline is built on, so a server
+// The lifeline objects (`key_next`, `net`) are read by the SHARED reader
+// (devnet) every v3 board's lifeline is built on, so a server
 // change no frozen reader could follow goes red here before any club's box sees
 // it.
 //
@@ -34,7 +34,6 @@
 #include "devlink/CodeSync.h"
 #include "devlink/RosterSync.h"
 #include "devnet/Net.h"
-#include "devota/Ota.h"
 #include "memcode/KeyRing.h"
 #include "roster/Roster.h"
 #include "support/CorpusJson.h"
@@ -206,19 +205,6 @@ void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t 
       TEST_ASSERT_TRUE_MESSAGE(r.keysReplaced, file);
       TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, r.rejected, file);
       TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(value), r.accepted, file);
-    } else if (strcmp(name, "ota") == 0) {
-      size_t objLen = 0U;
-      const size_t at = devapi::json::findTopLevelObject(body, len, "ota", objLen);
-      TEST_ASSERT_NOT_EQUAL_MESSAGE(devapi::json::kNotFound, at, file);
-      devota::Offer offer;
-      TEST_ASSERT_TRUE_MESSAGE(devota::parseOffer(body + at - 1U, objLen + 2U, devota::kTargetCourtBridge,
-                                                  offer) == devota::Refusal::Ok,
-                               file);
-      char want[devota::kPathCap] = {};
-      text(value, "version", want, sizeof(want));
-      TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.version, file);
-      text(value, "path", want, sizeof(want));
-      TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.path, file);
     } else if (strcmp(name, "key_next") == 0) {
       size_t objLen = 0U;
       const size_t at = devapi::json::findTopLevelObject(body, len, "key_next", objLen);

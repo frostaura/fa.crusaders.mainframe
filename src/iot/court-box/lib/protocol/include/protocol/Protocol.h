@@ -270,7 +270,7 @@ inline constexpr VerbSpec kVerbSpecs[kVerbCount] = {
     {Verb::State, "STATE", 5, 5, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
     // PONG takes two arguments or five. The three counters are ADDITIVE: a
     // bridge flashed ahead of the Mega it is wired to must still read the
-    // answer, and the Mega is the half that cannot be reflashed over the air.
+    // answer, and the Mega is the half that is not reflashed with it.
     {Verb::Pong, "PONG", 2, 5, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
     {Verb::Evt, "EVT", 2, 2, -1, -1, 0, 0, false, false, Dir::Any, nullptr},
     {Verb::Err, "ERR", 1, 1, -1, -1, 0, 0, false, false, Dir::Any, nullptr},

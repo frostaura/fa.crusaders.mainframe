@@ -127,13 +127,10 @@ public:
   /// blink while it is, whatever the radio is doing — see kFaultHalfMs.
   void setFault(bool fault) { fault_ = fault; }
 
-  /// 2.0.0's idle states (door-gate.md §14.5). Each outranks the ones below it
-  /// and none outranks a member-facing cue or a released door.
+  /// 2.0.0's idle states (door-gate.md §14.5). The portal outranks the fault
+  /// and link blinks, degraded is the quietest of all, and none outranks a
+  /// member-facing cue or a released door.
   void setSetup(bool on) { setup_ = on; }
-
-  void setDownloading(bool on) { downloading_ = on; }
-
-  void setProbation(bool on) { probation_ = on; }
 
   /// The last heartbeat was not a success, the roster is empty, or it is older
   /// than two intervals (DG-6).
@@ -160,16 +157,12 @@ private:
   bool linkUp_ = false;
   bool fault_ = false;
   bool setup_ = false;
-  bool downloading_ = false;
-  bool probation_ = false;
   bool degraded_ = false;
 };
 
 /// Setup portal: long-short, repeating (on 600, off 200, on 200, off 600).
 inline constexpr uint32_t kSetupPeriodMs = 1600U;
-/// Downloading an update: 2 Hz.
-inline constexpr uint32_t kDownloadHalfMs = 250U;
-/// Probation: a double blip every five seconds; degraded: one blip.
+/// Degraded: one blip every five seconds.
 inline constexpr uint32_t kIdlePeriodMs = 5000U;
 inline constexpr uint32_t kBlipMs = 80U;
 

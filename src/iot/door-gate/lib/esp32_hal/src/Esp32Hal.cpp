@@ -8,7 +8,6 @@
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <WebServer.h>
-#include <esp_ota_ops.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <string.h>
@@ -489,130 +488,8 @@ void Esp32Diag::read(gatelogic::GateDiag& out) {
   out.block = ESP.getMaxAllocHeap();
   // On this core a stack is counted in bytes (StackType_t is uint8_t).
   out.stackMin = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
-  const esp_partition_t* other = esp_ota_get_next_update_partition(nullptr);
-  out.sketchFree = other != nullptr ? other->size : 0U;
+  out.sketchFree = ESP.getFreeSketchSpace();
   out.flashMb = ESP.getFlashChipSize() / (1024U * 1024U);
-}
-
-namespace {
-
-esp_ota_handle_t gOtaHandle = 0;
-
-} // namespace
-
-bool Esp32OtaSlot::begin(uint32_t size) {
-  const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
-  if (next == nullptr || size > next->size) {
-    return false;
-  }
-  // Erases the slot as it goes (OTA_WITH_SEQUENTIAL_WRITES): an up-front erase
-  // of 1.25 MB would hold the loop for seconds with nothing feeding the dog.
-  open_ = esp_ota_begin(next, OTA_WITH_SEQUENTIAL_WRITES, &gOtaHandle) == ESP_OK;
-  finished_ = false;
-  return open_;
-}
-
-bool Esp32OtaSlot::write(const uint8_t* data, size_t len) {
-  return open_ && esp_ota_write(gOtaHandle, data, len) == ESP_OK;
-}
-
-bool Esp32OtaSlot::finish() {
-  if (!open_) {
-    return false;
-  }
-  open_ = false;
-  // esp_ota_end validates the image header and its own checksum; the board's
-  // SHA-256 and the release signature have been checked already.
-  finished_ = esp_ota_end(gOtaHandle) == ESP_OK;
-  return finished_;
-}
-
-void Esp32OtaSlot::abort() {
-  if (open_) {
-    static_cast<void>(esp_ota_abort(gOtaHandle));
-  }
-  open_ = false;
-  finished_ = false;
-}
-
-bool Esp32OtaSlot::activate() {
-  const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
-  return finished_ && next != nullptr && esp_ota_set_boot_partition(next) == ESP_OK;
-}
-
-bool Esp32OtaSlot::rollBack() {
-  // Two app slots: "the next update partition" from the running image IS the
-  // other slot, which still holds the image that ran before this one.
-  const esp_partition_t* other = esp_ota_get_next_update_partition(nullptr);
-  return other != nullptr && esp_ota_set_boot_partition(other) == ESP_OK;
-}
-
-uint32_t Esp32OtaSlot::capacity() {
-  const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
-  return next != nullptr ? next->size : 0U;
-}
-
-uint16_t Esp32Download::get(const char* path, uint32_t expectBytes, gatelogic::IChunkSink& sink) {
-  static char url[gatelogic::kUrlBufSize + 64U];
-  const int written = snprintf(url, sizeof(url), "%s%s", baseUrl_, path);
-  if (written < 0 || static_cast<size_t>(written) >= sizeof(url) || authorization_ == nullptr) {
-    return 0U;
-  }
-  WiFiClient client;
-  HTTPClient http;
-  if (!http.begin(client, url)) {
-    return 0U;
-  }
-  http.useHTTP10(true);
-  http.setReuse(false);
-  http.setConnectTimeout(gatelogic::kHttpConnectTimeoutMs);
-  http.setTimeout(gatelogic::kHttpResponseTimeoutMs);
-  http.addHeader("Authorization", authorization_);
-  const int status = http.GET();
-  if (status != 200) {
-    http.end();
-    return status > 0 ? static_cast<uint16_t>(status) : 0U;
-  }
-  // Content-Length must be the signed size; anything else is refused before a
-  // byte is written (the server never chunks a firmware download, §7).
-  if (http.getSize() < 0 || static_cast<uint32_t>(http.getSize()) != expectBytes) {
-    http.end();
-    return 0U;
-  }
-  const bool whole = streamBody(client, expectBytes, sink);
-  http.end();
-  static_cast<void>(whole); // the sink judged every byte; a short body fails its size check
-  return 200U;
-}
-
-bool Esp32Download::streamBody(WiFiClient& client, uint32_t expectBytes, gatelogic::IChunkSink& sink) {
-  static uint8_t buf[1024];
-  uint32_t got = 0U;
-  uint32_t lastByteMs = clock_.nowMs();
-  while (got < expectBytes) {
-    const int available = client.available();
-    if (available <= 0) {
-      if (!client.connected() || clock_.nowMs() - lastByteMs > gatelogic::kHttpBodyBudgetMs) {
-        return false;
-      }
-      sink.chunk(buf, 0U);
-      delay(1);
-      continue;
-    }
-    const size_t want =
-        static_cast<size_t>(available) < sizeof(buf) ? static_cast<size_t>(available) : sizeof(buf);
-    const size_t remaining = expectBytes - got;
-    const int n = client.read(buf, want < remaining ? want : remaining);
-    if (n <= 0) {
-      continue;
-    }
-    lastByteMs = clock_.nowMs();
-    got += static_cast<uint32_t>(n);
-    if (!sink.chunk(buf, static_cast<size_t>(n))) {
-      return false;
-    }
-  }
-  return true;
 }
 
 void Esp32BootButton::begin() {

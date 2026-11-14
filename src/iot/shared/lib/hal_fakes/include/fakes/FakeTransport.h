@@ -2,9 +2,9 @@
 //
 // WHAT IT CAN SIMULATE, AND WHY EACH ONE IS REAL
 // ----------------------------------------------
-//   setConnected(false)  the peer is absent, resetting, or mid-OTA. The ESP
-//                        reboots itself on every firmware update, so the Mega
-//                        sees this several times per release.
+//   setConnected(false)  the peer is absent or resetting. The ESP restarts
+//                        itself (the link supervisor, the stall watchdog, a
+//                        portal save), so the Mega sees this in service.
 //   setWriteFailure()    the driver accepts the call and writes nothing, while
 //                        still claiming space in writable(). Real drivers do
 //                        not know they are failing; a fake where failure is

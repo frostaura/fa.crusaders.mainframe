@@ -49,14 +49,11 @@ bool LedPattern::on(uint32_t nowMs) const {
     // the link blink below, which is where it belongs once the cue is over.
   }
 
-  // 2.0.0's states (door-gate.md §14.5): the portal and a download outrank the
-  // fault and link patterns because they say why the door is behaving oddly.
+  // 2.0.0's portal state (door-gate.md §14.5) outranks the fault and link
+  // patterns because it says why the door is behaving oddly.
   if (setup_) {
     const uint32_t t = nowMs % kSetupPeriodMs;
     return t < 600U || (t >= 800U && t < 1000U);
-  }
-  if (downloading_) {
-    return ((nowMs / kDownloadHalfMs) % 2U) == 0U;
   }
 
   if (fault_) {
@@ -77,16 +74,9 @@ bool LedPattern::on(uint32_t nowMs) const {
     return ((nowMs / kLinkDownHalfMs) % 2U) == 0U;
   }
 
-  // The idle blips: a new image not yet committed, or a door running on a
-  // roster it may not be able to refresh (DG-6). Never louder than a blip.
-  const uint32_t t = nowMs % kIdlePeriodMs;
-  if (probation_) {
-    return t < kBlipMs || (t >= 2U * kBlipMs && t < 3U * kBlipMs);
-  }
-  if (degraded_) {
-    return t < kBlipMs;
-  }
-  return false;
+  // The idle blip: a door running on a roster it may not be able to refresh
+  // (DG-6). Never louder than a blip.
+  return degraded_ && (nowMs % kIdlePeriodMs) < kBlipMs;
 }
 
 } // namespace gatelogic

@@ -30,10 +30,7 @@
 
 #include "../gatelogic/GateHeartbeat.h"
 #include "../gatelogic/GateNet.h"
-#include "../gatelogic/GateOta.h"
 #include "../gatelogic/GatePorts.h"
-
-class WiFiClient; // Arduino-ESP32's; only Esp32Download::streamBody names it
 #include "../gatelogic/GateStore.h"
 #include "../gatelogic/HttpPort.h"
 #include "../gatelogic/PinOut.h"
@@ -270,46 +267,10 @@ public:
 };
 
 /// `diag` (device-api.md §13): esp_reset_reason() as a word, the heap, the
-/// loop task's stack high-water mark, the other app slot and the flash size.
+/// loop task's stack high-water mark, the app slot's size and the flash size.
 class Esp32Diag final : public gatelogic::IDiagSource {
 public:
   void read(gatelogic::GateDiag& out) override;
-};
-
-/// The inactive app slot, through esp_ota_*. The boot partition is switched
-/// only by activate(), after the image has been verified.
-class Esp32OtaSlot final : public gatelogic::IOtaSlot {
-public:
-  bool begin(uint32_t size) override;
-  bool write(const uint8_t* data, size_t len) override;
-  bool finish() override;
-  void abort() override;
-  bool activate() override;
-  bool rollBack() override;
-  uint32_t capacity() override;
-
-private:
-  bool open_ = false;
-  bool finished_ = false;
-};
-
-/// The firmware download: a GET from this board's own server with its bearer
-/// key, `Content-Length` required to equal the offer's size, streamed in
-/// chunks with an idle bound per read.
-class Esp32Download final : public gatelogic::IDownload {
-public:
-  Esp32Download(const char* baseUrl, const char* authorization, hal::IClock& clock)
-      : baseUrl_(baseUrl), authorization_(authorization), clock_(clock) {}
-
-  uint16_t get(const char* path, uint32_t expectBytes, gatelogic::IChunkSink& sink) override;
-
-private:
-  /// The body, chunk by chunk into `sink`, until `expectBytes` or a stall past
-  /// the body budget. False when it stopped short.
-  bool streamBody(WiFiClient& client, uint32_t expectBytes, gatelogic::IChunkSink& sink);
-  const char* baseUrl_;
-  const char* authorization_;
-  hal::IClock& clock_;
 };
 
 /// The board's BOOT button (GPIO 0, active low).

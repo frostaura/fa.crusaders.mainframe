@@ -17,27 +17,24 @@ adapts to the hardware, never the reverse.
 
 ## Flashing — the whole procedure
 
-Both halves are flashed over USB **one last time — Mega 3.0.0 first, then
-bridge 3.1.0** (founder, 2026-11-13). The Mega can never be updated over WiFi
-(its ESP sits on Serial3, not the bootloader port), so Mega 3.0.0 is its last
-image: every timeout is bounded on the Mega itself and every hardware fact it
-used to compile in is a runtime `!CFG` setting
-([`device-serial-protocol.md`](../../../docs/specs/device-serial-protocol.md)
-v3). **Bridge 3.1.0 is the first bridge that never needs the cable again**
-([`device-api.md`](../../../docs/specs/device-api.md) §6–§8): a signed image
-arrives over HTTP from the club's own server (verified before a byte is
-fetched and again over the staged bytes, committed by an accepted heartbeat,
-rolled back from its own copy of the previous image on the fourth unproven
-boot), a rotated key arrives as `key_next`, a new WiFi or server address as
-`net`, and the setup portal (hold court A and court D together for five seconds
-within a minute of power-on; the glass says `SETUP AP 1A2B`) changes them at
-the box. The values in `secrets.h` are only the first-boot defaults. Before an
-enclosure is sealed, each box takes one signed release over the air on the
-bench (`docs/go-live-checklist.md` §5).
+Both halves are flashed over USB — **Mega 3.0.0 first, then bridge 3.1.0**
+(founder, 2026-11-13) — and USB is the only way either is ever updated. The Mega
+can never be updated over WiFi (its ESP sits on Serial3, not the bootloader
+port), so Mega 3.0.0 is its last image: every timeout is bounded on the Mega
+itself and every hardware fact it used to compile in is a runtime `!CFG`
+setting ([`device-serial-protocol.md`](../../../docs/specs/device-serial-protocol.md)
+v3). **Nothing an operator does needs the cable for bridge 3.1.0**
+([`device-api.md`](../../../docs/specs/device-api.md) §6, §8): a rotated key
+arrives as `key_next`, a new WiFi or server address as `net`, and the setup
+portal (hold court A and court D together for five seconds within a minute of
+power-on; the glass says `SETUP AP 1A2B`) changes them at the box. The values in
+`secrets.h` are only the first-boot defaults. A new bridge image is a cable
+flash at the box, by this same procedure.
 
 **The bridge needs the 4M2M flash layout** (`eagle.flash.4m2m.ld`, "4MB
-(FS:2MB OTA:~1019KB)" in the IDE): it is what leaves the update its staging
-area. Read esptool's **"Auto-detected Flash size"** line in the upload log — it
+(FS:2MB OTA:~1019KB)" in the IDE — the core's name for the layout; the bridge
+takes no update over the air): it is what gives LittleFS its 2 MB. Read
+esptool's **"Auto-detected Flash size"** line in the upload log — it
 must say 4MB — and keep **"Erase Flash: Only Sketch"**, so the LittleFS records
 (the event sequence mark, and on 3.1.0 everything under *What the box keeps in
 flash*) survive the flash (HW-10).
@@ -225,13 +222,14 @@ The Mega is 8 KB of SRAM driving relays. So the split is deliberate:
 Both are flashed over USB, by DIP switch, and neither can be flashed over the
 network: the ATmega's ESP sits on **Serial3**, not the Serial0 bootloader port,
 and no GPIO reaches the Mega's RESET pin. Adding one would be a wiring change.
-The ESP *could* have taken over-the-air updates and did until firmware 1.2.0;
-that was removed along with image signing and the runtime credential store,
-because a fleet update mechanism for one box is a way for the box to break
-itself and nothing else. Firmware 2.0.0 finished the job — request signing, the
-discovery beacon, claim codes and the device clock went the same way, for the
-same reason. The Mega's firmware is designed to almost never need reflashing,
-and the ESP's now needs it about as rarely.
+The ESP *could* take over-the-air updates. It did until firmware 1.2.0, and
+signed OTA was built again for bridge 3.1.0 and removed before it was ever
+flashed (founder, 2026-11-14: a complexity the club does not need now), because
+a fleet update mechanism for one box is a way for the box to break itself and
+nothing else. Firmware 2.0.0 removed request signing, the discovery beacon,
+claim codes and the device clock for the same reason. The Mega's firmware is
+designed to almost never need reflashing, and the ESP's now needs it about as
+rarely: a rotated key and a moved network reach it without one.
 
 The Mega's auto-off timer is independent on purpose: if the ESP hangs, the WiFi
 drops and the backend dies, **the lights still go off**. In the system this
@@ -680,10 +678,9 @@ every record sealed with its own check digits so a damaged one reads as absent):
 |---|---|---|
 | the last accepted heartbeat answer, whole (`/st/beat.bin`) | at most once a minute, and at once when the snapshot's lit courts change | the court map, buttons, layout and settings, the snapshot (re-lit from it), the roster, and — after a warm reset only — the member-code sync |
 | every undelivered event (`/st/events.bin`, `/st/carry.bin`) | whenever the queue changes | after the next boot they are uploaded first, one per call, under the boot id they were queued in |
-| the device keys, the network set, the OTA state | on change | how the box reaches the club, and whether an image is on probation |
-| a copy of the running image (`/ota/prev.bin`) | before an update is staged | the rollback |
+| the device keys, the network set | on change | how the box reaches the club |
 
-A WARM reset (watchdog, exception, software, an update) is aged exactly by an
+A WARM reset (watchdog, exception, software) is aged exactly by an
 epoch kept in RTC memory (`restore: warm`). A POWER-ON is `cold`: the answer is
 adopted as of boot, the roster is trusted for `device_power_restore_trust_minutes`
 only, member codes wait for the first heartbeat, and every court the snapshot owed

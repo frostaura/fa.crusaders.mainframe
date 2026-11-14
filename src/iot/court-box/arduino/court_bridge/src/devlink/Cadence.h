@@ -8,8 +8,8 @@
 // set, and the admin screen's default (60) did not even match the firmware's
 // (30). The interval is adopted here, bounded: below kMinHeartbeatMs a fleet
 // hammers the API and its own UART with 4 s blocking calls; above
-// kMaxHeartbeatMs the roster ages and an OTA offer takes minutes to reach a
-// box. An absent or unreadable field leaves the interval where it was.
+// kMaxHeartbeatMs the roster ages and a key rotation or a network change takes
+// minutes to reach a box. An absent or unreadable field leaves the interval where it was.
 //
 // No Arduino headers, no heap.
 
@@ -59,10 +59,9 @@ inline constexpr uint8_t kMaxRelayStateElements = 4U;
 /// The capabilities a board names in `caps`, rendered in this order.
 inline constexpr uint8_t kCapCodes = 0x01U; ///< codes:m1
 inline constexpr uint8_t kCapHb3 = 0x02U;   ///< hb:3
-inline constexpr uint8_t kCapOta = 0x04U;   ///< ota:1
-inline constexpr uint8_t kCapKey = 0x08U;   ///< key:1
-inline constexpr uint8_t kCapNet = 0x10U;   ///< net:1
-inline constexpr uint8_t kCapLcd2 = 0x20U;  ///< lcd:2
+inline constexpr uint8_t kCapKey = 0x04U;   ///< key:1
+inline constexpr uint8_t kCapNet = 0x08U;   ///< net:1
+inline constexpr uint8_t kCapLcd2 = 0x10U;  ///< lcd:2
 
 /// `relight`: a relay re-lit from the snapshot, and the booking ref behind it.
 struct RelightEntry {
@@ -101,9 +100,6 @@ inline constexpr uint8_t kMaxDriftNames = 8U;
 /// The v3 fields after `relay_state`, each absent at its nothing value.
 struct HeartbeatV3 {
   const char* megaVersion = nullptr;
-  const char* fwState = nullptr;
-  const char* fwFailed = nullptr;
-  const char* fwError = nullptr;
   bool netReported = false;
   uint32_t netVer = 0U;
   const char* netSrc = "compiled";

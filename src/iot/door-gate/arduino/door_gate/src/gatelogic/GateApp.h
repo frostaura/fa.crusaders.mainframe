@@ -127,7 +127,6 @@
 #include "../gatelogic/GateFlow.h"
 #include "../gatelogic/GateKeys.h"
 #include "../gatelogic/GateNet.h"
-#include "../gatelogic/GateOta.h"
 #include "../gatelogic/GatePorts.h"
 #include "../gatelogic/GateReply.h"
 #include "../gatelogic/GateStore.h"
@@ -254,7 +253,7 @@ public:
     // --- 2.0.0 (door-gate.md §14). Every one optional: left null, that concern
     // behaves as 1.x did, which is how the 1.x scenarios still prove 1.x rules.
 
-    /// Flash records (§14.1): settings, roster, keys, network, OTA, events.
+    /// Flash records (§14.1): settings, roster, keys, network, events.
     IBlobStore* blobs = nullptr;
     /// RTC_NOINIT storage of at least sizeof(WarmImage) bytes, and the RTC
     /// counter that dates it across a warm reset.
@@ -277,12 +276,6 @@ public:
     IRadio* radio = nullptr;
     ISystem* system = nullptr;
     IDiagSource* diag = nullptr;
-
-    /// Signed OTA (§14.2): the other app slot, the download, and the release
-    /// key's modulus (256 bytes, from secrets.h's OTA_PUBLIC_KEY_N).
-    IOtaSlot* otaSlot = nullptr;
-    IDownload* download = nullptr;
-    const uint8_t* otaModulus = nullptr;
 
     /// The setup gesture's button and the portal it opens (§14.3).
     IButton* setupButton = nullptr;
@@ -309,12 +302,6 @@ public:
   /// Seeds the uptime, empties the assembler, arms the first heartbeat, opens
   /// the event queue and puts a `boot` event in it.
   void begin();
-
-  /// FIRST THING AFTER beginOutputs(), before anything else is opened: an image
-  /// on probation counts this boot and, on its fourth, is rolled back to the
-  /// other slot (§14.2). True when it restarted the part (a host test's
-  /// ISystem returns; the board's does not).
-  bool checkFirmwareAtBoot();
 
   /// One pass of the loop.
   void pass();
@@ -392,8 +379,6 @@ public:
   const Drift& drift() const { return drift_; }
 
   const GateBoardState& boardState() const { return state_; }
-
-  const GateOta& ota() const { return ota_; }
 
   bool setupOpen() const { return setupOpen_; }
 
@@ -491,16 +476,6 @@ private:
     GateApp& app_;
   };
 
-  class DownloadHooks final : public GateOta::Hooks {
-  public:
-    explicit DownloadHooks(GateApp& app) : app_(app) {}
-
-    void duringDownload() override;
-
-  private:
-    GateApp& app_;
-  };
-
   /// What the board kept across the reset (§14.1), restored in begin().
   void restoreState(uint32_t nowMs);
   void restoreWarm(uint32_t nowMs);
@@ -521,11 +496,11 @@ private:
   GateReport report(GateDiag& diag) const;
 
   /// Lock engaged, no window, nothing in the assembler, nothing scanned for a
-  /// minute, no portal (device-api.md §7 step 2 as it reads on a door).
+  /// minute, no portal: the only moment a self-restart (the link supervisor's
+  /// or the stall watchdog's, device-api.md §8) may take the door down.
   bool idle(uint32_t nowMs) const;
   void pumpSupervisor(uint32_t nowMs);
   void pumpSetup(uint32_t nowMs);
-  void pumpOta();
   void pumpStall(uint32_t nowMs);
   void updateDegraded(uint32_t nowMs);
   void restart();
@@ -730,18 +705,13 @@ private:
   IRadio* radio_;
   ISystem* system_;
   IDiagSource* diag_;
-  IOtaSlot* otaSlot_;
-  IDownload* download_;
-  const uint8_t* otaModulus_;
   IButton* setupButton_;
   ISetupPortal* portal_;
 
   Between between_{*this};
-  DownloadHooks downloadHooks_{*this};
 
   GateBoardState state_;
   Drift drift_;
-  GateOta ota_;
   devnet::Supervisor supervisor_;
   SetupGesture gesture_;
 
@@ -798,7 +768,7 @@ private:
 constexpr uint32_t kStallRestartMs = 6UL * 60UL * 60UL * 1000UL;
 /// The setup portal closes after this, whatever happened (§8).
 constexpr uint32_t kSetupPortalMs = 10UL * 60UL * 1000UL;
-/// "No member input in the last 60 s" (§7 step 2).
+/// "No member input in the last 60 s": the quiet a self-restart waits for.
 constexpr uint32_t kIdleAfterInputMs = 60000UL;
 
 } // namespace gatelogic

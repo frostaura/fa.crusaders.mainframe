@@ -30,8 +30,8 @@
 // WHAT IS DELIBERATELY NOT HERE
 // -----------------------------
 // No booking logic, no member roster, no minute balance, no HTTP. The Mega does
-// not know what a member is and must not learn: it is the half that cannot be
-// updated over the air, so anything that will change belongs on the ESP.
+// not know what a member is and must not learn: it is the half that is never
+// reflashed, so anything that will change belongs on the ESP.
 //
 // No Arduino headers, no heap, no String/std::string/std::vector. This links
 // into 8 KB of SRAM, so the encode buffer is a member rather than a local —

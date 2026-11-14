@@ -6,7 +6,7 @@
       "max_frame": 928,
       "worst_path": 2656,
       "measured": {
-        "at": "fix/bridge-ota (bridge 3.1.0, phase B)",
+        "at": "fix/no-ota-fw (bridge 3.1.0, OTA removed; unchanged)",
         "loop_frame": 208,
         "max_frame": 928,
         "worst_path": 2608
@@ -16,7 +16,7 @@
         "max_frame": 512,
         "worst_path": 3000
       },
-      "lowered": "Bridge 3.1.0 moved the lifeline (OTA, persistence, supervisor) out of loop()'s own frame into functions called from its top, and the heartbeat/reply/RSA buffers into one static: loop()'s frame went 928 -> 208 B and the deepest path 3,136 -> 2,608 B, so both budgets were lowered with it."
+      "lowered": "Bridge 3.1.0 moved the lifeline (persistence, the portal, the supervisor) out of loop()'s own frame into functions called from its top, and the heartbeat and reply buffers into one static: loop()'s frame went 928 -> 208 B and the deepest path 3,136 -> 2,608 B, so both budgets were lowered with it."
     },
     "door_gate": {
       "loop_frame": 32,

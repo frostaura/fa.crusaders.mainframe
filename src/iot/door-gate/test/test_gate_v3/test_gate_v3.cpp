@@ -1,10 +1,11 @@
 // Gate 2.0.0 through the whole board (docs/specs/door-gate.md §14): what
-// survives a reset, fixing a door without a cable, and the checks the analysis
-// asked for. Every scenario here fails on 1.1.2 behaviour and passes on 2.0.0.
+// survives a reset, changing a door's key and network without a cable, and the
+// checks the analysis asked for. Every scenario here fails on 1.1.2 behaviour
+// and passes on 2.0.0.
 //
 // THE BOARD AND THE BOOT ARE TWO OBJECTS. `Board` is what survives a reset —
-// the flash records, the RTC memory and its counter, the two app slots, the
-// clock the test drives. `Boot` is one power-up of the firmware over it: every
+// the flash records, the RTC memory and its counter, and the clock the test
+// drives. `Boot` is one power-up of the firmware over it: every
 // RAM structure, constructed fresh, exactly as a reset leaves the part. A power
 // cut is a new Boot with `coldBoot` true and the RTC memory scrambled; a
 // watchdog reset is a new Boot with `coldBoot` false.
@@ -22,9 +23,7 @@
 
 #include "devapi/DeviceClient.h"
 #include "devcrypto/Base64Url.h"
-#include "devcrypto/Sha256.h"
 #include "devlink/ApiBreaker.h"
-#include "devota/Ota.h"
 #include "fakes/FakeClock.h"
 #include "fakes/FakeStore.h"
 #include "gatelogic/FaultingStore.h"
@@ -39,7 +38,6 @@
 #include "gatelogic/UnlockTimer.h"
 #include "memcode/Token.h"
 #include "memcode/Totp.h"
-#include "support/CorpusJson.h"
 
 namespace {
 
@@ -86,55 +84,11 @@ public:
   uint64_t us = 1000000ULL;
 };
 
-class Slots final : public gatelogic::IOtaSlot {
-public:
-  bool begin(uint32_t size) override {
-    staged.clear();
-    expected = size;
-    staging = true;
-    return size <= capacity();
-  }
-
-  bool write(const uint8_t* data, size_t len) override {
-    staged.insert(staged.end(), data, data + len);
-    return true;
-  }
-
-  bool finish() override { return staging && staged.size() == expected; }
-
-  void abort() override {
-    staging = false;
-    staged.clear();
-    ++aborts;
-  }
-
-  bool activate() override {
-    activated = true;
-    return true;
-  }
-
-  bool rollBack() override {
-    rolledBack = true;
-    return true;
-  }
-
-  uint32_t capacity() override { return 1310720U; }
-
-  std::vector<uint8_t> staged;
-  uint32_t expected = 0U;
-  bool staging = false;
-  bool activated = false;
-  bool rolledBack = false;
-  uint32_t aborts = 0U;
-};
-
 struct Board {
   fakes::FakeClock clock{1000U};
   RamBlobs blobs;
   Rtc rtc;
   uint8_t warm[sizeof(gatelogic::WarmImage) + 16U] = {};
-  Slots slots;
-  std::string running = "2.0.0";
 
   /// A power cut: RTC memory is garbage and the RTC counter starts again.
   void powerCut(uint32_t offForMs) {
@@ -285,30 +239,6 @@ private:
   Pin& led_;
 };
 
-/// Serves one image, possibly tampered, to the OTA download.
-class Download final : public gatelogic::IDownload {
-public:
-  uint16_t get(const char* path, uint32_t expectBytes, gatelogic::IChunkSink& sink) override {
-    ++gets;
-    lastPath = path;
-    if (image.size() != expectBytes) {
-      return 0U;
-    }
-    for (size_t at = 0U; at < image.size(); at += 300U) {
-      const size_t n = image.size() - at < 300U ? image.size() - at : 300U;
-      if (!sink.chunk(image.data() + at, n)) {
-        return 200U;
-      }
-    }
-    return status;
-  }
-
-  std::vector<uint8_t> image;
-  uint16_t status = 200U;
-  uint32_t gets = 0U;
-  std::string lastPath;
-};
-
 class Radio final : public gatelogic::IRadio {
 public:
   void join(const char* ssid, const char* psk) override { joins.push_back(std::string(ssid) + "/" + psk); }
@@ -388,12 +318,8 @@ public:
   std::vector<bool> queued;
 };
 
-uint8_t g_modulus[dc::kRsa2048Bytes];
-uint8_t g_otherModulus[dc::kRsa2048Bytes];
-
 struct Boot {
-  Boot(Board& b, bool cold, uint32_t bootId = 0xB0071D01U, const uint8_t* modulus = g_modulus,
-       uint32_t watchdogRun = 0U)
+  Boot(Board& b, bool cold, uint32_t bootId = 0xB0071D01U, uint32_t watchdogRun = 0U)
       : board(b), server(&authHeader, &baseUrl, ledPin), api(server, breaker, b.clock, faults),
         lock(relayPin, true, true), unlock(30000U, 400U, 3000U),
         roster(gatelogic::kGateConfig.rosterMaxAgeMs), counted(&store, faults, b.clock), queue(&counted) {
@@ -415,7 +341,7 @@ struct Boot {
     p.faults = &faults;
     p.log = &log;
     p.mac = kMac;
-    p.firmwareVersion = b.running.c_str();
+    p.firmwareVersion = "2.0.0";
     p.bootId = bootId;
     p.watchdogResetRun = watchdogRun;
     p.heartbeatBody = body;
@@ -434,16 +360,12 @@ struct Boot {
     p.radio = &radio;
     p.system = &chip;
     p.diag = &health;
-    p.otaSlot = &b.slots;
-    p.download = &download;
-    p.otaModulus = modulus;
     p.setupButton = &button;
     p.portal = &portal;
     app.reset(new gatelogic::GateApp(p));
     authHeader = keys.header();
     baseUrl = net.baseUrl();
     app->beginOutputs();
-    rolledBackAtBoot = app->checkFirmwareAtBoot();
     app->begin();
   }
 
@@ -504,20 +426,18 @@ struct Boot {
   Radio radio;
   Chip chip;
   Health health;
-  Download download;
   Button button;
   Portal portal;
   Log log;
   char body[gatelogic::kGateResponseCap] = {};
   std::unique_ptr<gatelogic::GateApp> app;
-  bool rolledBackAtBoot = false;
 };
 
 const char* kRoster =
     "{\"server_time\":\"2026-11-13T18:00:00\",\"kind\":\"gate\",\"gate_key\":\"front-door\",\"heartbeat_"
     "seconds\":60,"
     "\"gate\":{\"unlock_seconds\":5,\"power_restore_trust_minutes\":20,\"net_fallback_minutes\":10,"
-    "\"ota_probation_minutes\":10,\"device_fault_reporting\":true,\"device_fault_max_per_hour\":60},"
+    "\"device_fault_reporting\":true,\"device_fault_max_per_hour\":60},"
     "\"roster\":[\"7Q3F9KM2XZ8B|0|-60|7200\"]}";
 
 std::string withKey(const char* base, const std::string& extra) {
@@ -542,44 +462,6 @@ bool reported(Boot& b, const char* code) {
     }
   }
   return false;
-}
-
-// --- corpus pieces ------------------------------------------------------------
-
-corpus::File g_ota;
-
-std::string g_gateOffer;
-std::string g_bridgeOffer;
-std::vector<uint8_t> g_gateImage;
-
-void loadOta() {
-  TEST_ASSERT_TRUE(g_ota.load("ota", "cases.json"));
-  char hex[(dc::kRsa2048Bytes * 2U) + 1U] = {};
-  TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(corpus::member(g_ota.root(), "public_key"), "n_hex"),
-                                       hex, sizeof(hex), nullptr));
-  TEST_ASSERT_TRUE(devota::parseModulusHex(hex, g_modulus));
-  TEST_ASSERT_TRUE(corpus::stringValue(
-      corpus::member(corpus::member(g_ota.root(), "other_public_key"), "n_hex"), hex, sizeof(hex), nullptr));
-  TEST_ASSERT_TRUE(devota::parseModulusHex(hex, g_otherModulus));
-  corpus::ArrayIter it(corpus::member(g_ota.root(), "images"));
-  const char* c = nullptr;
-  while (it.next(&c)) {
-    char id[32] = {};
-    TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(c, "id"), id, sizeof(id), nullptr));
-    const char* offer = corpus::member(c, "offer");
-    const char* end = corpus::skipValue(offer);
-    std::string text(offer, static_cast<size_t>(end - offer));
-    if (strcmp(id, "image-gate") == 0) {
-      g_gateOffer = text;
-      static uint8_t image[4096];
-      size_t n = 0U;
-      TEST_ASSERT_TRUE(corpus::hexField(c, "image_hex", image, sizeof(image), &n));
-      g_gateImage.assign(image, image + n);
-    } else {
-      g_bridgeOffer = text;
-    }
-  }
-  TEST_ASSERT_FALSE(g_gateOffer.empty());
 }
 
 // =============================================================================
@@ -855,143 +737,6 @@ void test_a_late_hold_does_not_open_the_portal() {
 }
 
 // =============================================================================
-// DG-1a — signed OTA, end to end
-// =============================================================================
-
-std::string offerBeat(const std::string& offer) {
-  return withKey(kRoster, "\"ota\":" + offer);
-}
-
-void test_ota_a_good_image_is_verified_switched_and_committed() {
-  loadOta();
-  Board board;
-  {
-    Boot b(board, true);
-    b.download.image = g_gateImage;
-    b.server.on(gatelogic::kPathHeartbeat, 200U, kRoster);
-    b.run(200U);
-    // Not while somebody has just scanned: a minute of quiet first.
-    b.scan("UNKNOWNTOKEN1");
-    b.server.on(gatelogic::kPathHeartbeat, 200U, offerBeat(g_gateOffer));
-    b.beat();
-    TEST_ASSERT_TRUE(b.app->ota().pending());
-    b.run(30000U, 100U);
-    TEST_ASSERT_EQUAL_UINT32(0U, b.download.gets);
-    b.run(40000U, 100U);
-    TEST_ASSERT_EQUAL_UINT32(1U, b.download.gets);
-    TEST_ASSERT_EQUAL_STRING("/api/v1/device/firmware/g9f8e7d6", b.download.lastPath.c_str());
-    TEST_ASSERT_TRUE(board.slots.activated);
-    TEST_ASSERT_EQUAL_UINT32(1U, b.chip.restarts);
-    TEST_ASSERT_TRUE(b.dog.kicks > 7U);
-  }
-  board.running = "2.0.1";
-  Boot b(board, false);
-  TEST_ASSERT_FALSE(b.rolledBackAtBoot);
-  TEST_ASSERT_TRUE(b.app->ota().inProbation());
-  b.server.on(gatelogic::kPathHeartbeat, 200U, kRoster);
-  // The first request says probation; the accepted beat commits it.
-  b.run(100U);
-  bool sawProbation = false;
-  for (const Call& c : b.server.calls) {
-    sawProbation = sawProbation || c.body.find("\"fw_state\":\"probation\"") != std::string::npos;
-  }
-  TEST_ASSERT_TRUE(sawProbation);
-  TEST_ASSERT_FALSE(b.app->ota().inProbation());
-  b.beat();
-  TEST_ASSERT_NOT_NULL(
-      strstr(b.server.last(gatelogic::kPathHeartbeat)->body.c_str(), "\"fw_state\":\"committed\""));
-}
-
-/// Each refusal names its corpus reason, and none switches the slot.
-void test_ota_a_tampered_unsigned_older_or_foreign_image_is_refused() {
-  loadOta();
-
-  struct Case {
-    const char* why;
-    std::string offer;
-    bool tamper;
-    const uint8_t* modulus;
-    const char* running;
-    const char* error;
-    bool downloaded;
-  };
-
-  const Case cases[] = {
-      {"tampered byte", g_gateOffer, true, g_modulus, "2.0.0", "sha256", true},
-      {"wrong key", g_gateOffer, false, g_otherModulus, "2.0.0", "sig", false},
-      {"wrong target", g_bridgeOffer, false, g_modulus, "2.0.0", "target", false},
-      {"not newer", g_gateOffer, false, g_modulus, "2.0.1", "", false},
-  };
-  for (const Case& k : cases) {
-    Board board;
-    board.running = k.running;
-    Boot c(board, true, 0xB0071D01U, k.modulus);
-    c.download.image = g_gateImage;
-    if (k.tamper) {
-      c.download.image[1000] = static_cast<uint8_t>(c.download.image[1000] ^ 0x01U);
-    }
-    c.server.on(gatelogic::kPathHeartbeat, 200U, offerBeat(k.offer));
-    c.run(70000U, 100U);
-    TEST_ASSERT_FALSE_MESSAGE(board.slots.activated, k.why);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, c.chip.restarts, k.why);
-    TEST_ASSERT_EQUAL_MESSAGE(k.downloaded, c.download.gets > 0U, k.why);
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(k.error, c.app->ota().error(), k.why);
-    if (k.error[0] != '\0') {
-      c.beat();
-      const std::string& sent = c.server.last(gatelogic::kPathHeartbeat)->body;
-      TEST_ASSERT_TRUE_MESSAGE(sent.find("\"fw_state\":\"failed\"") != std::string::npos, k.why);
-      TEST_ASSERT_TRUE_MESSAGE(
-          sent.find(std::string("\"fw_error\":\"") + k.error + "\"") != std::string::npos, k.why);
-    }
-  }
-}
-
-/// No accepted heartbeat inside the probation window: back to the other slot,
-/// reported as rolled_back, never taken again. And three resets do the same.
-void test_ota_probation_rolls_back_on_timeout_and_on_the_fourth_boot() {
-  loadOta();
-  for (int mode = 0; mode < 2; ++mode) {
-    Board board;
-    {
-      Boot b(board, true);
-      b.download.image = g_gateImage;
-      b.server.on(gatelogic::kPathHeartbeat, 200U, offerBeat(g_gateOffer));
-      b.run(70000U, 100U);
-      TEST_ASSERT_TRUE(board.slots.activated);
-    }
-    board.running = "2.0.1";
-    if (mode == 0) {
-      Boot b(board, false);
-      b.server.down = true;
-      b.run(10U * 60000U + 2000U, 1000U);
-      TEST_ASSERT_TRUE(board.slots.rolledBack);
-      TEST_ASSERT_EQUAL_UINT32(1U, b.chip.restarts);
-    } else {
-      for (int boot = 1; boot <= 3; ++boot) {
-        Boot b(board, false);
-        TEST_ASSERT_FALSE(b.rolledBackAtBoot);
-      }
-      Boot b(board, false);
-      TEST_ASSERT_TRUE(b.rolledBackAtBoot);
-      TEST_ASSERT_TRUE(board.slots.rolledBack);
-    }
-    board.running = "2.0.0";
-    board.slots.activated = false;
-    Boot b(board, false);
-    b.download.image = g_gateImage;
-    b.server.on(gatelogic::kPathHeartbeat, 200U, offerBeat(g_gateOffer));
-    b.run(100U);
-    const std::string& sent = b.server.last(gatelogic::kPathHeartbeat)->body;
-    TEST_ASSERT_TRUE(
-        sent.find("\"fw_state\":\"rolled_back\",\"fw_failed\":\"2.0.1\",\"fw_error\":\"probation\"") !=
-        std::string::npos);
-    b.run(70000U, 100U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, b.download.gets,
-                                     "a version that failed probation is never taken again");
-  }
-}
-
-// =============================================================================
 // The analysis's door checks
 // =============================================================================
 
@@ -1059,7 +804,7 @@ void test_a_scan_inside_the_watchdog_hold_back_stays_offline() {
   board.rtc.us += 20000000ULL;
   board.clock.setNow(50U);
   // Reset by its watchdog twice in a row: the first call is held back 2 s.
-  Boot b(board, false, 0xB0071D05U, g_modulus, 2U);
+  Boot b(board, false, 0xB0071D05U, 2U);
   TEST_ASSERT_EQUAL_UINT32(2000U, b.app->firstCallHeldBackMs());
   b.tick();
   b.scan("7Q3F9KM2XZ8B");
@@ -1166,7 +911,7 @@ void test_an_online_replay_is_uploaded_as_replayed() {
   TEST_ASSERT_TRUE_MESSAGE(tagged, "1.1.2 uploaded this as an untagged offline unknown_scan");
 }
 
-/// The 2.0.0 request: fw_state, net, diag and caps on every beat, drift after
+/// The 2.0.0 request: net, diag and caps on every beat, drift after
 /// an answer the board could not fully read.
 void test_the_heartbeat_reports_telemetry_and_drift() {
   Board board;
@@ -1177,12 +922,12 @@ void test_the_heartbeat_reports_telemetry_and_drift() {
   b.run(200U);
   b.beat();
   const std::string& sent = b.server.last(gatelogic::kPathHeartbeat)->body;
-  TEST_ASSERT_TRUE(sent.find("\"fw_state\":\"committed\",\"net_ver\":0,\"net_src\":\"compiled\"") !=
+  TEST_ASSERT_TRUE(sent.find("\"kind\":\"gate\",\"net_ver\":0,\"net_src\":\"compiled\"") !=
                    std::string::npos);
   TEST_ASSERT_TRUE(sent.find("\"diag\":{\"reset\":\"task_wdt\",\"exc\":0,\"epc1\":0,\"heap\":151552") !=
                    std::string::npos);
   TEST_ASSERT_TRUE(sent.find("\"drift\":[\"gate.unlock_seconds\"]") != std::string::npos);
-  TEST_ASSERT_TRUE(sent.find("\"caps\":[\"codes:m1\",\"ota:1\",\"key:1\",\"net:1\"]}") != std::string::npos);
+  TEST_ASSERT_TRUE(sent.find("\"caps\":[\"codes:m1\",\"key:1\",\"net:1\"]}") != std::string::npos);
   TEST_ASSERT_TRUE(sent.size() * 5U <= gatelogic::kGateHeartbeatRequestCap * 4U);
 }
 
@@ -1205,9 +950,6 @@ int main(int, char**) {
   RUN_TEST(test_the_link_supervisor_rejoins_and_finally_restarts);
   RUN_TEST(test_the_setup_portal_saves_a_local_network);
   RUN_TEST(test_a_late_hold_does_not_open_the_portal);
-  RUN_TEST(test_ota_a_good_image_is_verified_switched_and_committed);
-  RUN_TEST(test_ota_a_tampered_unsigned_older_or_foreign_image_is_refused);
-  RUN_TEST(test_ota_probation_rolls_back_on_timeout_and_on_the_fourth_boot);
   RUN_TEST(test_the_lamp_says_scan_seen_before_the_server_answers);
   RUN_TEST(test_a_stray_byte_never_spoils_the_next_scan_and_a_suffixless_line_is_read);
   RUN_TEST(test_a_refused_heartbeat_shows_the_degraded_blip);

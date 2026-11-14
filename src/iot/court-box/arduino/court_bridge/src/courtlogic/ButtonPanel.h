@@ -18,8 +18,8 @@
 // -----------------------------------------------
 // A counter ("four agreeing samples") is a statement about the loop rate, not
 // about the switch. This loop's rate is not fixed: a pass that services a
-// 40-byte frame at 9600 baud is far longer than one that does not, and an OTA
-// on the ESP changes it again. So the window is measured in milliseconds
+// 40-byte frame at 9600 baud is far longer than one that does not, and an ESP
+// restart changes it again. So the window is measured in milliseconds
 // against hal::IClock, through tb::Deadline — which also means the 49.7-day
 // millis() wrap cannot turn a press into a stuck button.
 //

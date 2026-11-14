@@ -192,13 +192,13 @@ void renderDiag(Out& o, const DiagReport& d) {
 }
 
 void renderCaps(Out& o, uint8_t caps) {
-  static const char* const kNames[6] = {"codes:m1", "hb:3", "ota:1", "key:1", "net:1", "lcd:2"};
+  static const char* const kNames[5] = {"codes:m1", "hb:3", "key:1", "net:1", "lcd:2"};
   if (caps == 0U) {
     return;
   }
   o.put(",\"caps\":[");
   bool first = true;
-  for (uint8_t i = 0U; i < 6U; ++i) {
+  for (uint8_t i = 0U; i < 5U; ++i) {
     if ((caps & (1U << i)) == 0U) {
       continue;
     }
@@ -242,26 +242,11 @@ void renderDrift(Out& o, const HeartbeatV3& v) {
   o.putc(']');
 }
 
-/// The optional strings, each only when set.
-void renderV3Strings(Out& o, const HeartbeatV3& v) {
-  const struct {
-    const char* key;
-    const char* value;
-  } strings[] = {{"mega_version", v.megaVersion},
-                 {"fw_state", v.fwState},
-                 {"fw_failed", v.fwFailed},
-                 {"fw_error", v.fwError}};
-
-  for (const auto& s : strings) {
-    if (s.value != nullptr) {
-      o.str(s.key, s.value);
-    }
-  }
-}
-
 /// Everything after `relay_state`, in device-api.md §2's order, then caps.
 void renderV3(Out& o, const HeartbeatV3& v) {
-  renderV3Strings(o, v);
+  if (v.megaVersion != nullptr) {
+    o.str("mega_version", v.megaVersion);
+  }
   if (v.netReported) {
     o.num("net_ver", v.netVer);
     o.str("net_src", v.netSrc);

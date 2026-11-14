@@ -18,9 +18,9 @@
 //      previous value and is drift; an explicit [] is committed (FC-1).
 //   5. Every 2xx is a success (FC-4).
 //   6. `kind` other than "gate" adopts no roster, keys or settings, and is the
-//      fault `kind_mismatch` (DG-9). The lifeline — `ota`, `key_next`, `net` —
-//      is read from ANY complete object, drifted or mis-kinded, because it is
-//      how a board with a broken reader is replaced.
+//      fault `kind_mismatch` (DG-9). The lifeline — `key_next` and `net` — is
+//      read from ANY complete object, drifted or mis-kinded, because it is what
+//      keeps a board whose other readers drifted authenticated and reachable.
 //
 // The images below are the gate's own copies of what it adopted. The shared
 // roster and key ring keep their contents private, and the board has to put
@@ -80,7 +80,6 @@ struct GateSettings {
   uint32_t unlockSeconds = 15U;
   uint32_t powerRestoreTrustMinutes = 20U;
   uint32_t netFallbackMinutes = 10U;
-  uint32_t otaProbationMinutes = 10U;
   bool faultReporting = true;
   uint32_t faultMaxPerHour = 60U;
 };
@@ -177,7 +176,7 @@ template <class KeyRingT> void applyCodeImage(const CodeImage& image, KeyRingT& 
 // --- one whole heartbeat answer ----------------------------------------------
 
 /// Everything a heartbeat answer can change, apart from the lifeline (which
-/// GateApp hands to the key ring, the network and the OTA runner).
+/// GateApp hands to the key ring and the network).
 struct GateBoardState {
   GateSettings settings = compiledGateSettings();
   RosterImage roster;
@@ -203,7 +202,6 @@ struct HeartbeatRead {
   Drift drift;
   /// The lifeline objects' spans, present when the answer carried them —
   /// read from any accepted answer, whatever else in it drifted (§11.1).
-  jv::Value ota;
   jv::Value keyNext;
   jv::Value net;
 };

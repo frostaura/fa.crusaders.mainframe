@@ -20,8 +20,8 @@
 // iteration on a 9600 baud link — several hundred frames a second, which is
 // both a flooded link and an event log nobody can read.
 //
-// Rejected: keeping the window on the ESP. It is the ESP that goes away — OTA,
-// WiFi, a crash — and a window that stops expiring when its owner stops running
+// Rejected: keeping the window on the ESP. It is the ESP that goes away — a
+// restart, WiFi, a crash — and a window that stops expiring when its owner stops running
 // is the same defect as the relay timer being on a Windows PC.
 //
 // No Arduino headers, no heap.
