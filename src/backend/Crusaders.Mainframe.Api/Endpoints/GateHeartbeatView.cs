@@ -79,7 +79,7 @@ public static class GateHeartbeatView
     }
 
     /// <summary>
-    /// The <c>gate</c> object: <c>unlock_seconds</c>, then — for a v3 door only — its three v3
+    /// The <c>gate</c> object: <c>unlock_seconds</c>, then — for a v3 door only — its two v3
     /// settings and the two fault settings every gate firmware reads and no server sent before
     /// (FC-8). Scalars only, forever (FC-12): a nested object here is never a setting.
     /// </summary>
@@ -89,7 +89,6 @@ public static class GateHeartbeatView
         if (v3 is null) return gate;
         gate["power_restore_trust_minutes"] = v3.PowerRestoreTrustMinutes;
         gate["net_fallback_minutes"] = v3.NetFallbackMinutes;
-        gate["ota_probation_minutes"] = v3.OtaProbationMinutes;
         gate["device_fault_reporting"] = v3.DeviceFaultReporting;
         gate["device_fault_max_per_hour"] = v3.DeviceFaultMaxPerHour;
         return gate;
@@ -164,7 +163,7 @@ public sealed record GateTiming(int HeartbeatSeconds, int UnlockSeconds);
 
 /// <summary>A v3 door's settings inside <c>gate</c> (door-gate.md §14), each clamped.</summary>
 public sealed record GateV3Settings(
-    int PowerRestoreTrustMinutes, int NetFallbackMinutes, int OtaProbationMinutes,
+    int PowerRestoreTrustMinutes, int NetFallbackMinutes,
     bool DeviceFaultReporting, int DeviceFaultMaxPerHour)
 {
     /// <summary>The settings for a door naming any v3 ESP capability; null for a 1.x door, answered byte for byte as before.</summary>
@@ -173,7 +172,6 @@ public sealed record GateV3Settings(
         : new GateV3Settings(
             Services.DeviceSettings.Value(s, Services.DeviceSettings.PowerRestoreTrustMinutes),
             Services.DeviceSettings.Value(s, Services.DeviceSettings.NetFallbackMinutes),
-            Services.DeviceSettings.Value(s, Services.DeviceSettings.OtaProbationMinutes),
             Services.BoxSettings.DeviceFaultReporting(s),
             Services.BoxSettings.DeviceFaultMaxPerHour(s));
 }

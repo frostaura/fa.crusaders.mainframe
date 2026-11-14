@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -36,9 +35,8 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
 {
     private const string ReplayDirVariable = "DEVICE_REPLAY_DIR";
 
-    private static readonly string[] V3Caps = ["codes:m1", "hb:3", "ota:1", "key:1", "net:1", "lcd:2"];
-    private static readonly string[] GateV3Caps = ["codes:m1", "ota:1", "key:1", "net:1"];
-    private static readonly RSA Signer = RSA.Create(2048);
+    private static readonly string[] V3Caps = ["codes:m1", "hb:3", "key:1", "net:1", "lcd:2"];
+    private static readonly string[] GateV3Caps = ["codes:m1", "key:1", "net:1"];
 
     private sealed record Reply(string Scenario, string Device, string[] Caps, string Endpoint, int Status, byte[] Body, JsonObject Expect);
 
@@ -46,8 +44,7 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
     public async Task Every_scenario_reply_is_one_a_frozen_reader_can_live_by()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var app = MemberCodeClub.Wired(pg.SharedHost, new StubEmailService()).WithWebHostBuilder(b =>
-            b.UseSetting("DeviceOta:PublicKeyModulus", Convert.ToHexStringLower(Signer.ExportParameters(false).Modulus!)));
+        await using var app = MemberCodeClub.Wired(pg.SharedHost, new StubEmailService());
         var replies = new List<Reply>();
         await HeartbeatScenariosAsync(app, replies);
         await ScanScenariosAsync(app, replies);
@@ -55,7 +52,10 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
         foreach (var r in replies) AssertFrozenReaderRules(r);
         Assert.True(replies.Count >= 20, $"only {replies.Count} scenarios ran");
         Assert.Contains(replies, r => r.Endpoint == "heartbeat" && r.Device == "door_gate");
-        Assert.Contains(replies, r => r.Expect.ContainsKey("ota"));
+        Assert.Contains(replies, r => r.Expect.ContainsKey("key_next"));
+        Assert.Contains(replies, r => r.Expect.ContainsKey("net"));
+        // No remote firmware update (device-api.md §7): no reply ever carries an `ota` offer.
+        Assert.DoesNotContain(replies, r => JsonNode.Parse(r.Body) is JsonObject o && o.ContainsKey("ota"));
 
         if (Environment.GetEnvironmentVariable(ReplayDirVariable) is { Length: > 0 } dir) Write(dir, replies);
     }
@@ -109,20 +109,7 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
         await BeatAsync(device, club, replies, "box-2x-codes-full", club.BoxMac, ["codes:m1"], uptimeMs: 30_000);
         await BeatAsync(device, club, replies, "gate-v3-full", club.DoorMac, GateV3Caps, kind: "gate");
 
-        // The lifeline: an OTA offer, a key rotation, a network change.
-        var image = RandomNumberGenerator.GetBytes(2048);
-        var sha = Convert.ToHexStringLower(SHA256.HashData(image));
-        var sig = Convert.ToBase64String(Signer.SignData(Encoding.ASCII.GetBytes(DeviceOta.ManifestText("court_bridge", "3.0.1", image.Length, sha)),
-            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        var upload = new MultipartFormDataContent
-        {
-            { new ByteArrayContent(image), "image", "image.bin" },
-            { new StringContent(new JsonObject { ["target"] = "court_bridge", ["version"] = "3.0.1", ["size"] = image.Length, ["sha256"] = sha, ["sig"] = sig }.ToJsonString()), "manifest" },
-        };
-        var release = JsonDocument.Parse(await (await admin.PostAsync("/api/v1/admin/devices/firmware", upload)).Content.ReadAsStringAsync()).RootElement;
-        await admin.PatchAsync($"/api/v1/admin/devices/firmware/{release.GetProperty("id").GetGuid()}", JsonContent.Create(new { rollout = "all" }));
-        await BeatAsync(device, club, replies, "box-v3-ota", club.BoxMac, V3Caps);
-
+        // The lifeline: a key rotation, a network change.
         await admin.PostAsync("/api/v1/admin/devices/api-key/rotate", null);
         await BeatAsync(device, club, replies, "box-v3-key-next", club.BoxMac, V3Caps);
         await BeatAsync(device, club, replies, "gate-v3-key-next", club.DoorMac, GateV3Caps, kind: "gate");
@@ -219,7 +206,6 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
         }
         if (root["roster"] is JsonArray roster) expect["roster_count"] = roster.Count;
         if (root["code_keys"] is JsonArray keys) expect["code_keys_count"] = keys.Count;
-        if (root["ota"] is JsonObject ota) expect["ota"] = new JsonObject { ["version"] = ota["version"]?.DeepClone(), ["path"] = ota["path"]?.DeepClone() };
         if (root["key_next"] is JsonObject next) expect["key_next"] = new JsonObject { ["id"] = next["id"]?.DeepClone() };
         if (root["net"] is JsonObject net) expect["net"] = new JsonObject { ["ver"] = net["ver"]?.DeepClone() };
         return expect;
@@ -265,7 +251,7 @@ public sealed class DeviceReplyEmitterTests(PostgresFixture pg) : IClassFixture<
     private static int BudgetOf(Reply r) => (r.Device, r.Endpoint) switch
     {
         ("court_box", "heartbeat") => r.Caps.Contains("hb:3") ? DeviceHeartbeatBudget.CourtBoxV3 : DeviceHeartbeatBudget.CourtBox2x,
-        ("door_gate", "heartbeat") => r.Caps.Intersect(["ota:1", "key:1", "net:1"]).Any() ? DeviceHeartbeatBudget.GateV3 : DeviceHeartbeatBudget.Gate1x,
+        ("door_gate", "heartbeat") => r.Caps.Intersect(["key:1", "net:1"]).Any() ? DeviceHeartbeatBudget.GateV3 : DeviceHeartbeatBudget.Gate1x,
         ("door_gate", "gate") => DeviceHeartbeatBudget.GateReplyMax,
         (_, "events") => DeviceHeartbeatBudget.EventsReplyMax,
         _ => DeviceHeartbeatBudget.ScanReplyMax,

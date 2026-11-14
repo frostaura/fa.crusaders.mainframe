@@ -41,9 +41,6 @@ public static class DeviceEndpoints
         // DeviceEventEndpoints' group with the court box's money paths.
         g.MapPost("/gate", DeviceGateEndpoint.HandleAsync);
 
-        // Device contract v3 §7: the signed image a board's OTA offer points at.
-        g.MapDeviceFirmwareDownload();
-
         return app;
     }
 
@@ -61,7 +58,7 @@ public static class DeviceEndpoints
         ILoggerFactory logs,
         CancellationToken ct)
     {
-        var (db, tenant, settings, registry, codes, _, _, _, faults, _, _, _, clock, _, _, _) = services;
+        var (db, tenant, settings, registry, codes, _, _, _, faults, _, _, _, clock, _, _) = services;
 
         // Validated BEFORE the MAC is resolved, so a firmware that believes in a device kind
         // this server does not have is told so whether or not its row already exists. The
@@ -196,15 +193,14 @@ public static class DeviceEndpoints
     }
 
     /// <summary>
-    /// The lifeline objects this board is owed on this beat (§6–§8), each keyed on its own cap.
+    /// The lifeline objects this board is owed on this beat (§6, §8), each keyed on its own cap.
     /// Computed BEFORE the beat's save: delivering the club's network may clear a push request.
     /// </summary>
     private static async Task<DeviceLifeline> LifelineAsync(HeartbeatServices services, Device device, Beat beat, CancellationToken ct)
     {
-        var ota = await services.Firmware.OfferForAsync(device, ct);
         var next = DeviceKeyRing.KeyNextFor(device, beat.Club, beat.KeyId);
         var net = await services.Network.NetForAsync(device, ct);
-        return new DeviceLifeline(ota, next, net);
+        return new DeviceLifeline(next, net);
     }
 
     /// <summary>The trimmed-key count onto the row, and the first trim raised as a notice (§11.3, member-code §5.4).</summary>
@@ -1061,8 +1057,6 @@ public sealed record HeartbeatServices(
     TimeProvider Clock,
     /// <summary>Key rotation (device-api.md §6): which key a board is on, <c>key_next</c>, the automatic retirement.</summary>
     DeviceKeyRing Keys,
-    /// <summary>Signed OTA offers (§7).</summary>
-    FirmwareService Firmware,
     /// <summary>The club's device network (§8).</summary>
     DeviceNetworkService Network);
 
@@ -1206,9 +1200,6 @@ public sealed record HeartbeatRequest(
     [property: JsonPropertyName("caps")] string?[]? Caps = null,
     // ---- Device contract v3 (device-api.md §2). Every one nullable: absent is "no report",
     //      a 2.x board sends none of them, and none of them can cost a board its heartbeat. ----
-    [property: JsonPropertyName("fw_state")] string? FwState = null,
-    [property: JsonPropertyName("fw_failed")] string? FwFailed = null,
-    [property: JsonPropertyName("fw_error")] string? FwError = null,
     [property: JsonPropertyName("net_ver")] long? NetVer = null,
     [property: JsonPropertyName("net_src")] string? NetSrc = null,
     [property: JsonPropertyName("lcd_layout")] string? LcdLayout = null,

@@ -10,12 +10,13 @@ namespace Crusaders.Mainframe.Api.Migrations
     public partial class DeviceContractV3 : Migration
     {
         /// <summary>
-        /// Device contract v3 (docs/specs/device-api.md): what a v3 board reports (firmware state,
-        /// network, acknowledged layout, restore, telemetry, the key it is on), the per-board
-        /// display and hardware overrides, the server's key-shedding counts, a release's cause,
-        /// and three tenant-scoped tables — retained device keys, the club's device network and
-        /// signed firmware releases. Every new device column is nullable or defaulted, so a 2.x
-        /// board's row is untouched.
+        /// Device contract v3 (docs/specs/device-api.md): what a v3 board reports (network,
+        /// acknowledged layout, restore, telemetry, the key it is on), the per-board display and
+        /// hardware overrides, the server's key-shedding counts, a release's cause, and two
+        /// tenant-scoped tables — retained device keys and the club's device network. Every new
+        /// device column is nullable or defaulted, so a 2.x board's row is untouched. The boards
+        /// have no remote firmware update, so nothing here stores an image or a board's update
+        /// state.
         /// </summary>
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -69,40 +70,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                 type: "text[]",
                 nullable: false,
                 defaultValueSql: "'{}'::text[]");
-
-            migrationBuilder.AddColumn<string>(
-                name: "FwError",
-                table: "devices",
-                type: "character varying(16)",
-                maxLength: 16,
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "FwFailed",
-                table: "devices",
-                type: "character varying(32)",
-                maxLength: 32,
-                nullable: true);
-
-            migrationBuilder.AddColumn<List<string>>(
-                name: "FwFailedVersions",
-                table: "devices",
-                type: "text[]",
-                nullable: false,
-                defaultValueSql: "'{}'::text[]");
-
-            migrationBuilder.AddColumn<string>(
-                name: "FwState",
-                table: "devices",
-                type: "character varying(16)",
-                maxLength: 16,
-                nullable: true);
-
-            migrationBuilder.AddColumn<DateTimeOffset>(
-                name: "FwStateChangedAt",
-                table: "devices",
-                type: "timestamp with time zone",
-                nullable: true);
 
             migrationBuilder.AddColumn<int>(
                 name: "HwLcdI2cAddress",
@@ -269,41 +236,12 @@ namespace Crusaders.Mainframe.Api.Migrations
                     table.PrimaryKey("PK_device_previous_keys", x => x.Id);
                 });
 
-            migrationBuilder.CreateTable(
-                name: "firmware_releases",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    TenantId = table.Column<Guid>(type: "uuid", nullable: false),
-                    Target = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
-                    Version = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
-                    Size = table.Column<int>(type: "integer", nullable: false),
-                    Sha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
-                    Signature = table.Column<string>(type: "character varying(342)", maxLength: 342, nullable: false),
-                    Image = table.Column<byte[]>(type: "bytea", nullable: false),
-                    UploadedByUserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    UploadedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    Rollout = table.Column<string>(type: "character varying(8)", maxLength: 8, nullable: false),
-                    RolloutDeviceId = table.Column<Guid>(type: "uuid", nullable: true),
-                    Paused = table.Column<bool>(type: "boolean", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_firmware_releases", x => x.Id);
-                    table.CheckConstraint("ck_firmware_releases_rollout", "\"Rollout\" IN ('off', 'one', 'all')");
-                });
-
             migrationBuilder.CreateIndex(
                 name: "IX_device_previous_keys_TenantId_KeyId",
                 table: "device_previous_keys",
                 columns: new[] { "TenantId", "KeyId" },
                 unique: true);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_firmware_releases_TenantId_Target_Version",
-                table: "firmware_releases",
-                columns: new[] { "TenantId", "Target", "Version" },
-                unique: true);
         }
 
         /// <inheritdoc />
@@ -314,9 +252,6 @@ namespace Crusaders.Mainframe.Api.Migrations
 
             migrationBuilder.DropTable(
                 name: "device_previous_keys");
-
-            migrationBuilder.DropTable(
-                name: "firmware_releases");
 
             migrationBuilder.DropColumn(
                 name: "DeviceApiKeyId",
@@ -348,26 +283,6 @@ namespace Crusaders.Mainframe.Api.Migrations
 
             migrationBuilder.DropColumn(
                 name: "Drift",
-                table: "devices");
-
-            migrationBuilder.DropColumn(
-                name: "FwError",
-                table: "devices");
-
-            migrationBuilder.DropColumn(
-                name: "FwFailed",
-                table: "devices");
-
-            migrationBuilder.DropColumn(
-                name: "FwFailedVersions",
-                table: "devices");
-
-            migrationBuilder.DropColumn(
-                name: "FwState",
-                table: "devices");
-
-            migrationBuilder.DropColumn(
-                name: "FwStateChangedAt",
                 table: "devices");
 
             migrationBuilder.DropColumn(

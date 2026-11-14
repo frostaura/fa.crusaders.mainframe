@@ -116,14 +116,9 @@ public static class DeviceView
             capabilities_reported_at = d.CapabilitiesReportedAt,
             member_codes = d.SpeaksMemberCodes,
 
-            // ---- Device contract v3 (device-api.md §2, §5–§8, §10): what the board last
+            // ---- Device contract v3 (device-api.md §2, §5, §6, §8, §10): what the board last
             //      reported, and this board's own overrides. Always present (null on a 2.x
             //      board), for the one-shape argument above. ----
-            fw_state = d.FwState,
-            fw_failed = d.FwFailed,
-            fw_error = d.FwError,
-            fw_state_changed_at = d.FwStateChangedAt,
-            fw_failed_versions = d.FwFailedVersions,
             net_ver = d.NetVer,
             net_src = d.NetSrc,
             net_push_requested = d.NetPushRequested,

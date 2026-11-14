@@ -485,31 +485,6 @@ public sealed class Device : ITenantScoped
     //      per-board overrides an admin sets. Every column is nullable or defaulted, so a 2.x
     //      board's row is untouched and a v3 board on its first beat fills them in. ----
 
-    /// <summary>
-    /// The board's firmware state as its last heartbeat reported it (§2, §7): <c>committed</c>,
-    /// <c>probation</c>, <c>downloading</c>, <c>rolled_back</c>, <c>failed</c> — or
-    /// <c>unknown</c> for a value this server does not know, which is stored rather than refused
-    /// (a diagnostic field must never cost a board its heartbeat). Null for a 2.x board.
-    /// </summary>
-    public string? FwState { get; set; }
-
-    /// <summary>With <c>rolled_back</c>/<c>failed</c>: the version the board refused or rolled back from.</summary>
-    public string? FwFailed { get; set; }
-
-    /// <summary>With <c>rolled_back</c>/<c>failed</c>: why (<c>probation</c>, <c>sig</c>, <c>sha256</c>, …).</summary>
-    public string? FwError { get; set; }
-
-    /// <summary>When <see cref="FwState"/> last changed.</summary>
-    public DateTimeOffset? FwStateChangedAt { get; set; }
-
-    /// <summary>
-    /// Every version this board has reported as failed or rolled back from. The server never
-    /// offers one of these to this board again (§7: "which has not reported that version as
-    /// failed") — the board keeps its own list too, but a board whose flash was wiped would
-    /// otherwise be offered the image that broke it on every beat.
-    /// </summary>
-    public List<string> FwFailedVersions { get; set; } = [];
-
     /// <summary>The network configuration version the board has applied (§8). 0 = compiled defaults or the setup portal's.</summary>
     public long? NetVer { get; set; }
 

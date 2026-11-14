@@ -922,27 +922,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("EventsLostReportedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("FwError")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("FwFailed")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.PrimitiveCollection<List<string>>("FwFailedVersions")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text[]")
-                        .HasDefaultValueSql("'{}'::text[]");
-
-                    b.Property<string>("FwState")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<DateTimeOffset?>("FwStateChangedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("GateKey")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -1531,70 +1510,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("enrolled_templates", (string)null);
                 });
 
-            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.FirmwareRelease", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<byte[]>("Image")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<bool>("Paused")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Rollout")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("character varying(8)");
-
-                    b.Property<Guid?>("RolloutDeviceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Sha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Signature")
-                        .IsRequired()
-                        .HasMaxLength(342)
-                        .HasColumnType("character varying(342)");
-
-                    b.Property<int>("Size")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Target")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("UploadedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UploadedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Version")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "Target", "Version")
-                        .IsUnique();
-
-                    b.ToTable("firmware_releases", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_firmware_releases_rollout", "\"Rollout\" IN ('off', 'one', 'all')");
-                        });
-                });
-
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.LedgerEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1614,11 +1529,17 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<Guid?>("PurchaseId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Reason")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
                     b.Property<Guid?>("RelatedBookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReversesEntryId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("TenantId")
@@ -1638,6 +1559,13 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("ExternalReference")
                         .IsUnique()
                         .HasFilter("\"ExternalReference\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "PurchaseId")
+                        .IsUnique()
+                        .HasFilter("\"PurchaseId\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ReversesEntryId")
+                        .HasFilter("\"ReversesEntryId\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "ActorUserId", "CreatedAt");
 
@@ -2575,6 +2503,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("PublicBaseUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -2642,9 +2574,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsAdmin")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsPlatformAdmin")
                         .HasColumnType("boolean");
 
                     b.Property<DateTimeOffset?>("LastLoginAt")

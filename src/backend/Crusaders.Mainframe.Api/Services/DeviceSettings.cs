@@ -96,7 +96,6 @@ public static class DeviceSettings
     public static readonly IntSetting RelayReconcileMinSeconds = new("relay_reconcile_min_seconds", 60, 30, 600);
     public static readonly IntSetting PowerRestoreTrustMinutes = new("device_power_restore_trust_minutes", 20, 0, 120);
     public static readonly IntSetting NetFallbackMinutes = new("device_net_fallback_minutes", 10, 3, 60);
-    public static readonly IntSetting OtaProbationMinutes = new("device_ota_probation_minutes", 10, 3, 60);
 
     /// <summary>§6: hours the old key stays valid once every <c>key:1</c> board is on the new one.</summary>
     public static readonly IntSetting KeyGraceHours = new("device_key_grace_hours", 168, 1, 720);
@@ -131,15 +130,15 @@ public static class DeviceSettings
     /// <summary>The two enumerated integer settings.</summary>
     public static readonly IntChoice[] IntChoices = [HwLcdI2cAddress, HwScannerBaud];
 
-    /// <summary>The eleven v3 numbers the heartbeat's <c>config</c> carries, in the wire's order (§5).</summary>
+    /// <summary>The ten v3 numbers the heartbeat's <c>config</c> carries, in the wire's order (§5).</summary>
     public static readonly IntSetting[] HeartbeatInts =
     [
         LcdMarqueeStepMs, LcdLandingPageSeconds, LcdScreenCeilingSeconds, LcdLandingDwellSeconds,
         LcdAfterLightsOnSeconds, LcdReinitSeconds, RelayAuthorisationCapMinutes, RelayReconcileMinSeconds,
-        PowerRestoreTrustMinutes, NetFallbackMinutes, OtaProbationMinutes,
+        PowerRestoreTrustMinutes, NetFallbackMinutes,
     ];
 
-    /// <summary>Every v3 ranged integer setting: the heartbeat's eleven, the key grace and the scanner gap.</summary>
+    /// <summary>Every v3 ranged integer setting: the heartbeat's ten, the key grace and the scanner gap.</summary>
     public static readonly IntSetting[] V3Ints = [.. HeartbeatInts, KeyGraceHours, HwScannerGapMs];
 
     /// <summary>Every integer key the raw view keeps: the ranged ones and the enumerated ones.</summary>
@@ -341,7 +340,7 @@ public static class DeviceSettings
 
     /// <summary>
     /// The v3 keys of a <c>hb:3</c> box's heartbeat <c>config</c>, in the wire's order (§5): the
-    /// thirteen display keys, then the five hardware keys — each RESOLVED for this board (its own
+    /// twelve display keys, then the five hardware keys — each RESOLVED for this board (its own
     /// override, else the club's), each clamped or closed-set independently. <c>button_map</c>
     /// follows them, written by the caller.
     /// </summary>

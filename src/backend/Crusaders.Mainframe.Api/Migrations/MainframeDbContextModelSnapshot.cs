@@ -919,27 +919,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("EventsLostReportedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("FwError")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("FwFailed")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.PrimitiveCollection<List<string>>("FwFailedVersions")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text[]")
-                        .HasDefaultValueSql("'{}'::text[]");
-
-                    b.Property<string>("FwState")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<DateTimeOffset?>("FwStateChangedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("GateKey")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -1526,70 +1505,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("TenantId", "UserId");
 
                     b.ToTable("enrolled_templates", (string)null);
-                });
-
-            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.FirmwareRelease", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<byte[]>("Image")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<bool>("Paused")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Rollout")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("character varying(8)");
-
-                    b.Property<Guid?>("RolloutDeviceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Sha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Signature")
-                        .IsRequired()
-                        .HasMaxLength(342)
-                        .HasColumnType("character varying(342)");
-
-                    b.Property<int>("Size")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Target")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("UploadedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UploadedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Version")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "Target", "Version")
-                        .IsUnique();
-
-                    b.ToTable("firmware_releases", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_firmware_releases_rollout", "\"Rollout\" IN ('off', 'one', 'all')");
-                        });
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.LedgerEntry", b =>

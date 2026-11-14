@@ -478,13 +478,13 @@ public class DeviceGateProtocolCorpusTests
         // and two bytes above 0x7F, escaped. 12 and 25 since scan-to-extend: the extend body, five
         // extend answers (ok, truncated, court_not_lit, no_time_available, insufficient_balance)
         // and the activate answer carrying greeting_name and balance_minutes.
-        // 18 and 36 since device contract v3: the v3 heartbeat request, first beat, roll-back,
-        // relight, telemetry and widest requests plus the release cause (seven), the pay-for
-        // request leaving with D10 (one), and eleven v3 responses (snapshot, unacknowledged,
-        // display expanded and out of range, OTA offer, key_next, net, widest, play_remaining,
-        // hardware, lifeline-only).
-        Assert.Equal(18, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
-        Assert.Equal(36, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
+        // 17 and 35 since device contract v3: the v3 heartbeat request, first beat, relight,
+        // telemetry and widest requests plus the release cause (six), the pay-for request leaving
+        // with D10 (one), and ten v3 responses (snapshot, unacknowledged, display expanded and out
+        // of range, key_next, net, widest, play_remaining, hardware, lifeline-only). The roll-back
+        // request and the OTA offer went with the remote update (device-api.md §7).
+        Assert.Equal(17, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
+        Assert.Equal(35, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
     }
 
     /// <summary>
@@ -498,14 +498,13 @@ public class DeviceGateProtocolCorpusTests
             ? new GateV3Settings(
                 trust.GetInt32(),
                 gate.GetProperty("net_fallback_minutes").GetInt32(),
-                gate.GetProperty("ota_probation_minutes").GetInt32(),
                 gate.GetProperty("device_fault_reporting").GetBoolean(),
                 gate.GetProperty("device_fault_max_per_hour").GetInt32())
             : null;
 
         System.Text.Json.Nodes.JsonObject? Obj(string name) =>
             root.TryGetProperty(name, out var o) ? System.Text.Json.Nodes.JsonNode.Parse(o.GetRawText())!.AsObject() : null;
-        var lifeline = new DeviceLifeline(Obj("ota"), Obj("key_next"), Obj("net"));
+        var lifeline = new DeviceLifeline(Obj("key_next"), Obj("net"));
         return settings is null && !lifeline.Any ? null : new GateV3Parts(settings, lifeline);
     }
 
