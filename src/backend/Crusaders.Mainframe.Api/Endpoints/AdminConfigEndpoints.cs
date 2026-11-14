@@ -25,6 +25,10 @@ public static class AdminConfigEndpoints
             UpdateSettingsRequest req, HttpContext ctx, MainframeDbContext db,
             AdminChangeRecorder recorder, CancellationToken ct) =>
         {
+            // A snake-only key spelled camelCase is heard, not silently dropped (SettingsSpelling).
+            var (adopted, spelling) = SettingsSpelling.Adopt(req);
+            if (spelling is not null) return Results.BadRequest(spelling);
+            req = adopted;
             var tenant = ctx.RequestServices.GetRequiredService<ITenantContext>();
 
             // The row is held from here to the commit (A4-1), so the version check, the
