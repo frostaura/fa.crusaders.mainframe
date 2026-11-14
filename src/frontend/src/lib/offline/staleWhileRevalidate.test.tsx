@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { RequireAuth } from "@/components/shell/RequireAuth";
@@ -12,6 +13,10 @@ import WalletPage from "@/pages/Wallet";
 import { memberReads } from "./memberReads";
 import { OFFLINE_COPY, asOfLabel } from "./offlineCopy";
 import { getDataOwner, peekQuery, primeQuery, setDataOwner } from "./queryCache";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 /**
  * R4 wave B — the member pages drawn from `lib/offline`: what the club last said is on screen at

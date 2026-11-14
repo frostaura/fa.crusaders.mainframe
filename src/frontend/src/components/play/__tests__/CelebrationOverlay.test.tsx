@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
@@ -10,6 +11,10 @@ import { COLLAPSE_OVER, isQuietPath, momentOf } from "@/components/play/celebrat
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { CELEBRATION_COPY } from "@/lib/playCopy";
 import { celebration, serve } from "./playKit";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 /**
  * The one-shot moment (§9.3): one at a time, oldest first; more than three collapse into one;

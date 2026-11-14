@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { PrimaryNav } from "@/components/shell/PrimaryNav";
 import { tokenStore } from "@/lib/api";
@@ -49,7 +49,7 @@ describe("routeIntent", () => {
     routeIntent("/wallet");
     expect(wallet).toHaveBeenCalledTimes(1);
     expect(calls()).toEqual(["/api/v1/wallet"]);
-    await vi.waitFor(() => expect(peekQuery(ID, memberReads.wallet.key)).toBeDefined());
+    await waitFor(() => expect(peekQuery(ID, memberReads.wallet.key)).toBeDefined());
   });
 
   it("asks for nothing offline, or with nobody signed in", () => {
@@ -104,7 +104,7 @@ describe("the page joins the read its link started", () => {
     vi.spyOn(routeChunks, "schedule").mockImplementation(never);
 
     routeIntent("/bookings?date=2030-09-09");
-    await vi.waitFor(() => expect(peekQuery(ID, "schedule:2030-09-09")).toBeDefined());
+    await waitFor(() => expect(peekQuery(ID, "schedule:2030-09-09")).toBeDefined());
     const { result } = renderHook(() => useScheduleDay(false, "2030-09-09"), {
       wrapper: ({ children }) => <AuthProvider>{children}</AuthProvider>,
     });

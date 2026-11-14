@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "@/lib/auth";
 import { BalanceProvider } from "@/lib/balance";
@@ -28,7 +28,7 @@ describe("the chip's toast when its words cannot be fetched", () => {
     let live: { onFrame: (f: BalanceFrame) => void } | null = null;
     const transport: BalanceTransport = { open: (args) => { live = args; return Promise.resolve({ close: () => { live = null; } }); } };
     render(<MemoryRouter><AuthProvider><BalanceProvider transport={transport}><ToastProvider><MinutesChip /></ToastProvider></BalanceProvider></AuthProvider></MemoryRouter>);
-    await vi.waitFor(() => { if (!live) throw new Error("no stream yet"); });
+    await waitFor(() => { if (!live) throw new Error("no stream yet"); });
     await act(async () => { live!.onFrame({ balance_minutes: 200 }); });
     await act(async () => { live!.onFrame({ balance_minutes: 210, delta_minutes: 10, reason: "no_show_settled", court_name: "Court 2", booking_starts_at: "2026-10-05T16:30:00Z" } as BalanceFrame); });
     expect(await screen.findByText(plainMovementSentence(10, "no_show_settled"))).toBeInTheDocument();

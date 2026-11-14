@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, useLocation } from "react-router-dom";
 import { AppRoutes } from "../App";
@@ -11,6 +12,10 @@ import { ProfileProvider } from "../lib/profile";
 import { SIGN_OUT_EVERYWHERE_COPY as COPY } from "../lib/profileCopy";
 import { ToastProvider } from "../components/Toast";
 import { signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 /**
  * D7 and D11, through the REAL `AuthProvider` and the real route map — `RequireAuth` included.
