@@ -48,19 +48,6 @@ services:
       - "1025"
       - "8025"
 
-  # The backend image runs as uid 1654 (`app`), not root. Volumes a root backend created are
-  # root-owned, so this hands them over first — only what is not already owned — and exits.
-  # docker-compose.prod.yml carries the same service for the same reason.
-  volume-init:
-    logging: *capped-log
-    image: postgres:16-alpine
-    restart: "no"
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["find /app/media /app/biometric ! -user 1654 -exec chown 1654:1654 {} +"]
-    volumes:
-      - media_data:/app/media
-      - biometric_data:/app/biometric
-
   backend:
     logging: *capped-log
     build:
@@ -161,8 +148,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      volume-init:
-        condition: service_completed_successfully
       mailhog:
         condition: service_started
 

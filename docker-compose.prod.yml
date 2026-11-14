@@ -73,20 +73,6 @@ services:
       retries: 5
     logging: *default-logging
 
-  # Hands the two backend volumes to the image's non-root user (uid 1654, `app` in the .NET
-  # runtime image) before the API starts. The backend image used to run as root, so a volume it
-  # created is root-owned, and the first non-root start would fail every photo upload. Idempotent:
-  # it touches only what is not already owned, then exits; the backend waits for it.
-  volume-init:
-    image: postgres:16-alpine
-    restart: "no"
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["find /app/media /app/biometric ! -user 1654 -exec chown 1654:1654 {} +"]
-    volumes:
-      - media_data:/app/media
-      - biometric_data:/app/biometric
-    logging: *default-logging
-
   backend:
     image: frostaura/crusaders-mainframe-backend:${CRUSADERS_IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -205,8 +191,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      volume-init:
-        condition: service_completed_successfully
     logging: *default-logging
 
   frontend:

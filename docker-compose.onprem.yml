@@ -88,9 +88,6 @@ services:
       - "127.0.0.1:8025:8025"
     logging: *default-logging
 
-  volume-init:
-    logging: *default-logging
-
   frontend:
     logging: *default-logging
 

@@ -148,25 +148,25 @@ class OnPremMailTests(unittest.TestCase):
 class NonRootBackendTests(unittest.TestCase):
     """IO-17: the API does not run as root, and its volumes are handed over before it starts."""
 
-    def test_the_backend_image_drops_root_before_its_entrypoint(self):
+    def test_the_backend_drops_root_before_the_api_starts(self):
         lines = [l.strip() for l in (REPO / "src/backend/Dockerfile").read_text().splitlines()
                  if l.strip() and not l.strip().startswith("#")]
         runtime = lines[max(i for i, l in enumerate(lines) if l.startswith("FROM")):]
-        users = [l for l in runtime if l.startswith("USER ")]
-        self.assertTrue(users, "the runtime stage never leaves root")
-        self.assertNotIn(users[-1].split()[1], ("root", "0"))
-        self.assertLess(runtime.index(users[-1]), next(i for i, l in enumerate(runtime) if l.startswith("ENTRYPOINT")))
+        entry = next(l for l in runtime if l.startswith("ENTRYPOINT"))
+        self.assertIn("/usr/local/bin/docker-entrypoint.sh", entry)
+        self.assertLess(entry.index("docker-entrypoint.sh"), entry.index("dotnet"))
+        script = (REPO / "src/backend/docker-entrypoint.sh").read_text()
+        self.assertIn("setpriv --reuid=1654 --regid=1654", script)
+        self.assertIn("chown 1654:1654", script)
 
-    def test_both_stacks_chown_the_volumes_before_the_backend_starts(self):
+    def test_no_stack_needs_a_volume_init_service(self):
+        # A stack file written for the root image must keep working: the image hands its own
+        # volumes over, so no compose file may grow a service the club's stored stack lacks.
         for files, env in (((PROD,), {}), ((BASE,), DEV_ENV), ((BASE, ONPREM), DEV_ENV)):
             with self.subTest(files=files):
                 svc = services(compose_config(*files, **env))
-                self.assertEqual(svc["backend"]["depends_on"]["volume-init"]["condition"],
-                                 "service_completed_successfully")
-                init_targets = {m["source"]: m["target"] for m in svc["volume-init"]["volumes"]}
-                backend_targets = {m["source"]: m["target"] for m in svc["backend"]["volumes"]}
-                self.assertEqual(init_targets, backend_targets)
-                self.assertIn("1654", " ".join(svc["volume-init"]["command"]))
+                self.assertNotIn("volume-init", svc)
+                self.assertNotIn("volume-init", svc["backend"].get("depends_on", {}))
 
 
 class BuildShaTests(unittest.TestCase):

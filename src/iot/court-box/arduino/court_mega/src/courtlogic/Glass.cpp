@@ -225,7 +225,7 @@ void pagedItemInto(char* row, const LandingInput& in, uint8_t index) {
 } // namespace
 
 uint32_t minutesShown(uint32_t seconds) {
-  const uint32_t m = seconds / 60UL + ((seconds % 60UL) != 0UL ? 1UL : 0UL);
+  const uint32_t m = static_cast<uint32_t>(seconds / 60UL + ((seconds % 60UL) != 0UL ? 1UL : 0UL));
   return m > kMaxMinutesShown ? kMaxMinutesShown : m;
 }
 
