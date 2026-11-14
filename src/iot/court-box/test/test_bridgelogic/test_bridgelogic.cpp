@@ -4885,6 +4885,67 @@ void test_a_whole_http_call_ends_inside_the_wait_screen(void) {
   TEST_ASSERT_EQUAL_UINT16(1U, budget.phaseTimeoutMs(0xFFFFF000UL + 9000UL));
 }
 
+/// BR-14: a grant and the refusals whose words name a designed screen paint
+/// that 4-row screen; rows 0-1 stay the 16-column safe subset, so compact
+/// reads them whole. A refusal carrying a number no designed screen holds keeps
+/// its two lines.
+void test_grants_and_refusals_paint_their_designed_four_row_screens(void) {
+  struct Case {
+    const char* l1;
+    const char* l2;
+    bridgelogic::ScreenId id;
+  };
+
+  const Case cases[] = {
+      {"NO BOOKING", "SEE THE DESK", bridgelogic::ScreenId::NoBooking},
+      {"TOO FEW MINUTES", "BUY & RETRY", bridgelogic::ScreenId::InsufficientBalance},
+      {"SLOT ENDED", "SEE THE DESK", bridgelogic::ScreenId::SlotEnded},
+      {"CODE USED", "WAIT 30 SECONDS", bridgelogic::ScreenId::CodeUsed},
+      {"NOT RECOGNISED", "SEE THE DESK", bridgelogic::ScreenId::NotRecognised},
+      {"NO CONNECTION", "BOOKINGS ONLY", bridgelogic::ScreenId::NoConnection},
+      {"SEE THE DESK", "", bridgelogic::ScreenId::SeeTheDesk},
+  };
+  for (const Case& c : cases) {
+    court::Outcome o;
+    court::detail::setLine(o.line1, c.l1);
+    court::detail::setLine(o.line2, c.l2);
+    bridgelogic::ScreenFacts facts;
+    bridgelogic::ScreenId id = bridgelogic::ScreenId::Grant;
+    TEST_ASSERT_TRUE_MESSAGE(bridgelogic::verdictScreen(o, id, facts), c.l1);
+    TEST_ASSERT_TRUE_MESSAGE(id == c.id, c.l1);
+    const bridgelogic::Screen screen = bridgelogic::screenFor(id, facts);
+    TEST_ASSERT_TRUE_MESSAGE(screen.rows[0][0] != '\0' && screen.rows[3][0] != '\0', c.l1);
+    TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[0]) <= court::kSafeSubsetCols, c.l1);
+    TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[1]) <= court::kSafeSubsetCols, c.l1);
+  }
+
+  court::Outcome grant;
+  grant.action = court::Action::TurnOn;
+  grant.court = 2U;
+  grant.durationMs = 2700000UL;
+  bridgelogic::ScreenFacts facts;
+  bridgelogic::ScreenId id = bridgelogic::ScreenId::SeeTheDesk;
+  TEST_ASSERT_TRUE(bridgelogic::verdictScreen(grant, id, facts));
+  TEST_ASSERT_TRUE(id == bridgelogic::ScreenId::Grant);
+  const bridgelogic::Screen g = bridgelogic::screenFor(id, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT C IS ON", g.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("45 MINUTES", g.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME", g.rows[3]);
+
+  // Numbers and courts the designed screens cannot hold: the two lines stand.
+  const char* const twoLine[][2] = {{"TOO EARLY", "WAIT 12 MIN"},
+                                    {"WRONG COURT", "YOU ARE ON B"},
+                                    {"BUSY", "SCAN AGAIN"},
+                                    {"NO CONNECTION", "SEE THE DESK"},
+                                    {"TRY AGAIN", "SCAN TO START"}};
+  for (const auto& lines : twoLine) {
+    court::Outcome o;
+    court::detail::setLine(o.line1, lines[0]);
+    court::detail::setLine(o.line2, lines[1]);
+    TEST_ASSERT_FALSE_MESSAGE(bridgelogic::verdictScreen(o, id, facts), lines[0]);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
@@ -5029,5 +5090,6 @@ int main(int, char**) {
   RUN_TEST(test_a_duration_prompt_lives_no_longer_than_the_scan_and_rearms_the_window);
   RUN_TEST(test_a_rescan_on_the_members_own_lit_court_keeps_the_scan_for_an_extension);
   RUN_TEST(test_a_whole_http_call_ends_inside_the_wait_screen);
+  RUN_TEST(test_grants_and_refusals_paint_their_designed_four_row_screens);
   return UNITY_END();
 }

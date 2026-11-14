@@ -808,6 +808,19 @@ void paintLines(const char* line1, const char* line2) {
   sendAfterGreeting(linesScreen(line1, line2));
 }
 
+/// An outcome as its designed screen (BR-14) — composed for the acknowledged
+/// layout by sendScreen, held to the scan's life by screenNow — or as its two
+/// lines when no designed screen holds what they say. After the greeting.
+void paintOutcome(const court::Outcome& outcome, uint32_t nowMs) {
+  bridgelogic::ScreenFacts facts = screenFacts(nowMs);
+  bridgelogic::ScreenId id = bridgelogic::ScreenId::SeeTheDesk;
+  if (bridgelogic::verdictScreen(outcome, id, facts)) {
+    sendAfterGreeting(screenNow(id, facts));
+    return;
+  }
+  paintLines(outcome.line1, outcome.line2);
+}
+
 /// Two lines NOW, whatever was waiting: a failure the member must see.
 void sendLinesNow(const char* line1, const char* line2) {
   sendScreen(linesScreen(line1, line2));
@@ -1141,8 +1154,9 @@ void noteMegaDiag(const proto::Frame& frame) {
 /// game can leave true (D8-3).
 bool applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   // After the greeting, when one is on the glass (bridge 2.3.0); the relay
-  // below is never held back for it.
-  paintLines(outcome.line1, outcome.line2);
+  // below is never held back for it. The designed 4-row screen where the
+  // outcome names one (BR-14), else its two lines.
+  paintOutcome(outcome, nowMs);
   if (outcome.action != court::Action::TurnOn || outcome.court >= bridgelogic::kStateCourts) {
     return false;
   }

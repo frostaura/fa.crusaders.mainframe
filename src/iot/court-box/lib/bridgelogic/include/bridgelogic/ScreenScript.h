@@ -391,6 +391,17 @@ bool invitesPress(ScreenId id);
 Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings,
                  uint32_t scanLeftMs);
 
+/// The designed 4-row screen for a scan's two-line outcome (BR-14): a grant is
+/// Grant (court, minutes), and the refusals whose words name one designed
+/// screen — NO BOOKING, TOO FEW MINUTES, SLOT ENDED, CODE USED, NOT
+/// RECOGNISED, NO CONNECTION / BOOKINGS ONLY, SEE THE DESK — are theirs.
+/// `facts.court` and `facts.minutes` are filled; everything else in `facts`
+/// is the caller's. False for an outcome whose lines carry a number or a
+/// court no designed screen holds (TOO EARLY, WRONG COURT, BUSY, ...): the
+/// caller paints the two lines, which are the 16-column safe subset whatever
+/// the layout.
+bool verdictScreen(const court::Outcome& outcome, ScreenId& id, ScreenFacts& facts);
+
 /// Renders one action row: four cells of kActionCellCols columns, taken from
 /// physical buttons `from`..`from+3` of `map`. A SelectCourt cell renders its
 /// letter, a GrantMinutes cell its minutes, and an `off`- or `none`-mapped slot

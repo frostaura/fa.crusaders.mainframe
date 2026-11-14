@@ -636,6 +636,42 @@ void renderActionRow(const court::ButtonMap& map, uint8_t from, char* out, size_
   }
 }
 
+bool verdictScreen(const court::Outcome& outcome, ScreenId& id, ScreenFacts& facts) {
+  if (outcome.action == court::Action::TurnOn) {
+    if (outcome.court >= 4U) {
+      return false;
+    }
+    id = ScreenId::Grant;
+    facts.court = outcome.court;
+    facts.minutes = (outcome.durationMs + 59999UL) / 60000UL;
+    return true;
+  }
+
+  struct Words {
+    const char* line1;
+    const char* line2; // null: any
+    ScreenId id;
+  };
+
+  static const Words kWords[] = {
+      {"NO BOOKING", nullptr, ScreenId::NoBooking},
+      {"TOO FEW MINUTES", nullptr, ScreenId::InsufficientBalance},
+      {"SLOT ENDED", nullptr, ScreenId::SlotEnded},
+      {"CODE USED", nullptr, ScreenId::CodeUsed},
+      {"NOT RECOGNISED", nullptr, ScreenId::NotRecognised},
+      {"NO CONNECTION", "BOOKINGS ONLY", ScreenId::NoConnection},
+      {"SEE THE DESK", "", ScreenId::SeeTheDesk},
+  };
+  for (const Words& w : kWords) {
+    if (strcmp(outcome.line1, w.line1) == 0 && (w.line2 == nullptr || strcmp(outcome.line2, w.line2) == 0)) {
+      id = w.id;
+      facts.court = outcome.court < 4U ? outcome.court : 0U;
+      return true;
+    }
+  }
+  return false;
+}
+
 void readMemberDisplay(const char* body, size_t len, ScreenFacts& facts) {
   facts.name[0] = '\0';
   if (body == nullptr || len == 0U) {
