@@ -123,6 +123,46 @@ void stageKeys(const char* body, size_t len, size_t at, KeyRingT& ring, CodeSync
   }
 }
 
+/// The `code_days` slots, for the first pass: which slots a key may name.
+inline void readDaySlots(const char* body, size_t len, memcode::DaySlot (&days)[memcode::kMaxDaySlots]) {
+  size_t dayAt = devapi::json::findTopLevelArray(body, len, "code_days");
+  size_t start = 0U;
+  size_t n = 0U;
+  bool isString = false;
+  uint8_t slot = 0U;
+  while (dayAt != devapi::json::kNotFound && slot < memcode::kMaxDaySlots &&
+         nextArrayElement(body, len, dayAt, start, n, isString)) {
+    if (isString) {
+      static_cast<void>(memcode::parseDaySlot(body + start, n, days[slot]));
+    }
+    ++slot;
+  }
+}
+
+/// FC-1's first pass over `code_keys` at `at`: how many elements it has
+/// (`elements`, saturating) and how many of them are a readable key naming a
+/// valid day slot (the return, saturating). Every parsed key is wiped.
+inline uint8_t countReadableKeys(const char* body, size_t len, size_t at, uint8_t& elements) {
+  memcode::DaySlot days[memcode::kMaxDaySlots];
+  readDaySlots(body, len, days);
+  uint8_t readable = 0U;
+  elements = 0U;
+  size_t start = 0U;
+  size_t n = 0U;
+  bool isString = false;
+  size_t probe = at;
+  while (nextArrayElement(body, len, probe, start, n, isString)) {
+    memcode::DayKey key;
+    elements = elements < UINT8_MAX ? static_cast<uint8_t>(elements + 1U) : UINT8_MAX;
+    if (isString && memcode::parseKeyElement(body + start, n, key) && key.slot < memcode::kMaxDaySlots &&
+        days[key.slot].valid) {
+      readable = readable < UINT8_MAX ? static_cast<uint8_t>(readable + 1U) : UINT8_MAX;
+    }
+    dc::wipe(key.key, sizeof(key.key));
+  }
+  return readable;
+}
+
 } // namespace detail
 
 /// Applies the member-code sync in `body` to `clock` and `ring`, anchored at
@@ -144,36 +184,10 @@ CodeSyncResult applyCodeSync(const char* body, size_t len, memcode::StepClock& c
   // NOTHING is readable keeps the ring this board has, and is counted so the
   // caller reports drift; `[]` still withdraws every key (member-code.md
   // §5.2). The ring replaces in place, so this is decided before it begins.
-  {
-    memcode::DaySlot days[memcode::kMaxDaySlots];
-    size_t dayAt = devapi::json::findTopLevelArray(body, len, "code_days");
-    size_t start = 0U;
-    size_t n = 0U;
-    bool isString = false;
-    uint8_t slot = 0U;
-    while (dayAt != devapi::json::kNotFound && slot < memcode::kMaxDaySlots &&
-           detail::nextArrayElement(body, len, dayAt, start, n, isString)) {
-      if (isString) {
-        static_cast<void>(memcode::parseDaySlot(body + start, n, days[slot]));
-      }
-      ++slot;
-    }
-    uint8_t readable = 0U;
-    uint8_t elements = 0U;
-    size_t probe = at;
-    while (detail::nextArrayElement(body, len, probe, start, n, isString)) {
-      memcode::DayKey key;
-      elements = elements < UINT8_MAX ? static_cast<uint8_t>(elements + 1U) : UINT8_MAX;
-      if (isString && memcode::parseKeyElement(body + start, n, key) && key.slot < memcode::kMaxDaySlots &&
-          days[key.slot].valid) {
-        readable = readable < UINT8_MAX ? static_cast<uint8_t>(readable + 1U) : UINT8_MAX;
-      }
-      dc::wipe(key.key, sizeof(key.key));
-    }
-    if (elements > 0U && readable == 0U) {
-      result.rejected = elements;
-      return result;
-    }
+  uint8_t elements = 0U;
+  if (detail::countReadableKeys(body, len, at, elements) == 0U && elements > 0U) {
+    result.rejected = elements;
+    return result;
   }
   ring.beginReplace();
   detail::stageDays(body, len, ring);

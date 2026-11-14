@@ -1871,6 +1871,48 @@ void pumpMegaLink(uint32_t nowMs) {
 /// caller's buffer, and one whose `Content-Length` is at or past the buffer is
 /// refused before a byte is read — EMPTY, NOT HALF. A response cut mid-object
 /// is a body whose readers see whichever fields landed inside the buffer.
+/// Reads from `stream` into `out` until `want` bytes, the server closes, or
+/// kHttpTimeoutMs passes. Returns the bytes read.
+size_t readUpTo(WiFiClient* stream, char* out, size_t want) {
+  size_t got = 0U;
+  const uint32_t startedAt = millis();
+  while (stream != nullptr && got < want && millis() - startedAt < kHttpTimeoutMs) {
+    const int avail = stream->available();
+    if (avail <= 0) {
+      if (!stream->connected()) {
+        break;
+      }
+      delay(1);
+      continue;
+    }
+    const size_t room = want - got;
+    const int n = stream->read(reinterpret_cast<uint8_t*>(out) + got,
+                               static_cast<size_t>(avail) < room ? static_cast<size_t>(avail) : room);
+    if (n > 0) {
+      got += static_cast<size_t>(n);
+    }
+  }
+  return got;
+}
+
+/// The body's length in `out`, or 0 — EMPTY, NOT HALF — when its declared
+/// length is at or past the buffer, it was cut short, or an undeclared body
+/// is longer than the buffer.
+size_t readBody(WiFiClient* stream, int declared, char* out, size_t outCap) {
+  if (declared >= 0 && static_cast<size_t>(declared) >= outCap) {
+    return 0U;
+  }
+  const size_t want = declared < 0 ? outCap - 1U : static_cast<size_t>(declared);
+  const size_t got = readUpTo(stream, out, want);
+  if (declared >= 0 && got != static_cast<size_t>(declared)) {
+    return 0U; // cut short: nothing, never half
+  }
+  if (declared < 0 && stream != nullptr && stream->available() > 0) {
+    return 0U; // undeclared and longer than the buffer
+  }
+  return got;
+}
+
 int postOnce(const char* url, const char* body, char* out, size_t outCap, bool readRefusal) {
   WiFiClient client;
   HTTPClient http;
@@ -1883,42 +1925,35 @@ int postOnce(const char* url, const char* body, char* out, size_t outCap, bool r
   http.addHeader("Content-Type", "application/json");
   http.addHeader(devapi::kHeaderAuthorization, gKeys.header());
   const int status = http.POST(reinterpret_cast<const uint8_t*>(body), strlen(body));
-  if (status > 0 && out != nullptr && outCap > 0U) {
+  const bool hasOut = status > 0 && out != nullptr && outCap > 0U;
+  if (hasOut) {
     out[0] = '\0';
   }
-  if (status > 0 && out != nullptr && outCap > 0U && (readRefusal || (status >= 200 && status < 300))) {
-    const int declared = http.getSize();
-    WiFiClient* stream = http.getStreamPtr();
-    size_t got = 0U;
-    if (declared < 0 || static_cast<size_t>(declared) < outCap) {
-      const size_t want = declared < 0 ? outCap - 1U : static_cast<size_t>(declared);
-      const uint32_t startedAt = millis();
-      while (stream != nullptr && got < want && millis() - startedAt < kHttpTimeoutMs) {
-        const int avail = stream->available();
-        if (avail <= 0) {
-          if (!stream->connected()) {
-            break;
-          }
-          delay(1);
-          continue;
-        }
-        const size_t room = want - got;
-        const int n = stream->read(reinterpret_cast<uint8_t*>(out) + got,
-                                   static_cast<size_t>(avail) < room ? static_cast<size_t>(avail) : room);
-        if (n > 0) {
-          got += static_cast<size_t>(n);
-        }
-      }
-      if (declared >= 0 && got != static_cast<size_t>(declared)) {
-        got = 0U; // cut short: nothing, never half
-      } else if (declared < 0 && stream != nullptr && stream->available() > 0) {
-        got = 0U; // undeclared and longer than the buffer
-      }
-    }
-    out[got] = '\0';
+  if (hasOut && (readRefusal || (status >= 200 && status < 300))) {
+    out[readBody(http.getStreamPtr(), http.getSize(), out, outCap)] = '\0';
   }
   http.end();
   return status;
+}
+
+/// What one settled call teaches the fault log. Classified rather than lumped:
+/// a 4xx is this box sending something the server will never take and is fixed
+/// by a reflash or a setting, a 5xx is the club's server, and a zero is the
+/// network between them. Three different people fix them.
+void noteCallFaults(uint16_t result, bool breakerWasOpen, uint32_t settledAt) {
+  if (result == 0U) {
+    gFaults.note(bridgelogic::Fault::HttpTimeout, settledAt);
+  } else if (result >= 500U) {
+    gFaults.note(bridgelogic::Fault::Http5xx, settledAt);
+  } else if (result >= 400U) {
+    gFaults.note(bridgelogic::Fault::Http4xx, settledAt);
+  }
+  if (!breakerWasOpen && gBreaker.open(settledAt)) {
+    // The EDGE, not the state. Noting it every pass while the breaker is open
+    // would report the same outage several hundred times an hour under a rate
+    // limit designed to stop exactly that.
+    gFaults.note(bridgelogic::Fault::ApiBreakerOpen, settledAt);
+  }
 }
 
 uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
@@ -1958,23 +1993,8 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
   const uint32_t settledAt = gClock.nowMs();
   const bool wasOpen = gBreaker.open(settledAt);
   gBreaker.onResult(result, settledAt);
-  // ONE place, because every call comes through here. Classified rather than
-  // lumped: a 4xx is this box sending something the server will never take and
-  // is fixed by a reflash or a setting, a 5xx is the club's server, and a zero
-  // is the network between them. Three different people fix them.
-  if (result == 0U) {
-    gFaults.note(bridgelogic::Fault::HttpTimeout, settledAt);
-  } else if (result >= 500U) {
-    gFaults.note(bridgelogic::Fault::Http5xx, settledAt);
-  } else if (result >= 400U) {
-    gFaults.note(bridgelogic::Fault::Http4xx, settledAt);
-  }
-  if (!wasOpen && gBreaker.open(settledAt)) {
-    // The EDGE, not the state. Noting it every pass while the breaker is open
-    // would report the same outage several hundred times an hour under a rate
-    // limit designed to stop exactly that.
-    gFaults.note(bridgelogic::Fault::ApiBreakerOpen, settledAt);
-  }
+  // ONE place, because every call comes through here.
+  noteCallFaults(result, wasOpen, settledAt);
   return result;
 }
 
@@ -2894,8 +2914,8 @@ void pumpOta(uint32_t nowMs) {
   if (modulus == nullptr) {
     return;
   }
-  const bool armed = gOta.run(gDownload, gImageFlash, modulus, gBig.rsa,
-                              reinterpret_cast<uint8_t*>(gBig.text) + 2048U, 2048U, hooks, gClock.nowMs());
+  const bridgelogic::BridgeOta::Lent lent{gBig.rsa, reinterpret_cast<uint8_t*>(gBig.text) + 2048U, 2048U};
+  const bool armed = gOta.run(gDownload, gImageFlash, modulus, lent, hooks, gClock.nowMs());
   gHeartbeatBody[0] = '\0';
   if (armed) {
     flushMega(300UL);

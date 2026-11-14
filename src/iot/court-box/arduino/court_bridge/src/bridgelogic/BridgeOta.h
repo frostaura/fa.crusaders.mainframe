@@ -144,12 +144,18 @@ public:
     virtual void during() = 0;
   };
 
+  /// What the caller lends `run`: the RSA workspace and a chunk buffer
+  /// (4-aligned, at least 1 KB). They may overlap: they are never in use at once.
+  struct Lent {
+    dc::RsaWorkspace& work;
+    uint8_t* buffer;
+    size_t bufferCap;
+  };
+
   /// Steps 4–6. True when the copy was armed: the caller restarts. False on
-  /// any failure, with the state and reason recorded. `buffer` (4-aligned,
-  /// at least 1 KB) and `work` are lent by the caller and may overlap: they
-  /// are never in use at once.
+  /// any failure, with the state and reason recorded.
   bool run(IDownload& download, IImageFlash& flash, const uint8_t modulus[dc::kRsa2048Bytes],
-           dc::RsaWorkspace& work, uint8_t* buffer, size_t bufferCap, Hooks& hooks, uint32_t nowMs);
+           const Lent& lent, Hooks& hooks, uint32_t nowMs);
 
   /// An accepted heartbeat with the Mega heard: a probation image is committed.
   void heartbeatAccepted(bool megaHeard);
