@@ -103,7 +103,6 @@ constexpr char kRecRoster[] = "g_roster";
 constexpr char kRecRosterAge[] = "g_rage";
 constexpr char kRecKeys[] = "g_keys";
 constexpr char kRecNet[] = "g_net";
-constexpr char kRecOta[] = "g_ota";
 constexpr char kRecEvents[] = "g_events";
 
 /// How often the roster's age is checkpointed while one is loaded, so a

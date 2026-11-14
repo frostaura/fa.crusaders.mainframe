@@ -14,8 +14,8 @@
 // THE `expect` KEYS THIS SUITE UNDERSTANDS — anything else is a failure, so a
 // server that starts promising something the gate cannot check is found here:
 //   heartbeat: kind, roster_count, code_days_count, code_keys_count, gate
-//              (an object of the six settings), heartbeat_seconds,
-//              ota_version, key_next_id, net_ver
+//              (an object of the five settings), heartbeat_seconds,
+//              key_next (its id), net (its ver)
 //   gate:      opened, unlock_seconds, reason
 //   events:    accepted_through
 //
@@ -29,7 +29,6 @@
 #include <unity.h>
 
 #include "devnet/Net.h"
-#include "devota/Ota.h"
 #include "gatelogic/GateReply.h"
 #include "support/CorpusJson.h"
 
@@ -123,7 +122,6 @@ void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t 
       } numbers[] = {{"unlock_seconds", s.unlockSeconds},
                      {"power_restore_trust_minutes", s.powerRestoreTrustMinutes},
                      {"net_fallback_minutes", s.netFallbackMinutes},
-                     {"ota_probation_minutes", s.otaProbationMinutes},
                      {"device_fault_max_per_hour", s.faultMaxPerHour}};
 
       for (size_t i = 0U; i < sizeof(numbers) / sizeof(numbers[0]); ++i) {
@@ -136,18 +134,6 @@ void checkHeartbeat(const char* file, uint16_t status, const char* body, size_t 
       if (reporting != nullptr) {
         TEST_ASSERT_EQUAL_MESSAGE(flag(reporting), s.faultReporting, file);
       }
-    } else if (strcmp(name, "ota") == 0) {
-      // The emitter names each lifeline object by what identifies it (device-api §11.5).
-      TEST_ASSERT_TRUE_MESSAGE(read.ota.present(), file);
-      devota::Offer offer;
-      TEST_ASSERT_TRUE_MESSAGE(devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate,
-                                                  offer) == devota::Refusal::Ok,
-                               file);
-      char want[devota::kPathCap] = {};
-      TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(value, "version"), want, sizeof(want), nullptr));
-      TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.version, file);
-      TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(value, "path"), want, sizeof(want), nullptr));
-      TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.path, file);
     } else if (strcmp(name, "key_next") == 0) {
       TEST_ASSERT_TRUE_MESSAGE(read.keyNext.present(), file);
       devnet::KeyRing ring;

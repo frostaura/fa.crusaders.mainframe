@@ -24,8 +24,7 @@ GateApp::GateApp(const Ports& ports)
       warmBytesCap_(ports.warmBytesCap), warmClock_(ports.warmClock), coldBoot_(ports.coldBoot),
       keys_(ports.keys), net_(ports.net), compiledKey_(ports.compiledKey), compiledSsid_(ports.compiledSsid),
       compiledPsk_(ports.compiledPsk), compiledBase_(ports.compiledBase), radio_(ports.radio),
-      system_(ports.system), diag_(ports.diag), otaSlot_(ports.otaSlot), download_(ports.download),
-      otaModulus_(ports.otaModulus), setupButton_(ports.setupButton), portal_(ports.portal) {
+      system_(ports.system), diag_(ports.diag), setupButton_(ports.setupButton), portal_(ports.portal) {
 }
 
 void GateApp::fault(const char* code) {
@@ -209,12 +208,9 @@ void GateApp::pass() {
   pumpHeartbeat();
   pumpEvents();
 
-  // 2.0.0's slow concerns, none of which makes a call a member could wait on:
-  // the link supervisor, an update that has been waiting for the door to be
-  // idle, and the stall watchdog.
-  const uint32_t later = clock_.nowMs();
-  pumpSupervisor(later);
-  pumpOta();
+  // 2.0.0's slow concerns, neither of which makes a call a member could wait
+  // on: the link supervisor and the stall watchdog.
+  pumpSupervisor(clock_.nowMs());
   pumpStall(clock_.nowMs());
 
   // AFTER BOTH UPLOADS, so everything this pass noticed — including the HTTP

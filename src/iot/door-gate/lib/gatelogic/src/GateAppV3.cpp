@@ -1,6 +1,6 @@
 // GateApp's 2.0.0 half (docs/specs/door-gate.md §14): what survives a reset,
-// the lifeline (keys, network, signed OTA), the link supervisor, the setup
-// portal, the stall watchdog and the lamp's idle states. Same class as
+// the lifeline (keys, network), the link supervisor, the setup portal, the
+// stall watchdog and the lamp's idle states. Same class as
 // GateApp.cpp, a second translation unit so neither file is unreadable.
 
 #include <stdio.h>
@@ -77,34 +77,7 @@ void GateApp::Between::betweenCalls() {
   app_.pumpLock();
 }
 
-void GateApp::DownloadHooks::duringDownload() {
-  app_.watchdog_.kick();
-  app_.pumpLock();
-  app_.ledPin_.write(ledPinLevel(app_.led_.on(app_.clock_.nowMs()), app_.ledActiveHigh_));
-}
-
 // --- boot -------------------------------------------------------------------
-
-bool GateApp::checkFirmwareAtBoot() {
-  if (blobs_ == nullptr) {
-    return false;
-  }
-  if (ota_.begin(blobs_, firmwareVersion_) != GateOta::Boot::RollBack) {
-    led_.setProbation(ota_.inProbation());
-    return false;
-  }
-  // Three resets on probation: back to the other slot, which still holds the
-  // image that was running before (§14.2), and never this version again.
-  ota_.markRolledBack("probation");
-  if (otaSlot_ != nullptr) {
-    static_cast<void>(otaSlot_->rollBack());
-  }
-  ++restartsAsked_;
-  if (system_ != nullptr) {
-    system_->restart();
-  }
-  return true;
-}
 
 void GateApp::restoreState(uint32_t nowMs) {
   // From a static blank rather than `GateBoardState()`: the temporary is the
@@ -408,10 +381,6 @@ void GateApp::applySettings(const HeartbeatRead& read) {
 void GateApp::heartbeatAccepted(uint32_t nowMs) {
   lastHeartbeatOk_ = true;
   restoreReported_ = true;
-  // Probation commits on an ACCEPTED beat, not a readable one (§11.1): an
-  // image whose roster reader is broken can still be replaced by the next.
-  ota_.heartbeatAccepted();
-  led_.setProbation(ota_.inProbation());
   if (net_ != nullptr) {
     net_->heartbeatAccepted();
   }
@@ -426,19 +395,10 @@ void GateApp::adoptLifeline(const HeartbeatRead& read, uint32_t nowMs) {
   if (read.net.present() && net_ != nullptr) {
     static_cast<void>(net_->adopt(read.net.at, read.net.len, nowMs));
   }
-  if (read.ota.present() && otaModulus_ != nullptr && otaSlot_ != nullptr && download_ != nullptr) {
-    ota_.offer(read.ota, otaModulus_, nowMs);
-  }
 }
 
 GateReport GateApp::report(GateDiag& diag) const {
   GateReport r;
-  const FwState state = ota_.state();
-  r.fwState = fwStateName(state);
-  if (state == FwState::RolledBack || state == FwState::Failed) {
-    r.fwFailed = ota_.failedVersion();
-    r.fwError = ota_.error();
-  }
   if (net_ != nullptr) {
     r.netVer = net_->version();
     r.netSrc = netSourceName(net_->source());
@@ -573,31 +533,6 @@ void GateApp::takePortalForm(const PortalForm& form) {
   }
   portal_->accept();
   restart();
-}
-
-void GateApp::pumpOta() {
-  const uint32_t now = clock_.nowMs();
-  if (ota_.inProbation() && ota_.tick(now, state_.settings.otaProbationMinutes) && idle(now)) {
-    // No accepted heartbeat inside the window: back to the previous image.
-    ota_.markRolledBack("probation");
-    if (otaSlot_ != nullptr) {
-      static_cast<void>(otaSlot_->rollBack());
-    }
-    restart();
-    return;
-  }
-  if (!ota_.pending() || blocked_ || otaSlot_ == nullptr || download_ == nullptr || otaModulus_ == nullptr ||
-      !idle(now)) {
-    return;
-  }
-  led_.setDownloading(true);
-  beforeBlocking();
-  const bool switched = ota_.run(*download_, *otaSlot_, otaModulus_, downloadHooks_, now);
-  afterBlocking();
-  led_.setDownloading(false);
-  if (switched) {
-    restart();
-  }
 }
 
 void GateApp::pumpStall(uint32_t nowMs) {

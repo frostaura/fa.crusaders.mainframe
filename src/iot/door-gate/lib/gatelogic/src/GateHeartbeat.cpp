@@ -145,15 +145,8 @@ private:
 
 namespace {
 
-/// The firmware and network facts: fw_state, and fw_failed / fw_error when set.
-void writeFirmware(Writer& w, const GateReport& report) {
-  w.field("fw_state", report.fwState);
-  if (report.fwFailed != nullptr && report.fwFailed[0] != '\0') {
-    w.field("fw_failed", report.fwFailed);
-  }
-  if (report.fwError != nullptr && report.fwError[0] != '\0') {
-    w.field("fw_error", report.fwError);
-  }
+/// The network facts, and what this boot ran on until its first accepted beat.
+void writeNetwork(Writer& w, const GateReport& report) {
   w.number("net_ver", report.netVer);
   w.field("net_src", report.netSrc);
   if (report.restore != nullptr) {
@@ -197,7 +190,7 @@ size_t renderGateHeartbeatV3(char* out, size_t cap, const GateBeat& beat) {
   out[0] = '\0';
   const GateReport& report = beat.report;
   if (beat.mac == nullptr || beat.mac[0] == '\0' || beat.firmwareVersion == nullptr ||
-      report.fwState == nullptr || report.netSrc == nullptr) {
+      report.netSrc == nullptr) {
     return 0U;
   }
   char uptime[21] = {};
@@ -218,7 +211,7 @@ size_t renderGateHeartbeatV3(char* out, size_t cap, const GateBeat& beat) {
   if (beat.counters.eventsLost != 0U) {
     w.number("events_lost", saturate(beat.counters.eventsLost));
   }
-  writeFirmware(w, report);
+  writeNetwork(w, report);
   if (report.diag != nullptr) {
     writeDiag(w, *report.diag);
   }

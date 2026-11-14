@@ -176,7 +176,7 @@ within one heartbeat as `Kind=Gate`.
 |---|---|
 | PlatformIO environment | `[env:door_gate]` |
 | Board | `esp32:esp32` 2.0.17, FQBN `esp32:esp32:esp32` |
-| `lib/` modules | `devapi`, `devcrypto`, `devlink`, `devnet`, `devota`, `esp32_hal`, `eventq`, `fwversion`, `gatelogic`, `hal`, `memcode`, `roster`, `timebase` |
+| `lib/` modules | `devapi`, `devcrypto`, `devlink`, `devnet`, `esp32_hal`, `eventq`, `fwversion`, `gatelogic`, `hal`, `memcode`, `roster`, `timebase` |
 | Build flags in `src/build_config.h` | 23 |
 
 | Library | Version | Where | Licence file |

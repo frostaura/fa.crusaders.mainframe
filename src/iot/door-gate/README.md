@@ -22,25 +22,24 @@ sources compile for the ESP32 and for the host test runner — which is what let
 
 ---
 
-## 2.0.0 — the last cable flash
+## 2.0.0 — device contract v3
 
 Gate **2.0.0** is device contract v3 for the door
 ([`docs/specs/door-gate.md`](../../../docs/specs/door-gate.md) §14,
-[`docs/specs/device-api.md`](../../../docs/specs/device-api.md)). The USB flash that
-puts it on a board is the last one that board gets, so everything an operator might
-change later changes without a cable:
+[`docs/specs/device-api.md`](../../../docs/specs/device-api.md)). Everything an
+operator might change about a running door changes without a cable; the firmware
+image itself does not — a new image is a USB flash, by decision, and there is no
+over-the-air update:
 
 | What | How it changes after the flash | Where it lives |
 |---|---|---|
-| the firmware | **signed OTA** into the other app slot: the offer's grammar, target, a strictly newer version and the release signature are checked before a byte is fetched; the download is hashed as it streams, verified again, and only then is the boot partition switched; a new image is on **probation** until a heartbeat is accepted within `ota_probation_minutes`, and three resets or the window passing roll it back to the other slot — which still holds the old image — for good | `GateOta`, `Esp32OtaSlot`, `Esp32Download` |
 | the device key | `key_next` on the heartbeat; persisted before it is used; a 401 retried once with the other key; both kept | `GateKeys` |
 | WiFi and the server URL | the server's `net` (all or nothing) or the **setup portal**; profiles tried new → previous → compiled; a new base URL that brings no accepted heartbeat within `net_fallback_minutes` abandoned for the old one | `GateNet` |
 | what survives a reset | warm (watchdog, panic, brown-out, software): roster, member-code keys and step clock, gate settings and replay ring in RTC memory, every age continuing; cold (power-on): the same from NVS, written only on a **content** change, the roster trusted for `power_restore_trust_minutes`; undelivered events persisted and re-uploaded with their own boot id | `GateStore`, `GateAppV3.cpp` |
 
 The values in `secrets.h` — WiFi, base URL, `DEVICE_API_KEY` — are **first-boot
-defaults** only. Two values are new and mandatory: `OTA_PUBLIC_KEY_N`, the release
-key's modulus (512 hex; the corpus's test keys are refused at compile time), and
-`SETUP_AP_PASSWORD`, the portal's WPA2 password, printed on the enclosure label.
+defaults** only. One value is new and mandatory: `SETUP_AP_PASSWORD`, the portal's
+WPA2 password, printed on the enclosure label.
 
 **The setup portal.** Power the door up, wait for the two boot blinks, then hold
 the board's **BOOT** button for five seconds within the first minute (never *during*
@@ -708,8 +707,6 @@ owed and is a shared-library change neither device's lane could make alone.
 | 2 quick blinks | the board has just booted |
 | Solid, the moment a scan is read | the board is asking the server (2.0.0, DG-4) — written straight to the pin before the call |
 | Long-short, repeating | the setup portal is open (2.0.0) |
-| 2 Hz | an update is downloading (2.0.0) |
-| A double blip every 5 s | a new image on probation, not yet committed (2.0.0) |
 | One short blip every 5 s | degraded: the last heartbeat failed, or the roster is empty or older than two intervals (2.0.0, DG-6) |
 
 Solid beats everything: while the door is open the lamp is solid even if the WiFi
@@ -920,7 +917,7 @@ and every flag in `build_config.h` that is safe to change.
 That folder is **generated** and is never hand-edited: `make arduino-export`
 writes it from `lib/`, `../shared/lib/`, `src/` and the `-D` flags in
 [`platformio.ini`](platformio.ini) (with `build_unflags` applied, which is what
-makes the sketch report **2.0.0** — device contract v3, the last cable flash
+makes the sketch report **2.0.0** — device contract v3
 (see *2.0.0* above); the board environment spells its version out rather than
 inheriting `[common]`'s), and `make arduino-check`
 regenerates and fails on a diff. A hand-edit
@@ -933,7 +930,7 @@ against:
 make install-iot                 # once: creates src/iot/.venv
 cp src/iot/door-gate/src/common/secrets.h.example \
    src/iot/door-gate/src/common/secrets.h
-# fill in WIFI_SSID, WIFI_PASSWORD, API_BASE_URL, DEVICE_API_KEY, OTA_PUBLIC_KEY_N and
+# fill in WIFI_SSID, WIFI_PASSWORD, API_BASE_URL, DEVICE_API_KEY and
 # SETUP_AP_PASSWORD — it is gitignored
 make build-iot                   # compiles every board target, this one included
 src/iot/.venv/bin/pio run -d src/iot/door-gate -e door_gate -t upload
@@ -947,12 +944,12 @@ until it is screwed to a wall. Each route reads its own copy — the PlatformIO
 build `src/common/secrets.h`, the sketch `arduino/door_gate/secrets.h` — and
 both are gitignored.
 
-**This is the LAST cable flash.** After it, a firmware change is a signed release
-uploaded in the console and offered over the heartbeat (device-api.md §7); the
-board's image fills about 66% of one of the two 1.25 MB app slots of the pinned
-`default.csv` partition table, which is what leaves the other slot for the update.
-Whether the core's prebuilt bootloader also has app rollback enabled is a bench
-check; the firmware's own probation does not depend on it.
+**Every firmware change is a cable flash**, by either route above; there is no
+over-the-air update. The image fills about 67% of the 1.25 MB app slot of the
+pinned `default.csv` partition table — the ESP32 core's default and the Arduino
+IDE's, so both routes flash the same layout and a reflash leaves NVS — the keys, the
+network and the cold records of §14.1 — where it was (unless the IDE's *Erase All
+Flash Before Sketch Upload* is switched on).
 
 The monitor runs at 115200 — unlike the court bridge, whose UART0 *is* its link
 to the Mega. On this board UART0 is the USB console and nothing else; the scanner
@@ -965,11 +962,10 @@ door-gate/
   platformio.ini          the wiring flags, the board pin and the host test envs
   lib/gatelogic/          every decision, pure, host-tested
     GateApp               the loop itself — one pass, over ports a fake answers
-    GateAppV3.cpp         its 2.0.0 half: persistence, lifeline, supervisor, portal, OTA, stall
+    GateAppV3.cpp         its 2.0.0 half: persistence, lifeline, supervisor, portal, stall
     GateReply, JsonView   the §11.2 readers: strict JSON, exact kinds, drift
     GateStore             sealed flash records and the warm (RTC) image
     GateKeys, GateNet     the key ring, the network, the portal form, the setup gesture
-    GateOta               the signed-OTA runner and probation
     GatePorts             watchdog, link, scanner-error, decision-log and 2.0.0 ports
     ApiBaseUrl/StaticText compile-time checks on API_BASE_URL, C++11-clean
   lib/esp32_hal/          the only place allowed to include Arduino headers
@@ -980,7 +976,7 @@ door-gate/
   test/test_gatelogic/    the unit suite, including the whole loop
   test/test_gate_corpus/  every gate/ contract vector, executed and counted
   test/test_gate_compat/  the compat/ door_gate and scan cases, and the budget rows
-  test/test_gate_v3/      2.0.0 across simulated power cuts, warm resets and OTA reboots
+  test/test_gate_v3/      2.0.0 across simulated power cuts, warm resets and restarts
   test/test_gate_server_replies/  the server's real replies (make device-replay-check)
 ```
 

@@ -101,7 +101,6 @@ bool readGateSettings(const jv::Value& gate, GateSettings& settings, Drift& drif
                   drift);
   unsignedSetting(gate, "power_restore_trust_minutes", 0U, 120U, settings.powerRestoreTrustMinutes, drift);
   unsignedSetting(gate, "net_fallback_minutes", 3U, 60U, settings.netFallbackMinutes, drift);
-  unsignedSetting(gate, "ota_probation_minutes", 3U, 60U, settings.otaProbationMinutes, drift);
   const jv::Value reporting = jv::member(gate, "device_fault_reporting");
   if (reporting.present() && !jv::asBool(reporting, settings.faultReporting)) {
     driftOf(drift, "gate", "device_fault_reporting");
@@ -365,8 +364,8 @@ HeartbeatRead readHeartbeat(uint16_t status, const char* body, size_t len, uint3
   }
   read.accepted = true;
   // THE LIFELINE FIRST, and from any complete object: it is how a board whose
-  // other readers no longer understand the server is replaced (§11.1).
-  read.ota = jv::member(object, "ota");
+  // other readers no longer understand the server keeps its key and its
+  // network (§11.1).
   read.keyNext = jv::member(object, "key_next");
   read.net = jv::member(object, "net");
   static_cast<void>(readHeartbeatSeconds(object, state.heartbeatMs, read.drift));

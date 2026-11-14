@@ -41,7 +41,6 @@
 #include "devlink/EventUpload.h"
 #include "devlink/RosterSync.h"
 #include "devnet/Net.h"
-#include "devota/Ota.h"
 #include "eventq/Event.h"
 #include "gatelogic/GateApp.h"
 #include "gatelogic/GateConfig.h"
@@ -210,21 +209,9 @@ void executeV3HeartbeatRequest(const char* id, const char* expected, size_t expe
   static_cast<void>(
       gatelogic::jv::asUint32(gatelogic::jv::member(object, "events_lost"), counters.eventsLost));
 
-  static char fwState[16];
-  static char fwFailed[16];
-  static char fwError[16];
   static char netSrc[16];
   static char restore[16];
   gatelogic::GateReport report;
-  TEST_ASSERT_TRUE(
-      gatelogic::jv::asString(gatelogic::jv::member(object, "fw_state"), fwState, sizeof(fwState), n));
-  report.fwState = fwState;
-  if (gatelogic::jv::asString(gatelogic::jv::member(object, "fw_failed"), fwFailed, sizeof(fwFailed), n)) {
-    report.fwFailed = fwFailed;
-  }
-  if (gatelogic::jv::asString(gatelogic::jv::member(object, "fw_error"), fwError, sizeof(fwError), n)) {
-    report.fwError = fwError;
-  }
   TEST_ASSERT_TRUE(gatelogic::jv::asUint32(gatelogic::jv::member(object, "net_ver"), report.netVer));
   TEST_ASSERT_TRUE(
       gatelogic::jv::asString(gatelogic::jv::member(object, "net_src"), netSrc, sizeof(netSrc), n));
@@ -486,30 +473,12 @@ void executeV3Read(const char* id, const char* payload, size_t len, const char* 
                                        id);
       TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(gate, "net_fallback_minutes")),
                                        state.settings.netFallbackMinutes, id);
-      TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(gate, "ota_probation_minutes")),
-                                       state.settings.otaProbationMinutes, id);
       TEST_ASSERT_EQUAL_UINT32_MESSAGE(
           corpus::unsignedValue(corpus::member(gate, "device_fault_max_per_hour")),
           state.settings.faultMaxPerHour, id);
     }
   }
 
-  const char* ota = corpus::member(expect, "ota");
-  TEST_ASSERT_EQUAL_MESSAGE(ota != nullptr, read.ota.present(), id);
-  if (ota != nullptr) {
-    devota::Offer offer;
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(
-        "ok",
-        devota::refusalName(devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate, offer)),
-        id);
-    char want[400] = {};
-    text(ota, "version", want, sizeof(want));
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.version, id);
-    text(ota, "path", want, sizeof(want));
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.path, id);
-    text(ota, "sig", want, sizeof(want));
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, offer.sig, id);
-  }
   const char* keyNext = corpus::member(expect, "key_next");
   TEST_ASSERT_EQUAL_MESSAGE(keyNext != nullptr, read.keyNext.present(), id);
   if (keyNext != nullptr) {

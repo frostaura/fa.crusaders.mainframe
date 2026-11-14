@@ -2,7 +2,7 @@
 // adopts from the bodies a later server might send (docs/specs/device-api.md
 // §11). Every `door_gate` case and every gate `scan` case runs through the
 // board's own code (gatelogic::readHeartbeat, readScanReply, readEventsReply,
-// and the lifeline's devota/devnet readers), and the gate's `budgets` rows are
+// and the lifeline's devnet readers), and the gate's `budgets` rows are
 // asserted equal to the buffers this image compiles in. Executed == declared.
 //
 // HOW A CASE IS RUN: the base body is adopted first and must produce `prior`;
@@ -15,7 +15,6 @@
 
 #include "devlink/RosterSync.h"
 #include "devnet/Net.h"
-#include "devota/Ota.h"
 #include "gate_support/BigCorpus.h"
 #include "gatelogic/GateReply.h"
 #include "support/CorpusJson.h"
@@ -85,23 +84,14 @@ size_t bodyOf(const char* object, const char* name) {
 // --- the observables -------------------------------------------------------
 
 struct Lifeline {
-  char otaVersion[16] = {};
   char keyNextId[16] = {};
   uint32_t netVer = 0U;
 };
 
-/// The lifeline objects as the board reads them: the OTA offer for its own
-/// target, a key_next against a ring holding only the compiled key, a net
-/// against nothing applied yet.
+/// The lifeline objects as the board reads them: a key_next against a ring
+/// holding only the compiled key, a net against nothing applied yet.
 Lifeline lifelineOf(const gatelogic::HeartbeatRead& read) {
   Lifeline out;
-  if (read.ota.present()) {
-    devota::Offer offer;
-    if (devota::parseOffer(read.ota.at, read.ota.len, devota::kTargetDoorGate, offer) ==
-        devota::Refusal::Ok) {
-      memcpy(out.otaVersion, offer.version, strlen(offer.version) + 1U);
-    }
-  }
   if (read.keyNext.present()) {
     devnet::KeyRing ring;
     memcpy(ring.currentId, "k0", 3U);
@@ -128,8 +118,6 @@ void assertGate(const char* id, const char* expected, const gatelogic::GateSetti
       s.powerRestoreTrustMinutes, id);
   TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(expected, "net_fallback_minutes")),
                                    s.netFallbackMinutes, id);
-  TEST_ASSERT_EQUAL_UINT32_MESSAGE(corpus::unsignedValue(corpus::member(expected, "ota_probation_minutes")),
-                                   s.otaProbationMinutes, id);
   TEST_ASSERT_EQUAL_MESSAGE(flag(expected, "device_fault_reporting"), s.faultReporting, id);
   TEST_ASSERT_EQUAL_UINT32_MESSAGE(
       corpus::unsignedValue(corpus::member(expected, "device_fault_max_per_hour")), s.faultMaxPerHour, id);
@@ -214,7 +202,6 @@ void assertObservables(const char* id, const char* prior, const char* changes,
   assertRoster(id, observable(prior, changes, "roster"), state.roster);
   assertDays(id, observable(prior, changes, "code_days"), state.codes);
   assertKeys(id, observable(prior, changes, "code_keys"), state.codes);
-  assertString(id, observable(prior, changes, "ota_version"), life.otaVersion);
   assertString(id, observable(prior, changes, "key_next_id"), life.keyNextId);
   const char* net = observable(prior, changes, "net_ver");
   TEST_ASSERT_EQUAL_UINT32_MESSAGE(isNull(net) ? 0U : static_cast<uint32_t>(corpus::unsignedValue(net)),

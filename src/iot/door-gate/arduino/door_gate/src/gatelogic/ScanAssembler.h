@@ -138,7 +138,8 @@ public:
   /// it cannot spoil the next member's scan.
   ScanEvent idle(uint32_t nowMs);
 
-  /// Some part of a line is held. The board is not idle while one is (§14.2).
+  /// Some part of a line is held. The board is not idle while one is, so no
+  /// self-restart takes the door down under a half-read scan.
   bool partial() const { return len_ > 0U || overflow_ || corrupt_; }
 
 private:

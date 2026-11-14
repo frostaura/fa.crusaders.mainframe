@@ -495,9 +495,9 @@ private:
     ports.bootReason = nullptr;
     ports.heartbeatBody = heartbeatBody_;
     ports.heartbeatBodyCap = sizeof(heartbeatBody_);
-    // 2.0.0. No OTA slot and no setup portal: a simulator cannot replace its own
-    // image or open an access point, and pretending would test the pretence.
-    // Both are proven against the same GateApp in test/test_gate_v3.
+    // 2.0.0. No setup portal: a simulator cannot open an access point, and
+    // pretending would test the pretence. The portal is proven against the same
+    // GateApp in test/test_gate_v3.
     ports.blobs = &blobs_;
     ports.warmBytes = warm_;
     ports.warmBytesCap = sizeof(warm_);
@@ -588,7 +588,7 @@ private:
         "[status] link=%d released=%d relocking_ms=%lu capped=%lu roster=%u age_ms=%lu unlock_ms=%lu "
         "queued=%u lost=%lu no_push=%lu calls=%lu worst_call_ms=%lu worst_gap_ms=%lu wdt_breaches=%lu "
         "dropped_scan_bytes=%lu fault_report=%d fault_per_hour=%u fault_window_ms=%lu fault_codes=%u "
-        "fault_overflow=%lu carried=%u restore=%s net_src=%s fw_state=%s degraded=%d t=%lums\n",
+        "fault_overflow=%lu carried=%u restore=%s net_src=%s degraded=%d t=%lums\n",
         app_.linkUp() ? 1 : 0, lock_.released() ? 1 : 0,
         static_cast<unsigned long>(unlockTimer_.relockingForMs(clock_.nowMs())),
         static_cast<unsigned long>(app_.capForcedCloses()), static_cast<unsigned>(roster_.size()),
@@ -602,7 +602,7 @@ private:
         static_cast<unsigned>(faults_.tracked()), static_cast<unsigned long>(faults_.overflowPending()),
         static_cast<unsigned>(app_.carriedEvents()),
         app_.restoreReport() == nullptr ? "reported" : app_.restoreReport(), netSourceName(net_.source()),
-        fwStateName(app_.ota().state()), app_.degraded() ? 1 : 0, static_cast<unsigned long>(clock_.nowMs()));
+        app_.degraded() ? 1 : 0, static_cast<unsigned long>(clock_.nowMs()));
     static_cast<void>(fflush(stdout));
   }
 
