@@ -106,8 +106,8 @@ USB flash the Mega will ever get. The wire is
 - **No identity overlays.** `CONNECTED` / `CRUSADERS COURTS` are no longer
   painted on WiFi edges; the landing status says the same thing.
 - **No reflash for an operator change.** WiFi, server address and device key
-  change from the console or at the setup portal (hold court A and court D for
-  five seconds within a minute of power-on). The firmware itself has no remote
+  change from the console and reach the box in its heartbeat; a box the server
+  cannot reach is re-pointed by a cable flash. The firmware itself has no remote
   update — a new image is a cable flash ([`device-api.md`](device-api.md) §7).
   Every hardware fact the Mega used to have
   compiled in — relay level, LCD address, scanner baud and line end, which

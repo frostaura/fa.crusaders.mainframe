@@ -2026,12 +2026,11 @@ server's `accepted_through`, so an offline evening survives a power cut.
 an image and downloads nothing, whatever it names in `caps`. A door is answered as v3 when it names
 `key:1` or `net:1`; `ota:1` alone unlocks nothing. A new gate image is a USB flash at the door.
 
-### 14.3 Key rotation, network changes, the setup portal
+### 14.3 Key rotation and network changes
 
-[`device-api.md`](device-api.md) §6 and §8, unchanged. The gate's setup gesture is the board's
-**BOOT button held for five seconds within 60 s of power-on** — after the boot blinks, never during
-power-up, which enters the ROM loader. The gate has no screen, so the portal's name is on the
-enclosure label beside `SETUP_AP_PASSWORD`.
+[`device-api.md`](device-api.md) §6 and §8, unchanged. Keys and the network reach the gate in its
+heartbeat. The gate has no access point and no button gesture: its WiFi and server address are
+compiled in, so a gate the server cannot reach is re-pointed by a cable flash with new values.
 
 ### 14.4 The link supervisor, and the checks the analysis asked for
 
@@ -2063,7 +2062,6 @@ cue.
 | watchdog not armed | 4 Hz (unchanged) |
 | **healthy idle** | dark (unchanged) |
 | **degraded idle**: the last heartbeat was not a 200, the roster is empty, or it is older than two intervals | one short blip every 5 s (DG-6) |
-| **setup portal open** | long-short, repeating |
 
 ### 14.6 Forward compatibility, budgets and telemetry (addendum, 2026-11-13)
 
