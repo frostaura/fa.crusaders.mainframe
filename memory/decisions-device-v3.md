@@ -1,17 +1,16 @@
 ---
 name: crusaders-mainframe-decisions-device-v3
-description: "Device contract v3 (2026-11-13): OTA removed 2026-11-14 so every firmware change is a cable flash, the Mega a steered renderer and relay guard, a continuous ON-only snapshot reconcile, runtime layout, key rotation."
+description: "Device contract v3 (2026-11-13): OTA and the setup hotspot removed 2026-11-14, so every change is a cable flash with four secrets; the Mega a steered renderer and relay guard, an ON-only snapshot reconcile, key rotation."
 type: decision
 last_verified: 2026-11-13
 ---
 
-# Decisions — device contract v3 (2026-11-13; OTA removed 2026-11-14)
+# Decisions — device contract v3 (2026-11-13; OTA and hotspot removed 2026-11-14)
 
 Founder decisions taken by the orchestrator under Dean's "fix any and all" go-ahead, after the
 2026-11-13 pre-go-live analysis. Specs: `docs/specs/device-api.md`, `device-serial-protocol.md`
-(v3 chapter), `door-gate.md` §14; corpus families `provision/`, `display/`, `compat/`. Versions:
-Mega 3.0.0, bridge 3.1.0, door gate 2.0.0. Implemented by four parallel lanes (backend-device,
-court-box firmware, door-gate firmware, frontend-admin).
+(v3), `door-gate.md` §14; corpus `provision/`, `display/`, `compat/`. Mega 3.0.0, bridge 3.1.0,
+gate 2.0.0, built by four lanes (backend-device, court-box, door-gate, frontend-admin).
 
 - **No remote firmware update: every firmware change, to any chip, is a cable flash** (founder,
   2026-11-14: *"I don't want OTA. That's a complexity we don't need right now."*). *Why, as he gave
@@ -19,10 +18,15 @@ court-box firmware, door-gate firmware, frontend-admin).
   update paths, a release key to keep, rollback and probation proven on the host and never on a chip,
   and ~4,000 deleted lines in the court box alone (`f4a9b20b`). Removed whole, not switched off: no
   `ota` in any answer, no download route, no firmware table, no console panel, no signer;
-  `DeviceContractV3` was edited in place because it is unreleased. Kept: key rotation, runtime
-  network, the portal, flash persistence and the lifeline. **It reverses the old "the next USB flash
+  `DeviceContractV3` was edited in place because it is unreleased. Kept: key rotation, the
+  server's `net`, flash persistence and the lifeline. **It reverses the old "the next USB flash
   is the last" rule:** the planned flash is now the last *planned* visit, never the last possible
   one (`device-api.md` §1, §7). Restorable from `99e9c5ee`.
+- **No setup hotspot: a flash takes exactly `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL`,
+  `DEVICE_API_KEY`** (founder, 2026-11-14: *"we don't need a hotspot. We just need the cable to
+  flash, just like before"*; `899e4388`). *Why:* the flashing contract stays as it was; the portal
+  was the only reason for a fifth value. Gone: both portals, `!HELD` (29 verbs), `SETUP_AP_PASSWORD`,
+  `local` adoption. Dead residue: console/backend still handle `net_src: "local"`.
 - **The Mega is flashed to 3.0.0 too, and v3 makes cable flashes rare.** *Why:* the analysis found
   the stuck-screen, lost-`!ON` and Mega-reset defects live on the Mega, so leaving it at 2.x would
   freeze them in. Everything the bridge may ever need from it is a v3 frame or a bounded `!CFG`
@@ -48,8 +52,8 @@ court-box firmware, door-gate firmware, frontend-admin).
   click used to mean reflashing every board.
 - **D10 pay-for leaves the court-box image**; the server endpoint stays. *Why:* unreachable since
   2.3.0, and it can return with a bridge cable flash alone.
-- **Deferred, not rejected:** a remote "switch a court off" (needs only a server change and a bridge
-  cable flash, since the Mega obeys `!OFF`); a configuration QR at the door (the portal covers it).
+- **Deferred, not rejected:** a remote "switch a court off" (a server change and a bridge cable
+  flash; the Mega obeys `!OFF`).
 - **The same day's addendum** made the frozen firmware forward-compatible for its whole life, moved
   every compiled hardware fact to a setting, and made every board report its own health:
   `decisions-device-v3-compat.md`, `decisions-device-v3-hardware.md`, and for the member code

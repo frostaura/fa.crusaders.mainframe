@@ -1,65 +1,59 @@
 ---
 name: crusaders-mainframe-state
-description: "Ironclad passes 1-2 plus the OTA removal on fix/ironclad, PR #15 open, not merged (2026-11-14). No OTA: Mega 3.0.0, bridge 3.1.0, gate 2.0.0, every firmware change a cable flash. Production last seen down (1033)."
+description: "PR #15 (ironclad, cable-flash only) merged to main 2026-11-14; PR #16 (no hotspot, bridge scan flows, Mega taps) open. Mega 3.0.0, bridge 3.1.0, gate 2.0.0, flashed by cable with four secrets. Production last seen down (1033)."
 type: state
 last_verified: 2026-11-14
 ---
 
 # Current state
 
-Re-measured **2026-11-14** by hand (`ls-remote`, `rev-parse`, `status`); re-run, never inherit.
+Re-measured **2026-11-14** by hand (`ls-remote`, `gh pr view/checks`, `gh run list`); re-run, never inherit.
 
-**The code.** The ironclad pre-go-live pass (Dean: "fix any and all, full e2e testing") ran its
-fix lanes in `~/src/.crusaders-wt/` worktrees, in two passes, both integrated on **`fix/ironclad`**
-(worktree `…/integration`) over `origin/main` = `a77a1d72`, **open as PR #15** (not merged; Auto-fix
-is switched on from the PR bar). Dispositions: `https://claude.ai/artifact/DcXVM42d3H3nhxoztN8BPA`.
-Integrations: [`decisions-ironclad-integration.md`](decisions-ironclad-integration.md) (pass 1,
-nine lanes) and [`decisions-ironclad-integration-pass2.md`](decisions-ironclad-integration-pass2.md)
-(bridge-ota, app-rest). Lanes' own decisions: `decisions-bridge-3-1`, `decisions-app-rest-pass2`,
-`decisions-*-v3*`, `decisions-money-golive`, `decisions-platform-*`, `decisions-release-ops`,
-`decisions-*-golive`. The iCloud clone is still at `64ec7f43` (2026-10-22), untouched.
+**The code.** The ironclad pre-go-live pass (Dean: "fix any and all, full e2e testing") and the
+founder's OTA removal were integrated on `fix/ironclad` and **merged to `main` as PR #15 at
+`4e4ee0db`** (Dean: "merge when green"). Dispositions: `https://claude.ai/artifact/DcXVM42d3H3nhxoztN8BPA`.
+Integrations: [`decisions-ironclad-integration.md`](decisions-ironclad-integration.md),
+[`decisions-ironclad-integration-pass2.md`](decisions-ironclad-integration-pass2.md); OTA's why in
+[`decisions-device-v3.md`](decisions-device-v3.md). The `main` CI run that publishes images was
+**in progress** at writing. The iCloud clone is still at `64ec7f43` (2026-10-22), untouched.
 
-**After the pass, 2026-11-14:** the founder removed signed OTA everywhere (`fix/no-ota-fw`,
-`fix/no-ota-app`, merged into `fix/ironclad`; why in [`decisions-device-v3.md`](decisions-device-v3.md)).
-The pre-removal tree is `99e9c5ee` — the tip `origin/fix/ironclad` still pointed at when this was
-written, so the removal and the V-1 follow-up were local commits above it; re-run `ls-remote`.
-V-1/V-2 were fixed and re-walked in Chrome; V-1 was then narrowed so a member row wraps only while
-a confirm is armed (`1b9c4b9d`, not re-walked here).
+**Open: PR #16** (`fix/firmware-final` → `main`, head `79a2fe54`, not merged): no setup hotspot
+([`decisions-device-v3.md`](decisions-device-v3.md)), the bridge scan flows
+([`decisions-bridge-scan-flows.md`](decisions-bridge-scan-flows.md)), the Mega taps
+([`decisions-court-box-v3-firmware.md`](decisions-court-box-v3-firmware.md)), the entrypoint deploy
+fix ([`decisions-release-ops.md`](decisions-release-ops.md)).
+**Gates.** PR #15: CI green before merge (21 checks pass); GitGuardian red only on the published
+test vectors, which `.gitguardian.yaml` now ignores. Local gates on `firmware-final`, as reported
+by the integrating lane (not re-run here): `test-iot` 177/418/178, `build-iot`, arduino-export no
+diff, corpus-check, complexity, Linux gcc strict clean, 20k soak pass.
 
-**Gates after the OTA removal:** see the next commit.
-
-**Firmware as integrated.** Mega **3.0.0** (the generic renderer and relay guard), bridge **3.1.0**
-(key ring, runtime network, setup portal, supervisor, LittleFS persistence; caps `codes:m1 hb:3
-lcd:2 key:1 net:1`), door gate **2.0.0** (`codes:m1 key:1 net:1`). **No board updates over the air:
-every firmware change, to any chip, is a cable flash** (`docs/specs/device-api.md` §1, §7). The
-bridge's heap is 26,536 B, 1,960 B above its 24,576 B floor. **No flash is recorded anywhere yet.**
-**Running here:** the `crusaders-int` stack (`:8098`, MailHog `:8035`) runs `fix/ironclad` on its
-own volumes (not checked since the removal); the shared `crusaders` stack (`:8088`) is untouched.
+**Firmware on `fix/firmware-final`.** Mega **3.0.0**, bridge **3.1.0** (caps `codes:m1 hb:3 lcd:2
+key:1 net:1`), gate **2.0.0** (`codes:m1 key:1 net:1`). **No OTA, no hotspot:** every change is
+a cable flash taking exactly `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL`, `DEVICE_API_KEY`; the
+server's `net` and key rotation remain. Measured here at `79a2fe54` (`pio run`): bridge static RAM
+54,256 B, heap **27,664 B, 3,088 B over** the 24,576 B floor; Mega 3,977 B. **No flash is recorded.**
 
 **What only Dean can do, in this order** (`docs/go-live-checklist.md` has every step):
-1. Choose `SETUP_AP_PASSWORD` and label every enclosure with it. Delete any `OTA_PRIVATE_KEY`
-   repository secret if one was set — nothing reads it.
-2. Review and merge PR #15. Redeploy with the **new** `docker-compose.prod.yml`
-   (sha-tagged images, `volume-init`, `backup`). Migrations run on start: PlatformTenantOnboarding,
-   AddLedgerPurchaseId, AddLedgerReversesEntryId, DeviceContractV3.
-3. **Manual step at that redeploy:** a club whose stored PayFast account has no passphrase, or a
-   placeholder one, reads as not configured. Enter it under Settings › Money › PayFast account.
-4. Bring production back. It answered Cloudflare **1033** (no tunnel connector) on 2026-11-13.
-5. Flash the Mega with 3.0.0, then the bridge with 3.1.0 (never 3.0.0). Do the portal check on
-   each box before sealing it (checklist §5).
+1. Redeploy on the Pi with the **existing** Portainer stack file (it works unchanged). Migrations
+   run on start: PlatformTenantOnboarding, AddLedgerPurchaseId, AddLedgerReversesEntryId,
+   DeviceContractV3. Delete any `OTA_PRIVATE_KEY` repository secret — nothing reads it.
+2. **Manual step at that redeploy:** a stored PayFast passphrase that is blank or a placeholder
+   reads as not configured. Enter it under Settings › Money › PayFast account.
+3. Bring production back. It answered Cloudflare **1033** (no tunnel connector) on 2026-11-13.
+4. After PR #16 merges: flash the Mega with 3.0.0, then the bridge with 3.1.0 (never 3.0.0), with
+   the four secrets; the doors with gate 2.0.0. On the first box bench-check relay polarity, the LCD
+   address and size, and FWM-11, and **watch its scan flows**: main.cpp's new wiring has host-test
+   coverage only.
 
-**Open after the pass** (none blocks a redeploy; **the bridge ones now need a cable flash**, so
-they are done before the first flash or each costs a visit to every box):
-- `test_compat`'s executor (move main.cpp's adoption into bridgelogic first); the bridge halves
-  of BR-08/09, DL-07, FSF-06, MCV1-02/06/08, BR-11, BR-14; the dead PayFor source.
-- FM-8: the per-host static shell needs gateway SSI. BM-9: switch the readers first. FC-8's 1.x
-  corner is the contract owner's call. BA-17 and BA-21 need a design decision.
-- Offsite backup cron, branch protection and repo visibility (Dean's, per the release-ops topic).
+**Open** (none blocks a redeploy; bridge items each cost a cable flash of every box):
+- `test_compat`'s executor (move main.cpp's adoption into bridgelogic first); the dead PayFor source;
+  dead `net_src: "local"` handling in the console and backend (no board sends it now).
+- FM-8 needs gateway SSI; BM-9: switch the readers first; FC-8's 1.x corner is the contract
+  owner's; BA-17, BA-21 need a design decision. Offsite backup cron, branch protection, visibility: Dean's.
 - **Founder decision open** (play.md §14 Q4, [`questions.md`](questions.md)): partners who walk in
   behind a scanning PLAYER still count as attended.
 - Toasts never tried with a real screen reader ([`decisions-frontend-shell-r19.md`](decisions-frontend-shell-r19.md)).
-
-**Blueprint** `docs/system-blueprint.html`: fixed in place 2026-11-14, **not republished** (keep URL `https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4`).
+- **Blueprint** `docs/system-blueprint.html`: fixed 2026-11-14, **not republished** (keep URL `https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4`).
 
 **Still outside code:** the relay safety question ([`safety-relays.md`](safety-relays.md)), Carl's
 two lock facts ([`watch-doors.md`](watch-doors.md)), committee sign-off on charge-at-booking, and

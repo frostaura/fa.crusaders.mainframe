@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-door-gate-v3
-description: "Gate 2.0.0 (2026-11-13), flashed by cable like every gate change (OTA removed 2026-11-14): what survives a reset and where, key ring, runtime network and portal, the v3 readers, and why."
+description: "Gate 2.0.0 (2026-11-13), flashed by cable with four secrets (OTA and setup portal removed 2026-11-14): what survives a reset and where, key ring, server-pushed network, the v3 readers, and why."
 type: decision
 last_verified: 2026-11-13
 ---
@@ -40,9 +40,8 @@ addendum topics; the spec is `docs/specs/door-gate.md` §14. These are the door'
 - **A base URL that never earned an accepted beat is abandoned and its version never re-adopted.**
   *Why:* the server re-sends `net` while the board's `net_ver` is lower; re-adopting the typo each
   time the old URL reached the server would be a ten-minute outage on a loop.
-- **The setup form is validated by writing it as the JSON a server `net` would be and reading it
-  with `devnet::adoptNet`.** *Why:* one rule set; a value the portal accepts is one the server
-  would have sent, and the page names the same refusal reasons the console does.
+- *Superseded 2026-11-14 — the BOOT-button setup portal* (`899e4388`: the WebServer portal, the
+  setup LED pattern, `local` adoption; RAM 104,588 → 100,776 B). Why in `decisions-device-v3.md`.
 - **The scanner's idle gap is 150 ms and only ends a line on a pass that found the UART empty**;
   a gap-ended line needs 8+ characters. *Why:* a gap measured across a 4-second call would cut a
   member's scan in two; 8 is the Mega's own rule, so both devices treat suffix-less scanners alike.
@@ -50,6 +49,5 @@ addendum topics; the spec is `docs/specs/door-gate.md` §14. These are the door'
 - **MCV1-10's wire form is the gate's proposal, not yet a corpus vector:** a replay refusal's event
   carries `"reason":"replayed","online":<bool>` after `duration_ms`. The server ignores unknown
   event fields today; the contract and backend lanes own pinning and rendering it.
-- **The simulator has no portal** (a process cannot open an access point); it is proven against
-  the same `GateApp` in `test_gate_v3` with simulated power cuts and warm resets. It gained `--warm`, file-backed records and exit 75 on
-  a restart request.
+- **The simulator runs the same `GateApp`** as `test_gate_v3`, with simulated power cuts and warm
+  resets; it gained `--warm`, file-backed records and exit 75 on a restart request.

@@ -42,5 +42,7 @@ serial protocol are unchanged.
   v1 sequences. Residue: an offline v1 grant commits its replay step when `!ON` is queued, so
   an `!ON` the Mega never acknowledges leaves CODE USED for the rest of that 30 s step.
 
-Static RAM 55,524 B: heap 26,396 B, 1,820 B above the 24,576 B floor (was 26,536). Deepest
-stack path 2,720 B (was 2,608; budget raised to 2,768, goal 3,000): BR-14's paintOutcome layer.
+Measured on the branch, before the hotspot removal joined it: static RAM 55,524 B, heap 26,396 B.
+At the merged tip `79a2fe54` (`pio run`, 2026-11-14): 54,256 B, heap **27,664 B, 3,088 B over** the
+24,576 B floor. Deepest stack path 2,720 B (was 2,608; budget 2,656 → 2,768, goal 3,000): BR-14's
+paintOutcome layer; the new press answers are `noinline` so handleButton's frame stays out of it.
