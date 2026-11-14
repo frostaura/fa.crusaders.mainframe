@@ -1,5 +1,7 @@
 #include "bridgelogic/FaultLog.h"
 
+#include "bridgelogic/FlashTable.h"
+
 namespace bridgelogic {
 
 namespace {
@@ -8,7 +10,8 @@ namespace {
 /// somebody else's meaning — checked at compile time below. Kept beside the
 /// enum rather than in a switch for the reason proto::errorName's table is: a
 /// new fault cannot be added without also giving it a name.
-constexpr const char* kFaultNames[kFaultCount] = {
+/// BRIDGE_FLASH: pointers only, read a whole word at a time.
+constexpr const char* kFaultNames[kFaultCount] BRIDGE_FLASH = {
     "serial_badcrc",    "serial_badframe",    "serial_overrun_rx",  "serial_overrun_tx",
     "serial_badverb",   "serial_badarg",      "serial_nocourt",     "mega_link_lost",
     "mega_link_back",   "on_not_acked",       "ext_refused",        "relay_cmd_dropped",
@@ -17,16 +20,20 @@ constexpr const char* kFaultNames[kFaultCount] = {
     "queue_no_push",    "queue_events_lost",  "store_write_failed", "clock_corrected",
     "roster_rejected",  "http_4xx",           "http_5xx",           "http_timeout",
     "api_breaker_open", "heartbeat_rejected", "mega_unacked",       "relight_failed",
-    "screen_dropped",   "fault_overflow",
+    "screen_dropped",   "net_fallback",       "fault_overflow",
 };
 
 /// One return statement and recursion, not a loop: the generated sketches
 /// compile at gnu++11, where a constexpr function body may hold only a return.
-constexpr bool namesFitTheSubject(uint8_t i = 0U, uint8_t len = 0U) {
+/// Two recursions, not one walking every character of every name: one name
+/// more took the single walk past GCC's 512-deep constexpr limit.
+constexpr uint8_t nameLength(uint8_t i, uint8_t len = 0U) {
+  return kFaultNames[i][len] == '\0' ? len : nameLength(i, static_cast<uint8_t>(len + 1U));
+}
+
+constexpr bool namesFitTheSubject(uint8_t i = 0U) {
   return i >= kFaultCount ||
-         (kFaultNames[i][len] == '\0'
-              ? (len <= eventq::kMaxSubjectLen && namesFitTheSubject(static_cast<uint8_t>(i + 1U), 0U))
-              : namesFitTheSubject(i, static_cast<uint8_t>(len + 1U)));
+         (nameLength(i) <= eventq::kMaxSubjectLen && namesFitTheSubject(static_cast<uint8_t>(i + 1U)));
 }
 
 static_assert(namesFitTheSubject(),

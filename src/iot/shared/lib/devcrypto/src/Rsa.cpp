@@ -198,17 +198,8 @@ bool matchesEncoding(const uint8_t decoded[kRsa2048Bytes], const uint8_t digest[
 
 bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t digest[32],
                          const uint8_t signature[kRsa2048Bytes]) {
-  if (modulus == nullptr || digest == nullptr || signature == nullptr) {
-    return false;
-  }
-  if (!rsa2048InRange(modulus, signature)) {
-    return false;
-  }
-  uint8_t decoded[kRsa2048Bytes];
-  if (!rsa2048PublicOp(modulus, signature, decoded)) {
-    return false;
-  }
-  return matchesEncoding(decoded, digest);
+  static RsaWorkspace own; // linked only where this overload is used
+  return rsa2048VerifySha256(modulus, digest, signature, own);
 }
 
 bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t digest[32],

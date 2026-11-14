@@ -461,8 +461,6 @@ COURT_BRIDGE_SUBS = [
     ),
     ("see src/iot/court-box/src/common/secrets.h.example", "see secrets.h.example, next to court_bridge.ino"),
     ("compiled in from src/common/secrets.h", "compiled in from secrets.h, next to this sketch"),
-    ("them is `make flash-bridge`, which is a two-minute job",
-     "them is another Upload from the Arduino IDE, which is a two-minute job"),
 ]
 
 DOOR_GATE_SUBS = [
@@ -476,11 +474,11 @@ DOOR_GATE_SUBS = [
 ]
 
 COURT_BOX_SECRETS_EXAMPLE_SUBS = [
-    ("// Copy to secrets.h and fill in all four values before flashing. secrets.h is",
+    ("// Copy to secrets.h and fill in all six values before flashing. secrets.h is",
      "// Copy to secrets.h — in THIS folder, beside court_bridge.ino — and fill in all\n"
-     "// four values before flashing. secrets.h is"),
-    ("`make flash-bridge`. See src/iot/court-box/README.md's Flashing section.",
-     "Upload again from the Arduino IDE. See\n// src/iot/court-box/arduino/README.md."),
+     "// six values before flashing. secrets.h is"),
+    ("panel. See src/iot/court-box/README.md's Flashing section.",
+     "panel. See\n// src/iot/court-box/arduino/README.md."),
 ]
 
 DOOR_GATE_SECRETS_EXAMPLE_SUBS = [
@@ -575,8 +573,17 @@ def export_target(project: Project, target: dict, ini: dict[str, dict[str, str]]
     main = project.root / "src" / target["src"] / "main.cpp"
     if not main.is_file():
         raise SystemExit(f"{main} is missing")
+    # Companions: the target's other sources beside main.cpp (the bridge's
+    # EspLifeline, which speaks bridgelogic's ports and so cannot live in a
+    # hal library the Mega also compiles). They go beside the .ino, where the
+    # IDE compiles every .cpp and `#include "X.h"` resolves as it does here.
+    companions = sorted(p for p in (project.root / "src" / target["src"]).iterdir()
+                        if p.is_file() and p.suffix in (".h", ".cpp") and p.name != "main.cpp")
+    for stale in sorted(sketch.glob("*")):
+        if stale.is_file() and stale.suffix in (".h", ".cpp") and stale.name != "secrets.h":
+            stale.unlink()
 
-    libs = closure([main], ns_map, where)
+    libs = closure([main] + companions, ns_map, where)
     defines = defines_for(env, ini)
     deps = lib_deps_for(env, ini)
 
@@ -594,6 +601,8 @@ def export_target(project: Project, target: dict, ini: dict[str, dict[str, str]]
             emit(path, sketch_src / ns / path.name, "../", ns_map, vendor_headers)
 
     emit(main, sketch / f"{sketch_name}.ino", "src/", ns_map, vendor_headers, target["secrets"])
+    for companion in companions:
+        emit(companion, sketch / companion.name, "src/", ns_map, vendor_headers)
 
     (sketch_src / "build_config.h").write_text(build_config(project, defines, env), encoding="utf-8")
 
@@ -603,6 +612,7 @@ def export_target(project: Project, target: dict, ini: dict[str, dict[str, str]]
     ours = [p for p in sorted(sketch_src.rglob("*")) if p.is_file() and p.suffix in (".h", ".cpp")
             and p.parts[len(sketch_src.parts)] not in {n for n, _ in vendored}]
     ours.append(sketch / f"{sketch_name}.ino")
+    ours += [sketch / c.name for c in companions]
     used = {name for name in {n for n, _ in vendored}
             for f in ours if f"{name}/" in f.read_text(encoding="utf-8", errors="replace")}
     unused = sorted({n for n, _ in vendored} - used)

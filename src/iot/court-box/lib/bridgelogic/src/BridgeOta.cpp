@@ -195,7 +195,9 @@ void BridgeOta::offer(const char* object, size_t len, uint32_t nowMs) {
     return;
   }
   retryArmed_ = false;
-  static devota::Offer parsed; // 560 bytes: static, never a frame (ESPR-1)
+  // Parsed straight into the pending offer (filled only on Ok, and nothing is
+  // pending here): a second 560-byte Offer would be RAM the heap floor needs.
+  devota::Offer& parsed = offer_;
   parsed = devota::Offer();
   const devota::Refusal grammar = devota::parseOffer(object, len, devota::kTargetCourtBridge, parsed);
   if (grammar != devota::Refusal::Ok) {
@@ -211,7 +213,6 @@ void BridgeOta::offer(const char* object, size_t len, uint32_t nowMs) {
     // Not newer, or failed here before: not an offer for this board.
     return;
   }
-  offer_ = parsed;
   verifyDue_ = true;
 }
 

@@ -58,6 +58,11 @@ bool validId(const char* id) {
   return true;
 }
 
+/// The ONE staging copy each kind of record is adopted through: one loop,
+/// never re-entered, so every adopt shares it (statics, never frames: ESPR-1).
+devnet::NetSet gStagedNet;
+devnet::KeyRing gStagedRing;
+
 bool sameProfile(const devnet::Profile& a, const devnet::Profile& b) {
   return strcmp(a.ssid, b.ssid) == 0 && strcmp(a.psk, b.psk) == 0;
 }
@@ -113,14 +118,21 @@ devnet::Refusal BridgeKeys::adopt(const char* object, size_t len) {
   // `k0`'s text lives in the image, not the ring; the shared reader keeps a
   // previous key only when the current one has text, so k0 is given a marker
   // `render` never sends (it sends the compiled key for any `k0`).
-  static devnet::KeyRing view; // two rings are 230 bytes: static, never a frame (ESPR-1)
-  static devnet::KeyRing next;
-  view = ring_;
-  if (isCompiled(view.currentId) && view.currentKey[0] == '\0') {
-    view.currentKey[0] = '-';
-    view.currentKey[1] = '\0';
+  // The ring itself is the view, the marker put in and taken out again: a
+  // third ring would be 115 bytes the heap floor does not have.
+  devnet::KeyRing& next = gStagedRing;
+  const bool marked = isCompiled(ring_.currentId) && ring_.currentKey[0] == '\0';
+  if (marked) {
+    ring_.currentKey[0] = '-';
+    ring_.currentKey[1] = '\0';
   }
-  const devnet::Refusal got = devnet::adoptKeyNext(object, len, view, next);
+  const devnet::Refusal got = devnet::adoptKeyNext(object, len, ring_, next);
+  if (marked) {
+    ring_.currentKey[0] = '\0';
+    if (got == devnet::Refusal::Ok && strcmp(next.previousId, kCompiledId) == 0) {
+      next.previousKey[0] = '\0'; // k0's text stays in the image
+    }
+  }
   if (got != devnet::Refusal::Ok) {
     return got;
   }
@@ -140,7 +152,7 @@ bool BridgeKeys::adoptLocal(const char* id, const char* key) {
   if (!validId(id) || !validKey(key)) {
     return false;
   }
-  static devnet::KeyRing next;
+  devnet::KeyRing& next = gStagedRing;
   next = devnet::KeyRing();
   memcpy(next.currentId, id, strlen(id) + 1U);
   memcpy(next.currentKey, key, devnet::kKeyLen + 1U);
@@ -264,7 +276,7 @@ uint32_t BridgeNet::version() const {
 }
 
 devnet::NetResult BridgeNet::adopt(const char* object, size_t len, uint32_t nowMs) {
-  static devnet::NetSet staged; // 300 bytes: static, never a frame (ESPR-1)
+  devnet::NetSet& staged = gStagedNet;
   staged = devnet::NetSet();
   devnet::NetResult result = devnet::adoptNet(object, len, version(), staged);
   if (!result.adopted()) {
@@ -304,8 +316,10 @@ devnet::NetResult BridgeNet::adopt(const char* object, size_t len, uint32_t nowM
 }
 
 bool BridgeNet::adoptLocal(const devnet::NetSet& local) {
-  static devnet::NetSet staged;
-  staged = local;
+  devnet::NetSet& staged = gStagedNet;
+  if (&staged != &local) {
+    staged = local;
+  }
   staged.ver = 0U;
   NetMeta meta = record_.meta;
   const bool hadCurrent = meta.hasCurrent != 0U;

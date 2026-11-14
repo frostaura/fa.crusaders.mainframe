@@ -30,9 +30,10 @@
 //
 // WHOLESALE, LIKE THE ROSTER
 // --------------------------
-// beginReplace / add / commitReplace, with the previous ring serving until the
-// commit. A key that should no longer be held is expressed by its ABSENCE from
-// the next push, and an empty `code_keys` commits an empty ring.
+// beginReplace / add / commitReplace, IN PLACE: the ring verifies nobody from
+// beginReplace to the commit (every caller commits what it begins, in one go).
+// A key that should no longer be held is expressed by its ABSENCE from the
+// next push, and an empty `code_keys` commits an empty ring.
 //
 // No Arduino headers, no heap. Compiles for AVR, Xtensa and the host.
 

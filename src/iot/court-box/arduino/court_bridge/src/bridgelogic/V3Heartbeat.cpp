@@ -6,6 +6,7 @@
 
 #include <string.h>
 
+#include "../bridgelogic/FlashTable.h"
 #include "../devapi/Json.h"
 #include "../devlink/CodeSync.h"
 #include "../protocol/Protocol.h"
@@ -118,7 +119,8 @@ struct CfgSpec {
 
 // Hardware first (in force before any relay frame after a !BOOT), then KEYS,
 // then the display keys.
-const CfgSpec kSpecs[kMegaCfgKeys] = {
+/// BRIDGE_FLASH: a row is copied out whole (cfgSpec), never read in place.
+const CfgSpec kSpecs[kMegaCfgKeys] BRIDGE_FLASH = {
     {"RPOL", 0U, 1U, 0U},    {"LCDA", 0U, 63U, 0U},      {"SBAUD", 0U, 5U, 0U},
     {"SSUF", 0U, 1U, 0U},    {"SGAP", 50U, 500U, 150U},  {"KEYS", 0U, 255U, 15U},
     {"LAYOUT", 0U, 1U, 0U},  {"MARQ", 0U, 1U, 1U},       {"STEP", 250U, 1000U, 400U},
@@ -126,6 +128,12 @@ const CfgSpec kSpecs[kMegaCfgKeys] = {
     {"AFTON", 5U, 60U, 15U}, {"REINIT", 30U, 600U, 60U}, {"HINT", 1U, 10U, 3U},
     {"SCANH", 3U, 60U, 10U}, {"CAP", 90U, 720U, 240U},
 };
+
+CfgSpec cfgSpec(uint8_t i) {
+  CfgSpec spec;
+  flashCopy(&spec, &kSpecs[i], sizeof(spec));
+  return spec;
+}
 
 uint16_t clampTo(uint32_t v, uint16_t lo, uint16_t hi) {
   return v < lo ? lo : (v > hi ? hi : static_cast<uint16_t>(v));
@@ -146,8 +154,9 @@ void readNumber(const char* obj, size_t len, const char* key, const char* mega, 
     return;
   }
   for (uint8_t i = 0U; i < kMegaCfgKeys; ++i) {
-    if (strcmp(kSpecs[i].mega, mega) == 0) {
-      setCfg(out, mega, clampTo(v, kSpecs[i].min, kSpecs[i].max));
+    const CfgSpec spec = cfgSpec(i);
+    if (strcmp(spec.mega, mega) == 0) {
+      setCfg(out, mega, clampTo(v, spec.min, spec.max));
     }
   }
 }
@@ -302,7 +311,8 @@ ReadResult readSnapshot(const char* body, size_t len, Snapshot& out, uint32_t no
 MegaConfig defaultMegaConfig() {
   MegaConfig c;
   for (uint8_t i = 0U; i < kMegaCfgKeys; ++i) {
-    setCfg(c, kSpecs[i].mega, kSpecs[i].boot);
+    const CfgSpec spec = cfgSpec(i);
+    setCfg(c, spec.mega, spec.boot);
   }
   return c;
 }

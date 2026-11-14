@@ -208,9 +208,6 @@ public:
     for (Entry& e : entries_) {
       e = Entry();
     }
-    for (Entry& e : staging_) {
-      e = Entry();
-    }
     count_ = 0U;
     stagingCount_ = 0U;
     replacing_ = false;
@@ -302,7 +299,6 @@ private:
   Entry entries_[Capacity];
   uint8_t count_ = 0U;
 
-  Entry staging_[Capacity];
   uint8_t stagingCount_ = 0U;
   bool replacing_ = false;
 
@@ -325,10 +321,17 @@ bool copyToken(char* dest, size_t destCap, const char* src);
 } // namespace detail
 
 template <uint8_t Capacity> void Roster<Capacity>::beginReplace(uint32_t nowMs) {
+  // IN PLACE (bridge 3.1.0, the heap floor): the roster admits nobody until
+  // commitReplace, and the entries added overwrite the old ones from slot 0.
+  // A second, staging copy was 640 bytes of a court box's heap. The one
+  // abandoned replacement there could be — an array of which nothing was
+  // readable — is decided BEFORE this is called (devlink::applyRoster's first
+  // pass), so the previous roster is never lost to it.
   stagingCount_ = 0U;
   stagingAtMs_ = nowMs;
   replacing_ = true;
   dropped_ = 0U;
+  count_ = 0U;
 }
 
 template <uint8_t Capacity> bool Roster<Capacity>::add(const Entry& entry) {
@@ -339,8 +342,8 @@ template <uint8_t Capacity> bool Roster<Capacity>::add(const Entry& entry) {
     ++dropped_;
     return false;
   }
-  staging_[stagingCount_] = entry;
-  staging_[stagingCount_].valid = true;
+  entries_[stagingCount_] = entry;
+  entries_[stagingCount_].valid = true;
   ++stagingCount_;
   return true;
 }
@@ -349,8 +352,8 @@ template <uint8_t Capacity> void Roster<Capacity>::commitReplace() {
   if (!replacing_) {
     return;
   }
-  for (uint8_t i = 0U; i < stagingCount_; ++i) {
-    entries_[i] = staging_[i];
+  for (uint8_t i = stagingCount_; i < Capacity; ++i) {
+    entries_[i] = Entry();
   }
   count_ = stagingCount_;
   acceptedAtMs_ = stagingAtMs_;

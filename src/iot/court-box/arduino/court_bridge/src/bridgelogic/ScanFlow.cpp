@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../bridgelogic/FlashTable.h"
 #include "../memcode/Token.h"
 
 namespace bridgelogic {
@@ -30,7 +31,8 @@ struct ReasonLines {
   bool arms;
 };
 
-constexpr ReasonLines kReasons[] = {
+/// BRIDGE_FLASH: on the ESP8266 a row is copied out whole (it has a bool).
+constexpr ReasonLines kReasons[] BRIDGE_FLASH = {
     {"no_booking", "NO BOOKING", "SEE THE DESK", true},
     {"insufficient_balance", "TOO FEW MINUTES", "BUY & RETRY", true},
     {"wrong_court", "WRONG COURT", "SEE THE DESK", true},
@@ -81,7 +83,9 @@ court::Outcome refusedFor(const char* body, size_t len) {
     if (strcmp(reason, "too_early") == 0) {
       return tooEarly(body, len);
     }
-    for (const ReasonLines& row : kReasons) {
+    for (size_t i = 0U; i < sizeof(kReasons) / sizeof(kReasons[0]); ++i) {
+      ReasonLines row;
+      flashCopy(&row, &kReasons[i], sizeof(row));
       if (strcmp(reason, row.reason) == 0) {
         return refusal(row.line1, row.line2, row.arms);
       }

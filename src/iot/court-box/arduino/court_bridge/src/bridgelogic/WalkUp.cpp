@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../bridgelogic/FlashTable.h"
 #include "../bridgelogic/ScanFlow.h"
 #include "../devapi/Json.h"
 #include "../devcrypto/Hex.h"
@@ -36,7 +37,8 @@ struct ErrorLines {
   bool recognised;
 };
 
-constexpr ErrorLines kErrors[] = {
+/// BRIDGE_FLASH: on the ESP8266 a row is copied out whole (it has a bool).
+constexpr ErrorLines kErrors[] BRIDGE_FLASH = {
     // Priced: the API knows who this is and what they have.
     {"insufficient_balance", "TOO FEW MINUTES", "BUY & RETRY", true},
     // A verdict about the court, for a member the API identified.
@@ -152,7 +154,9 @@ court::Outcome refusal(uint16_t status, const char* body, size_t len) {
     if (strcmp(error, kClubClosed) == 0) {
       return clubClosed(body, len);
     }
-    for (const ErrorLines& row : kErrors) {
+    for (size_t i = 0U; i < sizeof(kErrors) / sizeof(kErrors[0]); ++i) {
+      ErrorLines row;
+      flashCopy(&row, &kErrors[i], sizeof(row));
       if (strcmp(error, row.error) == 0) {
         court::Outcome outcome = lines(row.line1, row.line2);
         outcome.recognised = row.recognised;
