@@ -7,7 +7,7 @@ import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
 import { StateBlock } from "../../components/ui/state-block";
 import { CaretDown, ListChecks } from "../../components/ui/icons";
 import {
-  CardListSkeleton, DownloadCsvLink, FilterBar, FilterSelect, type FilterOption,
+  CardListSkeleton, DownloadCsvButton, FilterBar, FilterSelect, type FilterOption,
 } from "../../components/monitoring/parts";
 import { useAsyncAction } from "../../lib/useAsyncAction";
 import { usePagedFocus } from "../../lib/usePagedFocus";
@@ -153,9 +153,9 @@ export function AdminChangeRecordPage() {
             options={PERIOD_OPTIONS}
             onChange={setPeriod}
           />
-          <DownloadCsvLink
-            className="sm:ml-auto"
-            href={adminEndpoints.adminChangesCsvUrl({ ...(area ? { area } : {}), period })}
+          <DownloadCsvButton
+            className="sm:ml-auto" fallbackName="change-record.csv"
+            path={adminEndpoints.adminChangesCsvUrl({ ...(area ? { area } : {}), period })}
           />
         </FilterBar>
         <p className="text-xs text-text-muted">{CHANGES_EXPORT_NOTE}</p>
@@ -224,6 +224,13 @@ const PERIOD_OPTIONS: FilterOption[] = [
 /** A name on a change row: whole words where the row can hold them (R14 L14-3, see the row's inset). */
 const CHANGE_NAME = "min-w-0 break-words text-xs @[12rem]/changes:text-sm";
 
+/** The row: a stacked card in a narrow list, one dense wrapping line from 48rem (BA-25). */
+export const CHANGE_ROW = cn(
+  "flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-2 shadow-xs @[12rem]/changes:p-4",
+  "@[48rem]/changes:flex-row @[48rem]/changes:flex-wrap @[48rem]/changes:items-baseline @[48rem]/changes:gap-x-4",
+  "@[48rem]/changes:rounded-lg @[48rem]/changes:py-2 @[48rem]/changes:shadow-none",
+);
+
 function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | undefined }) {
   return (
     // tabIndex -1: focusable by script only, so "Load more" can hand focus to the first row it brought.
@@ -232,8 +239,11 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
     // R14 L14-3 — and under 12rem the inset is p-2 and the names (who did it, who it was done to)
     // text-xs: at 320 / 200 % a 17-letter surname was 244px in a 206px column and broke mid-word;
     // it is 209px of 222 now. Chromium's `hyphens: auto` never splits a Capitalised word.
-    <li data-change-row="" tabIndex={-1} className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-2 shadow-xs @[12rem]/changes:p-4">
-      <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+    // BA-25: from a 48rem list the row is ONE dense line — when, what, who, and the diff toggle at its
+    // end — at 8px block padding, instead of a 130px card for a single line; an opened diff takes the
+    // row's full width beneath it. Narrower lists keep the stacked card the rules above describe.
+    <li data-change-row="" tabIndex={-1} className={CHANGE_ROW}>
+      <div className="flex min-w-0 flex-wrap items-baseline gap-2 @[48rem]/changes:flex-1">
         <time dateTime={row.occurred_at} className="shrink-0 text-sm tabular-nums text-text-muted">
           {clubDayAndClock(row.occurred_at, timezone)}
         </time>
@@ -249,8 +259,8 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
       {row.reason && <p className="text-sm text-text-secondary">{`Reason: “${row.reason}”`}</p>}
 
       {hasChangeDiff(row) ? (
-        <details className="group mt-1">
-          <summary className="no-lift inline-flex min-h-touch cursor-pointer list-none items-center gap-1 text-sm font-semibold text-accent-strong [&::-webkit-details-marker]:hidden">
+        <details className="group mt-1 @[48rem]/changes:mt-0 @[48rem]/changes:open:basis-full">
+          <summary className="no-lift inline-flex min-h-touch cursor-pointer list-none items-center gap-1 text-sm font-semibold text-accent-strong @[48rem]/changes:min-h-0 [&::-webkit-details-marker]:hidden">
             Show what changed
             {/* R8 L6-16: 1rem, so it grows with "Show what changed" (it stayed 16px at 200 %). */}
             <CaretDown size="1rem" aria-hidden="true" className="shrink-0 transition-transform duration-fast group-open:rotate-180 motion-reduce:transition-none" />

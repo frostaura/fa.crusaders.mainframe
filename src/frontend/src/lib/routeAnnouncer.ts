@@ -1,3 +1,5 @@
+import { currentClubShortName } from "./clubIdentity";
+
 /**
  * What each route is called, and therefore what the browser tab says. (C6)
  *
@@ -21,8 +23,11 @@
  */
 
 /**
- * The tab suffix: the club members know, not the software's internal name ("Crusaders Mainframe").
- * The header, the home page and the manifest say the same; one club is served per deployment.
+ * The name the STATIC shell is built with — `index.html`'s title and meta and the PWA manifest,
+ * which are served before any script runs and so cannot ask which club an address serves. It is
+ * the first club's, and `seo-posture.test` holds the two files to it. **The running app never uses
+ * it:** the tab suffix, the crest, the sign-in band and the pass carry the tenant's own name
+ * (`lib/clubIdentity`, go-live FM-8). Serving the static shell per host is the infra lane's.
  */
 export const APP_NAME = "Crusaders Squash";
 
@@ -85,6 +90,8 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   // P12 — disputed results and removing a wrong one.
   ["/admin/results", "Match results"],
   ["/admin/transactions", "Transactions"],
+  // BM-11 — the bookings the club has to decide on.
+  ["/admin/bookings", "Bookings"],
   ["/admin/reports", "Reports"],
   // Monitoring (R17: courts, hardware and control). The section index is the control board, so
   // it is named for what an admin opens it to look at rather than for the section.
@@ -172,9 +179,14 @@ function bestMatch(pathname: string): readonly [string, string] | undefined {
     .sort((a, b) => literalSegments(b[0]) - literalSegments(a[0]))[0];
 }
 
-/** The whole tab title: the page, then the product. */
-export function routeTitle(pathname: string): string {
-  return `${routePageName(pathname)} — ${APP_NAME}`;
+/** The whole tab title: the page, then the club members know (FM-8) — the page alone while it is unknown. */
+export function routeTitle(pathname: string, club: string | null = currentClubShortName()): string {
+  return withClub(routePageName(pathname), club);
+}
+
+/** "Bookings — Harbour Racquets", or "Bookings" when no club name is known. */
+export function withClub(page: string, club: string | null = currentClubShortName()): string {
+  return club ? `${page} — ${club}` : page;
 }
 
 /**

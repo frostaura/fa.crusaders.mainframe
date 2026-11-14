@@ -40,14 +40,19 @@ public class AdminNotificationTests
         db.Users.Add(user);
         db.Memberships.Add(new Membership
         {
-            TenantId = host.Tenant.Id, UserId = user.Id, FullName = handle,
-            MembershipNumber = $"{handle}-{Guid.NewGuid():N}"[..20], Status = MembershipStatus.Active,
+            TenantId = host.Tenant.Id,
+            UserId = user.Id,
+            FullName = handle,
+            MembershipNumber = $"{handle}-{Guid.NewGuid():N}"[..20],
+            Status = MembershipStatus.Active,
         });
         if (optouts.Length > 0)
         {
             db.UserPreferences.Add(new UserPreferences
             {
-                TenantId = host.Tenant.Id, UserId = user.Id, AdminNotificationOptoutsJson = JsonSerializer.Serialize(optouts),
+                TenantId = host.Tenant.Id,
+                UserId = user.Id,
+                AdminNotificationOptoutsJson = JsonSerializer.Serialize(optouts),
             });
         }
         await db.SaveChangesAsync();
@@ -317,7 +322,8 @@ public class AdminNotificationTests
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.UserPreferences.Add(new UserPreferences
             {
-                TenantId = host.Tenant.Id, UserId = host.AdminUser.Id,
+                TenantId = host.Tenant.Id,
+                UserId = host.AdminUser.Id,
                 AdminNotificationOptoutsJson = $"[\"{AdminEventCatalogue.MemberRegistered}\"]",
             });
             await db.SaveChangesAsync();
@@ -462,8 +468,12 @@ public class AdminNotificationTests
         db.Users.Add(user);
         db.Memberships.Add(new Membership
         {
-            TenantId = host.Tenant.Id, UserId = user.Id, FullName = name, MembershipNumber = $"P-{Guid.NewGuid():N}"[..12],
-            Status = MembershipStatus.PendingApproval, CreatedAt = createdAt,
+            TenantId = host.Tenant.Id,
+            UserId = user.Id,
+            FullName = name,
+            MembershipNumber = $"P-{Guid.NewGuid():N}"[..12],
+            Status = MembershipStatus.PendingApproval,
+            CreatedAt = createdAt,
         });
         await db.SaveChangesAsync();
     }
@@ -501,6 +511,62 @@ public class AdminNotificationTests
         Assert.Contains(host.EmailService.Sent, m => m.Subject == "2 applications are still waiting");
     }
 
+    private static async Task AddBookingAsync(TestHost host, DateTimeOffset startsAt, BookingStatus status, bool checkedIn = false)
+    {
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        db.Bookings.Add(new Booking
+        {
+            TenantId = host.Tenant.Id,
+            CourtId = host.Courts[0].Id,
+            UserId = host.PlayerUser.Id,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(30),
+            SliceMinutes = 30,
+            SliceCount = 1,
+            AmountChargedMinutes = 30,
+            Status = status,
+            CheckedInAt = checkedIn ? startsAt : null,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Money lane BM-11: a booking older than the no-show sweep's lookback (7 days in the fixture)
+    /// that is still Booked and never checked in is a full charge nobody settled. The club is told,
+    /// once per club day, naming how many and the oldest; a booking inside the lookback, a checked-in
+    /// one and a cancelled one are not counted. The fixture varies age, status and attendance.
+    /// </summary>
+    [Fact]
+    public async Task Past_bookings_the_sweep_cannot_reach_are_reminded_about_once_per_club_day()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var noon = new DateTimeOffset(T0.UtcDateTime.Date.AddHours(12), TimeSpan.Zero);
+        await AddBookingAsync(host, noon.AddDays(-6), BookingStatus.Booked);
+        await AddBookingAsync(host, noon.AddDays(-20), BookingStatus.Booked, checkedIn: true);
+        await AddBookingAsync(host, noon.AddDays(-20), BookingStatus.Cancelled);
+
+        await SweepAsync(host, noon);
+        Assert.Empty(await RowsAsync(host, AdminEventCatalogue.BookingsUnsettled));
+
+        var oldest = new DateTimeOffset(noon.UtcDateTime.Date.AddDays(-30).AddHours(18), TimeSpan.Zero);
+        await AddBookingAsync(host, oldest, BookingStatus.Booked);
+        await AddBookingAsync(host, noon.AddDays(-9), BookingStatus.Booked);
+        await SweepAsync(host, noon);
+        await SweepAsync(host, noon.AddHours(3));
+
+        var row = Assert.Single(await RowsAsync(host, AdminEventCatalogue.BookingsUnsettled));
+        var payload = JsonSerializer.Deserialize<BookingsUnsettledPayload>(row.PayloadJson, AdminEventCatalogue.Json)!;
+        Assert.Equal(2, payload.Count);
+        Assert.Equal(7, payload.LookbackDays);
+        Assert.Equal(oldest.ToString("ddd d MMM yyyy, HH:mm", System.Globalization.CultureInfo.InvariantCulture), payload.OldestLocal);
+
+        await SweepAsync(host, noon.AddDays(1));
+        Assert.Equal(2, (await RowsAsync(host, AdminEventCatalogue.BookingsUnsettled)).Count);
+        await host.DeliverAdminNoticesAsync(noon.AddDays(1));
+        Assert.Contains(host.EmailService.Sent, m => m.Subject == "2 past bookings were never settled");
+    }
+
     [Fact]
     public async Task No_reminder_goes_before_the_club_has_opened_for_the_day()
     {
@@ -531,9 +597,14 @@ public class AdminNotificationTests
         {
             db.DeviceErrors.Add(new DeviceError
             {
-                TenantId = host.Tenant.Id, Code = $"E{i}", Fingerprint = $"fp-{Guid.NewGuid():N}",
-                ClaimedDeviceCode = $"box-{i % 2}", Severity = severity, Source = DeviceErrorSource.Device,
-                FirstSeenAt = firstSeen ?? lastSeen, LastSeenAt = lastSeen,
+                TenantId = host.Tenant.Id,
+                Code = $"E{i}",
+                Fingerprint = $"fp-{Guid.NewGuid():N}",
+                ClaimedDeviceCode = $"box-{i % 2}",
+                Severity = severity,
+                Source = DeviceErrorSource.Device,
+                FirstSeenAt = firstSeen ?? lastSeen,
+                LastSeenAt = lastSeen,
             });
         }
         await db.SaveChangesAsync();
@@ -598,9 +669,14 @@ public class AdminNotificationTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var gate = new Device
         {
-            TenantId = host.Tenant.Id, DeviceCode = $"gate-{Guid.NewGuid():N}"[..12], Name = "Front door",
-            MacAddress = Guid.NewGuid().ToString("N")[..12], Kind = DeviceKind.Gate, GateKey = "front-door",
-            AutoRegistered = !acknowledged, LastSeenAt = T0,
+            TenantId = host.Tenant.Id,
+            DeviceCode = $"gate-{Guid.NewGuid():N}"[..12],
+            Name = "Front door",
+            MacAddress = Guid.NewGuid().ToString("N")[..12],
+            Kind = DeviceKind.Gate,
+            GateKey = "front-door",
+            AutoRegistered = !acknowledged,
+            LastSeenAt = T0,
         };
         db.Devices.Add(gate);
         await db.SaveChangesAsync();
@@ -615,8 +691,10 @@ public class AdminNotificationTests
         {
             db.AuditLogs.Add(new AuditLog
             {
-                TenantId = host.Tenant.Id, Action = $"{DoorTrail.DeniedPrefix}no_booking",
-                DetailsJson = JsonSerializer.Serialize(new { device_id = gate.Id }), CreatedAt = at.AddSeconds(i),
+                TenantId = host.Tenant.Id,
+                Action = $"{DoorTrail.DeniedPrefix}no_booking",
+                DetailsJson = JsonSerializer.Serialize(new { device_id = gate.Id }),
+                CreatedAt = at.AddSeconds(i),
             });
         }
         await db.SaveChangesAsync();
@@ -901,8 +979,13 @@ public class AdminNotificationTests
 
         var pending = new PendingTopup
         {
-            Id = Guid.NewGuid(), UserId = Guid.NewGuid(), AmountZar = 495m, IdempotencyKey = "idem-1",
-            ExternalReference = "pf-77", PackageName = "5 hours", Minutes = 300,
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            AmountZar = 495m,
+            IdempotencyKey = "idem-1",
+            ExternalReference = "pf-77",
+            PackageName = "5 hours",
+            Minutes = 300,
         };
         var notice = AdminNotices.TopUpFailed("amount_mismatch", pending.Id.ToString("N"), "Naledi Khoza", pending);
         Assert.Equal("topup.failed", notice.Kind);
@@ -979,8 +1062,10 @@ public class AdminNotificationTests
             [AdminEventCatalogue.AdminRoleChanged] = new AdminRolePayload("A", "B", true, null),
             [AdminEventCatalogue.CodeForgerySuspected] = new ForgeryPayload("box-1", null, "detail"),
             [AdminEventCatalogue.CodesCapabilityLost] = new CodesCapabilityLostPayload(Guid.NewGuid(), "Box", "box-1", "2.0.0", "v1"),
+            [AdminEventCatalogue.CodesPhaseMoved] = new CodesPhaseMovedPayload("legacy", "v1", "Sat 28 Nov 2026", 14),
             [AdminEventCatalogue.MemberDeleted] = new MemberDeletedPayload("A", "B", "moved away", true, 1, 30),
             [AdminEventCatalogue.EmailUndeliverable] = new EmailUndeliverablePayload("a@x.review.test", "Booking confirmed", "SmtpException: refused"),
+            [AdminEventCatalogue.BookingsUnsettled] = new BookingsUnsettledPayload(3, "Mon 2 Nov 2026, 18:00", 7),
         };
 
         Assert.Equal(AdminEventCatalogue.All.Count, AdminEventCatalogue.All.Select(k => k.Kind).Distinct().Count());
@@ -994,7 +1079,10 @@ public class AdminNotificationTests
 
             var row = new AdminNotification
             {
-                Kind = kind.Kind, DedupeKey = "k", Headline = "h", Link = "/admin",
+                Kind = kind.Kind,
+                DedupeKey = "k",
+                Headline = "h",
+                Link = "/admin",
                 PayloadJson = JsonSerializer.Serialize(samples[kind.Kind], samples[kind.Kind].GetType(), AdminEventCatalogue.Json),
             };
             foreach (var toSubject in new[] { false, true })

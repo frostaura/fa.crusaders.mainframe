@@ -122,10 +122,13 @@ public sealed class AuthService
     {
         email = email.Trim().ToLowerInvariant();
         membershipNumber = membershipNumber.Trim();
+        // Hashed before anything is looked up, on every path (BP-14): the refusals used to return
+        // before the 210,000-iteration hash a new account pays, so the reply's timing said which
+        // addresses and numbers exist even once the body stopped saying it.
+        var passwordHash = _hasher.Hash(password);
         if (await _db.Users.AnyAsync(u => u.Email == email, ct))
         {
-            await RemoveOrphanedPhotoAsync(photoUrl, ct);
-            return new RegistrationResult.AlreadyExists();
+            return await RefuseQuietlyAsync(new RegistrationResult.AlreadyExists(), email, membershipNumber, photoUrl, ct);
         }
 
         // Checked here rather than left to the unique index. It was left to the index, and the
@@ -135,8 +138,7 @@ public sealed class AuthService
         // else's is an ordinary human error, not an edge case.
         if (await _db.Memberships.AnyAsync(m => m.MembershipNumber == membershipNumber, ct))
         {
-            await RemoveOrphanedPhotoAsync(photoUrl, ct);
-            return new RegistrationResult.MembershipNumberInUse();
+            return await RefuseQuietlyAsync(new RegistrationResult.MembershipNumberInUse(), email, membershipNumber, photoUrl, ct);
         }
 
         // IsAdmin stays false here even for an address in Admins:Emails, and that is a decision
@@ -150,7 +152,7 @@ public sealed class AuthService
         {
             TenantId = _tenant.TenantId,
             Email = email,
-            PasswordHash = _hasher.Hash(password),
+            PasswordHash = passwordHash,
             EmailVerified = false,
             IsAdmin = false,
         };
@@ -200,10 +202,10 @@ public sealed class AuthService
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
             _db.ChangeTracker.Clear();
-            await RemoveOrphanedPhotoAsync(photoUrl, ct);
-            return await _db.Users.AnyAsync(u => u.Email == email, ct)
+            RegistrationResult lost = await _db.Users.AnyAsync(u => u.Email == email, ct)
                 ? new RegistrationResult.AlreadyExists()
                 : new RegistrationResult.MembershipNumberInUse();
+            return await RefuseQuietlyAsync(lost, email, membershipNumber, photoUrl, ct);
         }
 
         // ONE mail to the applicant, not two.
@@ -218,7 +220,7 @@ public sealed class AuthService
         //
         // VerifyEmail now says both things in the order they happen, which is the order the
         // registration screen already promises. MembershipPending is gone rather than unused.
-        var verifyUrl = $"{PublicBaseUrl()}/verify-email/{token}";
+        var verifyUrl = $"{await PublicBaseUrlAsync(ct)}/verify-email/{token}";
         var club = await _club.GetAsync(ct);
         await SendOrLogAsync(EmailTemplates.VerifyEmail(club, email, verifyUrl), $"verification for {email}", ct);
         // ONE call, and it is this one. Two fixers closed spec §2.3 independently — a private
@@ -229,6 +231,25 @@ public sealed class AuthService
         await _memberships.AnnounceRegistrationAsync(user.Id, ct);
 
         return new RegistrationResult.Created(user.Id);
+    }
+
+    /// <summary>
+    /// An application that cannot become an account, told to the mailbox it named rather than to
+    /// the screen (BP-14). The address's owner learns an application was made with their address —
+    /// and how to get back in, which also closes the pre-account takeover's last door (BP-02): a
+    /// reset replaces any password a stranger chose. An applicant who typed a number the club has
+    /// already issued is told so in their own inbox. The uploaded photo goes either way.
+    /// </summary>
+    private async Task<RegistrationResult> RefuseQuietlyAsync(
+        RegistrationResult result, string email, string membershipNumber, string? photoUrl, CancellationToken ct)
+    {
+        await RemoveOrphanedPhotoAsync(photoUrl, ct);
+        var club = await _club.GetAsync(ct);
+        var message = result is RegistrationResult.AlreadyExists
+            ? EmailTemplates.RegistrationForExistingAccount(club, email, $"{await PublicBaseUrlAsync(ct)}/forgot-password")
+            : EmailTemplates.RegistrationNumberTaken(club, email, membershipNumber);
+        await SendOrLogAsync(message, $"refused-application notice for {email}", ct);
+        return result;
     }
 
     /// <summary>
@@ -288,7 +309,7 @@ public sealed class AuthService
         await _db.SaveChangesAsync(ct);
 
         await SendOrLogAsync(
-            EmailTemplates.VerifyEmail(await _club.GetAsync(ct), user.Email, $"{PublicBaseUrl()}/verify-email/{token}"),
+            EmailTemplates.VerifyEmail(await _club.GetAsync(ct), user.Email, $"{await PublicBaseUrlAsync(ct)}/verify-email/{token}"),
             $"re-sent verification for {user.Email}", ct);
     }
 
@@ -351,23 +372,31 @@ public sealed class AuthService
     {
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
-        if (user.IsPlatformAdmin) roles.Add("platform_admin");
         return roles;
     }
 
-    public async Task<bool> VerifyEmailAsync(string token, CancellationToken ct)
+    /// <summary>
+    /// Confirms the address a verification link was mailed to. Null when the link is unknown,
+    /// used or expired; otherwise whether the membership is already approved, so the page can say
+    /// "you can sign in" rather than "wait for the committee" (BM-11). Telling the link's holder is
+    /// no oracle: only the mailbox the link went to holds it.
+    /// </summary>
+    public async Task<EmailVerification?> VerifyEmailAsync(string token, CancellationToken ct)
     {
         var hash = TokenHashing.Hash(token);
         var record = await _db.AuthTokens
             .Where(t => t.TokenHash == hash && t.Kind == TokenKind.EmailVerification && t.UsedAt == null)
             .FirstOrDefaultAsync(ct);
-        if (record is null || record.ExpiresAt < DateTimeOffset.UtcNow) return false;
+        if (record is null || record.ExpiresAt < DateTimeOffset.UtcNow) return null;
 
         var user = await _db.Users.FirstAsync(u => u.Id == record.UserId, ct);
         user.EmailVerified = true;
         record.UsedAt = DateTimeOffset.UtcNow;
+        // BM-01: member notices that waited for this address go now, in this save.
+        await MemberNoticeHold.ReleaseAsync(_db, user.Id, DateTimeOffset.UtcNow, ct);
         await _db.SaveChangesAsync(ct);
-        return true;
+        var active = await _db.Memberships.AnyAsync(m => m.UserId == user.Id && m.Status == MembershipStatus.Active, ct);
+        return new EmailVerification(user.IsAdmin || active);
     }
 
     public async Task<LoginResult> LoginAsync(string email, string password, CancellationToken ct)
@@ -376,7 +405,14 @@ public sealed class AuthService
         var query = _db.Users.IgnoreQueryFilters().Where(u => u.Email == email);
         if (_tenant.IsResolved) query = query.Where(u => u.TenantId == _tenant.TenantId);
         var user = await query.FirstOrDefaultAsync(ct);
-        if (user is null || user.PasswordHash is null) return new LoginResult.InvalidCredentials();
+        if (user is null || user.PasswordHash is null)
+        {
+            // The same 210,000 iterations an existing account costs (BP-14), so the reply's timing
+            // does not say whether the address has an account here.
+            _hasher.Verify(password, TimingDecoyHash);
+            return new LoginResult.InvalidCredentials();
+        }
+
         if (!_hasher.Verify(password, user.PasswordHash)) return new LoginResult.InvalidCredentials();
 
         if (!_tenant.IsResolved)
@@ -422,11 +458,15 @@ public sealed class AuthService
 
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
-        if (user.IsPlatformAdmin) roles.Add("platform_admin");
 
         var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles, user.SessionEpoch);
         return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword, user.SessionEpoch);
     }
+
+    /// <summary>A real hash of nothing anyone knows, verified against on the unknown-address path.</summary>
+    private string TimingDecoyHash => _timingDecoy ??= _hasher.Hash(Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)));
+
+    private static string? _timingDecoy;
 
     public async Task<bool> RequestPasswordResetAsync(string email, CancellationToken ct)
     {
@@ -445,7 +485,7 @@ public sealed class AuthService
         });
         await _db.SaveChangesAsync(ct);
 
-        var resetUrl = $"{PublicBaseUrl()}/reset-password/{token}";
+        var resetUrl = $"{await PublicBaseUrlAsync(ct)}/reset-password/{token}";
         await SendOrLogAsync(EmailTemplates.PasswordReset(await _club.GetAsync(ct), email, resetUrl), $"password reset for {email}", ct);
         return true;
     }
@@ -463,6 +503,11 @@ public sealed class AuthService
         // The member has just chosen this one themselves, so whatever an admin issued before it
         // is retired and the forced-change gate has nothing left to enforce.
         user.MustChangePassword = false;
+        // A reset link was mailed to the address, so using it proves the address — the same
+        // reasoning ConsumeMagicLinkAsync gives. A new club's first admin (the operator CLI) has
+        // no other way to confirm theirs, and a member who registered and then reset before
+        // clicking the verify link is no less proven for doing it in that order.
+        user.EmailVerified = true;
         record.UsedAt = DateTimeOffset.UtcNow;
         await _memberCodes.StageRotationAsync(user.Id, user.Id, "password_reset", ct);
         await _db.SaveChangesAsync(ct);
@@ -487,8 +532,24 @@ public sealed class AuthService
         if (record is null || record.ExpiresAt < DateTimeOffset.UtcNow) return new LoginResult.InvalidCredentials();
 
         var user = await _db.Users.FirstAsync(u => u.Id == record.UserId, ct);
+
+        // BP-12: the same membership gate the password sign-in applies. A member approved and then
+        // suspended inside the link's fifteen minutes was handed a session anyway.
+        var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.UserId == user.Id, ct);
+        if (membership is not null && membership.Status != MembershipStatus.Active && !user.IsAdmin)
+        {
+            return new LoginResult.NotApproved(membership.Status);
+        }
+
         record.UsedAt = DateTimeOffset.UtcNow;
         user.LastLoginAt = DateTimeOffset.UtcNow;
+
+        // BP-02, defence in depth behind ApproveAsync's refusal: an address nobody had confirmed
+        // when this link was minted means the password on the account was chosen by whoever filled
+        // the form, not proven to be the mailbox's owner. The link IS that proof, so the person
+        // holding it gets in and the unproven password stops working; they choose their own with
+        // "Forgot password", which their mailbox can now receive.
+        if (!user.EmailVerified) user.PasswordHash = null;
         // Consuming a link that was emailed to the address IS proof of control of the address.
         //
         // Email verification used to be enforced on the password ingress and silently skipped
@@ -497,6 +558,7 @@ public sealed class AuthService
         // straight in. One of the two had to give; refusing the ingress that carries the proof
         // would have been the wrong one.
         user.EmailVerified = true;
+        await MemberNoticeHold.ReleaseAsync(_db, user.Id, DateTimeOffset.UtcNow, ct);
         await _db.SaveChangesAsync(ct);
 
         var roles = new List<string>();
@@ -537,7 +599,6 @@ public sealed class AuthService
             return new LoginResult.NotApproved(membership.Status);
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
-        if (user.IsPlatformAdmin) roles.Add("platform_admin");
         var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles, user.SessionEpoch);
         return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword, user.SessionEpoch);
     }
@@ -630,7 +691,8 @@ public sealed class AuthService
         await _db.SaveChangesAsync(ct);
     }
 
-    private string PublicBaseUrl() => _config["App:PublicBaseUrl"] ?? "http://localhost:8088";
+    /// <summary>This club's own address (BP-03) — see <see cref="TenantLinks"/>.</summary>
+    private Task<string> PublicBaseUrlAsync(CancellationToken ct) => TenantLinks.ForTenantAsync(_db, _config, _tenant.TenantId, ct);
 }
 
 public abstract record RegistrationResult
@@ -671,3 +733,6 @@ public abstract record LoginResult
     public sealed record EmailNotVerified : LoginResult;
     public sealed record NotApproved(MembershipStatus Status) : LoginResult;
 }
+
+/// <summary>A confirmed address, and whether its membership is already approved (BM-11).</summary>
+public sealed record EmailVerification(bool Approved);

@@ -184,17 +184,16 @@ void test_relay_fake_all_off_releases_every_channel(void) {
 // --- display ---------------------------------------------------------------
 
 void test_display_fake_starts_blank_and_pads_rows_to_full_width(void) {
-  // This shared project builds with no LCD_COLS/LCD_ROWS, so the fake takes the
-  // HAL's DEFAULT geometry, 16x2, and the expectations below are written out at
-  // it. The court box itself is driven as 20x4 (its [lcd] flags); rows 0-1 hold
-  // the 16-column safe subset, which is what this default still models.
-  TEST_ASSERT_EQUAL_UINT8(16U, hal::kDisplayCols);
-  TEST_ASSERT_EQUAL_UINT8(2U, hal::kDisplayRows);
+  // Mega 3.0.0: the driver addresses the 20x4 DDRAM grid either controller has
+  // (no geometry build flag any more, FWM-17); the runtime LAYOUT decides how
+  // much of it is drawn, compact 16x2 on any doubt.
+  TEST_ASSERT_EQUAL_UINT8(20U, hal::kDisplayCols);
+  TEST_ASSERT_EQUAL_UINT8(4U, hal::kDisplayRows);
 
   fakes::FakeDisplay lcd;
-  TEST_ASSERT_EQUAL_STRING("                ", lcd.row(0U));
-  TEST_ASSERT_EQUAL_STRING("                ", lcd.row(1U));
-  TEST_ASSERT_EQUAL_STRING("", lcd.row(2U));
+  TEST_ASSERT_EQUAL_STRING("                    ", lcd.row(0U));
+  TEST_ASSERT_EQUAL_STRING("                    ", lcd.row(3U));
+  TEST_ASSERT_EQUAL_STRING("", lcd.row(4U));
 }
 
 void test_display_fake_writes_at_an_offset_without_disturbing_neighbours(void) {
@@ -202,47 +201,45 @@ void test_display_fake_writes_at_an_offset_without_disturbing_neighbours(void) {
   lcd.print(0U, 0U, "COURT A");
   lcd.print(1U, 9U, "45 MIN");
 
-  TEST_ASSERT_EQUAL_STRING("COURT A         ", lcd.row(0U));
-  TEST_ASSERT_EQUAL_STRING("         45 MIN ", lcd.row(1U));
+  TEST_ASSERT_EQUAL_STRING("COURT A             ", lcd.row(0U));
+  TEST_ASSERT_EQUAL_STRING("         45 MIN     ", lcd.row(1U));
   TEST_ASSERT_EQUAL_CHAR('4', lcd.at(1U, 9U));
   TEST_ASSERT_EQUAL_UINT16(0U, lcd.droppedChars());
   TEST_ASSERT_EQUAL_UINT16(0U, lcd.offGridCalls());
 }
 
-// Column 16 does not exist at the default 16x2 geometry. A write past the last
-// column of whatever geometry is built must be dropped, never land where nothing
-// repaints it — on a smaller panel than the build assumes it would sit forever.
+// Column 20 does not exist on the grid. A write past the last column must be
+// dropped, never land where nothing repaints it.
 void test_display_fake_truncates_past_the_last_column(void) {
   fakes::FakeDisplay lcd;
-  lcd.print(0U, 0U, "ABCDEFGHIJKLMNOPQRS"); // 19 chars into 16 columns
+  lcd.print(0U, 0U, "ABCDEFGHIJKLMNOPQRSTUVW"); // 23 chars into 20 columns
 
-  TEST_ASSERT_EQUAL_STRING("ABCDEFGHIJKLMNOP", lcd.row(0U));
+  TEST_ASSERT_EQUAL_STRING("ABCDEFGHIJKLMNOPQRST", lcd.row(0U));
   TEST_ASSERT_EQUAL_UINT16(3U, lcd.droppedChars());
 
-  lcd.print(1U, 14U, "LONG"); // only "LO" fits
-  TEST_ASSERT_EQUAL_STRING("              LO", lcd.row(1U));
+  lcd.print(1U, 18U, "LONG"); // only "LO" fits
+  TEST_ASSERT_EQUAL_STRING("                  LO", lcd.row(1U));
   TEST_ASSERT_EQUAL_UINT16(5U, lcd.droppedChars());
 
   // Starting past the last column lands nothing at all and is counted as an
   // off-grid call, not merely as truncation.
   lcd.print(1U, hal::kDisplayCols, "X");
-  TEST_ASSERT_EQUAL_STRING("              LO", lcd.row(1U));
+  TEST_ASSERT_EQUAL_STRING("                  LO", lcd.row(1U));
   TEST_ASSERT_EQUAL_UINT16(1U, lcd.offGridCalls());
   TEST_ASSERT_EQUAL_UINT16(6U, lcd.droppedChars());
 }
 
-// Row 2 does not exist at the default 16x2 geometry. The whole call is dropped
-// rather than clamped onto row 1: a status line rendered on the wrong row reads
-// as current.
+// Row 4 does not exist on the grid. The whole call is dropped rather than
+// clamped onto row 3: a status line rendered on the wrong row reads as current.
 void test_display_fake_drops_writes_past_the_last_row(void) {
   fakes::FakeDisplay lcd;
   lcd.print(hal::kDisplayRows, 0U, "GHOST");
-  lcd.print(3U, 0U, "GHOST");
+  lcd.print(7U, 0U, "GHOST");
   lcd.print(0U, 0U, nullptr);
 
   TEST_ASSERT_EQUAL_UINT16(3U, lcd.offGridCalls());
-  TEST_ASSERT_EQUAL_STRING("                ", lcd.row(0U));
-  TEST_ASSERT_EQUAL_STRING("                ", lcd.row(1U));
+  TEST_ASSERT_EQUAL_STRING("                    ", lcd.row(0U));
+  TEST_ASSERT_EQUAL_STRING("                    ", lcd.row(3U));
   TEST_ASSERT_EQUAL_UINT16(0U, lcd.droppedChars());
 }
 
@@ -253,7 +250,7 @@ void test_display_fake_shows_the_tail_a_short_repaint_leaves_behind(void) {
   lcd.print(0U, 0U, "COURT A 45 MIN");
   lcd.print(0U, 0U, "COURT A 5 MIN");
 
-  TEST_ASSERT_EQUAL_STRING("COURT A 5 MINN  ", lcd.row(0U));
+  TEST_ASSERT_EQUAL_STRING("COURT A 5 MINN      ", lcd.row(0U));
 }
 
 void test_display_fake_clear_blanks_every_cell(void) {
@@ -262,8 +259,8 @@ void test_display_fake_clear_blanks_every_cell(void) {
   lcd.print(1U, 0U, "SCAN TO START");
   lcd.clear();
 
-  TEST_ASSERT_EQUAL_STRING("                ", lcd.row(0U));
-  TEST_ASSERT_EQUAL_STRING("                ", lcd.row(1U));
+  TEST_ASSERT_EQUAL_STRING("                    ", lcd.row(0U));
+  TEST_ASSERT_EQUAL_STRING("                    ", lcd.row(1U));
   TEST_ASSERT_EQUAL_UINT16(2U, lcd.clearCalls()); // construction plus this one
   TEST_ASSERT_EQUAL_UINT16(2U, lcd.printCalls());
 }
@@ -596,9 +593,10 @@ void test_transport_fake_write_failure_is_invisible_to_writable(void) {
   TEST_ASSERT_EQUAL_UINT8(1U, link.lineCount());
 }
 
-// The ESP reboots on every OTA, so the Mega sees the link go away several times
-// per release. Queued RX bytes survive the outage so the recovery path can be
-// driven; nothing is delivered while it is down.
+// The ESP restarts itself in service (the link supervisor, the stall watchdog,
+// a portal save), so the Mega sees the link go away. Queued RX bytes survive
+// the outage so the recovery path can be driven; nothing is delivered while it
+// is down.
 void test_transport_fake_disconnection_stops_both_directions(void) {
   fakes::FakeTransport link;
   TEST_ASSERT_TRUE(link.feedLine("!ON,A,900*11"));

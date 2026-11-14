@@ -103,8 +103,13 @@ public sealed class R14PlayerAsksHttpTests(PostgresFixture pg) : IClassFixture<P
         var rival = await PlayersClub.SeedAsync(app, "r14placesx");
         await rival.WriteAsync(app, db => db.LedgerEntries.Add(new Api.Domain.LedgerEntry
         {
-            TenantId = rival.TenantId, UserId = rival.Sam, Type = Api.Domain.LedgerEntryType.ShareTransfer, AmountMinutes = 5,
-            ActorUserId = rival.Sam, RelatedBookingId = bookingId, ExternalReference = $"share:{Guid.NewGuid():N}:1:in",
+            TenantId = rival.TenantId,
+            UserId = rival.Sam,
+            Type = Api.Domain.LedgerEntryType.ShareTransfer,
+            AmountMinutes = 5,
+            ActorUserId = rival.Sam,
+            RelatedBookingId = bookingId,
+            ExternalReference = $"share:{Guid.NewGuid():N}:1:in",
         }));
         var theirs = await rival.Client(app, rival.Sam).GetFromJsonAsync<JsonElement>("/api/v1/wallet?include=share_bookings");
         Assert.False(theirs.GetProperty("share_places").TryGetProperty(bookingId.ToString(), out _));

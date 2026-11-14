@@ -352,8 +352,14 @@ export function describeSaveFailure(err: unknown, currency: string): string {
   const code = err instanceof ApiError ? err.code : null;
   if (!code || said !== code.replace(/_/g, " ")) return said;
   const key = /^(.+)_out_of_range$/.exec(code)?.[1];
-  if (key && settingDef(key)) return `${settingLabel(key, currency)} is outside what the club’s system accepts. Nothing was saved.`;
-  return said;
+  if (!key || !settingDef(key)) return said;
+  // The v3 refusal carries the range it applied (device-api §10): say it, so the admin can act.
+  const min = (err as ApiError).detail("min");
+  const max = (err as ApiError).detail("max");
+  if (typeof min === "number" && typeof max === "number") {
+    return `${settingLabel(key, currency)} has to be from ${min} to ${max}. Nothing was saved.`;
+  }
+  return `${settingLabel(key, currency)} is outside what the club’s system accepts. Nothing was saved.`;
 }
 
 /** Codes that say only "refused" — the banner replaces them with what to do. */

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderPage, signIn, signOut, stubFetch } from "@/test/harness";
 import { AcceptSheet } from "@/components/players/invites/AcceptSheet";
 import { InviteCard } from "@/components/players/invites/InviteCard";
@@ -75,7 +75,7 @@ describe("AcceptSheet startWith", () => {
     draw("decline");
     const keep = await screen.findByRole("button", { name: INVITES_COPY.declineKeep });
     expect(screen.getByRole("button", { name: INVITES_COPY.declineConfirm })).toBeInTheDocument();
-    await vi.waitFor(() => expect(keep).toHaveFocus());
+    await waitFor(() => expect(keep).toHaveFocus());
   });
 
   it("opened otherwise, asks nothing", async () => {

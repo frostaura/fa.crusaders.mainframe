@@ -69,7 +69,15 @@ export const SESSION_ANON = {
   is_admin: false,
 };
 
-export async function serveApi(page: Page, routes: ApiRoute[]) {
+/**
+ * Go-live FM-8 — the club an address serves (`GET /api/v1/auth/club`), read at every boot. Served
+ * by every route table as the sessions' own club unless a spec names another.
+ */
+export const CLUB_ROUTE = "/api/v1/auth/club";
+export const CLUB = { slug: "crusaders", name: "Crusaders Squash Club" };
+
+export async function serveApi(page: Page, given: ApiRoute[]) {
+  const routes = given.some((r) => r.path === CLUB_ROUTE) ? given : [...given, { path: CLUB_ROUTE, body: CLUB }];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method().toUpperCase();
@@ -79,6 +87,15 @@ export async function serveApi(page: Page, routes: ApiRoute[]) {
     const match = routes
       .filter((r) => (r.method ?? "GET").toUpperCase() === method && url.pathname.startsWith(r.path))
       .sort((a, b) => b.path.length - a.path.length)[0];
+
+    // The device contract v3 routes beside the board list (network, member codes) are
+    // answered 404 — what an API without them says — unless a spec declares one itself; the list's
+    // shorter prefix must not answer for them with an array of boards.
+    const v3 = /^\/api\/v1\/admin\/devices\/(network|member-codes)/.exec(url.pathname)?.[0];
+    if (v3 && (!match || !match.path.startsWith(v3))) {
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not_found" }) });
+      return;
+    }
 
     if (!match) {
       await route.fulfill({

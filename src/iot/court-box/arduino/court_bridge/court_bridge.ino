@@ -12,18 +12,19 @@
 // WHY THIS HALF EXISTS
 // --------------------
 // It is the half that talks to the network, so everything volatile lives here
-// and the Mega stays near-static. Both halves are flashed over USB by DIP
-// switch: there is no over-the-air path, no signing key, no discovery, no claim
-// flow and no runtime credential store, because one club with one box needs
-// none of it and every one of those parts was a way for the box to break
-// itself. The four things the box needs — the WiFi SSID and password, the API
-// base URL and the device API key — are compiled in from secrets.h, next to this sketch,
-// and changing any of them is a reflash. See src/iot/court-box/README.md's Flashing
+// and the Mega stays near-static. The bridge is updated only by cable, at the
+// box, so nothing an operator does — a rotated key, a new router, a moved
+// server — may need one (device-api.md §6, §8). The four
+// values compiled in from secrets.h, next to this sketch (the WiFi SSID and password, the
+// API base URL and the device API key) are only the FIRST-BOOT DEFAULTS; what
+// the server or the setup portal sends since is kept in flash. There is still
+// no discovery and no claim flow. See src/iot/court-box/README.md's Flashing
 // section.
 //
 // HOW THE BOX AUTHENTICATES
 // -------------------------
-// `Authorization: Bearer <DEVICE_API_KEY>` on every call, and its own MAC in
+// `Authorization: Bearer <key>` on every call — the compiled DEVICE_API_KEY
+// (k0) until the server's `key_next` replaces it — and its own MAC in
 // every request body. The server resolves the key to a tenant and the MAC to a
 // device, registering the device itself the first time it sees a new one. There
 // is no signature, no timestamp and no clock: the box has no RTC, and the whole
@@ -86,6 +87,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "EspLifeline.h"
 #include "src/arduino_hal/ArduinoClock.h"
 #include "src/arduino_hal/LittleFsStore.h"
 #include "src/arduino_hal/SerialTransport.h"
@@ -94,16 +96,19 @@
 #include "src/bridgelogic/EventDrain.h"
 #include "src/bridgelogic/Extend.h"
 #include "src/bridgelogic/FaultLog.h"
+#include "src/bridgelogic/Lifeline.h"
 #include "src/bridgelogic/MegaLink.h"
+#include "src/bridgelogic/MegaTx.h"
 #include "src/bridgelogic/MemberScan.h"
 #include "src/bridgelogic/OnRetry.h"
-#include "src/bridgelogic/PayFor.h"
+#include "src/bridgelogic/Persist.h"
 #include "src/bridgelogic/Relight.h"
 #include "src/bridgelogic/RestorePlan.h"
 #include "src/bridgelogic/ScanFlow.h"
 #include "src/bridgelogic/ScanMemory.h"
 #include "src/bridgelogic/ScreenScript.h"
 #include "src/bridgelogic/StateReconcile.h"
+#include "src/bridgelogic/V3Heartbeat.h"
 #include "src/bridgelogic/WalkUp.h"
 #include "src/bridgelogic/WallClock.h"
 #include "src/court/ButtonMap.h"
@@ -118,6 +123,8 @@
 #include "src/devlink/EventUpload.h"
 #include "src/devlink/LcdSettings.h"
 #include "src/devlink/RosterSync.h"
+#include "src/devnet/JsonMember.h"
+#include "src/devnet/Net.h"
 #include "src/eventq/EventQueue.h"
 #include "src/fwversion/Version.h"
 #include "src/memcode/GuessGuard.h"
@@ -130,11 +137,9 @@
 #include "src/roster/Roster.h"
 #include "src/timebase/TimeBase.h"
 
-// The four compiled-in values, all MANDATORY. There is no runtime store and no
-// provisioning line: one box, one club, and the person who flashes it is the
-// person who knows the WiFi password and holds the API key. Changing any of
-// them is another Upload from the Arduino IDE, which is a two-minute job and cannot leave a box
-// holding a credential nobody can see.
+// The five compiled-in values, all MANDATORY. The first four are first-boot
+// defaults (the runtime set in flash wins once there is one); the setup
+// portal's password is fixed for the life of the image.
 //
 // The build fails rather than producing an image with a blank in it — an image
 // that joins an empty SSID, or posts to an empty base URL with an empty bearer
@@ -165,6 +170,26 @@ static_assert(sizeof(API_BASE_URL) > 1U,
               "API_BASE_URL in secrets.h is empty — e.g. \"http://192.168.1.10:8088\"");
 static_assert(sizeof(DEVICE_API_KEY) > 1U,
               "DEVICE_API_KEY in secrets.h is empty — copy it from the admin Devices page");
+#ifndef SETUP_AP_PASSWORD
+#error "secrets.h does not define SETUP_AP_PASSWORD — see secrets.h.example, next to court_bridge.ino"
+#endif
+
+namespace secrets_check {
+
+// C++11-valid constexpr (one return each): the Arduino IDE builds at gnu++11.
+constexpr bool equals(const char* a, const char* b, unsigned i) {
+  return a[i] != b[i] ? false : (a[i] == '\0' ? true : equals(a, b, i + 1U));
+}
+
+} // namespace secrets_check
+
+// SETUP_AP_PASSWORD is the setup portal's WPA2 password, printed on the label
+// inside the enclosure (device-api.md §8).
+static_assert(sizeof(SETUP_AP_PASSWORD) >= 9U && sizeof(SETUP_AP_PASSWORD) <= 64U,
+              "SETUP_AP_PASSWORD must be 8 to 63 characters (WPA2)");
+static_assert(!secrets_check::equals(SETUP_AP_PASSWORD, "REPLACE_ME_SETUP_AP_PASSWORD", 0U),
+              "SETUP_AP_PASSWORD is still secrets.h.example's placeholder — choose one and print it on the "
+              "label inside the enclosure");
 static_assert(sizeof(DEVICE_API_KEY) - 1U <= devapi::kMaxApiKeyLen,
               "DEVICE_API_KEY is longer than devapi::kMaxApiKeyLen — a truncated key is a 401 that "
               "reads exactly like the wrong key");
@@ -231,11 +256,6 @@ tb::Deadline gHeartbeat;
 /// tenant.
 char gMacHex[dc::hex::encodedSize(6U)];
 
-/// `Bearer <DEVICE_API_KEY>`, rendered once at boot. Held rather than rebuilt
-/// per call because it is the same string for the life of the image and the
-/// heap it would churn is shared with the network stack.
-char gAuthHeader[devapi::kAuthorizationBufSize] = {};
-
 /// THIS BOOT'S IDENTITY — the third field of the server's idempotency key.
 ///
 /// Drawn once in setup(), after WiFi.begin(), and read-only thereafter. The ESP
@@ -264,6 +284,12 @@ uint32_t gMegaUptime = 0U;
 /// which is half of why the identity screen was never painted (review 3,
 /// finding 9). The rule is bridgelogic::shouldRepaintIdentity's.
 bool gMegaSeen = false;
+
+/// The Mega's boot instant on this half's clock, and the `!PING` a lost line
+/// earns (bridgelogic/MegaLink.h): together they find a Mega-only reset whose
+/// `!BOOT` and `!STATE` the link garbled, within a second instead of ten.
+bridgelogic::MegaBootClock gMegaBootClock;
+bridgelogic::MegaProbe gMegaProbe;
 
 bool gWifiUp = false;
 
@@ -418,6 +444,51 @@ uint16_t gMegaScanJunk = 0U;
 uint8_t gIdleFlags = 0xFFU;
 char gIdleClock[bridgelogic::kWireTimeLen] = {};
 
+// --- v3 (bridge 3.0.0) -------------------------------------------------------
+
+/// The Mega link: queued, paced, tagged and acknowledged (DL-01, DL-06).
+bridgelogic::MegaTx gTx;
+
+/// The last accepted heartbeat's `courts` (device-api.md §3), aged by this
+/// half's clock, and the continuous reconcile it drives (§4).
+bridgelogic::Snapshot gSnapshot;
+bridgelogic::Reconciler gReconciler;
+
+/// The Mega's settings as the last answer had them (hardware first), and the
+/// names that answer could not be read, for the next heartbeat's `drift`.
+bridgelogic::MegaConfig gMegaCfg = bridgelogic::defaultMegaConfig();
+bridgelogic::Drift gDrift;
+const char* gDriftNames[bridgelogic::Drift::kMax] = {};
+
+/// What the Mega said about itself this Mega boot (`!BOOT`, `!HW`, `!DIAG`).
+devlink::MegaReport gMegaReport;
+bool gMegaHeard = false;
+char gMegaVersion[16] = {};
+/// `relay_state` stays absent until the first `!STATE` of this Mega boot —
+/// never `[]`, which the server reads as "confirmed off" (BR-12).
+bool gMegaStateSeen = false;
+/// After a Mega boot, `!STATE`'s all-dark mask is the reset, not a release:
+/// courts the snapshot owes are re-lit by `!WANT` and released by nobody.
+tb::Deadline gBootGrace;
+constexpr uint32_t kBootGraceMs = 5000UL;
+/// A court `!ON`'d this recently is never reconciled as released (MCV1-01).
+uint32_t gOnSentAt[bridgelogic::kStateCourts] = {};
+bool gOnSent[bridgelogic::kStateCourts] = {};
+constexpr uint32_t kOnGraceMs = 3000UL;
+
+/// Relays re-lit from the snapshot since the last accepted beat (`relight`).
+devlink::RelightEntry gRelit[devlink::kMaxRelightElements];
+uint8_t gRelitCount = 0U;
+
+/// `!LIVE,5` every five seconds; `!IDLE` every thirty and on every beat.
+tb::Deadline gLiveDue;
+tb::Deadline gIdleDue;
+constexpr uint32_t kLiveEveryMs = 5000UL;
+constexpr uint32_t kIdleEveryMs = 30000UL;
+
+/// The lowest free heap seen since boot (`diag.heap_min`).
+uint32_t gHeapMin = UINT32_MAX;
+
 /// The scan flow's decision core and the walk-up nonce policy. Both stateless
 /// or nearly so; both live in lib/bridgelogic so the host suite owns them.
 bridgelogic::ScanFlow gScanFlow;
@@ -486,10 +557,6 @@ char gLastScan[proto::kMaxArgLen + 1] = {'\0'};
 /// AGAIN each armed it by a different rule, and the three disagreed.
 bridgelogic::ScanMemory gScan(kScanMemoryMs, devlink::kLcdChoiceDefaultMs);
 
-/// The state between a pay-for's two presses (D10): which court was quoted, at
-/// what price label, under which nonce.
-bridgelogic::PayForFlow gPayFor;
-
 /// The Mega's last `!STATE`, per court: the mask bit, the seconds it reported
 /// and when. What an unscanned court press (MinutesLeft) and an extension read
 /// a court's time left from (bridge 2.3.0). The Mega is the authority; this is
@@ -532,7 +599,80 @@ bridgelogic::AuthPolicy gAuth(kScanMemoryMs);
 /// API chooses to send that this build does not read — and
 /// loop() runs on the ESP8266's 4 KB continuation stack, where a 2.5 KB local
 /// under an HTTP call is a crash that looks like a random reset.
-char gHeartbeatBody[2560] = {};
+/// ONE 5 KB buffer for jobs that never overlap (bridge 3.1.0, the heap floor):
+/// the heartbeat ANSWER (from byte 0), the heartbeat REQUEST (its tail — sent
+/// before the answer is read over it), a member call's reply and the setup
+/// portal's scratch. Word-aligned, as the flash reads of a record want it.
+union BigBuffer {
+  char text[bridgelogic::kHeartbeatResponseCap];
+  uint32_t align;
+};
+
+BigBuffer gBig = {};
+char* const gHeartbeatBody = gBig.text;
+constexpr size_t kHeartbeatBodyCap = bridgelogic::kHeartbeatResponseCap;
+
+/// The heartbeat REQUEST, static for the same reason (ESPR-1, HW-6): the v3
+/// body carries the Mega's and this board's health and is up to 1023 bytes.
+char* const gHeartbeatRequest = gBig.text + (bridgelogic::kHeartbeatResponseCap - devlink::kHeartbeatBodyCap);
+constexpr size_t kHeartbeatRequestCap = devlink::kHeartbeatBodyCap;
+
+// --- bridge 3.1.0: the lifeline (device-api.md §4, §6-§8) --------------------------
+
+/// The flash: LittleFS records.
+arduino_hal::LittleFsFiles gFiles;
+arduino_hal::RtcEpoch gEpoch;
+arduino_hal::SetupPortal gPortal;
+
+/// The device keys and the network set.
+bridgelogic::BridgeKeys gKeys;
+bridgelogic::BridgeNet gNet;
+
+/// The link supervisor (30 s grace, 30-300 s backoff, restart at 15 min down)
+/// and the stall watchdog (link up, nothing accepted for 6 h: HW-8).
+devnet::Supervisor gSupervisor;
+bridgelogic::StallWatch gStall;
+bool gRestartWanted = false;
+
+/// The setup chord (`!HELD,09,5` within 60 s of power-on) and the portal.
+bridgelogic::SetupChord gChord;
+tb::Deadline gPortalUntil;
+constexpr uint32_t kPortalMs = 10UL * 60000UL;
+
+/// The four lifeline settings from `config`.
+bridgelogic::LifelineSettings gLife;
+
+/// What a boot restored, said once on the first accepted beat.
+bridgelogic::BodyStore gBody;
+bridgelogic::CarriedEvents gCarried;
+bridgelogic::RestoreKind gRestoreKind = bridgelogic::RestoreKind::None;
+bool gRestoreReported = false;
+/// Relays a COLD restore lit on stale evidence; the first accepted snapshot
+/// confirms or switches each one off (device-api.md §4).
+uint8_t gProvisional = 0U;
+/// A cold restore's roster is trusted only this long without a beat.
+tb::Deadline gColdTrust;
+bool gColdTrustArmed = false;
+bool gEverAccepted = false;
+
+/// The live event queue, written out when it changes (BR-07).
+uint16_t gEventsSize = 0U;
+uint32_t gEventsLastSeq = 0U;
+uint32_t gEventsHeadSeq = 0U;
+
+/// The last member input (scan or press), for the restart's idle rule.
+uint32_t gLastInputMs = 0U;
+
+/// The ONE reply buffer of the three member-facing calls — /activate,
+/// /walkup and /extend — which never run at the same time: 512 bytes (2.3.0:
+/// three of 384), the compat budget the server holds each reply to (FC-5,
+/// device-api.md §11.4). Static, never a stack local under an HTTP call.
+inline constexpr size_t kReplyBodyCap = 512U;
+/// In gBig as well (bridge 3.1.0, the heap floor): a member's call never runs
+/// while the heartbeat answer is still wanted — that answer is adopted in the
+/// pass it arrives and written to flash at the top of the next, before any
+/// scan of that pass is read.
+char* const gReplyBody = gBig.text;
 
 /// Write a frame to the Mega, all of it or none of it. A fragment would fail
 /// the Mega's checksum AND be read as the head of the next frame.
@@ -552,20 +692,36 @@ char gHeartbeatBody[2560] = {};
 /// not the Mega's last received line, and clearing on it would throw away a
 /// retry that is still legitimately owed.
 bool sendToMega(const proto::Frame& frame) {
-  char buf[proto::kMaxFrameLen];
-  const size_t len = proto::encode(frame, buf, sizeof(buf));
-  if (len == 0U || gMega.writable() < len) {
+  const uint32_t now = gClock.nowMs();
+  const proto::Verb v = frame.verb();
+  const bool command = v == proto::Verb::On || v == proto::Verb::Off || v == proto::Verb::Ext ||
+                       v == proto::Verb::Auth || v == proto::Verb::Want || v == proto::Verb::Cfg;
+  const bool queued = command ? gTx.command(frame, now) : gTx.plain(frame);
+  if (!queued) {
     return false;
   }
-  if (gMega.write(reinterpret_cast<const uint8_t*>(buf), len) != len) {
-    return false;
+  if (v == proto::Verb::On) {
+    proto::Court c = proto::Court::A;
+    if (proto::courtFromChar(frame.arg(0)[0], c)) {
+      gOnSent[static_cast<uint8_t>(c)] = true;
+      gOnSentAt[static_cast<uint8_t>(c)] = now;
+    }
   }
-  // A fresh clock read rather than the pass's: several callers write frames
-  // immediately after a blocking HTTP call, and a retry window stamped four
-  // seconds before the frame left is a window that is already most of the way
-  // gone.
-  gOnRetry.sent(frame, gClock.nowMs());
+  // A v2 Mega acknowledges nothing: its BADCRC retry is still OnRetry's.
+  if (gTx.dialect() != bridgelogic::MegaDialect::V3) {
+    gOnRetry.sent(frame, now);
+  }
   return true;
+}
+
+/// Pushes the queued Mega frames out for up to `budgetMs` (yielding), so the
+/// screen a member is waiting on is on the glass before a blocking HTTP call.
+void flushMega(uint32_t budgetMs) {
+  const uint32_t start = gClock.nowMs();
+  while (gTx.queued() > 0U && tb::since(gClock.nowMs(), start) < budgetMs) {
+    gTx.pump(gMega, gClock.nowMs());
+    yield();
+  }
 }
 
 /// Stages a whole screen and commits it: `!ROW` for each non-empty row, then
@@ -583,11 +739,13 @@ void sendScreen(const bridgelogic::Screen& screen) {
   // Whatever was waiting behind a greeting is superseded by this screen.
   gFollowUpPending = false;
   gGreetUntil.disarm();
-  // EVERY row, empty ones included: the Mega commits every staged row, and a
-  // skipped one showed the previous screen's words (R19).
-  for (size_t i = 0U; i < bridgelogic::kScreenFrameCount; ++i) {
-    static_cast<void>(sendToMega(bridgelogic::screenFrame(screen, i)));
+  bridgelogic::Screen s = screen;
+  if (gTx.ackedLayout() != 1 && strlen(s.rows[1]) > 12U) {
+    // Composed for the layout the Mega acknowledged: compact draws the
+    // countdown in row 1's last three cells, which a long row 1 needs.
+    s.flags = static_cast<uint8_t>(s.flags & ~0x01U);
   }
+  static_cast<void>(gTx.screen(s, gClock.nowMs()));
 }
 
 /// The screen for `id` with the tenant's holds, and never inviting a court
@@ -708,7 +866,7 @@ bool courtLit(uint8_t court, uint32_t nowMs) {
 /// bit3 is what puts `STARTING UP` on the glass from boot until the first
 /// accepted heartbeat. A scan is accepted THROUGHOUT: the offline roster path
 /// works, and a member must not be blocked by a restore that may never come.
-void sendIdle(uint32_t nowMs) {
+void sendIdle(uint32_t nowMs, bool force = false) {
   uint8_t flags = 0U;
   if (gWifiUp) {
     flags |= 0x01U;
@@ -725,7 +883,7 @@ void sendIdle(uint32_t nowMs) {
 
   char hhmm[bridgelogic::kWireTimeLen] = {};
   gWallClock.wireTime(nowMs, hhmm, sizeof(hhmm));
-  if (flags == gIdleFlags && strcmp(hhmm, gIdleClock) == 0) {
+  if (!force && flags == gIdleFlags && strcmp(hhmm, gIdleClock) == 0) {
     // Nothing the Mega does not already know. It advances the clock itself.
     return;
   }
@@ -754,16 +912,12 @@ void sendCourtMap() {
 /// link-up, a link-down. The lines themselves are bridgelogic::MegaLink's, so
 /// the composition root cannot invent a third screen nothing tests.
 void showIdentityScreen() {
-  // `!IDLE` FIRST: it is what the Mega's landing screen renders its status row
-  // from, and it is the thing that is true for as long as nothing overlays it.
-  sendIdle(gClock.nowMs());
-  // AND the two identity lines, which are an OVERLAY with the ordinary hold —
-  // `!LCD` stages rows 0-1 and commits them with a deadline, so this reverts to
-  // the landing screen on its own. Kept because this lane cannot verify the
-  // Mega's `!IDLE` renderer from here, and a box that shows nothing because the
-  // only paint it had was removed is worse than one overlay frame.
-  const bridgelogic::IdentityScreen screen = bridgelogic::identityScreen(gWifiUp);
-  static_cast<void>(sendToMega(proto::Frame::lcd(screen.line1, screen.line2)));
+  // `!IDLE` only (bridge 3.0.0, BR-10, DL-08). The CONNECTED / CRUSADERS
+  // COURTS overlays were painted on every WiFi edge and a marginal access
+  // point kept them up instead of the landing; the landing's own status item
+  // (READY / NO WIFI / NO SERVER / STARTING UP) says the same thing without
+  // leaving landing.
+  sendIdle(gClock.nowMs(), true);
 }
 
 /// Sends what bridgelogic::AuthPolicy decided to the Mega, whose window is the
@@ -798,7 +952,6 @@ void spendScan() {
 /// one left armed behind a forgotten scan is a confirm on nobody's code.
 void forgetScan() {
   spendScan();
-  gPayFor.clear();
   applyAuth(gAuth.disarm());
 }
 
@@ -841,7 +994,6 @@ void setupIdentity() {
   uint8_t mac[6] = {0U, 0U, 0U, 0U, 0U, 0U};
   WiFi.macAddress(mac);
   static_cast<void>(dc::hex::encodeLower(mac, sizeof(mac), gMacHex, sizeof(gMacHex)));
-  static_cast<void>(devapi::renderAuthorization(gAuthHeader, sizeof(gAuthHeader), DEVICE_API_KEY));
 }
 
 /// Decimal value of an argument the decoder already validated.
@@ -891,19 +1043,69 @@ void noteMegaCounters(const proto::Frame& frame, uint32_t nowMs) {
                    eventq::Event::kNoCourt, nowMs);
 }
 
+// Defined beside releaseCourt, which they need.
+void sendMegaSettings();
+void sendLand(uint32_t nowMs);
+void onMegaBoot(uint32_t nowMs);
+void noteHeld(const proto::Frame& frame, uint32_t nowMs);
+void adoptLifeline(const char* response, size_t responseLen, uint32_t nowMs);
+void settleProvisional(uint32_t nowMs);
+
 void noteMegaPong(const proto::Frame& frame, uint32_t nowMs) {
   const uint32_t seconds = argU32(frame, 1U);
   noteMegaCounters(frame, nowMs);
-  if (bridgelogic::shouldRepaintIdentity(gMegaSeen, gMegaUptime, seconds)) {
-    // Either the Mega restarted — its screen is back to the idle text — or this
-    // is the first pong of this boot and it has never been told at all. The
-    // second case is the one that matters after a USB flash of the ESP: the DIP
-    // block had the ESP on the USB socket, and restoring DIP 1 and 2 is the
-    // first moment the glass is reachable at all.
-    showIdentityScreen();
-  }
+  // The dialect follows the Mega's version (a 2.1.0 Mega sends no !BOOT).
+  gTx.setMegaVersion(frame.arg(0));
+  snprintf(gMegaVersion, sizeof(gMegaVersion), "%s", frame.arg(0));
+  // A restart is a boot instant that moved, not merely an uptime smaller than
+  // the last one: after a heard !BOOT the last figure is 0 (MegaBootClock).
+  const bool restarted = gMegaBootClock.observe(nowMs, seconds) && gMegaSeen;
+  const bool first = !gMegaSeen;
   gMegaSeen = true;
   gMegaUptime = seconds;
+  if (restarted) {
+    // A Mega restart this half heard no !BOOT for (a 2.x Mega, or a !BOOT the
+    // link lost): the same reconcile trigger.
+    onMegaBoot(nowMs);
+  } else if (first) {
+    sendMegaSettings();
+    sendCourtMap();
+    showIdentityScreen();
+    sendLand(nowMs);
+  }
+}
+
+/// `!BOOT,<version>,<cause>,<held>` — the Mega's first frame after a reset.
+void noteMegaBoot(const proto::Frame& frame, uint32_t nowMs) {
+  gTx.setMegaVersion(frame.arg(0));
+  snprintf(gMegaVersion, sizeof(gMegaVersion), "%s", frame.arg(0));
+  gMegaReport = devlink::MegaReport();
+  gMegaReport.reset = static_cast<uint8_t>(strtoul(frame.arg(1), nullptr, 16));
+  gMegaHeard = true;
+  gMegaSeen = true;
+  gMegaUptime = 0U;
+  static_cast<void>(gMegaBootClock.observe(nowMs, 0U));
+  onMegaBoot(nowMs);
+}
+
+/// `!HW` — the hardware facts the Mega is actually running with.
+void noteMegaHardware(const proto::Frame& frame) {
+  static const uint32_t kBauds[6] = {0U, 9600U, 19200U, 38400U, 57600U, 115200U};
+  gMegaReport.lcd = static_cast<uint8_t>(strtoul(frame.arg(0), nullptr, 16));
+  gMegaReport.relayLow = frame.arg(1)[0] == '1';
+  const uint32_t code = argU32(frame, 2U);
+  gMegaReport.scanBaud = code < 6U ? kBauds[code] : 0U;
+  gMegaReport.scanCrlf = frame.arg(3)[0] == '1';
+  gMegaReport.keys = static_cast<uint8_t>(strtoul(frame.arg(4), nullptr, 16));
+  gMegaHeard = true;
+}
+
+/// `!DIAG` — the Mega's since-boot counters, carried in the heartbeat's `mega`.
+void noteMegaDiag(const proto::Frame& frame) {
+  for (uint8_t i = 0U; i < 5U; ++i) {
+    const uint32_t v = argU32(frame, i);
+    gMegaReport.counters[i] = v > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(v);
+  }
 }
 
 /// Paints an outcome and, when it is an activation, opens the court.
@@ -989,10 +1191,8 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   snprintf(gLastScan, sizeof(gLastScan), "%s", frame.arg(0));
   // For the TENANT's scan memory, not the compile-time one (R19 D19-3).
   gScan.remember(nowMs);
-  // A new identity at the panel: any pay-for quote on the glass was somebody
-  // else's question.
-  gPayFor.clear();
-  // And any EXTEND prompt was somebody else's court press.
+  // A new identity at the panel: any EXTEND prompt was somebody else's court
+  // press.
   gExtendCourt = kNoExtend;
 
   // No `!AUTH` yet. The window used to be armed HERE, before anything had
@@ -1095,11 +1295,11 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
 
 /// Queues the Release for a court and forgets it. The one place a held court
 /// becomes a released one, whichever messenger — `!EVT` or `!STATE` — said so.
-void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
+void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs, eventq::Cause cause) {
   // The Release event only. Its `CRUSADERS COURTS / SCAN TO START` overlay is
   // no longer painted (bridge 2.3.0): the Mega's own landing screen — SCAN
   // YOUR CODE over the lit courts' minutes — is what a released court leaves.
-  static_cast<void>(gSession.onRelease(court, heldMs, nowMs));
+  static_cast<void>(gSession.onRelease(court, heldMs, nowMs, cause));
   gHeld[court] = bridgelogic::HeldState{nowMs, false};
   gRelight.onRelease(court);
   gOnlineGrants.released(court);
@@ -1108,6 +1308,91 @@ void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
   // waiting on — and A's coil switching is a plausible cause of B's CRC failure
   // in the first place (review 3, finding 24).
   gOnRetry.clearIfCourt(court);
+}
+
+// --- v3: the Mega's settings, the landing figures and the reconcile ----------
+
+/// The whole `!CFG` set — hardware first, KEYS from the button map — on every
+/// Mega boot, every revival and every accepted heartbeat. Idempotent.
+void sendMegaSettings() {
+  bridgelogic::setCfg(gMegaCfg, "KEYS", bridgelogic::keysFromButtonMap(gButtons));
+  bridgelogic::setCfg(gMegaCfg, "HINT", static_cast<uint16_t>(gLcdSettings.hintMs / 1000UL));
+  bridgelogic::setCfg(gMegaCfg, "SCANH", static_cast<uint16_t>(gLcdSettings.revertMs / 1000UL));
+  for (uint8_t i = 0U; i < gMegaCfg.count; ++i) {
+    if (!sendToMega(proto::Frame::cfg(0U, gMegaCfg.items[i].key, gMegaCfg.items[i].value))) {
+      gFaults.note(bridgelogic::Fault::RelayCmdDropped, gClock.nowMs());
+    }
+  }
+}
+
+/// `!LAND`: the paid seconds of every relay as the aged snapshot has them.
+void sendLand(uint32_t nowMs) {
+  int32_t seconds[4] = {proto::kNoOpinion, proto::kNoOpinion, proto::kNoOpinion, proto::kNoOpinion};
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    seconds[i] = bridgelogic::Reconciler::paidSeconds(gSnapshot, i, nowMs);
+  }
+  static_cast<void>(sendToMega(proto::Frame::land(seconds)));
+}
+
+/// One `!WANT` for every relay the snapshot owes light (device-api.md §4).
+void reconcileNow(uint32_t nowMs, bool force) {
+  bridgelogic::RelayView view[bridgelogic::kSnapshotRelays];
+  for (uint8_t i = 0U; i < bridgelogic::kSnapshotRelays; ++i) {
+    view[i].lit = (gStateMask & static_cast<uint8_t>(1U << i)) != 0U;
+    view[i].seconds = relaySecondsLeft(i, nowMs);
+  }
+  bridgelogic::ReconcileSettings settings;
+  settings.restoreEnabled = gLcdSettings.relayRestoreEnabled;
+  settings.minSeconds = gLife.reconcileMinSeconds;
+  int32_t want[bridgelogic::kSnapshotRelays];
+  if (!gReconciler.plan(gSnapshot, view, settings, nowMs, force, want)) {
+    return;
+  }
+  if (!sendToMega(proto::Frame::want(0U, want))) {
+    return;
+  }
+  for (uint8_t i = 0U; i < bridgelogic::kSnapshotRelays; ++i) {
+    if (want[i] == proto::kNoOpinion) {
+      continue;
+    }
+    // Held in this half's books from now: the Mega's !STATE confirms it.
+    if (!gHeld[i].held) {
+      gHeld[i] = bridgelogic::HeldState{nowMs, true};
+      if (gRelitCount < devlink::kMaxRelightElements) {
+        gRelit[gRelitCount].relay = i;
+        for (uint8_t c = 0U; c < gSnapshot.count; ++c) {
+          if (gSnapshot.courts[c].relay == i) {
+            memcpy(gRelit[gRelitCount].ref, gSnapshot.courts[c].ref, sizeof(gRelit[gRelitCount].ref));
+          }
+        }
+        ++gRelitCount;
+      }
+    }
+  }
+}
+
+/// The Mega restarted (`!BOOT`, or a 2.x `!PONG` whose uptime went back): its
+/// relays are all open and its settings are the boot defaults. Settings first
+/// (the hardware keys before any relay frame), then the landing, then the
+/// reconcile, within seconds (FWM-01, DL-03, BR-03). A held court the
+/// snapshot does not owe is released with cause mega_reset.
+void onMegaBoot(uint32_t nowMs) {
+  gTx.megaBooted();
+  gMegaStateSeen = false;
+  gBootGrace.arm(nowMs, kBootGraceMs);
+  sendMegaSettings();
+  sendCourtMap();
+  sendIdle(nowMs, true);
+  sendLand(nowMs);
+  static_cast<void>(sendToMega(proto::Frame::live(kLiveEveryMs / 1000UL)));
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    const int32_t owed = bridgelogic::Reconciler::paidSeconds(gSnapshot, i, nowMs);
+    if (gHeld[i].held && (owed <= 0 || !gLcdSettings.relayRestoreEnabled)) {
+      releaseCourt(i, tb::since(nowMs, gHeld[i].sinceMs), nowMs, eventq::Cause::MegaReset);
+    }
+  }
+  gStateMask = 0U;
+  reconcileNow(nowMs, true);
 }
 
 /// The Mega said something about the last line it received. If that line was a
@@ -1210,7 +1495,18 @@ void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
                      eventq::Event::kNoCourt, nowMs);
     return;
   }
-  if (strcmp(name, "AUTOOFF") != 0 && strcmp(name, "OFF") != 0) {
+  if (strcmp(name, "LIVE") == 0) {
+    // The Mega had declared this bridge dead and dropped its settings'
+    // dependants: send them again (device-serial-protocol.md v3, liveness).
+    sendMegaSettings();
+    sendCourtMap();
+    sendIdle(nowMs, true);
+    sendLand(nowMs);
+    return;
+  }
+  const bool capOff = strcmp(name, "CAPOFF") == 0;
+  const bool autoOff = strcmp(name, "AUTOOFF") == 0;
+  if (!capOff && !autoOff && strcmp(name, "OFF") != 0) {
     return;
   }
   const char* courtText = frame.arg(1);
@@ -1224,7 +1520,67 @@ void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
     // survived the Mega's TX ring.
     return;
   }
-  releaseCourt(court, tb::since(nowMs, gHeld[court].sinceMs), nowMs);
+  const eventq::Cause cause =
+      capOff ? eventq::Cause::Cap : (autoOff ? eventq::Cause::AutoOff : eventq::Cause::Member);
+  if (cause == eventq::Cause::Member) {
+    // Never re-lit for this booking by the snapshot that still lists it.
+    gReconciler.memberReleased(court, gSnapshot, nowMs);
+  }
+  releaseCourt(court, tb::since(nowMs, gHeld[court].sinceMs), nowMs, cause);
+}
+
+/// The Mega's own account of what each relay has left, adopted: the relay
+/// deadline Relight re-sends against, what MinutesLeft and an extension read,
+/// and the heartbeat's relay_state.
+///
+/// It is the AUTHORITY on the relay deadline; this half only ever had a belief
+/// about it, stamped the instant an `!EXT` left the TX ring. A corrupted
+/// extension therefore left gRelight quiet for another half hour and the court
+/// went dark mid-game with the bridge convinced it had extended it (review 3,
+/// finding 7). And it is the only account of the relays anybody outside this
+/// box has ever had: the heartbeat carries it on, so the control board can say
+/// "lights on, confirmed by the box" instead of only what the server believes.
+void adoptRelayState(const proto::Frame& frame, uint8_t mask, uint32_t nowMs) {
+  gRelayStateCount = 0U;
+  gStateMask = mask;
+  gMegaStateSeen = true;
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    uint16_t seconds = 0U;
+    if (bridgelogic::parseStateSeconds(frame.arg(static_cast<uint8_t>(i + 1U)), seconds)) {
+      gRelight.observeRelayRemaining(i, seconds, nowMs);
+    }
+    const bool closed = (mask & static_cast<uint8_t>(1U << i)) != 0U;
+    // What MinutesLeft and an extension read (bridge 2.3.0).
+    gStateSecs[i] = closed ? seconds : 0U;
+    gStateAt[i] = nowMs;
+    if (!closed) {
+      continue;
+    }
+    gRelayState[gRelayStateCount].relay = i;
+    gRelayState[gRelayStateCount].remainingSeconds = seconds;
+    ++gRelayStateCount;
+  }
+}
+
+/// What bridgelogic::reconcile decided per court, applied. A synthesized
+/// release is not one when it is the !STATE right after a Mega boot (the
+/// !WANT re-lights what is owed), or one that crossed an !ON still on the wire
+/// (MCV1-01).
+void applyStatePlan(const bridgelogic::Reconciliation& plan, uint32_t nowMs) {
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    if (plan.action[i] == bridgelogic::CourtAction::AdoptHeld) {
+      gHeld[i] = bridgelogic::HeldState{nowMs, true};
+      continue;
+    }
+    if (plan.action[i] != bridgelogic::CourtAction::SynthesizeRelease) {
+      continue;
+    }
+    const bool booting = gBootGrace.isArmed() && !gBootGrace.expired(nowMs);
+    const bool justOn = gOnSent[i] && tb::since(nowMs, gOnSentAt[i]) < kOnGraceMs;
+    if (!booting && !justOn) {
+      releaseCourt(i, plan.heldMs[i], nowMs, eventq::Cause::AutoOff);
+    }
+  }
 }
 
 /// `!STATE,<mask>,...` — the Mega's own account of which relays are closed,
@@ -1237,47 +1593,18 @@ void handleState(const proto::Frame& frame, uint32_t nowMs) {
   if (!bridgelogic::parseStateMask(frame.arg(0), mask)) {
     return;
   }
-  // The Mega's own account of what each relay has left. It is the AUTHORITY on
-  // the relay deadline; this half only ever had a belief about it, stamped the
-  // instant an `!EXT` left the TX ring. A corrupted extension therefore left
-  // gRelight quiet for another half hour and the court went dark mid-game with
-  // the bridge convinced it had extended it (review 3, finding 7). Adopting the
-  // truth here is what makes the next pass re-send it in time.
-  //
-  // And it is the only account of the relays anybody outside this box has ever
-  // had. The heartbeat carries it on, so the control board can say "lights on,
-  // confirmed by the box" instead of only what the server believes.
-  gRelayStateCount = 0U;
-  gStateMask = mask;
-  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
-    uint16_t seconds = 0U;
-    if (bridgelogic::parseStateSeconds(frame.arg(static_cast<uint8_t>(i + 1U)), seconds)) {
-      gRelight.observeRelayRemaining(i, seconds, nowMs);
-    }
-    // What MinutesLeft and an extension read (bridge 2.3.0).
-    gStateSecs[i] = (mask & static_cast<uint8_t>(1U << i)) != 0U ? seconds : 0U;
-    gStateAt[i] = nowMs;
-    if ((mask & static_cast<uint8_t>(1U << i)) == 0U) {
-      continue;
-    }
-    gRelayState[gRelayStateCount].relay = i;
-    gRelayState[gRelayStateCount].remainingSeconds = seconds;
-    ++gRelayStateCount;
-  }
+  // Adopting the Mega's truth here is what makes the next pass re-send in time.
+  adoptRelayState(frame, mask, nowMs);
 
-  const bridgelogic::Reconciliation plan = bridgelogic::reconcile(mask, gHeld, nowMs);
   for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
-    switch (plan.action[i]) {
-    case bridgelogic::CourtAction::SynthesizeRelease:
-      releaseCourt(i, plan.heldMs[i], nowMs);
-      break;
-    case bridgelogic::CourtAction::AdoptHeld:
-      gHeld[i] = bridgelogic::HeldState{nowMs, true};
-      break;
-    case bridgelogic::CourtAction::None:
-      break;
+    if ((mask & static_cast<uint8_t>(1U << i)) != 0U) {
+      gReconciler.confirmed(i);
     }
   }
+  applyStatePlan(bridgelogic::reconcile(mask, gHeld, nowMs), nowMs);
+  // A !STATE that contradicts the snapshot is a reconcile trigger (§4); the
+  // planner's own 60 s pace keeps this from becoming a !WANT every ten seconds.
+  reconcileNow(nowMs, false);
 }
 
 /// A debounced press, interpreted through the map the API pushed.
@@ -1302,7 +1629,6 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     // this is where an unscanned court press is answered, and a lit court is
     // an EXTEND rather than a pay-for or the first half of switching off.
     const uint8_t relay = gPad.selectedCourt();
-    gPayFor.clear();
     const bool lit = courtLit(relay, nowMs);
     bridgelogic::ScreenFacts facts = screenFacts(nowMs);
     facts.court = relay;
@@ -1396,6 +1722,10 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     // switching relay coils, and the first week's numbers are expected to be
     // surprising.
     gFaults.note(faultForDecodeError(result.error), nowMs);
+    // The lost line may have been a `!BOOT`: ask for the uptime that proves it.
+    if (gMegaProbe.lineLost(nowMs)) {
+      static_cast<void>(sendToMega(proto::Frame::ping()));
+    }
     return;
   }
 
@@ -1403,7 +1733,25 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
   case proto::Verb::Pong:
     noteMegaPong(result.frame, nowMs);
     return;
+  case proto::Verb::Ack:
+    gTx.onAck(result.frame, nowMs);
+    return;
+  case proto::Verb::Boot:
+    noteMegaBoot(result.frame, nowMs);
+    return;
+  case proto::Verb::Hw:
+    noteMegaHardware(result.frame);
+    return;
+  case proto::Verb::Diag:
+    noteMegaDiag(result.frame);
+    return;
+  case proto::Verb::Held:
+    // The setup gesture (court A + court D for five seconds, `!HELD,09,5`,
+    // within 60 s of power-on) opens the setup portal (device-api.md §8).
+    noteHeld(result.frame, nowMs);
+    return;
   case proto::Verb::Scan:
+    gLastInputMs = nowMs;
     handleScan(result.frame, nowMs);
     return;
   case proto::Verb::Evt:
@@ -1414,6 +1762,7 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     handleReceiveError(result.frame, nowMs);
     return;
   case proto::Verb::Btn:
+    gLastInputMs = nowMs;
     handleButton(result.frame, nowMs);
     return;
   case proto::Verb::State:
@@ -1447,54 +1796,85 @@ void pumpMegaLink(uint32_t nowMs) {
 /// The response body is read into a caller buffer rather than a String: the ESP's
 /// heap is shared with the network stack, and a heartbeat that allocates four
 /// times a minute is a heap that fragments over a season in a cupboard.
-uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
-  if (body == nullptr || gAuthHeader[0] == '\0') {
-    // An unrenderable body, or a key that would not fit its buffer. Refused
-    // locally rather than sent as something the server has to reject, and it
-    // teaches the breaker nothing because it says nothing about the host.
+/// One POST, its answer read into `out` by a bounded reader. Returns the HTTP
+/// status, or 0 when it never completed.
+///
+/// HTTP/1.0 and no reuse (ESPR-5: a kept-alive socket per call left TIME_WAIT
+/// pcbs on the heap), and no `String` (ESPR-3, BR-16: getString() held a second
+/// copy of a 4 KB answer on the heap): the body is streamed straight into the
+/// caller's buffer, and one whose `Content-Length` is at or past the buffer is
+/// refused before a byte is read — EMPTY, NOT HALF. A response cut mid-object
+/// is a body whose readers see whichever fields landed inside the buffer.
+/// Reads from `stream` into `out` until `want` bytes, the server closes, or
+/// kHttpTimeoutMs passes. Returns the bytes read.
+size_t readUpTo(WiFiClient* stream, char* out, size_t want) {
+  size_t got = 0U;
+  const uint32_t startedAt = millis();
+  while (stream != nullptr && got < want && millis() - startedAt < kHttpTimeoutMs) {
+    const int avail = stream->available();
+    if (avail <= 0) {
+      if (!stream->connected()) {
+        break;
+      }
+      delay(1);
+      continue;
+    }
+    const size_t room = want - got;
+    const int n = stream->read(reinterpret_cast<uint8_t*>(out) + got,
+                               static_cast<size_t>(avail) < room ? static_cast<size_t>(avail) : room);
+    if (n > 0) {
+      got += static_cast<size_t>(n);
+    }
+  }
+  return got;
+}
+
+/// The body's length in `out`, or 0 — EMPTY, NOT HALF — when its declared
+/// length is at or past the buffer, it was cut short, or an undeclared body
+/// is longer than the buffer.
+size_t readBody(WiFiClient* stream, int declared, char* out, size_t outCap) {
+  if (declared >= 0 && static_cast<size_t>(declared) >= outCap) {
     return 0U;
   }
+  const size_t want = declared < 0 ? outCap - 1U : static_cast<size_t>(declared);
+  const size_t got = readUpTo(stream, out, want);
+  if (declared >= 0 && got != static_cast<size_t>(declared)) {
+    return 0U; // cut short: nothing, never half
+  }
+  if (declared < 0 && stream != nullptr && stream->available() > 0) {
+    return 0U; // undeclared and longer than the buffer
+  }
+  return got;
+}
 
-  char url[sizeof(API_BASE_URL) + 64U];
-  snprintf(url, sizeof(url), "%s%s", API_BASE_URL, path);
-
+int postOnce(const char* url, const char* body, char* out, size_t outCap, bool readRefusal) {
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) {
-    return 0U;
+    return 0;
   }
+  http.useHTTP10(true);
+  http.setReuse(false);
   http.setTimeout(kHttpTimeoutMs);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader(devapi::kHeaderAuthorization, gAuthHeader);
-
+  http.addHeader(devapi::kHeaderAuthorization, gKeys.header());
   const int status = http.POST(reinterpret_cast<const uint8_t*>(body), strlen(body));
-  if (status > 0 && out != nullptr && outCap > 0U) {
-    const String payload = http.getString();
-    if (payload.length() < outCap) {
-      memcpy(out, payload.c_str(), payload.length());
-      out[payload.length()] = '\0';
-    } else {
-      // EMPTY, NOT HALF. A response cut mid-object is a body whose readers see
-      // whichever fields happened to land inside the buffer — and the activate
-      // reader used to refuse a grant whose `court_number` was in the lost tail,
-      // which is a dark court for an attendance the API had already recorded.
-      // Nothing here can recover the rest, so nothing here pretends to have it;
-      // bridgelogic::ScanFlow treats an absent body as no decision and the
-      // roster answers instead.
-      out[0] = '\0';
-    }
+  const bool hasOut = status > 0 && out != nullptr && outCap > 0U;
+  if (hasOut) {
+    out[0] = '\0';
+  }
+  if (hasOut && (readRefusal || (status >= 200 && status < 300))) {
+    out[readBody(http.getStreamPtr(), http.getSize(), out, outCap)] = '\0';
   }
   http.end();
-  const uint16_t result = status > 0 ? static_cast<uint16_t>(status) : 0U;
-  // Every call that actually went to the socket teaches the breaker. A fresh
-  // clock read, because the call may have just spent kHttpTimeoutMs.
-  const uint32_t settledAt = gClock.nowMs();
-  const bool wasOpen = gBreaker.open(settledAt);
-  gBreaker.onResult(result, settledAt);
-  // ONE place, because every call comes through here. Classified rather than
-  // lumped: a 4xx is this box sending something the server will never take and
-  // is fixed by a reflash or a setting, a 5xx is the club's server, and a zero
-  // is the network between them. Three different people fix them.
+  return status;
+}
+
+/// What one settled call teaches the fault log. Classified rather than lumped:
+/// a 4xx is this box sending something the server will never take and is fixed
+/// by a reflash or a setting, a 5xx is the club's server, and a zero is the
+/// network between them. Three different people fix them.
+void noteCallFaults(uint16_t result, bool breakerWasOpen, uint32_t settledAt) {
   if (result == 0U) {
     gFaults.note(bridgelogic::Fault::HttpTimeout, settledAt);
   } else if (result >= 500U) {
@@ -1502,12 +1882,53 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
   } else if (result >= 400U) {
     gFaults.note(bridgelogic::Fault::Http4xx, settledAt);
   }
-  if (!wasOpen && gBreaker.open(settledAt)) {
+  if (!breakerWasOpen && gBreaker.open(settledAt)) {
     // The EDGE, not the state. Noting it every pass while the breaker is open
     // would report the same outage several hundred times an hour under a rate
     // limit designed to stop exactly that.
     gFaults.note(bridgelogic::Fault::ApiBreakerOpen, settledAt);
   }
+}
+
+uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
+  // The screen the member is waiting on reaches the glass before this call
+  // blocks for up to four seconds (bounded: 200 ms is ~190 bytes at 9600).
+  flushMega(200UL);
+  if (body == nullptr || gKeys.header()[0] == '\0') {
+    // An unrenderable body, or a key that would not fit its buffer. Refused
+    // locally rather than sent as something the server has to reject, and it
+    // teaches the breaker nothing because it says nothing about the host.
+    return 0U;
+  }
+
+  // The base URL is the network set's (device-api.md §8): the compiled one is
+  // only the first-boot default.
+  char url[devnet::kBaseUrlMax + 64U];
+  const int urlLen = snprintf(url, sizeof(url), "%s%s", gNet.baseUrl(), path);
+  if (urlLen <= 0 || static_cast<size_t>(urlLen) >= sizeof(url)) {
+    return 0U;
+  }
+
+  // The heartbeat's request lives in the tail of its own answer buffer, so a
+  // refusal's body is not read over it: the 401 retry must resend it whole.
+  const bool aliased = out != nullptr && body >= out && body < out + outCap;
+  int status = postOnce(url, body, out, outCap, !aliased);
+  if (status == 401 && gKeys.switchForRetry()) {
+    // A 401 is as likely a server restored to the old key as a retired one:
+    // ONE retry with the other key held, and neither is ever erased (§6).
+    status = postOnce(url, body, out, outCap, !aliased);
+    if (status == 401) {
+      gKeys.retryFailed();
+    }
+  }
+  const uint16_t result = status > 0 ? static_cast<uint16_t>(status) : 0U;
+  // Every call that actually went to the socket teaches the breaker. A fresh
+  // clock read, because the call may have just spent kHttpTimeoutMs.
+  const uint32_t settledAt = gClock.nowMs();
+  const bool wasOpen = gBreaker.open(settledAt);
+  gBreaker.onResult(result, settledAt);
+  // ONE place, because every call comes through here.
+  noteCallFaults(result, wasOpen, settledAt);
   return result;
 }
 
@@ -1530,10 +1951,10 @@ bool activateOnline(const char* token) {
   // stack, beside callApi's own url buffer. 384 rather than 256: the contract
   // body is ~150 bytes, `member_display` adds up to 16 more, and a response
   // that does not fit is discarded whole rather than read in part (callApi).
-  static char response[384];
+  char* const response = gReplyBody;
   response[0] = '\0';
 
-  const uint16_t status = callApi("/api/v1/device/activate", body, response, sizeof(response));
+  const uint16_t status = callApi("/api/v1/device/activate", body, response, kReplyBodyCap);
 
   const bridgelogic::ActivationResult decision =
       gScanFlow.onActivateResponse(status, response, strlen(response), gCourtNumbers, gCourtCount);
@@ -1607,9 +2028,9 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   }
 
   // 384 for the same reason as the activate response above.
-  static char response[384];
+  char* const response = gReplyBody;
   response[0] = '\0';
-  const uint16_t status = callApi("/api/v1/device/walkup", body, response, sizeof(response));
+  const uint16_t status = callApi("/api/v1/device/walkup", body, response, kReplyBodyCap);
 
   const bridgelogic::WalkUpResult answer =
       bridgelogic::onWalkUpResponse(status, response, strlen(response), intent.court, intent.minutes);
@@ -1722,8 +2143,8 @@ void applyExtension(uint8_t court, const bridgelogic::ExtendResult& answer, uint
 /// `!EXT` sets the new relay deadline from now, capped at ninety minutes; a
 /// longer session is held past the cap by Relight exactly as a long booking is.
 ///
-/// (The D10 pay-for flow is no longer reachable from the panel: a lit court
-/// press is an extension now. bridgelogic::PayFor stays compiled.)
+/// (The D10 pay-for flow left the image at bridge 3.1.0: a lit court press is
+/// an extension, and nothing in this file can reach /pay-for.)
 void requestExtend(const court::WalkUpIntent& intent) {
   uint32_t nowMs = gClock.nowMs();
   if (!extendPreflight(intent, nowMs)) {
@@ -1744,9 +2165,9 @@ void requestExtend(const court::WalkUpIntent& intent) {
     return;
   }
 
-  static char response[384];
+  char* const response = gReplyBody;
   response[0] = '\0';
-  const uint16_t status = callApi(bridgelogic::kPathExtend, body, response, sizeof(response));
+  const uint16_t status = callApi(bridgelogic::kPathExtend, body, response, kReplyBodyCap);
   const bridgelogic::ExtendResult answer = bridgelogic::onExtendResponse(status, response, strlen(response));
   if (answer.decided) {
     gExtendNonce.decided();
@@ -1868,6 +2289,17 @@ void drainEvents(uint32_t nowMs) {
   const auto post = [](const char* body, char* response, size_t cap) -> uint16_t {
     return callApi("/api/v1/device/events", body, response, cap);
   };
+  if (!gCarried.empty()) {
+    // Earlier boots' undelivered events first, one per call, under the boot
+    // they were queued in (BR-07): the server deduplicates on (device,
+    // boot_id, seq), so one whose receipt the cut lost is a no-op.
+    bridgelogic::DrainSource carried;
+    carried.mac = gMacHex;
+    carried.bootId = gCarried.headBootId();
+    carried.uptimeMs = gCarried.headUptimeMs();
+    static_cast<void>(bridgelogic::pumpEventDrain(gCarried, gDrainPace, carried, online, gClock, post));
+    return;
+  }
   static_cast<void>(bridgelogic::pumpEventDrain(gQueue, gDrainPace, source, online, gClock, post));
 }
 
@@ -1937,6 +2369,158 @@ void applyRestore(const char* body, size_t len, uint32_t nowMs) {
   }
 }
 
+/// The ESP8266's own reset reason as the `diag.reset` word (device-api.md §13).
+const char* bridgeResetWord() {
+  const rst_info* info = ESP.getResetInfoPtr();
+  switch (info != nullptr ? info->reason : 0U) {
+  case REASON_DEFAULT_RST:
+    return "power_on";
+  case REASON_WDT_RST:
+    return "hw_wdt";
+  case REASON_EXCEPTION_RST:
+    return "exception";
+  case REASON_SOFT_WDT_RST:
+    return "soft_wdt";
+  case REASON_SOFT_RESTART:
+    return "software";
+  case REASON_DEEP_SLEEP_AWAKE:
+    return "deep_sleep";
+  case REASON_EXT_SYS_RST:
+    return "external";
+  default:
+    return "unknown";
+  }
+}
+
+/// The v3 fields of this beat (device-api.md §2): caps, versions, the layout
+/// the Mega acknowledged, what was re-lit, the Mega's own report.
+void fillHeartbeatV3(devlink::HeartbeatV3& v3) {
+  // Bridge 3.1.0 names the lifeline: key rotation and network changes are real
+  // in this image (device-api.md §1), so the server may rotate keys and move
+  // the box.
+  v3.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapLcd2 | devlink::kCapKey | devlink::kCapNet;
+  v3.megaVersion = gMegaVersion[0] != '\0' ? gMegaVersion : nullptr;
+  v3.netReported = true;
+  v3.netVer = gNet.version();
+  v3.netSrc = bridgelogic::netSourceName(gNet.source());
+  // `restore` on the first accepted beat of a boot only (§2).
+  v3.restore = gRestoreReported ? nullptr : bridgelogic::restoreName(gRestoreKind);
+  v3.lcdLayout = gTx.ackedLayout() < 0 ? nullptr : (gTx.ackedLayout() == 1 ? "expanded" : "compact");
+  v3.relight = gRelitCount > 0U ? gRelit : nullptr;
+  v3.relightCount = gRelitCount;
+  v3.mega = gMegaHeard ? &gMegaReport : nullptr;
+  // The keys of the previous answer this box could not read (§11.2).
+  for (uint8_t i = 0U; i < gDrift.count; ++i) {
+    gDriftNames[i] = gDrift.names[i];
+  }
+  v3.drift = gDrift.count > 0U ? gDriftNames : nullptr;
+  v3.driftCount = gDrift.count;
+}
+
+/// The bridge's own health (§13): reset cause, heap, stack and flash.
+void fillDiag(devlink::DiagReport& diag) {
+  diag.reset = bridgeResetWord();
+  const rst_info* resetInfo = ESP.getResetInfoPtr();
+  if (resetInfo != nullptr && resetInfo->reason == REASON_EXCEPTION_RST) {
+    diag.exc = resetInfo->exccause;
+    diag.epc1 = resetInfo->epc1;
+  }
+  diag.heap = ESP.getFreeHeap();
+  gHeapMin = diag.heap < gHeapMin ? diag.heap : gHeapMin;
+  diag.heapMin = gHeapMin;
+  diag.block = ESP.getMaxFreeBlockSize();
+  diag.stackMin = ESP.getFreeContStack();
+  diag.sketchFree = ESP.getFreeSketchSpace();
+  diag.flashMb = ESP.getFlashChipRealSize() / (1024UL * 1024UL);
+}
+
+/// The operator settings an accepted beat carries, before anything that consumes them.
+void adoptOperatorSettings(const char* response, size_t responseLen) {
+  // The nine operator settings, before anything that consumes them. Each is
+  // clamped by the parser and none of them refuses the eight beside it: a club
+  // that typed 3600 into one field must not thereby lose its button map.
+  static_cast<void>(devlink::parseLcdSettings(response, responseLen, gLcdSettings));
+  gPad.setTtlMs(gLcdSettings.choiceMs);
+  gScanMemoryMs = gLcdSettings.scanMemoryMs;
+  gAuth.setTtlMs(gLcdSettings.scanMemoryMs);
+  // The bridge's own memory of who scanned follows the same setting (D19-3),
+  // and a shorter one applies to a scan already held (D19-2: the server
+  // measures its age against what it holds now).
+  gScan.setLimits(gLcdSettings.scanMemoryMs, gLcdSettings.choiceMs, gClock.nowMs());
+  gWallClock.setTrustMinutes(gLcdSettings.clockTrustMs / 60000UL);
+  gFaults.setEnabled(gLcdSettings.faultReporting);
+  gFaults.setMaxPerHour(gLcdSettings.faultMaxPerHour);
+  // The four lifeline settings, read from inside `config` by exact kind.
+  bridgelogic::readLifelineSettings(response, responseLen, gLife, &gDrift);
+}
+
+/// The button map, the court list, the roster and the member-code sync.
+void adoptCourtsRosterAndCodes(const char* response, size_t responseLen, uint32_t anchorMs, bool codes) {
+  applyButtonMap(response, responseLen);
+  // Absent keys leave the previous set alone, for the same reason the button
+  // map's does: an older API must not blank what a newer one configured.
+  static_cast<void>(devlink::parseCourtNumbers(response, responseLen, gCourtNumbers, gCourtCount));
+  // The roster's times are relative to the instant the server produced them,
+  // and `nowMs` was sampled before an HTTP call that may have taken four
+  // seconds — so the roster is anchored to a fresh read, not the pass's.
+  // Every accepted heartbeat re-anchors it, which is what resets staleness;
+  // ROSTER_MAX_AGE_MS only governs how long the last one survives offline.
+  const devlink::SyncResult sync = devlink::applyRoster(response, responseLen, gRoster, anchorMs);
+  if (sync.rejected > 0U) {
+    // Bookings the server sent that this box could not read. It has always been
+    // counted and never reported, and it is contract drift — the shape of an
+    // element changing under a firmware that cannot be updated over the air is
+    // exactly the thing an admin needs to hear about early.
+    gFaults.noteMany(bridgelogic::Fault::RosterRejected, sync.rejected, eventq::Event::kNoCourt,
+                     gClock.nowMs());
+  }
+  // The member-code sync: the step clock, the day slots and the per-day keys.
+  // Anchored to a FRESH read for the roster's reason, and wholesale like the
+  // roster — an absent `code_keys` (a server that has not shipped member codes)
+  // leaves both exactly as they were.
+  if (!codes) {
+    // A cold restore: the step clock cannot be re-derived, so offline member
+    // codes wait for the first heartbeat (device-api.md §4).
+    return;
+  }
+  const devlink::CodeSyncResult codeSync =
+      devlink::applyCodeSync(response, responseLen, gStepClock, gKeyRing, anchorMs);
+  if (codeSync.rejected > 0U || codeSync.dropped > 0U) {
+    // A key this box could not read, or could not hold, is a member it will
+    // refuse offline. Contract drift or a server over the cap — both an admin's.
+    gFaults.noteMany(bridgelogic::Fault::RosterRejected,
+                     static_cast<uint32_t>(codeSync.rejected) + codeSync.dropped, eventq::Event::kNoCourt,
+                     gClock.nowMs());
+  }
+}
+
+/// The v3 snapshot and Mega settings from a whole body, else the v2 one-shot restore.
+void adoptSnapshot(const char* response, size_t responseLen, bool whole, uint32_t settledAt) {
+  // v3: the snapshot is the source of truth for what should be lit, and the
+  // box reconciles on EVERY accepted beat (device-api.md §4). Only a whole
+  // body is ever applied (BR-02, FSF-04); an absent `courts` changes nothing.
+  bridgelogic::ReadResult snap = bridgelogic::ReadResult::Absent;
+  if (whole) {
+    snap = bridgelogic::readSnapshot(response, responseLen, gSnapshot, settledAt);
+    if (snap == bridgelogic::ReadResult::Unreadable) {
+      gDrift.add("courts");
+    }
+    bridgelogic::MegaConfig next;
+    bridgelogic::readMegaConfig(response, responseLen, gMegaCfg, next, gDrift);
+    gMegaCfg = next;
+  }
+  if (snap == bridgelogic::ReadResult::Absent && whole && gCourtCount > 0U) {
+    // A pre-v3 server, or an unacknowledged box: the v2 one-shot `relays`
+    // restore, spent only by a whole body with the court list adopted (FC-2).
+    applyRestore(response, responseLen, settledAt);
+  } else if (snap != bridgelogic::ReadResult::Absent) {
+    gRestorePending = false;
+  }
+  if (gRestorePending && gUptime.value() > 10ULL * 60000ULL) {
+    gRestorePending = false; // ten minutes of uptime: stop waiting for it
+  }
+}
+
 void pumpHeartbeat(uint32_t nowMs) {
   if (!gHeartbeat.expired(nowMs)) {
     return;
@@ -1957,25 +2541,32 @@ void pumpHeartbeat(uint32_t nowMs) {
   // firmware. It is a fact about the board, not an input to any decision —
   // there is no update mechanism left for it to feed.
   devlink::HeartbeatReport report;
-  report.restoredRelays = gRestoredRelays;
-  // A non-null pointer with a count of zero renders `[]`, which means "this box
-  // believes nothing is closed" — a different answer from the absent key, which
-  // means "this firmware does not report". The control board needs both.
-  report.relayState = gRelayState;
+  // Absent until the first !STATE of this Mega boot, never `[]` (BR-12): a
+  // non-null pointer with a count of zero means "nothing is closed".
+  report.relayState = gMegaStateSeen ? gRelayState : nullptr;
   report.relayStateCount = gRelayStateCount;
-  // Every heartbeat: the server keys what it sends this box, and the club's
-  // automatic cut-over to the single code, on the latest one it saw.
-  report.codesCapability = true;
 
-  char body[devlink::kHeartbeatBodyCap];
-  if (devlink::renderHeartbeatBody(body, sizeof(body), gMacHex, fw::kFirmwareVersion, gUptime.value(),
+  // The v3 fields (device-api.md §2, §13). The caps name what THIS image does:
+  // member codes, the snapshot reconcile, both layouts, key rotation and
+  // network changes.
+  devlink::HeartbeatV3 v3;
+  fillHeartbeatV3(v3);
+  devlink::DiagReport diag;
+  fillDiag(diag);
+  v3.diag = &diag;
+  report.v3 = &v3;
+
+  char* body = gHeartbeatRequest;
+  if (devlink::renderHeartbeatBody(body, kHeartbeatRequestCap, gMacHex, fw::kFirmwareVersion, gUptime.value(),
                                    report) == 0U) {
     return;
   }
+  // The answer is read over the request's buffer (gBig): any persisted copy of
+  // the previous answer was written at the top of this pass (pumpLifeline).
 
   char* response = gHeartbeatBody;
   response[0] = '\0';
-  const uint16_t status = callApi("/api/v1/device/heartbeat", body, response, sizeof(gHeartbeatBody));
+  const uint16_t status = callApi("/api/v1/device/heartbeat", body, response, kHeartbeatBodyCap);
   const size_t responseLen = strlen(response);
 
   if (devapi::react(status) != devapi::Reaction::Accepted) {
@@ -1990,7 +2581,19 @@ void pumpHeartbeat(uint32_t nowMs) {
     return;
   }
 
-  if (!devapi::json::isCompleteObject(response, responseLen)) {
+  // Accepted: what this beat reported has been heard.
+  gRelitCount = 0U;
+  gDrift.clear();
+  gRestoreReported = true;
+  gStall.reset(gClock.nowMs());
+  gNet.heartbeatAccepted();
+  const bool whole = devapi::json::isCompleteObject(response, responseLen);
+  // The lifeline first, from any complete object, even when everything else
+  // has drifted (§11.1): it is how this box stays reachable.
+  if (whole) {
+    adoptLifeline(response, responseLen, gClock.nowMs());
+  }
+  if (!whole) {
     // ACCEPTED, AND NOTHING TO ADOPT. A body longer than gHeartbeatBody arrives
     // here as an empty buffer (callApi refuses to keep half of one) and a cut
     // one as a partial object; every reader below would silently keep what it
@@ -2000,52 +2603,9 @@ void pumpHeartbeat(uint32_t nowMs) {
     gFaults.note(bridgelogic::Fault::HeartbeatRejected, gClock.nowMs());
   }
 
-  // The nine operator settings, before anything that consumes them. Each is
-  // clamped by the parser and none of them refuses the eight beside it: a club
-  // that typed 3600 into one field must not thereby lose its button map.
-  static_cast<void>(devlink::parseLcdSettings(response, responseLen, gLcdSettings));
-  gPad.setTtlMs(gLcdSettings.choiceMs);
-  gScanMemoryMs = gLcdSettings.scanMemoryMs;
-  gAuth.setTtlMs(gLcdSettings.scanMemoryMs);
-  // The bridge's own memory of who scanned follows the same setting (D19-3),
-  // and a shorter one applies to a scan already held (D19-2: the server
-  // measures its age against what it holds now).
-  gScan.setLimits(gLcdSettings.scanMemoryMs, gLcdSettings.choiceMs, gClock.nowMs());
-  gWallClock.setTrustMinutes(gLcdSettings.clockTrustMs / 60000UL);
-  gFaults.setEnabled(gLcdSettings.faultReporting);
-  gFaults.setMaxPerHour(gLcdSettings.faultMaxPerHour);
+  adoptOperatorSettings(response, responseLen);
 
-  applyButtonMap(response, responseLen);
-  // Absent keys leave the previous set alone, for the same reason the button
-  // map's does: an older API must not blank what a newer one configured.
-  static_cast<void>(devlink::parseCourtNumbers(response, responseLen, gCourtNumbers, gCourtCount));
-  // The roster's times are relative to the instant the server produced them,
-  // and `nowMs` was sampled before an HTTP call that may have taken four
-  // seconds — so the roster is anchored to a fresh read, not the pass's.
-  // Every accepted heartbeat re-anchors it, which is what resets staleness;
-  // ROSTER_MAX_AGE_MS only governs how long the last one survives offline.
-  const devlink::SyncResult sync = devlink::applyRoster(response, responseLen, gRoster, gClock.nowMs());
-  if (sync.rejected > 0U) {
-    // Bookings the server sent that this box could not read. It has always been
-    // counted and never reported, and it is contract drift — the shape of an
-    // element changing under a firmware that cannot be updated over the air is
-    // exactly the thing an admin needs to hear about early.
-    gFaults.noteMany(bridgelogic::Fault::RosterRejected, sync.rejected, eventq::Event::kNoCourt,
-                     gClock.nowMs());
-  }
-  // The member-code sync: the step clock, the day slots and the per-day keys.
-  // Anchored to a FRESH read for the roster's reason, and wholesale like the
-  // roster — an absent `code_keys` (a server that has not shipped member codes)
-  // leaves both exactly as they were.
-  const devlink::CodeSyncResult codes =
-      devlink::applyCodeSync(response, responseLen, gStepClock, gKeyRing, gClock.nowMs());
-  if (codes.rejected > 0U || codes.dropped > 0U) {
-    // A key this box could not read, or could not hold, is a member it will
-    // refuse offline. Contract drift or a server over the cap — both an admin's.
-    gFaults.noteMany(bridgelogic::Fault::RosterRejected,
-                     static_cast<uint32_t>(codes.rejected) + codes.dropped, eventq::Event::kNoCourt,
-                     gClock.nowMs());
-  }
+  adoptCourtsRosterAndCodes(response, responseLen, gClock.nowMs(), true);
   // The tenant's cadence, bounded. Takes effect from the NEXT arm; the one
   // above already used the old value, which is a one-interval delay and not
   // worth a re-arm that could shorten this interval to nothing.
@@ -2060,16 +2620,21 @@ void pumpHeartbeat(uint32_t nowMs) {
     static_cast<void>(gWallClock.adopt(serverTime, settledAt));
   }
 
-  // The restore is a ONE-SHOT at the first accepted heartbeat, never a
-  // reconcile: a continuous one would make the API the authority on the relay,
-  // which contradicts the Mega/ESP split this box is built on.
-  applyRestore(response, responseLen, settledAt);
+  adoptSnapshot(response, responseLen, whole, settledAt);
+  if (whole) {
+    // Kept whole for a boot with the server down (device-api.md §4), written
+    // at the top of a later pass.
+    gBody.accepted(gSnapshot, gEpoch.now(settledAt), settledAt);
+    settleProvisional(settledAt);
+  }
 
-  // The Mega's landing screen: the court numbers behind each relay, then the
-  // status row. Both on a CHANGE and on an accepted heartbeat, never per
-  // second — the Mega advances its own clock between them.
+  // The Mega: its settings, the court numbers, the status row, the landing's
+  // paid minutes, then the reconcile — on every accepted heartbeat.
+  sendMegaSettings();
   sendCourtMap();
-  sendIdle(settledAt);
+  sendIdle(settledAt, true);
+  sendLand(settledAt);
+  reconcileNow(settledAt, false);
   // Unknown keys in the response — anything a later contract adds — are ignored
   // by construction: every reader above looks up the key it wants and leaves
   // the rest alone.
@@ -2095,6 +2660,249 @@ void pumpRelight(uint32_t nowMs) {
   }
 }
 
+/// The v3 link's own cadence and its failures: `!LIVE,5` every five seconds,
+/// `!IDLE` every thirty (DL-13, FSF-10), the queue out to the UART, and every
+/// frame the Mega never acknowledged reported — a relay one painted TRY AGAIN
+/// and left dark in this half's books, exactly as an unsendable `!ON` is.
+void pumpMegaV3(uint32_t nowMs) {
+  if (!gLiveDue.isArmed() || gLiveDue.expired(nowMs)) {
+    gLiveDue.arm(nowMs, kLiveEveryMs);
+    static_cast<void>(sendToMega(proto::Frame::live(kLiveEveryMs / 1000UL)));
+  }
+  if (!gIdleDue.isArmed() || gIdleDue.expired(nowMs)) {
+    gIdleDue.arm(nowMs, kIdleEveryMs);
+    sendIdle(nowMs, true);
+  }
+  gTx.pump(gMega, nowMs);
+  bridgelogic::UnackedFrame lost;
+  while (gTx.takeUnacked(lost)) {
+    gFaults.note(bridgelogic::Fault::MegaUnacked, nowMs);
+    if (lost.verb == proto::Verb::On && lost.court < bridgelogic::kStateCourts) {
+      gHeld[lost.court] = bridgelogic::afterOnAttempt(gHeld[lost.court], false, nowMs);
+      gOnlineGrants.released(lost.court);
+      sendLinesNow("TRY AGAIN", "SCAN TO START");
+    }
+  }
+  static uint16_t screensDropped = 0U;
+  if (gTx.screensDropped() != screensDropped) {
+    gFaults.noteMany(bridgelogic::Fault::ScreenDropped,
+                     static_cast<uint16_t>(gTx.screensDropped() - screensDropped), eventq::Event::kNoCourt,
+                     nowMs);
+    screensDropped = gTx.screensDropped();
+  }
+  uint8_t relay = 0U;
+  while (gReconciler.takeFailed(relay)) {
+    gFaults.note(bridgelogic::Fault::RelightFailed, relay, nowMs);
+  }
+}
+
+// --- bridge 3.1.0: the lifeline ---------------------------------------------------
+
+/// The lifeline objects of an accepted, complete answer (§11.1): read
+/// independently of everything else, so a body whose roster or config this
+/// image can no longer read can still rotate its key and move it.
+void adoptLifeline(const char* response, size_t responseLen, uint32_t nowMs) {
+  const char* object = nullptr;
+  size_t objectLen = 0U;
+  if (devnet::json::topLevelObjectText(response, responseLen, "key_next", object, objectLen)) {
+    const devnet::Refusal key = gKeys.adopt(object, objectLen);
+    if (key != devnet::Refusal::Ok && key != devnet::Refusal::Current && key != devnet::Refusal::Held) {
+      gDrift.add("key_next");
+    }
+  }
+  if (devnet::json::topLevelObjectText(response, responseLen, "net", object, objectLen)) {
+    const char* ssidBefore = gNet.ssid(0U);
+    char before[devnet::kSsidMax + 1U];
+    snprintf(before, sizeof(before), "%s", ssidBefore);
+    const devnet::NetResult net = gNet.adopt(object, objectLen, nowMs);
+    if (net.adopted()) {
+      if (strcmp(before, gNet.ssid(0U)) != 0) {
+        // A new first profile: join it now. The previous one is still listed,
+        // so a wrong password costs one supervisor step, never the box.
+        WiFi.disconnect();
+        WiFi.begin(gNet.ssid(0U), gNet.psk(0U));
+      }
+    } else if (net.reason != devnet::Refusal::NotNewer) {
+      gDrift.add("net");
+    }
+  }
+}
+
+/// The first accepted snapshot after a COLD restore: each provisional light is
+/// confirmed by the reconcile, or — where the server says dark — switched off
+/// by the bridge itself, cause `reconcile` (device-api.md §4).
+void settleProvisional(uint32_t nowMs) {
+  gEverAccepted = true;
+  gColdTrustArmed = false;
+  if (gProvisional == 0U || !gSnapshot.valid) {
+    return;
+  }
+  const uint8_t off = bridgelogic::provisionalToRelease(gProvisional, gSnapshot);
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    if ((off & (1U << i)) == 0U) {
+      continue;
+    }
+    if (sendToMega(proto::Frame::off(static_cast<proto::Court>(i))) && gHeld[i].held) {
+      releaseCourt(i, tb::since(nowMs, gHeld[i].sinceMs), nowMs, eventq::Cause::Reconcile);
+    }
+  }
+  gProvisional = 0U;
+}
+
+/// Restores the last accepted answer from flash at boot: warm exactly, cold
+/// inside the trust window (device-api.md §4).
+void restoreFromFlash(bool epochCarried, uint32_t nowMs) {
+  bridgelogic::BodyMeta meta;
+  const size_t len = gBody.load(gHeartbeatBody, kHeartbeatBodyCap, meta);
+  bridgelogic::LifelineSettings stored = gLife;
+  if (len > 0U) {
+    bridgelogic::readLifelineSettings(gHeartbeatBody, len, stored, nullptr);
+  }
+  gRestoreKind = bridgelogic::classifyRestore(epochCarried, len > 0U, stored.trustMinutes);
+  if (gRestoreKind == bridgelogic::RestoreKind::None) {
+    gHeartbeatBody[0] = '\0';
+    return;
+  }
+  gLife = stored;
+  const bool warm = gRestoreKind == bridgelogic::RestoreKind::Warm;
+  // Warm: aged exactly by the epoch the reset did not interrupt. Cold: as of
+  // now, and trusted only for the window.
+  const uint64_t epochNow = gEpoch.now(nowMs);
+  const uint64_t age = warm && epochNow > meta.epochMs ? epochNow - meta.epochMs : 0U;
+  const uint32_t anchor = nowMs - static_cast<uint32_t>(age > 0x7FFFFFFFULL ? 0x7FFFFFFFULL : age);
+  adoptOperatorSettings(gHeartbeatBody, len);
+  adoptCourtsRosterAndCodes(gHeartbeatBody, len, anchor, warm);
+  bridgelogic::MegaConfig next;
+  bridgelogic::readMegaConfig(gHeartbeatBody, len, gMegaCfg, next, gDrift);
+  gMegaCfg = next;
+  gDrift.clear(); // our own flash is not the server's drift
+  if (bridgelogic::readSnapshot(gHeartbeatBody, len, gSnapshot, anchor) == bridgelogic::ReadResult::Adopted &&
+      !warm) {
+    gProvisional = bridgelogic::capColdSnapshot(gSnapshot, gLife.trustMinutes);
+  }
+  if (!warm) {
+    gColdTrust.arm(nowMs, gLife.trustMinutes * 60000UL);
+    gColdTrustArmed = true;
+  }
+  gRestorePending = false;
+  gHeartbeatBody[0] = '\0';
+}
+
+/// The restart's idle rule: no scan remembered, no button window or choice
+/// armed, nothing waiting on the Mega, and no member input for a minute. Lit
+/// courts are fine — the Mega holds them.
+bool bridgeIdle(uint32_t nowMs) {
+  return gLastScan[0] == '\0' && !gAuth.armed(nowMs) && !gPad.hasSelection() && gExtendCourt == kNoExtend &&
+         !gFollowUpPending && gTx.idle() && tb::since(nowMs, gLastInputMs) >= 60000UL;
+}
+
+/// The live event queue to flash whenever it changed (BR-07), from the top of
+/// loop(): a cheap signature (size, newest and oldest seq) says when.
+void persistEvents() {
+  eventq::Event head;
+  const uint32_t headSeq = gQueue.peek(head) ? head.seq : 0U;
+  if (gQueue.size() == gEventsSize && gQueue.lastSeq() == gEventsLastSeq && headSeq == gEventsHeadSeq) {
+    return;
+  }
+  if (bridgelogic::writeLiveEvents(gFiles, gQueue, gBootId, gUptime.value())) {
+    gEventsSize = gQueue.size();
+    gEventsLastSeq = gQueue.lastSeq();
+    gEventsHeadSeq = headSeq;
+  }
+}
+
+/// What the setup portal saves: a `local` network set, and optionally a key.
+bool savePortal(const devnet::NetSet& net, const char* keyId, const char* key) {
+  if (keyId != nullptr && !gKeys.adoptLocal(keyId, key)) {
+    return false;
+  }
+  return gNet.adoptLocal(net);
+}
+
+/// `!HELD,09,5` within 60 s of power-on: the setup portal (device-api.md §8).
+void noteHeld(const proto::Frame& frame, uint32_t nowMs) {
+  if (gPortal.isOpen() || !gChord.held(frame.arg(0), frame.arg(1), nowMs)) {
+    return;
+  }
+  char ap[32];
+  if (!bridgelogic::setupApName(gMacHex, ap, sizeof(ap))) {
+    return;
+  }
+  // The heartbeat buffer is the form's scratch: nothing else runs meanwhile.
+  if (!gPortal.open(ap, SETUP_AP_PASSWORD, savePortal, gBig.text, kHeartbeatBodyCap)) {
+    return;
+  }
+  gPortalUntil.arm(nowMs, kPortalMs);
+  char note[24];
+  snprintf(note, sizeof(note), "SETUP AP %s", ap + strlen(ap) - 4U);
+  static_cast<void>(sendToMega(proto::Frame::note(kPortalMs / 1000UL, note)));
+}
+
+/// The portal, while open: it serves, and it closes after ten minutes or a save
+/// — with a restart either way, onto whatever network the box now holds.
+bool pumpPortal(uint32_t nowMs) {
+  if (!gPortal.isOpen()) {
+    return false;
+  }
+  if (gPortal.pump() || gPortalUntil.expired(nowMs)) {
+    gPortal.close();
+    flushMega(300UL);
+    ESP.restart();
+  }
+  return true;
+}
+
+/// The link supervisor and the stall watchdog (device-api.md §8, HW-8), and an
+/// unproven base URL's fallback.
+void superviseLink(uint32_t nowMs) {
+  const bool up = WiFi.status() == WL_CONNECTED;
+  switch (gSupervisor.tick(nowMs, up)) {
+  case devnet::Action::ReconnectNextProfile: {
+    const uint8_t next = gNet.advanceProfile();
+    WiFi.disconnect();
+    WiFi.begin(gNet.ssid(next), gNet.psk(next));
+    break;
+  }
+  case devnet::Action::Restart:
+    gRestartWanted = true;
+    break;
+  case devnet::Action::None:
+    break;
+  }
+  if (gStall.stalled(nowMs, up)) {
+    gRestartWanted = true;
+  }
+  if (gNet.tick(nowMs, gLife.fallbackMinutes)) {
+    gFaults.note(bridgelogic::Fault::NetFallback, nowMs);
+  }
+  if (gColdTrustArmed && gColdTrust.expired(nowMs)) {
+    // A cold restore nobody confirmed: the roster it brought back is past its
+    // trust window and admits nobody offline any more.
+    gColdTrustArmed = false;
+    gRoster.forget();
+  }
+  if (gRestartWanted && bridgeIdle(nowMs)) {
+    // Safe: the Mega holds its relays, and every record is in flash.
+    flushMega(300UL);
+    ESP.restart();
+  }
+}
+
+/// Everything the lifeline does from the TOP of loop(), where a flash write is
+/// shallowest (ESPR-1). True while the setup portal owns the loop.
+bool pumpLifeline(uint32_t nowMs) {
+  static_cast<void>(gEpoch.tick(nowMs));
+  if (gBody.due()) {
+    gBody.flush(gHeartbeatBody, strlen(gHeartbeatBody), nowMs);
+  }
+  persistEvents();
+  if (pumpPortal(nowMs)) {
+    return true;
+  }
+  superviseLink(nowMs);
+  return false;
+}
+
 } // namespace
 
 void setup() {
@@ -2103,14 +2911,18 @@ void setup() {
   // its own link with the core default.
   gMega.begin(kMegaRxBufferBytes);
   static_cast<void>(gStore.begin());
+  arduino_hal::LittleFsFiles::prepare();
 
-  // The credential is the compiled-in one and nothing else — persistent(false)
-  // keeps the core from writing a second, invisible copy in its own flash
-  // record, which would outlive a reflash and join the wrong network.
-  // DHCP: no WiFi.config(), no static address — see the header.
+  // The compiled WiFi, base URL and key are only the first-boot defaults: the
+  // persisted network set and key ring win (device-api.md §6, §8).
+  gKeys.begin(DEVICE_API_KEY, &gFiles);
+  gNet.begin(WIFI_SSID, WIFI_PASSWORD, API_BASE_URL, &gFiles);
+  // persistent(false) keeps the core from writing a second, invisible copy of
+  // the credential in its own flash record. DHCP: no WiFi.config(), no static
+  // address — see the header.
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(gNet.ssid(0U), gNet.psk(0U));
 
   setupIdentity();
 
@@ -2132,6 +2944,19 @@ void setup() {
   gQueue.begin();
   gSession.onBoot(now);
 
+  // What survived the reset (device-api.md §4): the epoch decides warm or
+  // cold, the carried events go first, the last answer comes back.
+  const rst_info* reset = ESP.getResetInfoPtr();
+  const bool powerOn = reset == nullptr || reset->reason == REASON_DEFAULT_RST;
+  const bool warm = gEpoch.begin(powerOn, now);
+  gBody.begin(&gFiles);
+  gCarried.begin(&gFiles);
+  restoreFromFlash(warm, now);
+  gNet.startClock(now);
+  gStall.begin(now);
+  gChord.begin(now);
+  gLastInputMs = now - 60000UL;
+
   // LAST. A freshly flashed box should say what it is from the moment it comes
   // up, rather than leaving the Mega's own idle text on the glass and letting
   // the technician read that as "already working" (review 3, finding 9). If the
@@ -2145,6 +2970,15 @@ void loop() {
   // lapse deadlines are never evaluated against two different instants.
   const uint32_t now = gClock.nowMs();
   gUptime.tick(now);
+
+  // The lifeline from the TOP of the pass: flash writes, the portal, the
+  // supervisor. While the setup portal is open it owns the loop, and the Mega
+  // link is still served.
+  if (pumpLifeline(now)) {
+    pumpMegaLink(now);
+    pumpMegaV3(now);
+    return;
+  }
 
   // EVERY "HOW OLD IS IT?" AGE, ON EVERY PASS, LINK OR NO LINK (review round
   // 18, D18-2). Each is a 32-bit difference, so one 2^32 ms + 1 s old reads
@@ -2170,8 +3004,6 @@ void loop() {
   }
   // The outcome a greeting was holding back, once its card hold is over.
   pumpFollowUp(now);
-  // A pay-for question nobody answered lapses on its own, for the same reason.
-  static_cast<void>(gPayFor.tick(now));
   if (gLastScan[0] != '\0' && gScan.expired(now)) {
     // Lapsed unspent. The Mega's own window lapses at the same TTL, but the
     // explicit `!AUTH,0` is what keeps the two from drifting by a loop pass.
@@ -2191,6 +3023,7 @@ void loop() {
   // arrived a moment ago from sharing the ring with the frames the call is
   // about to let pile up.
   pumpMegaLink(now);
+  pumpMegaV3(now);
   pumpRelight(now);
   drainFaults(now);
   drainEvents(now);

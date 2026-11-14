@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-member-code
-description: "D1's single rotating code as built in firmware: 19 chars so the Mega stays untouched, ON server-only and OFF under a 12-byte per-day key devices hold, rosters naming players, pay-for at the box in three rows, flash owed."
+description: "D1's single rotating code as built in firmware: 19 chars to fit the Mega's limits, ON server-only and OFF under a 12-byte per-day key devices hold, rosters naming players; pay-for left the box at bridge 3.1.0."
 type: decision
 last_verified: 2026-10-03
 ---
@@ -35,11 +35,10 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   one that bought lit their booking at a second box.
 - **A device that loses its key entitlement is sent EMPTY `code_days`/`code_keys`, never an
   omission** — an absent key means "no member codes here" and keeps the old ring.
-- **D10 pay-for runs down three rows** — `CT2 BOOKED` / `PAY 45 MIN?` / `PRESS CT2 TO PAY`. *Why:*
-  as two lines the 16-column safe subset clips the instruction (so `SPLIT BOOKING` / `PAY IN APP`
-  too). P13 (2.2.0): minutes, `amount_label` 1–4 digits (> 9999 is `amount_unshowable`).
-- **Pay-for is online only; any non-decision (a 404 included) is the old walk-up choice.** The
-  confirm echoes the server's `amount_label`; a mismatch is `price_changed`, never a charge.
+- **D10 pay-for is out of the court-box image from bridge 3.1.0** (founder, 2026-11-13; 3.0.0
+  still linked it, BR-17). *Why:* the panel stopped reaching it at 2.3.0, and dead code in a long-lived image is debt. The server keeps
+  `/pay-for` (three-row glass, online only, `amount_label` echo — spec §9), held to
+  `membercode/payfor.json`, read by the server only: it can return with a bridge cable flash, no Mega change.
 - **A code the device already acted on is refused LOCALLY before any online call**
   (`memcode::knownReplay`, both ESP boards). *Why:* offline open, link back, photo scanned before
   the open was uploaded — the server had not heard of the first use (refute round 2, 2026-09-28).
@@ -53,8 +52,8 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   pay-for forgets the scan ONLY for `code_used`/`not_recognised`** (2.2.4, D9-1, in bridgelogic's
   `WalkUpResult::forgetsScan`) — never on `recognised`, false for every refusal made before the
   token resolves (TOO LONG lost the scan); `code_used` reads `CODE USED` at pay-for too (D9-2).
-- **Versions: bridge 2.2.9 and door 1.1.2 (R19 D19-1/2/3, see [`decisions-firmware-r19.md`](decisions-firmware-r19.md); 2.2.8 was R18 D18-2/3/4, 2.2.7/1.1.1 R17 D17-2/4, 2.2.6 R16 D16-2/3, 2.2.5 R15 D15-1), Mega 2.0.0 (never reflashed).** The bridge unflags
-  `[common]`'s MINOR/PATCH by its own tokens; the Devices page showing these confirms a flash.
-- **Owed, and only Dean can do it:** flash the ESP8266 bridge and each door ESP32 (spec §8.1; the
-  Mega is not touched) — the current order is in [`state.md`](state.md). No flash or hardware run
-  is recorded anywhere. Server half: `decisions-member-code-backend.md`.
+- **Versions** are the device contract's, not this topic's: the v3 images (Mega 3.0.0, bridge
+  3.1.0, door 2.0.0, all by cable) is [`decisions-device-v3.md`](decisions-device-v3.md); the flash order and
+  what is owed are in [`state.md`](state.md). The bridge unflags `[common]`'s MINOR/PATCH by its
+  own tokens. Server half: `decisions-member-code-backend.md`; keys in every phase, the cut-over's
+  blockers and the v1 extend fix (2026-11-13): `decisions-member-code-cutover.md`.

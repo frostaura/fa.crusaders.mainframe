@@ -78,7 +78,7 @@ public static class ProductionBootstrap
     /// neither text nor a focus ring. Note that nothing reads this key today; it is written so
     /// the row is honest about the club when something finally does.
     /// </remarks>
-    private const string InitialSettingsJson = """
+    internal const string InitialSettingsJson = """
         {
           "timezone": "Africa/Johannesburg",
           "brand_accent_hex": "#00498D"
@@ -119,12 +119,49 @@ public static class ProductionBootstrap
         tenantContext.Set(tenant.Id, tenant.Slug);
         await EnsureAdminAsync(db, hasher, tenant, plan, logger, created);
         await EnsureCourtsAsync(db, tenant, plan, created);
+        await EnsureDeviceKeyAsync(db, tenant, config["Bootstrap:DeviceApiKey"], logger, created);
         // P13 §4.6: a new club's buy screen is never empty. Only for a club that has never had a
         // package, so an admin's own shelf is never touched. The system is the author.
         if (await MinutePackageSeeder.EnsureAsync(db, tenant.Id, Guid.Empty))
             created.Add("the opening minutes packages (1, 5 and 10 hours)");
 
         Report(plan, created, logger);
+    }
+
+    /// <summary>
+    /// <c>Bootstrap:DeviceApiKey</c> (device-api.md §6, BD-3, IO-01): the key every board already
+    /// holds, put back on a REBUILT stack so a lost database is not a reflash of every court box and
+    /// door. Applied only to a club that has no device key yet — never over a live one, which an
+    /// owner replaces with the console's typed <i>Restore a key</i> — and refused at start unless it
+    /// is exactly 43 base64url characters, the only shape a board accepts. Never logged.
+    /// </summary>
+    private static async Task EnsureDeviceKeyAsync(
+        MainframeDbContext db, Tenant tenant, string? configured, ILogger logger, List<string> created)
+    {
+        var key = configured?.Trim();
+        if (string.IsNullOrEmpty(key)) return;
+        if (!Services.DeviceProvision.IsKey(key))
+        {
+            throw new InvalidOperationException(
+                "Bootstrap:DeviceApiKey is set but is not a device key (exactly 43 base64url characters). " +
+                "Copy it from the club's secret backup, or remove it.");
+        }
+
+        if (!string.IsNullOrEmpty(tenant.DeviceApiKey))
+        {
+            if (!Security.DeviceAuth.DeviceApiKey.Matches(tenant.DeviceApiKey, key))
+            {
+                logger.LogWarning(
+                    "Bootstrap: Bootstrap__DeviceApiKey differs from the club's current device key and was NOT applied; " +
+                    "an owner restores a key from the console (Boards › Device key › Restore a key).");
+            }
+            return;
+        }
+
+        tenant.DeviceApiKey = key;
+        tenant.DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        created.Add("the club's device key, from Bootstrap:DeviceApiKey");
     }
 
     /// <summary>
@@ -261,20 +298,29 @@ public static class ProductionBootstrap
     /// <summary>The club's courts, if it has none. Never adds to a club that already has some.</summary>
     private static async Task EnsureCourtsAsync(MainframeDbContext db, Tenant tenant, BootstrapPlan plan, List<string> created)
     {
-        if (await db.Courts.IgnoreQueryFilters().AnyAsync(c => c.TenantId == tenant.Id)) return;
+        if (await AddCourtsAsync(db, tenant.Id, plan.CourtCount)) created.Add($"{plan.CourtCount} squash court(s)");
+    }
 
-        for (var i = 1; i <= plan.CourtCount; i++)
+    /// <summary>
+    /// Courts 1..<paramref name="count"/> for a club that has none; false when it already has
+    /// some. Shared with the operator CLI's <c>tenant create</c>.
+    /// </summary>
+    internal static async Task<bool> AddCourtsAsync(MainframeDbContext db, Guid tenantId, int count)
+    {
+        if (await db.Courts.IgnoreQueryFilters().AnyAsync(c => c.TenantId == tenantId)) return false;
+
+        for (var i = 1; i <= count; i++)
         {
             db.Courts.Add(new Court
             {
-                TenantId = tenant.Id,
+                TenantId = tenantId,
                 CourtNumber = i,
                 Name = $"Court {i}",
                 CourtType = CourtType.Squash,
             });
         }
         await db.SaveChangesAsync();
-        created.Add($"{plan.CourtCount} squash court(s)");
+        return true;
     }
 
     /// <summary>What happened, at a level an operator reading container logs will actually see.</summary>
@@ -295,7 +341,7 @@ public static class ProductionBootstrap
     /// <summary>
     /// The first ADMIN-nnnn membership number not already taken in this tenant.
     /// </summary>
-    private static async Task<string> FreeAdminNumberAsync(MainframeDbContext db, Guid tenantId)
+    internal static async Task<string> FreeAdminNumberAsync(MainframeDbContext db, Guid tenantId)
     {
         var taken = await db.Memberships.IgnoreQueryFilters()
             .Where(m => m.TenantId == tenantId && m.MembershipNumber.StartsWith("ADMIN-"))

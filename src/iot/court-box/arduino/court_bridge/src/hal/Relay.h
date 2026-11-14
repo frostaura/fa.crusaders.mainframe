@@ -4,15 +4,20 @@
 //
 // WHY THIS EXISTS
 // ---------------
-// Four SONGLE SRD-05VDC-SL-C channels on Mega pins 2, 3, 4, 5, courts A-D. The
-// board is ACTIVE LOW: driving the input LOW energises the coil, closes the
-// contact and turns a court's lights on. The wiring is fixed and cannot change.
+// Four relay channels on Mega pins 2, 3, 4, 5, courts A-D. The wiring is fixed
+// and cannot change. WHICH MODULE is fitted, and so which level closes it, is
+// NOT a fact this code may assume (HW-1, the 2026-11-13 hardware addendum): the
+// part number, trigger level and rating are unrecorded, so since Mega 3.0.0
+// the drive level is a runtime setting (`!CFG,RPOL`, `hw_relay_active_level`)
+// whose boot default is the compiled `RELAY_ACTIVE_LOW`.
 //
-// Getting that inversion backwards is not a cosmetic bug. It means the lights
-// are on whenever the system believes they are off — no booking, no ledger
-// debit, nobody in the building, and nothing in the software that would ever
-// notice. The inversion is therefore expressed once, here, by relayLevelFor(),
-// and nowhere else in the codebase.
+// A RELEASED RELAY IS AN INPUT, NEVER A DRIVEN LEVEL. A high-Z pin is off for
+// a low-trigger module (its input is pulled to VCC) and for a high-trigger one
+// (an LED or transistor to GND) alike, so a wrong drive level fails DARK, never
+// lit: "on" then drives the module's own idle level. That is what lets the
+// level be changed remotely at any time, and why no pull-down is fitted (the
+// wiring rule forbids one). relayDriveFor() below is the one place the mapping
+// is written down.
 //
 // This port is deliberately dumb: set a channel, read back what was last
 // commanded. The duration, the hard cap and the auto-off timer are NOT here.
@@ -34,15 +39,13 @@ namespace hal {
 /// Courts A, B, C, D — channel index 0..3. Fixed by the wiring.
 constexpr uint8_t kRelayChannelCount = 4U;
 
-/// LOW energises the coil and closes the contact: LOW == lights on.
+/// The active-LOW module's levels: LOW closes the contact.
 constexpr PinLevel kRelayAssertedLevel = PinLevel::kLow;
 constexpr PinLevel kRelayReleasedLevel = PinLevel::kHigh;
 
-/// Which level closes the contact. A FACT ABOUT THE FITTED RELAY MODULE, not a
-/// preference: the SONGLE coil board above is ACTIVE LOW, and the
-/// normally-open solid-state relays the club fitted for Mega 2.1.0 close on a
-/// HIGH input (`RELAY_ACTIVE_LOW=0`). A build names its polarity; nothing
-/// guesses it.
+/// Which level closes the contact. A FACT ABOUT THE FITTED RELAY MODULE that
+/// no one has recorded (HW-1): since Mega 3.0.0 it is the runtime `RPOL`
+/// setting, and the build's `RELAY_ACTIVE_LOW` only its first-boot default.
 enum class RelayPolarity : uint8_t { kActiveLow = 0U, kActiveHigh = 1U };
 
 /// The build flag `RELAY_ACTIVE_LOW` read as a polarity: non-zero is the coil
@@ -69,9 +72,24 @@ constexpr PinLevel relayLevelFor(bool on) {
 static_assert(relayLevelFor(true) == kRelayAssertedLevel && relayLevelFor(false) == kRelayReleasedLevel,
               "the active-LOW default must stay the coil board's mapping");
 
+/// What a correct driver does with the pin (Mega 3.0.0, HW-1): an open relay
+/// is an INPUT (high-Z, no pull-up), a closed one an output at the level that
+/// closes the module named by `polarity`. Off is `DDR = 0` then `PORT = 0`; on
+/// is `PORT = level` then `DDR = 1`.
+enum class PinDrive : uint8_t { kInput = 0U, kHigh, kLow };
+
+constexpr PinDrive relayDriveFor(bool on, RelayPolarity polarity) {
+  return !on ? PinDrive::kInput
+             : (relayLevelFor(true, polarity) == PinLevel::kHigh ? PinDrive::kHigh : PinDrive::kLow);
+}
+
+static_assert(relayDriveFor(false, RelayPolarity::kActiveLow) == PinDrive::kInput &&
+                  relayDriveFor(false, RelayPolarity::kActiveHigh) == PinDrive::kInput,
+              "a released relay is an input for either module");
+
 /// Drives the four court-light relays.
 ///
-/// Vtable is deliberately three slots plus the destructor. There is no
+/// Vtable is deliberately small. There is no
 /// channelCount() accessor because kRelayChannelCount is a compile-time
 /// constant fixed by the wiring; a virtual would cost flash and RAM on an 8-bit
 /// part to return a number that cannot vary.
@@ -99,6 +117,12 @@ public:
   /// hard-cap expiry. Separate from set() in a loop because it must remain the
   /// single cheapest, most obviously correct way to make the building dark.
   virtual void allOff() = 0;
+
+  /// The drive level (`!CFG,RPOL`). Applied at once: every CLOSED channel is
+  /// re-driven at the new level; an open channel stays an input.
+  virtual void setPolarity(RelayPolarity polarity) = 0;
+
+  virtual RelayPolarity polarity() const = 0;
 };
 
 } // namespace hal

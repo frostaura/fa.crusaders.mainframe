@@ -177,6 +177,8 @@ const LEDGER_ROW = {
   actorName: "Dean", relatedBookingId: null,
 };
 const WALLET = { balance_minutes: 412, entries: [LEDGER_ROW], total_entries: 1, offset: 0, limit: 100 };
+const CLUB = { slug: "crusaders", name: "Crusaders Squash Club" };
+
 const PROFILE = {
   user_id: SESSION_MEMBER.user_id, email: "dean@example.test", is_admin: false, tenant_slug: "crusaders",
   full_name: "Dean Martin", membership_number: "C-0009", photo_url: null, status: "Active",
@@ -193,7 +195,9 @@ async function warmApi(page: import("@playwright/test").Page, whoami: Record<str
         : path.endsWith("/me/notifications/unread-count") ? { unread_count: 1 }
           : path.endsWith("/me/notifications") ? NOTICES
             : path.endsWith("/me/profile") ? PROFILE
-              : null;
+              // FM-8 — the club this address serves, read once online and kept for the cold start.
+              : path.endsWith("/auth/club") ? CLUB
+                : null;
     if (member !== null) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(member) });
     const body = path.endsWith("/whoami") ? whoami
       : path.endsWith("/me/code/enrol") ? ENROL()

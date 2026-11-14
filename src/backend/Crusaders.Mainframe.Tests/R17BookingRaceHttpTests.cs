@@ -58,8 +58,10 @@ public sealed class R17BookingRaceHttpTests(PostgresFixture pg) : IClassFixture<
     {
         var user = new User
         {
-            TenantId = club.TenantId, Email = $"{handle}-{club.Slug}@test.local",
-            PasswordHash = new Pbkdf2PasswordHasher().Hash("OldPass!123"), EmailVerified = true,
+            TenantId = club.TenantId,
+            Email = $"{handle}-{club.Slug}@test.local",
+            PasswordHash = new Pbkdf2PasswordHasher().Hash("OldPass!123"),
+            EmailVerified = true,
         };
         var used = club.Refs.Values.ToHashSet();
         var reference = Enumerable.Range(0, 64).Select(_ => Random.Shared.Next(1, MemberCodeMath.MaxRefValue)).First(r => !used.Contains(r));
@@ -68,8 +70,11 @@ public sealed class R17BookingRaceHttpTests(PostgresFixture pg) : IClassFixture<
             db.Users.Add(user);
             db.Memberships.Add(new Membership
             {
-                TenantId = club.TenantId, UserId = user.Id, FullName = $"{char.ToUpperInvariant(handle[0])}{handle[1..]} Partner",
-                MembershipNumber = $"{handle}-{club.Slug}", Status = MembershipStatus.Active,
+                TenantId = club.TenantId,
+                UserId = user.Id,
+                FullName = $"{char.ToUpperInvariant(handle[0])}{handle[1..]} Partner",
+                MembershipNumber = $"{handle}-{club.Slug}",
+                Status = MembershipStatus.Active,
             });
             db.MemberCodes.Add(new MemberCode { TenantId = club.TenantId, UserId = user.Id, Ref = reference });
             return Task.CompletedTask;
@@ -93,9 +98,19 @@ public sealed class R17BookingRaceHttpTests(PostgresFixture pg) : IClassFixture<
             {
                 db.BookingParticipants.Add(new BookingParticipant
                 {
-                    TenantId = c.TenantId, BookingId = booking.Id, Seat = seat + 1, UserId = players[seat], Status = ParticipantStatus.Accepted,
-                    ShareMinutes = 0, ConsentedMinutes = 0, ShareWeight = 1, SplitMode = seat == 0 ? SplitModes.Equal : null,
-                    InvitedAt = now, CreatedAt = now, UpdatedAt = now, RespondedAt = now,
+                    TenantId = c.TenantId,
+                    BookingId = booking.Id,
+                    Seat = seat + 1,
+                    UserId = players[seat],
+                    Status = ParticipantStatus.Accepted,
+                    ShareMinutes = 0,
+                    ConsentedMinutes = 0,
+                    ShareWeight = 1,
+                    SplitMode = seat == 0 ? SplitModes.Equal : null,
+                    InvitedAt = now,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    RespondedAt = now,
                 });
             }
             return Task.CompletedTask;

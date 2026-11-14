@@ -45,7 +45,12 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = user, Type = LedgerEntryType.TopUp, AmountMinutes = minutes, ActorUserId = user, Reason = "seed",
+                TenantId = club.TenantId,
+                UserId = user,
+                Type = LedgerEntryType.TopUp,
+                AmountMinutes = minutes,
+                ActorUserId = user,
+                Reason = "seed",
             });
             return Task.CompletedTask;
         });
@@ -124,8 +129,15 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         {
             db.DevicePayFors.Add(new DevicePayFor
             {
-                TenantId = club.TenantId, DeviceId = boxId, Nonce = nonce, BookingId = booking.Id, PayerUserId = club.Pam,
-                CourtNumber = 2, AmountMinutes = 60, AmountLabel = "60", CreatedAt = DateTimeOffset.UtcNow - age,
+                TenantId = club.TenantId,
+                DeviceId = boxId,
+                Nonce = nonce,
+                BookingId = booking.Id,
+                PayerUserId = club.Pam,
+                CourtNumber = 2,
+                AmountMinutes = 60,
+                AmountLabel = "60",
+                CreatedAt = DateTimeOffset.UtcNow - age,
             });
             return Task.CompletedTask;
         });

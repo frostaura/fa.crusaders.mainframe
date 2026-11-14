@@ -16,15 +16,15 @@ public class PackageShelfTests
 
     private static MinutePackage P(string name, int minutes, decimal price, int sort = 0, Guid? group = null,
         MinutePackageStatus status = MinutePackageStatus.Active) => new()
-    {
-        TenantId = Club,
-        Name = name,
-        Minutes = minutes,
-        PriceZar = price,
-        SortOrder = sort,
-        GroupId = group,
-        Status = status,
-    };
+        {
+            TenantId = Club,
+            Name = name,
+            Minutes = minutes,
+            PriceZar = price,
+            SortOrder = sort,
+            GroupId = group,
+            Status = status,
+        };
 
     private static TariffGroup G(string name, int? bps, int sort = 0) => new(Guid.NewGuid(), name, null, bps, null, sort);
 

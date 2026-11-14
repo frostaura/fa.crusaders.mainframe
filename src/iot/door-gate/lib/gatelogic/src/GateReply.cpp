@@ -1,0 +1,425 @@
+#include "gatelogic/GateReply.h"
+
+#include <string.h>
+
+#include "devlink/Cadence.h"
+#include "devlink/RosterSync.h"
+#include "gatelogic/FaultLog.h"
+#include "gatelogic/GateHeartbeat.h"
+
+namespace gatelogic {
+
+// --- drift -----------------------------------------------------------------
+
+void Drift::add(const char* name) {
+  if (name == nullptr || contains(name) || count >= kMaxDrift) {
+    return;
+  }
+  const size_t n = strlen(name);
+  if (n + 1U > kDriftNameCap) {
+    return;
+  }
+  memcpy(names[count], name, n + 1U);
+  ++count;
+}
+
+bool Drift::contains(const char* name) const {
+  for (uint8_t i = 0U; i < count; ++i) {
+    if (strcmp(names[i], name) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// --- the gate object --------------------------------------------------------
+
+GateSettings compiledGateSettings() {
+  GateSettings s;
+  s.unlockSeconds = kGateConfig.unlockDefaultMs / 1000UL;
+  s.faultReporting = kFaultReportingDefault;
+  s.faultMaxPerHour = kFaultMaxPerHourDefault;
+  return s;
+}
+
+namespace {
+
+constexpr uint32_t kUnlockMinSeconds = 1U;
+constexpr uint32_t kUnlockMaxSeconds = 30U;
+
+uint32_t clampTo(uint32_t v, uint32_t lo, uint32_t hi) {
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
+void driftOf(Drift& drift, const char* object, const char* key) {
+  char name[kDriftNameCap] = {};
+  const size_t a = strlen(object);
+  const size_t b = strlen(key);
+  if (a + 1U + b + 1U > sizeof(name)) {
+    return;
+  }
+  memcpy(name, object, a);
+  name[a] = '.';
+  memcpy(name + a + 1U, key, b + 1U);
+  drift.add(name);
+}
+
+/// One clamped unsigned setting: absent leaves it, the wrong kind is drift.
+void unsignedSetting(const jv::Value& gate, const char* key, uint32_t lo, uint32_t hi, uint32_t& value,
+                     Drift& drift) {
+  const jv::Value v = jv::member(gate, key);
+  if (!v.present()) {
+    return;
+  }
+  uint32_t read = 0U;
+  if (!jv::asUint32(v, read)) {
+    driftOf(drift, "gate", key);
+    return;
+  }
+  value = clampTo(read, lo, hi);
+}
+
+} // namespace
+
+bool readGateSettings(const jv::Value& gate, GateSettings& settings, Drift& drift) {
+  if (!gate.present()) {
+    return false;
+  }
+  if (!gate.isObject()) {
+    drift.add("gate");
+    return false;
+  }
+  bool unlockClamped = false;
+  const jv::Value unlock = jv::member(gate, "unlock_seconds");
+  uint32_t seconds = 0U;
+  if (unlock.present() && jv::asUint32(unlock, seconds)) {
+    unlockClamped = seconds < kUnlockMinSeconds || seconds > kUnlockMaxSeconds;
+  }
+  unsignedSetting(gate, "unlock_seconds", kUnlockMinSeconds, kUnlockMaxSeconds, settings.unlockSeconds,
+                  drift);
+  unsignedSetting(gate, "power_restore_trust_minutes", 0U, 120U, settings.powerRestoreTrustMinutes, drift);
+  unsignedSetting(gate, "net_fallback_minutes", 3U, 60U, settings.netFallbackMinutes, drift);
+  const jv::Value reporting = jv::member(gate, "device_fault_reporting");
+  if (reporting.present() && !jv::asBool(reporting, settings.faultReporting)) {
+    driftOf(drift, "gate", "device_fault_reporting");
+  }
+  unsignedSetting(gate, "device_fault_max_per_hour", kMinFaultMaxPerHour, kMaxFaultMaxPerHour,
+                  settings.faultMaxPerHour, drift);
+  return unlockClamped;
+}
+
+// --- element grammars -------------------------------------------------------
+
+namespace {
+
+/// The length of the first `n` `|`-separated fields of `text` (everything after
+/// the n-th separator is ignored), or false when it has fewer than `n` fields.
+bool firstFields(const char* text, size_t len, uint8_t n, size_t& spanLen) {
+  uint8_t seen = 1U;
+  for (size_t i = 0U; i < len; ++i) {
+    if (text[i] == '|') {
+      if (seen == n) {
+        spanLen = i;
+        return true;
+      }
+      ++seen;
+    }
+  }
+  if (seen < n) {
+    return false;
+  }
+  spanLen = len;
+  return true;
+}
+
+} // namespace
+
+bool readRosterElement(const jv::Value& element, roster::Entry& out) {
+  const char* text = nullptr;
+  size_t len = 0U;
+  size_t span = 0U;
+  if (!jv::rawString(element, text, len) || !firstFields(text, len, 4U, span)) {
+    return false;
+  }
+  roster::Entry entry;
+  if (!devlink::parseRosterElement(text, span, entry) || entry.court != 0U) {
+    return false;
+  }
+  out = entry;
+  return true;
+}
+
+bool readDayElement(const jv::Value& element, memcode::DaySlot& out) {
+  const char* text = nullptr;
+  size_t len = 0U;
+  size_t span = 0U;
+  if (!jv::rawString(element, text, len) || !firstFields(text, len, 2U, span)) {
+    return false;
+  }
+  memcode::DaySlot day;
+  if (!memcode::parseDaySlot(text, span, day)) {
+    return false;
+  }
+  out = day;
+  return true;
+}
+
+bool readKeyElement(const jv::Value& element, memcode::DayKey& out) {
+  const char* text = nullptr;
+  size_t len = 0U;
+  if (!jv::rawString(element, text, len) || len < memcode::kKeyElementLen ||
+      (len > memcode::kKeyElementLen && text[memcode::kKeyElementLen] != '|')) {
+    return false;
+  }
+  memcode::DayKey key;
+  if (!memcode::parseKeyElement(text, memcode::kKeyElementLen, key)) {
+    return false;
+  }
+  out = key;
+  return true;
+}
+
+// --- arrays ----------------------------------------------------------------
+
+ArrayRead readRoster(const jv::Value& body, RosterImage& image, uint32_t nowMs, Drift& drift) {
+  const jv::Value array = jv::member(body, "roster");
+  if (!array.present()) {
+    return ArrayRead::Absent;
+  }
+  if (!array.isArray()) {
+    drift.add("roster");
+    return ArrayRead::Kept;
+  }
+  // Two passes: whether ANYTHING is readable decides whether the previous
+  // roster survives, so nothing is committed until that is known.
+  jv::ArrayIter count(array);
+  jv::Value element;
+  size_t present = 0U;
+  size_t readable = 0U;
+  roster::Entry entry;
+  while (count.next(element)) {
+    ++present;
+    if (readRosterElement(element, entry)) {
+      ++readable;
+    }
+  }
+  if (present > 0U && readable == 0U) {
+    drift.add("roster");
+    return ArrayRead::Kept;
+  }
+  if (readable < present) {
+    drift.add("roster");
+  }
+  image.count = 0U;
+  jv::ArrayIter it(array);
+  while (it.next(element)) {
+    if (image.count < kGateRosterEntries && readRosterElement(element, entry)) {
+      image.entries[image.count] = entry;
+      ++image.count;
+    }
+  }
+  image.anchorMs = nowMs;
+  image.loaded = true;
+  return ArrayRead::Adopted;
+}
+
+namespace {
+
+/// `code_days`: adopted whole, kept when nothing in a non-empty array reads.
+ArrayRead readCodeDays(const jv::Value& dayArray, CodeImage& image, Drift& drift) {
+  if (!dayArray.isArray()) {
+    drift.add("code_days");
+    return ArrayRead::Kept;
+  }
+  memcode::DaySlot staged[memcode::kMaxDaySlots];
+  jv::ArrayIter it(dayArray);
+  jv::Value element;
+  size_t present = 0U;
+  size_t readable = 0U;
+  uint8_t slot = 0U;
+  while (it.next(element)) {
+    ++present;
+    memcode::DaySlot day;
+    if (readDayElement(element, day)) {
+      ++readable;
+      if (slot < memcode::kMaxDaySlots) {
+        staged[slot] = day;
+      }
+    }
+    // The slot is the server's index, readable or not: keys name it.
+    if (slot < UINT8_MAX) {
+      ++slot;
+    }
+  }
+  if (present > 0U && readable == 0U) {
+    drift.add("code_days");
+    return ArrayRead::Kept;
+  }
+  if (readable < present) {
+    drift.add("code_days");
+  }
+  for (uint8_t s = 0U; s < memcode::kMaxDaySlots; ++s) {
+    image.days[s] = staged[s];
+  }
+  return ArrayRead::Adopted;
+}
+
+/// `code_keys`: counted first so a wholly unreadable array keeps the ring, then adopted.
+ArrayRead readCodeKeys(const jv::Value& keyArray, CodeImage& image, Drift& drift) {
+  if (!keyArray.isArray()) {
+    drift.add("code_keys");
+    return ArrayRead::Kept;
+  }
+  jv::ArrayIter count(keyArray);
+  jv::Value element;
+  size_t present = 0U;
+  size_t readable = 0U;
+  memcode::DayKey key;
+  while (count.next(element)) {
+    ++present;
+    if (readKeyElement(element, key)) {
+      ++readable;
+    }
+  }
+  if (present > 0U && readable == 0U) {
+    drift.add("code_keys");
+    return ArrayRead::Kept;
+  }
+  if (readable < present) {
+    drift.add("code_keys");
+  }
+  image.count = 0U;
+  jv::ArrayIter it(keyArray);
+  while (it.next(element)) {
+    if (image.count < kGateKeyRingSlots && readKeyElement(element, key)) {
+      image.keys[image.count] = key;
+      ++image.count;
+    }
+  }
+  return ArrayRead::Adopted;
+}
+
+} // namespace
+
+void readCodes(const jv::Value& body, CodeImage& image, Drift& drift, ArrayRead& days, ArrayRead& keys) {
+  const jv::Value dayArray = jv::member(body, "code_days");
+  days = dayArray.present() ? readCodeDays(dayArray, image, drift) : ArrayRead::Absent;
+  const jv::Value keyArray = jv::member(body, "code_keys");
+  keys = keyArray.present() ? readCodeKeys(keyArray, image, drift) : ArrayRead::Absent;
+}
+
+bool readStepClock(const jv::Value& body, StepImage& image, uint32_t nowMs, Drift& drift) {
+  const jv::Value step = jv::member(body, "code_step");
+  const jv::Value phase = jv::member(body, "code_step_ms");
+  if (!step.present() && !phase.present()) {
+    return false;
+  }
+  uint32_t s = 0U;
+  uint32_t ms = 0U;
+  const bool stepOk = jv::asUint32(step, s);
+  const bool phaseOk = jv::asUint32(phase, ms) && ms < memcode::kStepMs;
+  if (step.present() && !stepOk) {
+    drift.add("code_step");
+  }
+  if (phase.present() && !phaseOk) {
+    drift.add("code_step_ms");
+  }
+  // BOTH, or the clock is left alone: a step with no phase is up to thirty
+  // seconds wrong in a direction nobody can tell.
+  if (!stepOk || !phaseOk) {
+    return false;
+  }
+  image.step = s;
+  image.stepMs = ms;
+  image.anchorMs = nowMs;
+  image.synced = true;
+  return true;
+}
+
+bool readHeartbeatSeconds(const jv::Value& body, uint32_t& intervalMs, Drift& drift) {
+  const jv::Value v = jv::member(body, "heartbeat_seconds");
+  if (!v.present()) {
+    return false;
+  }
+  uint32_t seconds = 0U;
+  if (!jv::asUint32(v, seconds)) {
+    drift.add("heartbeat_seconds");
+    return false;
+  }
+  intervalMs = clampTo(seconds, devlink::kMinHeartbeatMs / 1000U, devlink::kMaxHeartbeatMs / 1000U) * 1000U;
+  return true;
+}
+
+// --- one whole heartbeat answer ----------------------------------------------
+
+HeartbeatRead readHeartbeat(uint16_t status, const char* body, size_t len, uint32_t nowMs,
+                            GateBoardState& state) {
+  HeartbeatRead read;
+  read.authRetry = status == 401U;
+  jv::Value object;
+  if (!isSuccess(status) || body == nullptr || !jv::completeObject(body, len, object)) {
+    return read;
+  }
+  read.accepted = true;
+  // THE LIFELINE FIRST, and from any complete object: it is how a board whose
+  // other readers no longer understand the server keeps its key and its
+  // network (§11.1).
+  read.keyNext = jv::member(object, "key_next");
+  read.net = jv::member(object, "net");
+  static_cast<void>(readHeartbeatSeconds(object, state.heartbeatMs, read.drift));
+
+  if (!jv::stringEquals(jv::member(object, "kind"), "gate")) {
+    read.kindMismatch = true;
+    return read;
+  }
+  read.unlockClamped = readGateSettings(jv::member(object, "gate"), state.settings, read.drift);
+  read.roster = readRoster(object, state.roster, nowMs, read.drift);
+  readCodes(object, state.codes, read.drift, read.days, read.keys);
+  read.stepSynced = readStepClock(object, state.step, nowMs, read.drift);
+  return read;
+}
+
+// --- the scan decision and the events reply ---------------------------------
+
+ScanDecision readScanReply(uint16_t status, const char* body, size_t len, uint32_t hardCapMs) {
+  ScanDecision decision;
+  if (status == 403U) {
+    static_cast<void>(memcpy(decision.reason, kReasonOutOfService, sizeof(kReasonOutOfService)));
+    decision.outOfService = true;
+    return decision;
+  }
+  jv::Value object;
+  if (!isSuccess(status) || body == nullptr || !jv::completeObject(body, len, object)) {
+    decision.fallbackToRoster = true;
+    return decision;
+  }
+  bool opened = false;
+  if (!jv::asBool(jv::member(object, "opened"), opened)) {
+    decision.fallbackToRoster = true;
+    return decision;
+  }
+  uint32_t seconds = 0U;
+  if (opened && !jv::asUint32(jv::member(object, "unlock_seconds"), seconds)) {
+    decision.fallbackToRoster = true;
+    return decision;
+  }
+  size_t n = 0U;
+  if (!jv::asString(jv::member(object, "reason"), decision.reason, sizeof(decision.reason), n)) {
+    decision.reason[0] = '\0';
+  }
+  if (opened) {
+    decision.released = true;
+    decision.unlockMs = unlockMsFromSeconds(seconds, hardCapMs);
+  }
+  return decision;
+}
+
+bool readEventsReply(uint16_t status, const char* body, size_t len, uint32_t& acceptedThrough) {
+  jv::Value object;
+  if (!isSuccess(status) || body == nullptr || !jv::completeObject(body, len, object)) {
+    return false;
+  }
+  return jv::asUint32(jv::member(object, "accepted_through"), acceptedThrough);
+}
+
+} // namespace gatelogic

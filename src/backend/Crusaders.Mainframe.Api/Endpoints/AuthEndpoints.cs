@@ -17,19 +17,7 @@ public static class AuthEndpoints
         // membership-number oracle; every one of them is anonymous by necessity.
         var g = app.MapGroup("/api/v1/auth").RequireRateLimiting(RateLimitPolicies.Auth).RefuseUnstorableText();
 
-        g.MapPost("/register", async (RegisterRequest req, AuthService auth, CancellationToken ct) =>
-        {
-            if (RegistrationRules.Refusal(req) is { } refused) return refused;
-
-            var result = await auth.RegisterAsync(req.Email, req.Password, req.FullName.Trim(), req.MembershipNumber, req.PhotoUrl, ct);
-            return result switch
-            {
-                RegistrationResult.Created c => Results.Ok(new { user_id = c.UserId, status = "pending_email_verification" }),
-                RegistrationResult.AlreadyExists => Results.Conflict(new { error = "email_in_use" }),
-                RegistrationResult.MembershipNumberInUse => Results.Conflict(new { error = "membership_number_in_use" }),
-                _ => Results.Problem("Unexpected"),
-            };
-        }).AllowAnonymous();
+        g.MapPost("/register", RegisterAsync).AllowAnonymous();
 
         // Re-send the address-confirmation email. Anonymous by necessity — the member cannot sign
         // in until it is done — and deliberately incurious: it answers 200 whether or not the
@@ -42,11 +30,11 @@ public static class AuthEndpoints
             return Results.Ok(new { ok = true });
         }).AllowAnonymous();
 
-        g.MapPost("/verify-email/{token}", async (string token, AuthService auth, CancellationToken ct) =>
-        {
-            var ok = await auth.VerifyEmailAsync(token, ct);
-            return ok ? Results.Ok(new { verified = true }) : Results.BadRequest(new { error = "invalid_or_expired" });
-        }).AllowAnonymous();
+        // BP-18: the token in the BODY is the form clients use — a path segment is in every access
+        // log in front of the API. The path form stays for a page loaded from an older build;
+        // the gateway's access log blanks it (nginx/nginx.conf).
+        g.MapPost("/verify-email", (OneTimeTokenRequest req, AuthService auth, CancellationToken ct) => VerifyAsync(req.Token, auth, ct)).AllowAnonymous();
+        g.MapPost("/verify-email/{token}", (string token, AuthService auth, CancellationToken ct) => VerifyAsync(token, auth, ct)).AllowAnonymous();
 
         g.MapPost("/login", async (
             LoginRequest req, HttpContext ctx, AuthService auth, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
@@ -109,15 +97,10 @@ public static class AuthEndpoints
             return ok ? Results.Ok(new { reset = true }) : Results.BadRequest(new { error = "invalid_or_expired" });
         }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
 
-        g.MapPost("/magic-link/{token}", async (string token, HttpContext ctx, AuthService auth, CancellationToken ct) =>
-        {
-            var result = await auth.ConsumeMagicLinkAsync(token, ct);
-            return result switch
-            {
-                LoginResult.Ok ok => await SessionCookies.SignedInAsync(ctx, ok, ct),
-                _ => Results.BadRequest(new { error = "invalid_or_expired" }),
-            };
-        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
+        g.MapPost("/magic-link", (OneTimeTokenRequest req, HttpContext ctx, AuthService auth, CancellationToken ct) =>
+            MagicLinkAsync(req.Token, ctx, auth, ct)).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
+        g.MapPost("/magic-link/{token}", (string token, HttpContext ctx, AuthService auth, CancellationToken ct) =>
+            MagicLinkAsync(token, ctx, auth, ct)).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
 
         // Refresh the access token (B1). Either a still-valid bearer (as before) or — with no
         // usable bearer — the httpOnly refresh cookie alone, which is what keeps a phone left idle
@@ -160,6 +143,65 @@ public static class AuthEndpoints
         }).AllowAnonymous();
 
         return app;
+    }
+
+    private static async Task<IResult> VerifyAsync(string? token, AuthService auth, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return Results.BadRequest(new { error = "invalid_or_expired" });
+        var verified = await auth.VerifyEmailAsync(token, ct);
+        return verified is null
+            ? Results.BadRequest(new { error = "invalid_or_expired" })
+            : Results.Ok(new { verified = true, approved = verified.Approved });
+    }
+
+    /// <summary>
+    /// The approval mail's sign-in link. A membership no longer active (suspended inside the
+    /// link's life, BP-12) is told so, as the password sign-in tells it — never handed a session.
+    /// </summary>
+    private static async Task<IResult> MagicLinkAsync(string? token, HttpContext ctx, AuthService auth, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return Results.BadRequest(new { error = "invalid_or_expired" });
+        var result = await auth.ConsumeMagicLinkAsync(token, ct);
+        return result switch
+        {
+            LoginResult.Ok ok => await SessionCookies.SignedInAsync(ctx, ok, ct),
+            LoginResult.NotApproved na => Results.Json(new { error = "not_approved", status = na.Status.ToString() }, statusCode: 403),
+            _ => Results.BadRequest(new { error = "invalid_or_expired" }),
+        };
+    }
+
+    /// <summary>
+    /// An application. One answer for every application that is well formed (BP-14, BM-15).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It used to answer <c>409 email_in_use</c> and <c>409 membership_number_in_use</c>, which
+    /// told any stranger which addresses hold an account and which membership numbers the club has
+    /// issued — while forgot-password and resend-verification were careful to say nothing. A
+    /// well-formed application now always answers <c>200 pending_email_verification</c>, the same
+    /// body with no id in it, and what actually happened is told to the mailbox the application
+    /// named (<see cref="AuthService.RegisterAsync"/>): the verify link, "you already have an
+    /// account", or "that membership number is already registered". A lost reply's retry is no
+    /// longer turned into "email in use" for the applicant's own account, either.
+    /// </para>
+    /// <para>
+    /// The photo is checked first (BP-06, BA-13): required, issued to this club, on disk, and not
+    /// another membership's. Those refusals do say something — about the request's own photo, which
+    /// the caller just uploaded, never about anybody else's account.
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> RegisterAsync(
+        RegisterRequest req, AuthService auth, MemberPhotoFiles photos, Multitenancy.ITenantContext tenant,
+        Persistence.MainframeDbContext db, CancellationToken ct)
+    {
+        if (RegistrationRules.Refusal(req) is { } refused) return refused;
+        if (await MeProfileEndpoints.PhotoRefusalAsync(db, photos, tenant.TenantSlug, req.PhotoUrl, null, ct) is { } photo)
+        {
+            return Results.BadRequest(new { error = photo });
+        }
+
+        await auth.RegisterAsync(req.Email, req.Password, req.FullName.Trim(), req.MembershipNumber, req.PhotoUrl!.Trim(), ct);
+        return Results.Ok(new { status = "pending_email_verification" });
     }
 
     /// <summary>
@@ -283,6 +325,9 @@ public sealed record LoginRequest(string Email, string Password);
 public sealed record ForgotPasswordRequest(string Email);
 public sealed record ResendVerificationRequest(string Email);
 public sealed record ResetPasswordRequest(string Token, string NewPassword);
+
+/// <summary>A one-time link's token, in the body where no access log records it (BP-18).</summary>
+public sealed record OneTimeTokenRequest(string? Token);
 
 public static class CurrentUser
 {

@@ -17,6 +17,8 @@ export const CLUB_REPORT_COPY = {
   description: "The club's money, minutes, courts and attendance, for any period.",
   refreshFailed: "Couldn't refresh these figures — they are from the last read. Try Refresh again.",
   action: "load the club's reports",
+  /** BA-08: the server-built file of every no-show in the range. */
+  noShowsCsv: "No-shows (CSV)",
   tilesLabel: "This period at a glance",
   tiles: {
     received: "Rand received (net)",

@@ -25,6 +25,10 @@ public static class AdminConfigEndpoints
             UpdateSettingsRequest req, HttpContext ctx, MainframeDbContext db,
             AdminChangeRecorder recorder, CancellationToken ct) =>
         {
+            // A snake-only key spelled camelCase is heard, not silently dropped (SettingsSpelling).
+            var (adopted, spelling) = SettingsSpelling.Adopt(req);
+            if (spelling is not null) return Results.BadRequest(spelling);
+            req = adopted;
             var tenant = ctx.RequestServices.GetRequiredService<ITenantContext>();
 
             // The row is held from here to the commit (A4-1), so the version check, the
@@ -84,17 +88,25 @@ public static class AdminConfigEndpoints
             var economicsError = ValidateEconomics(req);
             if (economicsError is not null) return Results.BadRequest(new { error = economicsError });
 
+            // Every box and device refusal names the bounds (device-api.md §5, FA-2/BA-05): the
+            // console reads its ranges from the GET's `bounds`, and a refusal that did not say what
+            // IS accepted is how an admin was told "Allowed: 5-120" by one side and refused by the other.
             var deviceError = ValidateDeviceNumbers(req);
-            if (deviceError is not null) return Results.BadRequest(new { error = deviceError });
+            if (deviceError is not null) return Results.BadRequest(DeviceSettings.Refusal(deviceError));
 
             var gateError = ValidateGateSettings(req);
-            if (gateError is not null) return Results.BadRequest(new { error = gateError });
+            if (gateError is not null) return Results.BadRequest(DeviceSettings.Refusal(gateError));
 
             var doorError = ValidateDoorSettings(req);
             if (doorError is not null) return Results.BadRequest(new { error = doorError });
 
             var boxError = ValidateBoxSettings(req);
-            if (boxError is not null) return Results.BadRequest(new { error = boxError });
+            if (boxError is not null) return Results.BadRequest(DeviceSettings.Refusal(boxError));
+
+            // The device contract v3 keys (device-api.md §5, §6), under either spelling — see
+            // UpdateSettingsRequest.Extra for why they are read from the unmatched keys.
+            var (deviceV3Writes, deviceV3Refusal) = DeviceSettings.Parse(req.Extra);
+            if (deviceV3Refusal is not null) return Results.BadRequest(deviceV3Refusal);
 
             // The realtime keys are validated ONCE, here, by the money lane's validator — it is
             // the one that answers with a refusal PAYLOAD naming the bound rather than a bare
@@ -207,6 +219,7 @@ public static class AdminConfigEndpoints
             WriteOptionalGateSettings(doc, req);
             WriteOptionalDoorSettings(doc, req);
             WriteOptionalBoxSettings(doc, req);
+            foreach (var (key, value) in deviceV3Writes) doc[key] = value;
             WriteOptionalLiveSettings(doc, req);
             WriteOptionalNotifierSettings(doc, req);
             WriteOptionalPlayerSettings(doc, req);
@@ -218,6 +231,11 @@ public static class AdminConfigEndpoints
                 ? storedPhase.GetString()
                 : MemberCodeSettings.Legacy;
             WriteOptionalMemberCodeSettings(doc, req, ctx.User.Id() ?? Guid.Empty, DateTimeOffset.UtcNow);
+
+            // FC-8 (device keys only): saving the walk-up maximum caps every minutes:N button above
+            // it — the club's map and every box's own — so the setting finally governs what the box
+            // offers, not only what the API sells.
+            if (req.WalkUpMaxMinutes is { } walkUpCap) await CapButtonsAsync(db, doc, walkUpCap, ct);
 
             // D2-B19 — the diff of CHANGED KEYS ONLY, before the document is replaced.
             //
@@ -1106,6 +1124,18 @@ public static class AdminConfigEndpoints
         // and pressing save doubled every slice and repriced every court, silently.
         var defaults = await settingsAccessor.GetAsync(ct);
 
+        // The device contract v3 settings (device-api.md §5, §6), clamped, appended as top-level
+        // keys like every other setting, and the bounds of every box and device setting — the
+        // console takes its ranges from `bounds` and nowhere else (FA-2/BA-05).
+        var rendered = JsonSerializer.SerializeToNode(RenderSettingsBody(row, doc, defaults))!.AsObject();
+        foreach (var (key, value) in DeviceSettings.Render(defaults)) rendered[key] = JsonSerializer.SerializeToNode(value);
+        rendered["bounds"] = JsonSerializer.SerializeToNode(DeviceSettings.Bounds());
+        return rendered;
+    }
+
+    private static object RenderSettingsBody(
+        TenantSettings? row, Dictionary<string, JsonElement> doc, TenantSettingsView defaults)
+    {
         return new
         {
             // The document's version (A4-1): send it back with a save, and a save made from a
@@ -1290,6 +1320,26 @@ public static class AdminConfigEndpoints
         return dict;
     }
     private static JsonElement ToElement<T>(T value) => JsonSerializer.SerializeToElement(value);
+
+    /// <summary>
+    /// FC-8: every <c>minutes:N</c> button above <paramref name="cap"/> lowered to it, in the club's
+    /// map (in <paramref name="doc"/>) and in every court box's own override, in the same save.
+    /// </summary>
+    private static async Task CapButtonsAsync(MainframeDbContext db, Dictionary<string, JsonElement> doc, int cap, CancellationToken ct)
+    {
+        var root = JsonSerializer.SerializeToElement(doc);
+        var club = ButtonMap.FromSettings(root);
+        var capped = club.CappedAt(cap);
+        if (!ReferenceEquals(capped, club)) doc["button_map"] = ToElement(capped.ToWire());
+
+        var boxes = await db.Devices.Where(d => d.Kind == DeviceKind.CourtBox && d.ButtonMapJson != null).ToListAsync(ct);
+        foreach (var box in boxes)
+        {
+            if (ButtonMap.FromJson(box.ButtonMapJson) is not { } own) continue;
+            var lowered = own.CappedAt(cap);
+            if (!ReferenceEquals(lowered, own)) box.ButtonMapJson = lowered.ToJson();
+        }
+    }
     /// <summary>
     /// An integer out of the stored document, or the default.
     ///
@@ -1567,6 +1617,16 @@ public sealed record UpdateSettingsRequest(
     /// </summary>
     string? Version = null)
 {
+    /// <summary>
+    /// Every key this record has no member for — which is where the device contract v3 settings
+    /// (device-api.md §5, §6) are read from, under either spelling, by <see cref="DeviceSettings.Parse"/>.
+    /// Fourteen keys × two spellings as positional members would double the surface of a record
+    /// that is already the endpoint's longest; one table-driven reader keeps the bounds, the
+    /// validation and the GET's <c>bounds</c> in one place.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; init; }
+
     /// <summary>The money symbol the club asked for, under either spelling.</summary>
     public string? EffectiveCurrencySymbol => CurrencySymbol ?? CurrencySymbolSnake;
 

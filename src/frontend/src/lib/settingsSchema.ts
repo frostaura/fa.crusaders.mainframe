@@ -2,8 +2,8 @@ import type { AdminSettings } from "./api";
 import { GATE_ACCESS_POLICIES } from "./api";
 import {
   CAP_RULES, CURRENCY_SYMBOL_HINT,
-  CURRENCY_SYMBOL_LABEL, DEVICE_TIMING_RULES, MAX_CURRENCY_SYMBOL_LENGTH, MEMBER_TRACE_HINT,
-  MEMBER_TRACE_LABEL, MONITORING_RULES, REALTIME_RULES, SCHEDULE_RULES, type NumericSettingRule,
+  CURRENCY_SYMBOL_LABEL, MAX_CURRENCY_SYMBOL_LENGTH, MEMBER_TRACE_HINT,
+  MEMBER_TRACE_LABEL, MONITORING_RULES, REALTIME_RULES, SCHEDULE_RULES, servedBound, servedValues, type NumericSettingRule,
 } from "./ecoSettings";
 import {
   CLUB_CONTACT_EMAIL_MAX_LENGTH, CLUB_CONTACT_PHONE_MAX_LENGTH, DEVICE_ALERT_COOLDOWN_MAX_MINUTES,
@@ -83,6 +83,11 @@ export type SettingDef = {
   minExclusive?: boolean;
   /** Checked here against min/max. False where a module of its own already validates the key. */
   range?: boolean;
+  /**
+   * The range is the API's alone (device-api §10): the row carries no `min`/`max` of its own and
+   * takes the settings GET's `bounds` for this key. A test fails if such a row grows a client range.
+   */
+  serverBounds?: true;
   /** The shipping default, for the (i) and for a reset. */
   defaultValue?: number | string | boolean;
   /** Collapsed behind the section's "Advanced" disclosure. */
@@ -90,6 +95,8 @@ export type SettingDef = {
   /** Rendered only when the API serves the key (an older API omits it; omitted = unchanged). */
   optional?: boolean;
   options?: readonly SettingOption[];
+  /** A select whose values are numbers on the wire (the served `values` are numbers). */
+  numericChoice?: true;
   maxLength?: number;
   placeholder?: string;
   /**
@@ -224,7 +231,9 @@ const BOOKINGS: SettingDef[] = [
   {
     key: "slice_minutes", section: "bookings", label: "Slice length (minutes)", kind: "number", unit: "min",
     description: "The smallest piece of court time a member can book.",
-    help: "5–240. Each booking is one or more slices, e.g. 30 minutes, and costs the minutes it covers.",
+    // FC-8: the heartbeat carries this to the boxes, and no box does anything with it.
+    help: "5–240. Each booking is one or more slices, e.g. 30 minutes, and costs the minutes it covers. A rule of the"
+      + " club's system, not of the court boxes: a box never uses it, so changing it changes nothing at the courts.",
     min: 5, max: 240, step: 5, integer: true, range: true, defaultValue: 15,
   },
   {
@@ -299,7 +308,8 @@ const CANCELLATIONS: SettingDef[] = [
   {
     key: "grace_window_minutes", section: "cancellations", label: "Grace window (minutes)", kind: "number", unit: "min",
     description: "How late a member can arrive before it counts as a no-show.",
-    help: "0–60. After slot start, before a no-show triggers.",
+    help: "0–60. After slot start, before a no-show triggers. The club's system judges it from the check-ins it receives;"
+      + " the court boxes do nothing with it.",
     min: 0, max: 60, integer: true, range: true, defaultValue: 5,
   },
   {
@@ -333,8 +343,9 @@ const SCHEDULES: SettingDef[] = [
 const BOXES: SettingDef[] = [
   {
     key: "walk_up_max_minutes", section: "boxes", label: "Walk-up maximum (minutes)", kind: "number", unit: "min",
-    description: "The most court time a walk-up can buy at the box in one go.",
-    help: "1–90. The most court time a walk-up can buy at the box in one go; 90 is the relay's hard cap.",
+    description: "The most court time a walk-up can buy at the box in one go — and the most any time button gives.",
+    help: "1–90. The most court time a walk-up can buy at the box in one go; 90 is the relay's hard cap. Saving it also caps"
+      + " every time button above it — the club's button map and each box's own — so a button can never offer more.",
     min: 1, max: 90, integer: true, range: true, defaultValue: 90,
   },
   {
@@ -396,20 +407,275 @@ const BOXES: SettingDef[] = [
   },
 ];
 
+/*
+ * Every box and device setting below carries NO client range (`serverBounds`): its bounds are
+ * the ones the settings GET serves in `bounds` (device-api §10), applied by `settingsFor`. A copy
+ * here is how the console once offered 5–120 s for a revert the API bounded 3–60 (FA-2/BA-05).
+ * An API that serves no bound for a key gets no client check either — its refusal names the
+ * range (`<key>_out_of_range` with `min`/`max`), which the save banner quotes.
+ *
+ * The keys are snake_case only on the settings PUT (AdminConfigEndpoints' JsonPropertyName
+ * block); `lcd_revert_seconds` binds both spellings.
+ */
+const BOX_KEY = { optional: true, wire: "snake", serverBounds: true } as const;
+const BOX_NUMBER = { ...BOX_KEY, kind: "number", integer: true, range: true } as const;
+
+/** Said on every box row: the box is pull-only and learns a change in the answer to its next beat. */
+const ONE_HEARTBEAT = "A box picks a change up the next time it calls in.";
+
+export const LCD_LAYOUT_LABELS: Readonly<Record<string, string>> = {
+  compact: "Compact — 2 lines of 16 (16×2)",
+  expanded: "Expanded — 4 lines of 20 (20×4)",
+};
+
 const SCREENS: SettingDef[] = [
-  fromRule(rule(DEVICE_TIMING_RULES, "lcd_revert_seconds"), "screens",
-    "How long the box's screen shows a result before going back to the start.", { unit: "s", wire: "both" }),
-  fromRule(rule(DEVICE_TIMING_RULES, "rapid_scan_window_seconds"), "screens",
-    "How long the box stays ready for the next person. 0 turns it off.", { unit: "s" }),
   {
-    // R5 A5-8: settable through the API (BoxSettings 1–10, default 3) and so on the change record,
-    // where it had no caption and read "Lcd hint seconds". Snake_case only on the settings PUT.
-    key: "lcd_hint_seconds", section: "screens", label: "Short messages stay on the box's screen (seconds)",
-    kind: "number", unit: "s", advanced: true, optional: true, wire: "snake",
-    description: "How long a one-off message holds the bottom line of the box's screen.",
-    help: "1–10. How long a short one-off message holds the bottom line of the box's screen before that line"
-      + " goes back to what it was showing.",
-    min: 1, max: 10, integer: true, range: true, defaultValue: 3,
+    ...BOX_KEY, key: "lcd_layout", section: "screens", kind: "select", label: "Screen layout",
+    description: "Which size of screen the boxes draw for. A board can be set on its own on Boards.",
+    help: "Compact draws two lines of sixteen characters, which every fitted screen can show. Expanded draws four"
+      + " lines of twenty and needs a 20×4 panel. A box that cannot reach the club, or is sent a value it does not"
+      + ` know, draws compact. ${ONE_HEARTBEAT} If expanded looks wrong on a box, set that board back to compact on`
+      + " Boards — one press, and it is compact again on its next heartbeat.",
+    options: [
+      { value: "compact", label: LCD_LAYOUT_LABELS.compact },
+      { value: "expanded", label: LCD_LAYOUT_LABELS.expanded },
+    ],
+    defaultValue: "compact",
+  },
+  {
+    ...BOX_KEY, key: "lcd_marquee_enabled", section: "screens", kind: "switch", label: "Scroll long lines",
+    description: "A line longer than the screen scrolls across it. Off, it is cut and the start screen pages instead.",
+    help: "On, a line wider than the screen scrolls one character at a time, smoothly, on the box itself. Off, a long"
+      + ` line is cut at the edge and the compact start screen shows one court per page instead. ${ONE_HEARTBEAT}`,
+    defaultValue: true,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_revert_seconds", section: "screens", label: "Screen returns to the start after a result (seconds)",
+    unit: "s", wire: "both",
+    description: "How long a scan's result — a welcome, a refusal, lights on — stays before the start screen.",
+    help: "How long the box shows the result of a decided scan before it goes back to the start screen (“SCAN YOUR QR”)."
+      + " It is also how long the next person has to scan straight after: a new scan replaces the result at once."
+      + " It governs results only — a court or time choice waits for “Court choice waits”, and the name card for"
+      + ` “Name card shows”. Whatever these say, no screen lasts past “Longest any screen lasts”. ${ONE_HEARTBEAT}`,
+    defaultValue: 10,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_choice_seconds", section: "screens", label: "Court choice waits (seconds)", unit: "s",
+    description: "How long the box waits for a court or time button after a scan, then goes back to the start.",
+    help: "After a scan that needs a choice — which court, how long — the box waits this long for a button, then gives"
+      + " up and goes back to the start screen. A press does not restart the wait. This is the screen a member who"
+      + ` walks away leaves behind. ${ONE_HEARTBEAT}`,
+    defaultValue: 20,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_card_seconds", section: "screens", label: "Name card shows (seconds)", unit: "s",
+    description: "How long the member's first name shows after a recognised scan.",
+    help: `How long the greeting with the member's first name stays before the box moves on. ${ONE_HEARTBEAT}`,
+    defaultValue: 2,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_hint_seconds", section: "screens", label: "Short messages stay on the bottom line (seconds)",
+    unit: "s", advanced: true,
+    description: "How long a one-off message holds the bottom line of the screen.",
+    help: "How long a short one-off message holds the bottom line of the box's screen before that line goes back to"
+      + ` what it was showing. ${ONE_HEARTBEAT}`,
+    defaultValue: 3,
+  },
+  {
+    ...BOX_NUMBER, key: "scan_memory_seconds", section: "screens", label: "Box remembers a scan for (seconds)", unit: "s",
+    advanced: true,
+    description: "How long the buttons still belong to the member who last scanned.",
+    help: "How long the box remembers who scanned, so a court button pressed after a scan is that member's. The box"
+      + " never remembers a scan for less than “Court choice waits”, whatever this says — otherwise a choice could be"
+      + ` left on the screen for nobody. ${ONE_HEARTBEAT}`,
+    defaultValue: 30,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_screen_ceiling_seconds", section: "screens", label: "Longest any screen lasts (seconds)", unit: "s",
+    description: "The absolute limit on every screen that is not the start screen. The box enforces it itself.",
+    help: "No screen other than the start screen lasts longer than this — whatever a bridge sends, whatever button is"
+      + " held. The box's own controller enforces it, so a screen cannot get stuck. When it fires, the start screen"
+      + ` holds for “Start screen holds after a timeout” before anything else may show. ${ONE_HEARTBEAT}`,
+    defaultValue: 60,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_after_lights_on_seconds", section: "screens", label: "Back to the start after lights on (seconds)",
+    unit: "s",
+    description: "How soon the box returns to the start screen once a court's lights come on.",
+    help: `Once a court lights, the box goes back to the start screen this soon, so the next person sees every court. ${ONE_HEARTBEAT}`,
+    defaultValue: 15,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_landing_page_seconds", section: "screens", label: "Start screen turns its page every (seconds)",
+    unit: "s",
+    description: "When the start screen has more courts than lines, how long each page shows.",
+    help: `When there are more courts than the screen has lines, the start screen pages through them this often. ${ONE_HEARTBEAT}`,
+    defaultValue: 4,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_marquee_step_ms", section: "screens", label: "Scrolling speed (milliseconds a character)", unit: "ms",
+    advanced: true,
+    description: "How long a scrolling line waits before moving one character. Larger is slower.",
+    help: `A scrolling line moves one character every this many milliseconds. ${ONE_HEARTBEAT}`,
+    defaultValue: 400,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_landing_dwell_seconds", section: "screens", label: "Start screen holds after a timeout (seconds)",
+    unit: "s", advanced: true,
+    description: "After the longest-screen limit fires, the start screen holds this long before anything else shows.",
+    help: "After “Longest any screen lasts” forces the start screen, it stays at least this long, so a stuck button"
+      + ` cannot bounce the screen straight back. 0 means no hold. ${ONE_HEARTBEAT}`,
+    defaultValue: 3,
+  },
+  {
+    ...BOX_NUMBER, key: "lcd_reinit_seconds", section: "screens", label: "Screen refreshes itself every (seconds)", unit: "s",
+    advanced: true,
+    description: "How often the box resets its screen and redraws the start screen, to clear any garbled text.",
+    help: "Electrical noise can garble a character screen. While it shows the start screen, the box re-initialises it"
+      + ` and redraws everything this often, so a garbled screen heals by itself. ${ONE_HEARTBEAT}`,
+    defaultValue: 60,
+  },
+];
+
+/** The v3 box rows that belong with the lights and the network rather than the screen. */
+const BOX_V3: SettingDef[] = [
+  {
+    ...BOX_KEY, key: "relay_restore_enabled", section: "boxes", kind: "switch", label: "Put paid lights back on by themselves",
+    description: "A box re-lights a court the club says is paid for and in play — after a power cut, or a reset.",
+    help: "On, a box turns a court's lights back on when the club's system says a checked-in booking is still in play"
+      + " there — after a power cut or a box reset — for the paid time left, extensions included. The club's word"
+      + " never switches a court off. Off, a box never re-lights by itself, and a member scans again."
+      + ` ${ONE_HEARTBEAT}`,
+    defaultValue: true,
+  },
+  {
+    ...BOX_NUMBER, key: "relay_reconcile_min_seconds", section: "boxes", label: "Re-light only with at least (seconds) paid",
+    unit: "s", advanced: true,
+    description: "A box does not re-light a court with less paid time left than this — no ten-second flashes.",
+    help: `Below this much paid time left, a box does not switch a court back on by itself. ${ONE_HEARTBEAT}`,
+    defaultValue: 60,
+  },
+  {
+    ...BOX_NUMBER, key: "relay_authorisation_cap_minutes", section: "boxes", label: "Lights a box put back on stay on at most (minutes)",
+    unit: "min", advanced: true,
+    description: "A court a box re-lit by itself switches off this long after the club last confirmed it.",
+    help: "A safety limit for lights the box turned back on by itself: if the club's system has not confirmed that"
+      + ` court for this long, the box switches it off. ${ONE_HEARTBEAT}`,
+    defaultValue: 240,
+  },
+  {
+    ...BOX_NUMBER, key: "device_power_restore_trust_minutes", section: "boxes",
+    label: "After a power cut with no network, trust the box's memory for (minutes)", unit: "min", advanced: true,
+    description: "How long a box (or door) acts on what it last knew after power returns and the network does not.",
+    help: "After a power cut, a box that cannot reach the club re-lights paid courts and admits rostered members from"
+      + " what it saved, for at most this long; a door does the same with its roster. The first answer from the club"
+      + ` replaces it. 0 turns this off. ${ONE_HEARTBEAT}`,
+    defaultValue: 20,
+  },
+  {
+    ...BOX_NUMBER, key: "clock_trust_minutes", section: "boxes", label: "Box trusts its clock for (minutes)", unit: "min",
+    advanced: true,
+    description: "How long a box keeps showing the time without hearing from the club.",
+    help: `A box that has not heard the club's time for this long stops printing a time at all rather than a wrong one. ${ONE_HEARTBEAT}`,
+    defaultValue: 90,
+  },
+  {
+    ...BOX_NUMBER, key: "device_net_fallback_minutes", section: "boxes", label: "Give up on a new network address after (minutes)",
+    unit: "min", advanced: true,
+    description: "A board that cannot reach the club at a new address goes back to the old one after this.",
+    help: "When the club's network settings change (Boards › Club network), a board that has not reached the club at"
+      + ` the new address within this long goes back to the previous one, so a typo cannot strand it. ${ONE_HEARTBEAT}`,
+    defaultValue: 10,
+  },
+  {
+    ...BOX_NUMBER, key: "device_key_grace_hours", section: "boxes", label: "Old device key keeps working for (hours)", unit: "h",
+    advanced: true,
+    description: "After a key rotation, the old key is retired this long after every board has the new one.",
+    help: "After a key rotation (Boards › Device key), the old key is retired automatically once every board has moved to"
+      + " the new one and this long has passed — never while a board that cannot rotate is still in service.",
+    defaultValue: 168,
+  },
+];
+
+/**
+ * The five hardware facts the Mega once had compiled in (device-api §5, §12; HW-1, HW-2, HW-5):
+ * the club's values, which a board may override on Boards. Their values and range are the API's
+ * (`bounds`); the labels name each value in words. Advanced: a club sets them once, at
+ * commissioning (`lights-controller.md`), and a wrong one is fixed per board, never by a cable.
+ */
+const HW_VALUE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  hw_relay_active_level: { high: "High — an active-high module", low: "Low — an active-low module" },
+  hw_scanner_line_end: { auto: "Auto — CR, LF or a pause ends a code", crlf: "CR/LF — only the scanner's own line end" },
+  hw_lcd_i2c_address: { 0: "Search for it" },
+  hw_scanner_baud: { 0: "Auto-detect" },
+};
+
+/** A served hardware value in words: an LCD address in hex, a scanner speed in baud. */
+function hwValueLabel(key: string, value: string): string | undefined {
+  const named = HW_VALUE_LABELS[key]?.[value];
+  if (named) return named;
+  const n = Number(value);
+  if (key === "hw_lcd_i2c_address" && Number.isInteger(n)) return `0x${n.toString(16).toUpperCase().padStart(2, "0")}`;
+  if (key === "hw_scanner_baud" && Number.isInteger(n)) return `${n} baud`;
+  return undefined;
+}
+
+const HARDWARE: SettingDef[] = [
+  {
+    ...BOX_KEY, key: "hw_relay_active_level", section: "boxes", kind: "select", label: "Relay drive level", advanced: true,
+    description: "Which level switches a court's relay on. A board can be set on its own on Boards.",
+    help: "Set at commissioning: light a court the normal way; if it stays dark while the box says it is on, the level is"
+      + " the other one. A released relay is never driven, so a wrong level keeps courts dark — it never lights one that"
+      + ` should be off. Changing it re-drives every lit court at the new level. ${ONE_HEARTBEAT}`,
+    defaultValue: "high",
+  },
+  {
+    ...BOX_KEY, key: "hw_lcd_i2c_address", section: "boxes", kind: "select", numericChoice: true, label: "Screen (LCD) address",
+    advanced: true,
+    description: "Where the box looks for its screen. Searching finds every common backpack.",
+    help: "Leave it on search: the box tries every address a character-screen backpack uses and keeps the one that answers,"
+      + " and Boards shows which. Set an address only for a backpack the search cannot find. A board can be set on its own."
+      + ` ${ONE_HEARTBEAT}`,
+    defaultValue: 0,
+  },
+  {
+    ...BOX_KEY, key: "hw_scanner_baud", section: "boxes", kind: "select", numericChoice: true, label: "Scanner speed", advanced: true,
+    description: "How fast the QR scanner talks to the box. Auto finds it while the box is idle.",
+    help: "Auto tries each speed while nobody is scanning and keeps the one a scan arrives on; Boards shows which. Set it only"
+      + ` if scans never arrive. A board can be set on its own. ${ONE_HEARTBEAT}`,
+    defaultValue: 0,
+  },
+  {
+    ...BOX_KEY, key: "hw_scanner_line_end", section: "boxes", kind: "select", label: "Scanner line end", advanced: true,
+    description: "How the box knows a scanned code has ended.",
+    help: "Auto accepts a CR, an LF, or a short pause after the last character, so a scanner with no line end still works."
+      + ` CR/LF waits for the scanner's own line end. A board can be set on its own. ${ONE_HEARTBEAT}`,
+    defaultValue: "auto",
+  },
+  {
+    ...BOX_NUMBER, key: "hw_scanner_gap_ms", section: "boxes", label: "Scanner end-of-code pause (milliseconds)", unit: "ms",
+    advanced: true,
+    description: "With the line end on auto, a pause this long after the last character ends a scanned code.",
+    help: `Too short and a slow scanner's code is cut in two; too long and the box waits after every scan. ${ONE_HEARTBEAT}`,
+    defaultValue: 150,
+  },
+];
+
+/** The two fault switches belong with monitoring: they decide what reaches Faults at all. */
+const MONITORING_DEVICE: SettingDef[] = [
+  {
+    ...BOX_KEY, key: "device_fault_reporting", section: "monitoring", kind: "switch", label: "Boards report their faults",
+    description: "Whether boards send their own faults to Faults at all.",
+    help: `Off, no board sends a fault and Faults hears nothing from them. ${ONE_HEARTBEAT}`,
+    defaultValue: true,
+  },
+  {
+    ...BOX_NUMBER, key: "device_fault_max_per_hour", section: "monitoring", label: "Most fault reports from one board an hour",
+    unit: "faults", advanced: true,
+    description: "Repeats of one fault inside the window are counted into one report, not sent one by one.",
+    help: "A board turns this into a quiet time per fault code: at 20 an hour, one report of a code every three"
+      + ` minutes, carrying how many times it happened. ${ONE_HEARTBEAT}`,
+    defaultValue: 20,
   },
 ];
 
@@ -614,8 +880,8 @@ const PLAY: SettingDef[] = [
 
 /** Every setting on the page, in page order. */
 export const SETTINGS: readonly SettingDef[] = [
-  ...BOOKINGS, ...HOURS, ...CANCELLATIONS, ...MONEY, ...SCHEDULES, ...BOXES, ...SCREENS, ...DOORS, ...RECORDS,
-  ...MONITORING, ...ALERTS, ...PLAY,
+  ...BOOKINGS, ...HOURS, ...CANCELLATIONS, ...MONEY, ...SCHEDULES, ...BOXES, ...BOX_V3, ...HARDWARE, ...SCREENS, ...DOORS, ...RECORDS,
+  ...MONITORING, ...MONITORING_DEVICE, ...ALERTS, ...PLAY,
 ];
 
 const BY_KEY = new Map(SETTINGS.map((def) => [def.key, def]));
@@ -657,16 +923,78 @@ function cooldownDef(key: string): SettingDef | undefined {
   return def;
 }
 
-/** The registry, plus a row for every alert cooldown the API serves that the registry does not name. */
+/**
+ * One row with the range the API serves for it (`bounds`, device-api §10), which outranks any
+ * client copy. Cached by key and range, so a memoised row keeps its def while the bound holds.
+ */
+const boundDefs = new Map<string, SettingDef>();
+
+function withServedBound(def: SettingDef, settings: AdminSettings): SettingDef {
+  const held = settings as unknown as Record<string, unknown>;
+  if (def.kind === "number") return withServedRange(def, held);
+  if (def.kind === "select") return withServedChoices(def, held);
+  return def;
+}
+
+function withServedRange(def: SettingDef, held: Record<string, unknown>): SettingDef {
+  const bound = servedBound(held, def.key);
+  if (!bound) return def;
+  if (def.min === bound.min && def.max === bound.max) return def;
+  const id = `${def.key}|${bound.min}|${bound.max}`;
+  const cached = boundDefs.get(id);
+  if (cached) return cached;
+  const next: SettingDef = { ...def, min: bound.min, max: bound.max, range: true };
+  boundDefs.set(id, next);
+  return next;
+}
+
+function withServedChoices(def: SettingDef, held: Record<string, unknown>): SettingDef {
+  const values = servedValues(held, def.key);
+  if (!values) return heldChoiceOnly(def, held);
+  const id = `${def.key}|${values.join(",")}`;
+  const cached = boundDefs.get(id);
+  if (cached) return cached;
+  const known = new Map((def.options ?? []).map((option) => [option.value, option.label]));
+  const next: SettingDef = {
+    ...def, options: values.map((value) => ({ value, label: known.get(value) ?? hwValueLabel(def.key, value) ?? value })),
+  };
+  boundDefs.set(id, next);
+  return next;
+}
+
+/**
+ * A served-bounds select with no served values (a hardware key on an API that lists none)
+ * offers only what it holds: never an enumeration the client made up.
+ */
+function heldChoiceOnly(def: SettingDef, held: Record<string, unknown>): SettingDef {
+  const current = held[def.key];
+  if (!def.serverBounds || (def.options ?? []).length > 0) return def;
+  if (typeof current !== "string" && typeof current !== "number") return def;
+  return { ...def, options: [{ value: String(current), label: hwValueLabel(def.key, String(current)) ?? String(current) }] };
+}
+
+/** Whether the API serves a range (or value list) for any key at all. */
+function servesBounds(settings: AdminSettings): boolean {
+  const bounds = (settings as unknown as { bounds?: unknown }).bounds;
+  return typeof bounds === "object" && bounds !== null && Object.keys(bounds).length > 0;
+}
+
+/**
+ * The registry, with every served bound applied, plus a row for every alert cooldown the API
+ * serves that the registry does not name.
+ */
 export function settingsFor(settings: AdminSettings): readonly SettingDef[] {
   const extra = Object.keys(settings).sort()
     .map((key) => ((settings as unknown as Record<string, unknown>)[key] === undefined ? undefined : cooldownDef(key)))
     .filter((def): def is SettingDef => def !== undefined);
-  return extra.length === 0 ? SETTINGS : [...SETTINGS, ...extra];
+  const all = extra.length === 0 ? SETTINGS : [...SETTINGS, ...extra];
+  if (!servesBounds(settings)) return all;
+  return all.map((def) => withServedBound(def, settings));
 }
 
-export function settingDef(key: string): SettingDef | undefined {
-  return BY_KEY.get(key) ?? cooldownDef(key);
+export function settingDef(key: string, settings?: AdminSettings): SettingDef | undefined {
+  const def = BY_KEY.get(key) ?? cooldownDef(key);
+  return def && settings ? withServedBound(def, settings) : def;
 }
 
 export function sectionDef(id: SettingsSectionId): SettingsSectionDef {
@@ -785,8 +1113,9 @@ export function sectionMatches(section: SettingsSectionDef, query: string): bool
 export function rangeComplaints(settings: AdminSettings, context: SettingContext): SettingComplaint[] {
   const held = settings as unknown as Record<string, unknown>;
   const out: SettingComplaint[] = [];
-  for (const def of SETTINGS) {
+  for (const def of settingsFor(settings)) {
     if (!def.range) continue;
+    if (def.serverBounds && (def.min === undefined || def.max === undefined)) continue; // the API's refusal names it
     const value = held[def.key];
     if (typeof value !== "number" || !Number.isFinite(value)) continue; // empty: the page's own check
     const message = outOfRange(def, value, context);

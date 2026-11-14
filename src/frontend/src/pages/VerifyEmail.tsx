@@ -9,7 +9,7 @@ import { Clock, LinkBreak, SealCheck } from "../components/ui/icons";
 import { PendingInviteNote } from "../components/players/invites/PendingInviteNote";
 import {
   REGISTER, VERIFY_BACK_TO_SIGN_IN, VERIFY_FAIL_BODY, VERIFY_FAIL_HEADING, VERIFY_FAIL_PRIMARY,
-  VERIFY_LIMITED_BODY, VERIFY_LIMITED_HEADING, VERIFY_LIMITED_RETRY, VERIFY_OK_BODY, VERIFY_OK_HEADING,
+  VERIFY_LIMITED_BODY, VERIFY_LIMITED_HEADING, VERIFY_LIMITED_RETRY, VERIFY_OK_HEADING, verifyOkBody,
   VERIFY_WORKING,
 } from "../lib/registrationCopy";
 
@@ -35,6 +35,8 @@ function outcomeOf(error: unknown): VerifyState {
 export default function VerifyEmailPage() {
   const { token } = useParams<{ token: string }>();
   const [state, setState] = useState<VerifyState>(token ? "verifying" : "fail");
+  // BM-11 — whether the club had already approved the account; undefined when the API does not say.
+  const [approved, setApproved] = useState<boolean | undefined>(undefined);
   // Same single-use token, same rule as /welcome: spend it once. StrictMode invokes this effect
   // twice, and the second call was answered `400 invalid_or_expired` on a link just consumed.
   const spent = useRef<string | null>(null);
@@ -43,7 +45,10 @@ export default function VerifyEmailPage() {
     if (!token || state !== "verifying") return;
     if (spent.current === token) return;
     spent.current = token;
-    endpoints.verifyEmail(token).then((r) => setState(r.verified ? "ok" : "fail")).catch((e) => setState(outcomeOf(e)));
+    endpoints.verifyEmail(token).then((r) => {
+      setApproved(typeof r.approved === "boolean" ? r.approved : undefined);
+      setState(r.verified ? "ok" : "fail");
+    }).catch((e) => setState(outcomeOf(e)));
   }, [token, state]);
 
   // A rate-limited try spent nothing, so trying again is the same request once more.
@@ -55,7 +60,7 @@ export default function VerifyEmailPage() {
   if (state === "ok") {
     return (
       <AuthShell className="my-auto" subline={REGISTER.verifySubline} mark={<AuthMark icon={SealCheck} tone="success" />}
-        title={VERIFY_OK_HEADING} lead={VERIFY_OK_BODY}>
+        title={VERIFY_OK_HEADING} lead={verifyOkBody(approved)}>
         {/* R1 F2.3 — arrived by an invite link: it waits for the first sign-in after approval. */}
         <div className="mb-4"><PendingInviteNote stage="verified" /></div>
         <Button asChild block><Link to="/login">{VERIFY_BACK_TO_SIGN_IN}</Link></Button>

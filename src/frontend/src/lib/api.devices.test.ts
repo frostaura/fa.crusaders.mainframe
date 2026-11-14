@@ -19,8 +19,8 @@ import {
  *
  * <p>
  * The removed half matters as much as the kept half. There is no discovery list, no
- * claim, no manual register, no rotate-key and no revoke, because the boxes now carry
- * one static club key and register themselves. A wrapper for any of those coming back
+ * claim, no manual register and no revoke, because the boxes carry the club key and
+ * register themselves; since v3 the key changes by rotation with an overlap, never by Regenerate. A wrapper for any of those coming back
  * would mean the old contract came back with it.
  * </p>
  */
@@ -43,12 +43,56 @@ describe("device API wrappers", () => {
     expect(key.regenerated_at).toBe(DEVICE_API_KEY_FIXTURE.regenerated_at);
   });
 
-  it("regenerates the club's device API key", async () => {
+  it("has no Regenerate: a key changes by rotation, retirement or restore (device-api §6)", async () => {
+    // Regenerate killed the old key at once and forced a reflash of every board (BA-01).
+    expect((endpoints as Record<string, unknown>).adminDeviceApiKeyRegenerate).toBeUndefined();
     const stub = stubFetch([
-      { method: "POST", path: "/api/v1/admin/devices/api-key/regenerate", body: DEVICE_API_KEY_FIXTURE },
+      { method: "POST", path: "/api/v1/admin/devices/api-key/rotate", body: DEVICE_API_KEY_FIXTURE },
+      { method: "POST", path: "/api/v1/admin/devices/api-key/retire", body: DEVICE_API_KEY_FIXTURE },
+      { method: "POST", path: "/api/v1/admin/devices/api-key/restore", body: DEVICE_API_KEY_FIXTURE },
     ]);
-    await endpoints.adminDeviceApiKeyRegenerate();
-    expect(stub.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/admin/devices/api-key/regenerate" });
+    await endpoints.adminDeviceApiKeyRotate();
+    await endpoints.adminDeviceApiKeyRetire();
+    await endpoints.adminDeviceApiKeyRetire("k1");
+    await endpoints.adminDeviceApiKeyRestore("A".repeat(43), "restore this key");
+    expect(stub.calls.map((c) => [c.method, c.path])).toEqual([
+      ["POST", "/api/v1/admin/devices/api-key/rotate"],
+      ["POST", "/api/v1/admin/devices/api-key/retire"],
+      ["POST", "/api/v1/admin/devices/api-key/retire"],
+      ["POST", "/api/v1/admin/devices/api-key/restore"],
+    ]);
+    // Retire without a confirmation asks the API who it would strand; with one, it names the key.
+    expect(stub.calls[1].raw).toBe("{}");
+    expect(stub.calls[2].body).toEqual({ confirm: "k1" });
+    expect(stub.calls[3].body).toEqual({ key: "A".repeat(43), confirm: "restore this key" });
+  });
+
+  it("sends the v3 per-board overrides three-valued, and a network push", async () => {
+    const stub = stubFetch([{ method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture() }]);
+    await endpoints.adminDeviceUpdate(ID, { lcd_layout: null });
+    await endpoints.adminDeviceUpdate(ID, { lcd_layout: "compact", lcd_marquee_enabled: false });
+    await endpoints.adminDeviceUpdate(ID, { push_network: true });
+    expect(stub.calls.map((c) => c.raw)).toEqual([
+      '{"lcd_layout":null}', '{"lcd_layout":"compact","lcd_marquee_enabled":false}', '{"push_network":true}',
+    ]);
+  });
+
+  it("reads and saves the club network, and reads the member-code rollout", async () => {
+    const stub = stubFetch([
+      { path: "/api/v1/admin/devices/network", body: { ver: 1, base: null, wifi: [], updated_at: null, updated_by: null } },
+      { method: "PUT", path: "/api/v1/admin/devices/network", body: { ver: 2, base: "http://10.0.0.5", wifi: [], updated_at: null, updated_by: null } },
+      { path: "/api/v1/admin/devices/member-codes", body: {} },
+    ]);
+    await endpoints.adminDeviceNetwork();
+    await endpoints.adminDeviceNetworkSave({ ver: 1, base: "http://10.0.0.5", wifi: [{ ssid: "CLUB", psk: null }] });
+    await endpoints.adminMemberCodeRollout();
+    expect(stub.calls.map((c) => [c.method, c.path])).toEqual([
+      ["GET", "/api/v1/admin/devices/network"],
+      ["PUT", "/api/v1/admin/devices/network"],
+      ["GET", "/api/v1/admin/devices/member-codes"],
+    ]);
+    // A null password keeps the stored one: it is sent as null, never dropped.
+    expect(stub.calls[1].raw).toBe('{"ver":1,"base":"http://10.0.0.5","wifi":[{"ssid":"CLUB","psk":null}]}');
   });
 
   it("PATCHes only the keys the caller named", async () => {

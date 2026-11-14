@@ -114,6 +114,13 @@ internal static class EmailCatalogue
             ("PasswordReset", EmailTemplates.PasswordReset(club, to, LinkUrl)),
             ("AdminPasswordReset", EmailTemplates.AdminPasswordReset(club, to, "Thandi Mokoena", "Qm7-42xw")),
             ("PasswordChanged", EmailTemplates.PasswordChanged(club, to)),
+            // The platform pass's account mail (BP-02, BP-07, BP-10, BP-11, BP-14).
+            ("RegistrationForExistingAccount", EmailTemplates.RegistrationForExistingAccount(club, to, LinkUrl)),
+            ("RegistrationNumberTaken", EmailTemplates.RegistrationNumberTaken(club, to, "RR-0412")),
+            ("PasskeyAdded", EmailTemplates.PasskeyAdded(club, to, "Thandi's iPhone")),
+            ("PasskeyRemoved", EmailTemplates.PasskeyRemoved(club, to, "Thandi's iPhone")),
+            ("PinSetByClub", EmailTemplates.PinSetByClub(club, to, "Thandi Mokoena")),
+            ("ClubReady", EmailTemplates.ClubReady(club, to, LinkUrl, 72)),
             ("BookingConfirmation", EmailTemplates.BookingConfirmation(club, to, booking)),
             ("BookingConfirmationWalkUp", EmailTemplates.BookingConfirmation(club, to, booking with { IsWalkUp = true })),
             ("BookingConfirmationOverdrawn", EmailTemplates.BookingConfirmation(club, to, booking with { BalanceAfterMinutes = -40, MadeByClub = true })),
@@ -133,6 +140,12 @@ internal static class EmailCatalogue
                 "5 hours", 300, 550m, 1000, "League members", 495m, 1530, "pf-2026-09-22-0041", symbol))),
             ("PurchaseConfirmationNoDiscount", EmailTemplates.PurchaseConfirmation(club, to, new PackagePurchaseReceipt(
                 "1 hour", 60, 120m, 0, null, 120m, 105, "pf-2026-09-22-0046", symbol))),
+            ("PartnerNotComing", EmailTemplates.PartnerNotComing(club, to, new PartnerNotComingNotice("Sam Partner", "Court 2", "Sat 14 Nov, 07:00", false, ConsoleUrl))),
+            ("PartnerNotComingWithdrew", EmailTemplates.PartnerNotComing(club, to, new PartnerNotComingNotice("Sam Partner", "Court 2", "Sat 14 Nov, 07:00", true, ConsoleUrl))),
+            ("PaymentNotAddedMail", EmailTemplates.PaymentNotAddedMail(club, to, new PaymentNotAdded("5 hours", 495m, "pf-2026-11-13-0101", true, symbol))),
+            ("PaymentNotAddedAfterClose", EmailTemplates.PaymentNotAddedMail(club, to, new PaymentNotAdded("5 hours", null, "pf-2026-11-13-0102", false, symbol))),
+            ("PaymentReversed", EmailTemplates.PaymentReversed(club, to, new ReversedPayment($"PayFast purchase: 5 hours for {symbol}495.00", 495m, 300, 0, false, symbol))),
+            ("PaymentChargedBackKept", EmailTemplates.PaymentReversed(club, to, new ReversedPayment("EFT — 1 hour", 120m, 0, 45, true, symbol))),
             ("PurchaseNotCompleted", EmailTemplates.PurchaseNotCompleted(club, to, new PackagePurchaseAttempt("5 hours", 300, 495m, "declined", "pf-2026-09-22-0042", symbol))),
             ("PurchaseCancelled", EmailTemplates.PurchaseNotCompleted(club, to, new PackagePurchaseAttempt("5 hours", 300, 495m, "cancelled", "pf-2026-09-22-0043", symbol))),
             ("PurchaseMismatched", EmailTemplates.PurchaseNotCompleted(club, to, new PackagePurchaseAttempt("5 hours", 300, 495m, "amount_mismatch", "pf-2026-09-22-0044", symbol))),
@@ -160,6 +173,8 @@ internal static class EmailCatalogue
             // R23's admin notices — everything the notifier sends that nothing sent before it.
             ("AdminApplicationsWaiting", EmailTemplates.AdminApplicationsWaiting(club, to, new ApplicationsWaiting(3, "Jason Fourie", 31, ConsoleUrl))),
             ("AdminApplicationsWaitingOne", EmailTemplates.AdminApplicationsWaiting(club, to, new ApplicationsWaiting(1, "Jason Fourie", 26, ConsoleUrl))),
+            ("AdminBookingsUnsettled", EmailTemplates.AdminBookingsUnsettled(club, to, new UnsettledBookings(3, "Mon 2 Nov 2026, 18:00", 7, ConsoleUrl))),
+            ("AdminBookingsUnsettledOne", EmailTemplates.AdminBookingsUnsettled(club, to, new UnsettledBookings(1, "Mon 2 Nov 2026, 18:00", 7, ConsoleUrl))),
             ("AdminFaultSpike", EmailTemplates.AdminFaultSpike(club, to, new FaultSpike(6, 15, ["box-2ad001", "gate-44c101"], ConsoleUrl))),
             ("AdminDoorRefusalSpike", EmailTemplates.AdminDoorRefusalSpike(club, to, new DoorRefusalSpike("Front door", "gate-44c101", "front-door", 9, 20, ConsoleUrl))),
             ("AdminTopUpFailed", EmailTemplates.AdminTopUpFailed(club, to, new TopUpFailure("amount_mismatch", 495m, "Thandi Mokoena", "pf-2026-09-22-0045", symbol, ConsoleUrl, "5 hours", 300))),
@@ -174,6 +189,7 @@ internal static class EmailCatalogue
             ("YouPaidForACourt", EmailTemplates.YouPaidForACourt(club, to, new PaidForCourt("Court 3", "Tue 29 Sep, 18:00", 24, "Thandi Mokoena"))),
             ("YourCourtWasPaidFor", EmailTemplates.YourCourtWasPaidFor(club, to, new PaidForCourt("Court 3", "Tue 29 Sep, 18:00", 24, "Jason Fourie"))),
             ("AdminBoardLostMemberCodes", EmailTemplates.AdminBoardLostMemberCodes(club, to, new BoardLostMemberCodes("Court box 1-4", "box-2ad001", "2.0.0", ConsoleUrl))),
+            ("AdminCodesPhaseMoved", EmailTemplates.AdminCodesPhaseMoved(club, to, new CodesPhaseMoved("legacy", "v1", "Sat 28 Nov 2026", 14, ConsoleUrl))),
 
             // D11's players messages.
             ("PlayerInvite", EmailTemplates.PlayerInvite(club, to, new PlayerInviteNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12, GameUrl))),

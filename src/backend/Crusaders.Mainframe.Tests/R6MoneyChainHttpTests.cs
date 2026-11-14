@@ -224,18 +224,34 @@ public sealed class R6MoneyChainHttpTests(PostgresFixture pg) : IClassFixture<Po
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = c.TenantId, UserId = c.Pam, Type = LedgerEntryType.BookingCharge, AmountMinutes = -90,
-                ActorUserId = c.Pam, Reason = "spent elsewhere",
+                TenantId = c.TenantId,
+                UserId = c.Pam,
+                Type = LedgerEntryType.BookingCharge,
+                AmountMinutes = -90,
+                ActorUserId = c.Pam,
+                Reason = "spent elsewhere",
             });
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = c.TenantId, UserId = c.Pam, Type = LedgerEntryType.ShareTransfer, AmountMinutes = 50,
-                ActorUserId = c.Sid, RelatedBookingId = own.Id, Reason = "share", ExternalReference = $"share:{Guid.NewGuid():N}:1:in",
+                TenantId = c.TenantId,
+                UserId = c.Pam,
+                Type = LedgerEntryType.ShareTransfer,
+                AmountMinutes = 50,
+                ActorUserId = c.Sid,
+                RelatedBookingId = own.Id,
+                Reason = "share",
+                ExternalReference = $"share:{Guid.NewGuid():N}:1:in",
             });
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = c.TenantId, UserId = c.Sid, Type = LedgerEntryType.ShareTransfer, AmountMinutes = -50,
-                ActorUserId = c.Sid, RelatedBookingId = own.Id, Reason = "share", ExternalReference = $"share:{Guid.NewGuid():N}:1:out",
+                TenantId = c.TenantId,
+                UserId = c.Sid,
+                Type = LedgerEntryType.ShareTransfer,
+                AmountMinutes = -50,
+                ActorUserId = c.Sid,
+                RelatedBookingId = own.Id,
+                Reason = "share",
+                ExternalReference = $"share:{Guid.NewGuid():N}:1:out",
             });
             return Task.CompletedTask;
         });

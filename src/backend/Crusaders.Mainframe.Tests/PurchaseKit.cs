@@ -32,18 +32,26 @@ internal static class PurchaseKit
     public const string MerchantId = "10000100";
     public const string CallbackPath = "/api/v1/credit/topup/callback";
 
+    public const string MerchantKey = "46f0cd694581a";
+
     public static string SettingsJson(bool payments = true) => payments
-        ? $$"""
-          {
-            "payfast": {
-              "merchant_id": "{{MerchantId}}",
-              "merchant_key": "46f0cd694581a",
-              "passphrase": "{{Passphrase}}",
-              "environment": "test"
-            }
-          }
-          """
+        ? PayFastJson(MerchantId, MerchantKey, Passphrase, "test")
         : "{}";
+
+    /// <summary>A settings document whose <c>payfast</c> object holds exactly these values.</summary>
+    public static string PayFastJson(string merchantId, string merchantKey, string passphrase, string environment) =>
+        JsonSerializer.Serialize(new
+        {
+            payfast = new { merchant_id = merchantId, merchant_key = merchantKey, passphrase, environment },
+        });
+
+    /// <summary>Replaces the club's <c>payfast</c> object, for a test of what the club configured.</summary>
+    public static Task SetPayFastAsync(WebApplicationFactory<Program> factory, PurchaseClub club, string json)
+        => WriteAsync(factory, async db =>
+        {
+            var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(s => s.TenantId == club.TenantId);
+            row.SettingsJson = json;
+        });
 
     public static async Task<PurchaseClub> SeedAsync(WebApplicationFactory<Program> factory, string prefix, bool payments = true)
     {
@@ -112,7 +120,11 @@ internal static class PurchaseKit
     public static HttpClient Admin(WebApplicationFactory<Program> factory, PurchaseClub club) => Client(factory, club, club.AdminUserId, admin: true);
 
     /// <summary>An ITN as PayFast composes it: fields in posted order, signature last.</summary>
-    public static HttpContent Itn(string mPaymentId, string gross, string? pfPaymentId = null, string status = "COMPLETE")
+    /// <param name="edit">Varies the fields before signing — drop <c>amount_gross</c>, name another merchant.</param>
+    /// <param name="passphrase">Signs with this instead of the club's <see cref="Passphrase"/>; "" signs with none.</param>
+    public static HttpContent Itn(
+        string mPaymentId, string gross, string? pfPaymentId = null, string status = "COMPLETE",
+        Action<List<KeyValuePair<string, string?>>>? edit = null, string? passphrase = null)
     {
         var fields = new List<KeyValuePair<string, string?>>
         {
@@ -126,10 +138,11 @@ internal static class PurchaseKit
             new("merchant_id", MerchantId),
         };
         if (pfPaymentId == "") fields.RemoveAll(f => f.Key == "pf_payment_id");
+        edit?.Invoke(fields);
 
         var body = string.Join("&", fields
             .Select(f => $"{f.Key}={PayFastSignature.UrlEncode(f.Value!)}")
-            .Append($"signature={PayFastSignature.Compute(fields, Passphrase)}"));
+            .Append($"signature={PayFastSignature.Compute(fields, passphrase ?? Passphrase)}"));
         return new StringContent(body, Encoding.UTF8, "application/x-www-form-urlencoded");
     }
 
@@ -188,12 +201,20 @@ internal static class PurchaseKit
             {
                 db.MemberGroups.Add(new MemberGroup
                 {
-                    Id = id, TenantId = club.TenantId, Name = name!, PackageDiscountBps = discountBps, Status = status, SortOrder = 3,
+                    Id = id,
+                    TenantId = club.TenantId,
+                    Name = name!,
+                    PackageDiscountBps = discountBps,
+                    Status = status,
+                    SortOrder = 3,
                 });
             }
             db.MemberGroupMembers.Add(new MemberGroupMember
             {
-                TenantId = club.TenantId, GroupId = id, UserId = userId, AddedByUserId = club.AdminUserId,
+                TenantId = club.TenantId,
+                GroupId = id,
+                UserId = userId,
+                AddedByUserId = club.AdminUserId,
             });
             return Task.CompletedTask;
         });
@@ -212,8 +233,13 @@ internal static class PurchaseKit
     {
         var package = new MinutePackage
         {
-            TenantId = club.TenantId, Name = name, Minutes = minutes, PriceZar = price, GroupId = groupId,
-            SortOrder = 9, CreatedByUserId = club.AdminUserId,
+            TenantId = club.TenantId,
+            Name = name,
+            Minutes = minutes,
+            PriceZar = price,
+            GroupId = groupId,
+            SortOrder = 9,
+            CreatedByUserId = club.AdminUserId,
         };
         await WriteAsync(factory, db => { db.MinutePackages.Add(package); return Task.CompletedTask; });
         return package.Id;

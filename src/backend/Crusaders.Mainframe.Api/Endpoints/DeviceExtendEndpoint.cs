@@ -41,8 +41,15 @@ public static class DeviceExtendEndpoint
     /// </summary>
     public const string ExtendedAction = "court.extended";
 
-    /// <summary>Longest extension accepted — the relay bank's hard cap.</summary>
-    public const int MaxMinutes = 90;
+    /// <summary>Longest extension the relay bank could ever hold — <see cref="RelayHardCap.Minutes"/>, never a second literal (BD-12).</summary>
+    public const int MaxMinutes = RelayHardCap.Minutes;
+
+    /// <summary>
+    /// The longest extension THIS club sells: <c>walk_up_max_minutes</c> under the relay cap, the
+    /// bound the walk-up applies and the box's minute buttons are capped at (BD-12, FC-8). A club
+    /// that lowered its walk-up maximum went on selling 90-minute extensions.
+    /// </summary>
+    public static int MaxMinutesFor(TenantSettingsView settings) => Math.Clamp(settings.WalkUpMaxMinutes, 1, RelayHardCap.Minutes);
 
     /// <summary>How many already-lit extensions are followed past the session in play before giving up.</summary>
     private const int MaxChain = 16;
@@ -78,7 +85,7 @@ public static class DeviceExtendEndpoint
         // with that purchase, never refused for something that changed since.
         if (await ReplayAsync(reference, services, ct) is { } replayed) return replayed;
 
-        if (RefuseFields(device, req) is { } badRequest) return badRequest;
+        if (RefuseFields(device, req, MaxMinutesFor(settings)) is { } badRequest) return badRequest;
 
         var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == req.Court && c.IsActive, ct);
         if (court is null) return Results.NotFound(new { error = "court_not_found" });
@@ -217,11 +224,11 @@ public static class DeviceExtendEndpoint
         return resolved?.Purpose == AccessCodePurpose.MemberIdent ? (resolved.UserId, match) : (null, null);
     }
 
-    private static IResult? RefuseFields(Device device, ExtendRequest req)
+    private static IResult? RefuseFields(Device device, ExtendRequest req, int maxMinutes)
     {
-        if (req.Minutes < 1 || req.Minutes > MaxMinutes)
+        if (req.Minutes < 1 || req.Minutes > maxMinutes)
         {
-            return Results.BadRequest(new { error = "minutes_out_of_range", max_minutes = MaxMinutes });
+            return Results.BadRequest(new { error = "minutes_out_of_range", max_minutes = maxMinutes });
         }
         if (!device.CourtNumbers.Contains(req.Court))
         {

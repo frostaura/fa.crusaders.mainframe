@@ -30,9 +30,10 @@
 //
 // WHOLESALE, LIKE THE ROSTER
 // --------------------------
-// beginReplace / add / commitReplace, with the previous ring serving until the
-// commit. A key that should no longer be held is expressed by its ABSENCE from
-// the next push, and an empty `code_keys` commits an empty ring.
+// beginReplace / add / commitReplace, IN PLACE: the ring verifies nobody from
+// beginReplace to the commit (every caller commits what it begins, in one go).
+// A key that should no longer be held is expressed by its ABSENCE from the
+// next push, and an empty `code_keys` commits an empty ring.
 //
 // No Arduino headers, no heap. Compiles for AVR, Xtensa and the host.
 
@@ -90,9 +91,15 @@ template <uint8_t Capacity> class KeyRing {
 public:
   static_assert(Capacity >= 1U, "a ring of nothing verifies nobody");
 
+  /// Starts a replacement IN PLACE: the ring verifies nobody until
+  /// commitReplace, and the keys added overwrite the old ones from slot 0.
+  /// There is no second copy of the ring (a 64-key court ring would be 1.3 KB
+  /// more RAM on a bridge at its heap floor) and no abandoned replacement: the
+  /// one caller, devlink::applyCodeSync, always commits what it began.
   void beginReplace() {
     stagingCount_ = 0U;
     stagingDropped_ = 0U;
+    count_ = 0U;
     for (uint8_t i = 0U; i < kMaxDaySlots; ++i) {
       stagingDays_[i] = DaySlot();
     }
@@ -124,23 +131,19 @@ public:
       }
       return false;
     }
-    staging_[stagingCount_] = key;
+    keys_[stagingCount_] = key;
     ++stagingCount_;
     return true;
   }
 
-  /// Commits the replacement. KEY MATERIAL IS WIPED on the way: the staging
-  /// copy once it is live, and whatever tail of the old ring the new one did
-  /// not overwrite — a key a board no longer holds must not still be in its RAM.
+  /// Commits the replacement. KEY MATERIAL IS WIPED on the way: whatever tail
+  /// of the old ring the new one did not overwrite — a key a board no longer
+  /// holds must not still be in its RAM.
   void commitReplace() {
     if (!replacing_) {
       return;
     }
-    for (uint8_t i = 0U; i < stagingCount_; ++i) {
-      keys_[i] = staging_[i];
-    }
     dc::wipe(keys_ + stagingCount_, sizeof(DayKey) * (Capacity - stagingCount_));
-    dc::wipe(staging_, sizeof(staging_));
     for (uint8_t i = 0U; i < kMaxDaySlots; ++i) {
       days_[i] = stagingDays_[i];
     }
@@ -154,7 +157,6 @@ public:
   /// nobody and keeps nothing.
   void clear() {
     dc::wipe(keys_, sizeof(keys_));
-    dc::wipe(staging_, sizeof(staging_));
     count_ = 0U;
     stagingCount_ = 0U;
     dropped_ = 0U;
@@ -193,7 +195,6 @@ public:
 
 private:
   DayKey keys_[Capacity];
-  DayKey staging_[Capacity];
   DaySlot days_[kMaxDaySlots];
   DaySlot stagingDays_[kMaxDaySlots];
   uint8_t count_ = 0U;

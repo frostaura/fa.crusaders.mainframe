@@ -90,6 +90,13 @@ ArgStatus unescapeInto(const char* s, size_t n, Arg& out) {
         c = ',';
       } else if (s[i + 1] == '2' && s[i + 2] == '5') {
         c = '%';
+      } else if (s[i + 1] == '2' && s[i + 2] == '1') {
+        // v3: '!' is the frame sentinel on both links, so a literal one in
+        // text travels as %21 (a bare '!' restarts the line, see feed()).
+        c = '!';
+      } else if (s[i + 1] == '2' && s[i + 2] == 'A') {
+        // v3: accepted, never required — the checksum is the LAST '*'.
+        c = '*';
       } else {
         return ArgStatus::Malformed;
       }
@@ -181,6 +188,10 @@ public:
         bodyText("%2C");
       } else if (s[i] == '%') {
         bodyText("%25");
+      } else if (s[i] == '!') {
+        // v3 reserves '!' on both links. A 2.1.0 Mega refuses %21, so the
+        // bridge replaces '!' in text before encoding for one (MegaLink).
+        bodyText("%21");
       } else {
         body(s[i]);
       }
@@ -364,6 +375,19 @@ bool Decoder::feed(char c) {
     return alreadyTerminated ? false : endLine();
   }
   lastWasCr_ = false;
+  if (c == '!' && (len_ > 0U || overrun_)) {
+    // v3 resynchronisation (DL-02). A bare '!' can only start a frame — every
+    // text '!' is escaped — so a line still open when one arrives was cut
+    // short by a lost byte. Under v2 the decoder waited for '\n' and the torn
+    // line swallowed the intact `!ON` behind it. Abandon it, say so once, and
+    // start the new frame here.
+    const bool wasOverrun = overrun_;
+    len_ = 0;
+    overrun_ = false;
+    line_[0] = c;
+    len_ = 1U;
+    return pushError(wasOverrun ? DecodeError::Overrun : DecodeError::BadFrame);
+  }
   if (len_ >= kMaxFrameLen) {
     // Stop storing but keep consuming: the line is lost either way, and the
     // only useful thing left to do is find the next terminator.
@@ -450,31 +474,180 @@ DecodeError rowIndexOf(const Arg& a, uint8_t& out) {
 
 } // namespace
 
-DecodeError Decoder::buildFrame(Arg* fields, uint8_t count, Frame& out) {
-  const Verb v = verbFromName(fields[0].c_str());
-  if (v == Verb::Unknown) {
-    return DecodeError::BadVerb;
-  }
-  const VerbSpec& spec = specOf(v);
-  const uint8_t argc = static_cast<uint8_t>(count - 1U);
-  if (argc < spec.minArgs || argc > spec.maxArgs) {
-    return DecodeError::BadArg;
-  }
+namespace {
 
-  Arg* args = fields + 1;
-  if (v == Verb::Row) {
-    uint8_t rowIndex = 0;
-    const DecodeError e = rowIndexOf(args[0], rowIndex);
-    if (e != DecodeError::None) {
-      return e;
+/// Decimal 0..`highest` with no leading zero (one spelling per number), into `out`.
+bool parseBounded(const Arg& a, uint32_t highest, uint32_t& out) {
+  if (a.empty() || (a.size() > 1U && a.c_str()[0] == '0')) {
+    return false;
+  }
+  uint32_t raw = 0;
+  if (!parseU32(a, raw) || raw > highest) {
+    return false;
+  }
+  out = raw;
+  return true;
+}
+
+bool isUpperHex(const Arg& a, size_t digits) {
+  if (a.size() != digits) {
+    return false;
+  }
+  uint8_t ignored = 0;
+  for (size_t i = 0; i < digits; ++i) {
+    if (!hexValue(a.c_str()[i], ignored)) {
+      return false;
     }
-    // Through its own constructor, for the same reason ON is: the refusal rule
-    // then lives in ONE place and the wire cannot mint a frame the factory
-    // would not have built.
-    out = Frame::row(rowIndex, args[1].c_str());
-    return DecodeError::None;
   }
+  return true;
+}
 
+/// Saturating decimal parse then clamp into [lowest, highest], rewriting the
+/// argument with the clamped value — the v2 rule for durations.
+bool clampArg(Arg& a, uint32_t lowest, uint32_t highest) {
+  uint32_t raw = 0;
+  if (!parseU32(a, raw)) {
+    return false;
+  }
+  a.setU32(raw < lowest ? lowest : (raw > highest ? highest : raw));
+  return true;
+}
+
+/// "-" (no opinion) or a clamped number; `zeroIsError` refuses a 0 before the
+/// clamp (a `!WANT` of 0 would read as a one-second light once clamped).
+bool opinionArg(Arg& a, uint32_t lowest, uint32_t highest, bool zeroIsError) {
+  if (a.equals("-")) {
+    return true;
+  }
+  uint32_t raw = 0;
+  if (!parseU32(a, raw) || (zeroIsError && raw == 0U)) {
+    return false;
+  }
+  return clampArg(a, lowest, highest);
+}
+
+bool cfgKeyArg(const Arg& a) {
+  if (a.empty() || a.size() > 6U) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (a.c_str()[i] < 'A' || a.c_str()[i] > 'Z') {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ackIdArg(const Arg& a) {
+  uint32_t ignored = 0;
+  if (!a.empty() && a.c_str()[0] == 'S') {
+    Arg seq;
+    static_cast<void>(seq.set(a.c_str() + 1));
+    return parseBounded(seq, 255U, ignored);
+  }
+  return parseBounded(a, 255U, ignored) && ignored != 0U;
+}
+
+/// The tag on a v3 relay frame: 1..255, no leading zero (0 would collide with
+/// "untagged").
+bool tagArg(const Arg& a) {
+  uint32_t tag = 0;
+  return parseBounded(a, 255U, tag) && tag != 0U;
+}
+
+/// One v3 argument by its grammar letter (kVerbSpecs' `grammar`):
+///   s seq 0-255 · r row 0-3 · o column offset 0|24 · X text · m mask 1-15 ·
+///   H hold, clamped [1,120] · f flags 0-255 · h four uppercase hex ·
+///   t tag 1-255 · w '-' or seconds 1-5400 (clamped, 0 refused) ·
+///   k CFG key, 1-6 uppercase letters · v value 0-65535 ·
+///   l '-' or seconds 0-86400 (clamped) · T note TTL [0,3600] · P live [1,120] ·
+///   a ack id (tag or S<seq>) · e ack code 0-4 · b two uppercase hex ·
+///   G held seconds [5,60] · n any decimal · p 0|1 · d 0-5.
+/// The plain bounded-integer letters. `handled` false for every other letter.
+bool numericArg(char letter, Arg& a, bool& handled) {
+  uint32_t value = 0;
+  handled = true;
+  switch (letter) {
+  case 's':
+  case 'f':
+    return parseBounded(a, 255U, value);
+  case 'r':
+    return parseBounded(a, kMaxRows - 1U, value);
+  case 'o':
+    return parseBounded(a, kRwSegment, value) && (value == 0U || value == kRwSegment);
+  case 'm':
+    return parseBounded(a, 15U, value) && value != 0U;
+  case 'v':
+    return parseBounded(a, 65535U, value);
+  case 'e':
+    return parseBounded(a, kAckMaxCode, value);
+  case 'n':
+    return parseU32(a, value);
+  case 'p':
+    return parseBounded(a, 1U, value);
+  case 'd':
+    return parseBounded(a, 5U, value);
+  default:
+    handled = false;
+    return false;
+  }
+}
+
+/// The letters with a grammar of their own: text, hex, tags, opinions, clamps.
+bool shapedArg(char letter, Arg& a) {
+  switch (letter) {
+  case 'X':
+    return true;
+  case 'H':
+    return clampArg(a, kShowHoldMinSeconds, kShowHoldMaxSeconds);
+  case 'h':
+    return isUpperHex(a, 4U);
+  case 't':
+    return tagArg(a);
+  case 'w':
+    return opinionArg(a, kRelayMinSeconds, kRelayHardCapSeconds, true);
+  case 'k':
+    return cfgKeyArg(a);
+  case 'l':
+    return opinionArg(a, 0U, kLandMaxSeconds, false);
+  case 'T':
+    return clampArg(a, 0U, kNoteMaxSeconds);
+  case 'P':
+    return clampArg(a, kLiveMinSeconds, kLiveMaxSeconds);
+  case 'a':
+    return ackIdArg(a);
+  case 'b':
+    return isUpperHex(a, 2U);
+  case 'G':
+    return clampArg(a, kHeldMinSeconds, kHeldMaxSeconds);
+  default:
+    return false;
+  }
+}
+
+/// One v3 argument by its grammar letter (kVerbSpecs' `grammar`):
+///   s seq 0-255 · r row 0-3 · o column offset 0|24 · X text · m mask 1-15 ·
+///   H hold, clamped [1,120] · f flags 0-255 · h four uppercase hex ·
+///   t tag 1-255 · w '-' or seconds 1-5400 (clamped, 0 refused) ·
+///   k CFG key, 1-6 uppercase letters · v value 0-65535 ·
+///   l '-' or seconds 0-86400 (clamped) · T note TTL [0,3600] · P live [1,120] ·
+///   a ack id (tag or S<seq>) · e ack code 0-4 · b two uppercase hex ·
+///   G held seconds [5,60] · n any decimal · p 0|1 · d 0-5.
+/// Two switches rather than a table: a table would sit in the Mega's 8 KB of
+/// RAM (AVR keeps constexpr data in .data), and the image is at its 4 KB budget.
+bool v3Arg(char letter, Arg& a) {
+  bool handled = false;
+  const bool ok = numericArg(letter, a, handled);
+  return handled ? ok : shapedArg(letter, a);
+}
+
+bool wrongDirection(Link link, Dir dir) {
+  return (dir == Dir::Down && link == Link::Uplink) || (dir == Dir::Up && link == Link::Downlink);
+}
+
+} // namespace
+
+DecodeError Decoder::buildV2Frame(Verb v, const VerbSpec& spec, Arg* args, uint8_t argc, Frame& out) {
   Court court = Court::A;
   if (spec.courtArg >= 0) {
     const Arg& a = args[spec.courtArg];
@@ -493,11 +666,55 @@ DecodeError Decoder::buildFrame(Arg* fields, uint8_t count, Frame& out) {
     args[spec.secondsArg].setU32(seconds);
   }
 
-  // ON goes through its own constructor rather than the generic path, so the
-  // "no ON without a duration" rule is enforced by the same code on the wire
-  // side as on the API side.
-  out = (v == Verb::On) ? Frame::on(court, seconds) : Frame::fromValidated(spec, args, argc);
+  out = (v == Verb::On && argc == spec.minArgs) ? Frame::on(court, seconds)
+                                                : Frame::fromValidated(spec, args, argc);
   return DecodeError::None;
+}
+
+DecodeError Decoder::buildFrame(Link link, Arg* fields, uint8_t count, Frame& out) {
+  const Verb v = verbFromName(fields[0].c_str());
+  if (v == Verb::Unknown) {
+    return DecodeError::BadVerb;
+  }
+  const VerbSpec& spec = specOf(v);
+  const uint8_t argc = static_cast<uint8_t>(count - 1U);
+  if (argc < spec.minArgs || argc > spec.maxArgs) {
+    return DecodeError::BadArg;
+  }
+
+  // Direction is part of the v3 grammar: a relay verb echoed back by a wiring
+  // fault is never acted on (see Dir for why v2's verbs stay Any).
+  if (wrongDirection(link, spec.dir)) {
+    return DecodeError::BadVerb;
+  }
+
+  Arg* args = fields + 1;
+  if (spec.grammar != nullptr) {
+    for (uint8_t i = 0; i < argc; ++i) {
+      if (!v3Arg(spec.grammar[i], args[i])) {
+        return DecodeError::BadArg;
+      }
+    }
+    out = Frame::fromValidated(spec, args, argc);
+    return DecodeError::None;
+  }
+  if (spec.optionalTag && argc == spec.maxArgs && !tagArg(args[argc - 1U])) {
+    return DecodeError::BadArg;
+  }
+  if (v == Verb::Row) {
+    uint8_t rowIndex = 0;
+    const DecodeError e = rowIndexOf(args[0], rowIndex);
+    if (e != DecodeError::None) {
+      return e;
+    }
+    // Through its own constructor, for the same reason ON is: the refusal rule
+    // then lives in ONE place and the wire cannot mint a frame the factory
+    // would not have built.
+    out = Frame::row(rowIndex, args[1].c_str());
+    return DecodeError::None;
+  }
+
+  return buildV2Frame(v, spec, args, argc, out);
 }
 
 bool Decoder::parseV2(const char* line, size_t n) {
@@ -522,7 +739,7 @@ bool Decoder::parseV2(const char* line, size_t n) {
   DecodeError e = splitBody(line + 1, bodyLen, fields, count);
   Frame f;
   if (e == DecodeError::None) {
-    e = buildFrame(fields, count, f);
+    e = buildFrame(link_, fields, count, f);
   }
   return e == DecodeError::None ? pushFrame(f) : pushError(e);
 }

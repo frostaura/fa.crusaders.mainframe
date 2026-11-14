@@ -74,6 +74,12 @@ public static class AdminChangeActions
     public const string MinutesAdjusted = "credit.adjusted";
     public const string PackageSold = "credit.topped_up";
 
+    /// <summary>
+    /// Rand the club gave back — a refund it made, or a card chargeback it recorded — posted as a
+    /// <c>PaymentReversal</c> naming the purchase (money lane BM-6). Reason-required: somebody's money moved.
+    /// </summary>
+    public const string PaymentReversed = "payment.reversed";
+
     // P13 §4.5: the club's minutes packages. Area credit, subject kind package, none reason-required.
     public const string PackageCreated = "package.created";
     public const string PackageUpdated = "package.updated";
@@ -131,6 +137,14 @@ public static class AdminChangeActions
     public const string MemberAdminRevoked = "member.admin_revoked";
 
     /// <summary>
+    /// An admin set a member's court PIN (BP-11). A PIN identifies the member at the court and
+    /// spends their minutes there, so a desk that sets one is changing a credential: it was only
+    /// in <c>audit_log</c> (which has a delete path) and the member was never told. Carries no
+    /// PIN, ever — only that one was set.
+    /// </summary>
+    public const string MemberPinSet = "member.pin_set";
+
+    /// <summary>
     /// An admin looked at one member's night.
     ///
     /// <para>
@@ -155,6 +169,13 @@ public static class AdminChangeActions
 
     // ---- setting ----
     public const string SettingsUpdated = "settings.updated";
+
+    /// <summary>
+    /// The club's PayFast credentials changed (<c>PUT /api/v1/admin/payments/payfast</c>, money lane
+    /// BM-4). Its own action, not <see cref="SettingsUpdated"/>: it decides where every member's
+    /// money goes. The passphrase is never recorded — only that it was set or changed.
+    /// </summary>
+    public const string PaymentsConfigured = "payments.payfast_updated";
     public const string CourtCreated = "court.created";
     public const string CourtUpdated = "court.updated";
     public const string CourtDeactivated = "court.deactivated";
@@ -198,6 +219,15 @@ public static class AdminChangeActions
     public const string DeviceUpdated = "device.updated";
     public const string DeviceDeleted = "device.deleted";
     public const string DeviceApiKeyRegenerated = "device.api_key_regenerated";
+    /// <summary>Device contract v3 §6: a key rotation started; the old key stays valid until retired.</summary>
+    public const string DeviceApiKeyRotated = "device.api_key_rotated";
+    public const string DeviceApiKeyRetired = "device.api_key_retired";
+    /// <summary>§6: a known key put back as the current one (an owner, after a database loss).</summary>
+    public const string DeviceApiKeyRestored = "device.api_key_restored";
+    /// <summary>§8: the club's device network (WiFi profiles, server base URL) saved — passwords never recorded.</summary>
+    public const string DeviceNetworkUpdated = "device.network_updated";
+    /// <summary>§8: the club's network pushed to a board whose own configuration came from its setup portal.</summary>
+    public const string DeviceNetworkPushed = "device.network_pushed";
     public const string DoorsShutAll = "doors.shut_all";
     public const string DoorsReopenedAll = "doors.reopened_all";
     public const string MonitoringErrorResolved = "monitoring.error_resolved";
@@ -221,13 +251,16 @@ public static class AdminChangeActions
         BookingsBulkCancelled, BookingsBulkBooked, BookingCancelledByAdmin, BookingBlocked, BookingBlockLifted,
         BookingBookedOnBehalf, BookingOverdraftAuthorised,
         BookingPlayerAdded, BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
-        MinutesAdjusted, PackageSold, PackageCreated, PackageUpdated, PackageArchived,
+        MinutesAdjusted, PackageSold, PaymentReversed, PackageCreated, PackageUpdated, PackageArchived,
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberApproved, MemberRejected, MemberSuspended, MemberReactivated, MemberDeleted,
         MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
-        SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported, WebhookCreated, WebhookDeleted,
+        MemberPinSet,
+        SettingsUpdated, PaymentsConfigured, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported, WebhookCreated, WebhookDeleted,
         DemoEntered, DemoLeft, DemoReset, DemoMemberViewEntered, DemoMemberViewLeft,
-        DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
+        DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DeviceApiKeyRotated, DeviceApiKeyRetired, DeviceApiKeyRestored,
+        DeviceNetworkUpdated, DeviceNetworkPushed,
+        DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
         PlayResultVoided, PlayResultUpheld,
     ];
 
@@ -239,7 +272,7 @@ public static class AdminChangeActions
     public static readonly string[] ReasonRequired =
     [
         BookingsBulkCancelled, BookingCancelledByAdmin, BookingBlockLifted, ScheduleEnded, ScheduleOccurrenceSkipped,
-        MinutesAdjusted, PackageSold, GroupArchived, MemberSuspended, MemberRejected, MemberDeleted, CourtDeactivated,
+        MinutesAdjusted, PackageSold, PaymentReversed, GroupArchived, MemberSuspended, MemberRejected, MemberDeleted, CourtDeactivated,
         DeviceDeleted, MemberAdminRevoked, MemberAdminGranted, MemberCodeReset,
         BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
         PlayResultVoided, PlayResultUpheld,
@@ -262,17 +295,20 @@ public static class AdminChangeActions
                 or BookingBookedOnBehalf or BookingOverdraftAuthorised
                 or BookingPlayerAdded or BookingPlayerRemoved or BookingPlayerAcceptedOnBehalf
                 or BookingShareSettledOutside or BookingShareCollected => AdminChangeAreas.Booking,
-            MinutesAdjusted or PackageSold
+            MinutesAdjusted or PackageSold or PaymentReversed
                 or PackageCreated or PackageUpdated or PackageArchived => AdminChangeAreas.Money,
             GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged
                 or GroupDeleted => AdminChangeAreas.Group,
             MemberApproved or MemberRejected or MemberSuspended or MemberDeleted
                 or MemberReactivated or MemberPasswordReset or MemberCodeReset or MemberTraceViewed
-                or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
-            SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
+                or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked
+                or MemberPinSet => AdminChangeAreas.Member,
+            SettingsUpdated or PaymentsConfigured or CourtCreated or CourtUpdated or CourtDeactivated
                 or ChangesExported or WebhookCreated or WebhookDeleted
                 or DemoEntered or DemoLeft or DemoReset or DemoMemberViewEntered or DemoMemberViewLeft => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
+                or DeviceApiKeyRotated or DeviceApiKeyRetired or DeviceApiKeyRestored
+                or DeviceNetworkUpdated or DeviceNetworkPushed
                 or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
             PlayResultVoided or PlayResultUpheld => AdminChangeAreas.Play,
             _ => null,
@@ -316,6 +352,7 @@ public static class AdminChangeActions
 
             MinutesAdjusted => $"Adjusted a member's minutes{of}",
             PackageSold => $"Sold a member a package{of}",
+            PaymentReversed => $"Recorded rand given back to a member{of}",
             PackageCreated => $"Created a minutes package{of}",
             PackageUpdated => $"Changed a minutes package{of}",
             PackageArchived => $"Retired a minutes package{of}",   // R9 J9-7: the console's word
@@ -337,8 +374,10 @@ public static class AdminChangeActions
             MemberDoorHistoryViewed => $"Looked at one member's door history{of}",
             MemberAdminGranted => $"Made a member an administrator{of}",
             MemberAdminRevoked => $"Removed a member's administrator rights{of}",
+            MemberPinSet => $"Set a member's court PIN{of}",
 
             SettingsUpdated => "Changed the club's settings",
+            PaymentsConfigured => "Changed the club's PayFast payment settings",
             CourtCreated => $"Added a court{of}",
             CourtUpdated => $"Changed a court{of}",
             CourtDeactivated => $"Deactivated a court{of}",
@@ -354,6 +393,11 @@ public static class AdminChangeActions
             DeviceUpdated => $"Changed a device{of}",
             DeviceDeleted => $"Removed a device{of}",
             DeviceApiKeyRegenerated => "Regenerated the club's device key",
+            DeviceApiKeyRotated => "Started a device key rotation",
+            DeviceApiKeyRetired => "Retired the club's old device key",
+            DeviceApiKeyRestored => "Restored a known device key",
+            DeviceNetworkUpdated => "Changed the club's device network",
+            DeviceNetworkPushed => $"Sent the club's network to a board{of}",
             DoorsShutAll => "Shut every door at once",
             DoorsReopenedAll => "Reopened the doors",
             MonitoringErrorResolved => $"Marked a device fault as resolved{of}",

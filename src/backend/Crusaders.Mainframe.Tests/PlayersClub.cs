@@ -55,8 +55,10 @@ public sealed class PlayersClub
         var slug = $"{(prefix.Length > 12 ? prefix[..12] : prefix)}-{Guid.NewGuid():N}"[..25];
         var tenant = new Tenant
         {
-            Slug = slug, DisplayName = $"Club {slug}",
-            DeviceApiKey = DeviceApiKey.Generate(), DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
+            Slug = slug,
+            DisplayName = $"Club {slug}",
+            DeviceApiKey = DeviceApiKey.Generate(),
+            DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
         };
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = settings });
@@ -65,7 +67,9 @@ public sealed class PlayersClub
 
         var club = new PlayersClub
         {
-            TenantId = tenant.Id, Slug = slug, CourtId = court.Id,
+            TenantId = tenant.Id,
+            Slug = slug,
+            CourtId = court.Id,
             Admin = Person(db, tenant.Id, slug, "Ada Admin", isAdmin: true),
             Organiser = Person(db, tenant.Id, slug, "Olive Organiser"),
             Sam = Person(db, tenant.Id, slug, "Sam Partner"),
@@ -82,14 +86,20 @@ public sealed class PlayersClub
         var handle = name.ToLowerInvariant().Replace(' ', '.');
         var user = new User
         {
-            TenantId = tenantId, Email = $"{handle}@{slug}.review.test", PasswordHash = "x",
-            EmailVerified = true, IsAdmin = isAdmin,
+            TenantId = tenantId,
+            Email = $"{handle}@{slug}.review.test",
+            PasswordHash = "x",
+            EmailVerified = true,
+            IsAdmin = isAdmin,
         };
         db.Users.Add(user);
         db.Memberships.Add(new Membership
         {
-            TenantId = tenantId, UserId = user.Id, FullName = name,
-            MembershipNumber = $"{handle}-{Guid.NewGuid():N}"[..20], Status = MembershipStatus.Active,
+            TenantId = tenantId,
+            UserId = user.Id,
+            FullName = name,
+            MembershipNumber = $"{handle}-{Guid.NewGuid():N}"[..20],
+            Status = MembershipStatus.Active,
         });
         return user.Id;
     }
@@ -125,8 +135,12 @@ public sealed class PlayersClub
     {
         await WriteAsync(factory, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = TenantId, UserId = userId, Type = LedgerEntryType.TopUp, AmountMinutes = minutes,
-            ActorUserId = Guid.Empty, Reason = "fixture float",
+            TenantId = TenantId,
+            UserId = userId,
+            Type = LedgerEntryType.TopUp,
+            AmountMinutes = minutes,
+            ActorUserId = Guid.Empty,
+            Reason = "fixture float",
         }));
     }
 
@@ -151,18 +165,31 @@ public sealed class PlayersClub
     {
         var booking = new Booking
         {
-            TenantId = TenantId, CourtId = CourtId, UserId = organiser ?? Organiser, BookedByUserId = organiser ?? Organiser,
-            PaidByUserId = organiser ?? Organiser, ActorUserId = organiser ?? Organiser, StartsAt = startsAt,
-            EndsAt = startsAt.AddMinutes(8 * slices), SliceMinutes = 8, SliceCount = slices,
-            AmountChargedMinutes = 8 * slices, Status = BookingStatus.Booked, ChargedAt = startsAt.AddDays(-1),
+            TenantId = TenantId,
+            CourtId = CourtId,
+            UserId = organiser ?? Organiser,
+            BookedByUserId = organiser ?? Organiser,
+            PaidByUserId = organiser ?? Organiser,
+            ActorUserId = organiser ?? Organiser,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(8 * slices),
+            SliceMinutes = 8,
+            SliceCount = slices,
+            AmountChargedMinutes = 8 * slices,
+            Status = BookingStatus.Booked,
+            ChargedAt = startsAt.AddDays(-1),
         };
         await WriteAsync(factory, db =>
         {
             db.Bookings.Add(booking);
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = TenantId, UserId = booking.UserId!.Value, Type = LedgerEntryType.BookingCharge,
-                AmountMinutes = -booking.AmountChargedMinutes, ActorUserId = booking.UserId.Value, RelatedBookingId = booking.Id,
+                TenantId = TenantId,
+                UserId = booking.UserId!.Value,
+                Type = LedgerEntryType.BookingCharge,
+                AmountMinutes = -booking.AmountChargedMinutes,
+                ActorUserId = booking.UserId.Value,
+                RelatedBookingId = booking.Id,
             });
         });
         return booking.Id;
@@ -175,9 +202,17 @@ public sealed class PlayersClub
     {
         var row = new BookingParticipant
         {
-            TenantId = TenantId, BookingId = bookingId, Seat = seat, UserId = userId, Status = status,
-            ShareMinutes = share, ShareWeight = 1, SplitMode = seat == 1 ? SplitModes.Equal : null,
-            InvitedAt = invitedAt ?? DateTimeOffset.UtcNow, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            TenantId = TenantId,
+            BookingId = bookingId,
+            Seat = seat,
+            UserId = userId,
+            Status = status,
+            ShareMinutes = share,
+            ShareWeight = 1,
+            SplitMode = seat == 1 ? SplitModes.Equal : null,
+            InvitedAt = invitedAt ?? DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
         await WriteAsync(factory, db => db.BookingParticipants.Add(row));
         return row.Id;
@@ -216,7 +251,11 @@ public sealed class PlayersClub
     {
         var response = await Client(factory, Organiser).PostAsJsonAsync("/api/v1/bookings", new
         {
-            courtId = CourtId, startsAt = at ?? Tomorrow(), sliceCount = slices, players, splitMode,
+            courtId = CourtId,
+            startsAt = at ?? Tomorrow(),
+            sliceCount = slices,
+            players,
+            splitMode,
         });
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"booking refused: {(int)response.StatusCode} {body}");

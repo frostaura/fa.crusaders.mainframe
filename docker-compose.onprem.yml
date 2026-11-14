@@ -51,20 +51,49 @@
 #    in docs/specs/deployment.md gives them. Direct :5000 from the LAN was a side
 #    effect of host networking, never a path the system hands out.
 #
+# 5. **Mail goes where .env says.** This overlay used to set the flat SMTP_HOST
+#    and SMTP_PORT to MailHog's loopback port, and the API reads the flat names
+#    BEFORE Smtp__Host, so a club with a real relay in .env had every verification,
+#    reset and receipt mail swallowed by MailHog with nothing erroring. Now only
+#    the Smtp__* names are set, from .env, and MailHog's loopback port is merely
+#    the fallback when .env names no relay.
+#
+# 6. **Backups and log rotation come with it** — the same backup service as
+#    docker-compose.prod.yml (it is `extends`-ed from there, not copied), and
+#    every container's log capped. docs/runbooks/backup-and-restore.md.
+#
+# Needs Docker Compose 2.24.4 or later: the `!override` tags below replace the
+# base file's port lists instead of appending to them. Appended, MailHog was
+# published on every interface AND on loopback, on the same host port.
+#
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     # Reachable from the host-networked backend. Bound to loopback rather than
     # 0.0.0.0 so the club LAN cannot reach the database directly.
     ports:
       - "127.0.0.1:5432:5432"
+    logging: *default-logging
 
   mailhog:
-    ports:
+    # Loopback only, REPLACING the base file's 0.0.0.0 publications rather than
+    # adding to them. Nothing is sent here unless .env names no SMTP relay.
+    ports: !override
       - "127.0.0.1:11025:1025"
       - "127.0.0.1:8025:8025"
+    logging: *default-logging
+
+  frontend:
+    logging: *default-logging
 
   backend:
     network_mode: host
+    logging: *default-logging
     environment:
       # Loopback for the healthcheck and anything on the host, plus the ONE address the
       # gateway container dials: `extra_hosts: backend:host-gateway` below resolves to the
@@ -81,8 +110,12 @@ services:
 
       # Service names are gone with the bridge; everything is loopback now.
       ConnectionStrings__DefaultConnection: Host=127.0.0.1;Port=5432;Database=${POSTGRES_DB:-crusaders_mainframe};Username=${POSTGRES_USER:-crusaders};Password=${POSTGRES_PASSWORD}
-      SMTP_HOST: 127.0.0.1
-      SMTP_PORT: 11025
+      # The relay .env names, else MailHog on loopback (the base file's `mailhog`
+      # service name does not resolve from the host network). Never the flat
+      # SMTP_HOST / SMTP_PORT: the API reads those first — see note 5 above.
+      Smtp__Host: ${SMTP_HOST:-127.0.0.1}
+      Smtp__Port: ${SMTP_PORT:-11025}
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
 
       # LAN webhook consumers — see go-live checklist item 12. The court box is
       # pull-only and never a webhook destination; uncomment only for a genuine
@@ -101,10 +134,27 @@ services:
     # believes its X-Forwarded-* headers: that is what gives every member their own
     # rate-limit bucket rather than one shared club-wide one.
     #
-    # cloudflared runs on this host and dials the published gateway port, so the
-    # gateway sees it as the bridge's own gateway address — also inside that /24,
-    # which is what lets Gateway:ForwardLimit=2 walk back past cloudflared to the
-    # real visitor. A club that fronts the API with anything else sets
-    # GATEWAY_TRUSTED_PROXIES to a comma-delimited list (see .env.example).
+    # This overlay carries no cloudflared (docker-compose.prod.yml runs one inside
+    # its own stack). A club that runs cloudflared on THIS host, outside compose,
+    # dialling the published gateway port, is seen by the gateway as the bridge's
+    # own gateway address — also inside that /24, which is what lets
+    # Gateway:ForwardLimit=2 walk back past cloudflared to the real visitor. A club
+    # that fronts the API with anything else sets GATEWAY_TRUSTED_PROXIES to a
+    # comma-delimited list (see .env.example).
     extra_hosts:
       - "backend:host-gateway"
+    logging: *default-logging
+
+  # The production backup service, verbatim — extended from docker-compose.prod.yml
+  # so there is one script to keep right — pointed at this stack's database.
+  backup:
+    extends:
+      file: docker-compose.prod.yml
+      service: backup
+    environment:
+      PGUSER: ${POSTGRES_USER:-crusaders}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-crusaders_mainframe}
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -141,7 +141,7 @@ describe("the guide page", () => {
     const box = screen.getByRole("heading", { name: /Turn the lights on at the court box/ })
       .closest("li")!.textContent ?? "";
     // The box's own resting words, not an invented caption.
-    expect(box).toMatch(/SCAN YOUR CODE/);
+    expect(box).toMatch(/SCAN YOUR QR CODE/);
     // The asymmetry that is the single most useful thing to tell somebody: a booked member
     // presses nothing, because the panel has no OK button.
     expect(box).toMatch(/lights come on by themselves/);

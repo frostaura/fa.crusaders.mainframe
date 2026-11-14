@@ -87,7 +87,7 @@ public static class DoorTrail
     /// </para>
     /// </summary>
     public static readonly string[] Reasons =
-        [.. GateAccess.Reasons, MalformedOutcome, GateAccess.NotACourtBox, GateAccess.CodeUsed, RefusedOffline];
+        [.. GateAccess.Reasons, MalformedOutcome, GateAccess.NotACourtBox, GateAccess.CodeUsed, RefusedOffline, Replayed];
 
     /// <summary>
     /// Review round 11, D11-2: a board refused a GENUINE member code while it was offline — a
@@ -99,6 +99,14 @@ public static class DoorTrail
     /// nobody named.
     /// </summary>
     public const string RefusedOffline = "refused_offline";
+
+    /// <summary>
+    /// MCV1-10: a board refused a genuine code ITSELF as a replay of one it had just acted on —
+    /// while ONLINE, with no call made (<c>memcode::knownReplay</c>) — and uploaded it with
+    /// <c>cause: "replayed"</c>. It is a replayed or photographed code, not an offline refusal,
+    /// and the activity view says so.
+    /// </summary>
+    public const string Replayed = "replayed";
 
     /// <summary>
     /// The same four actions as a predicate the database can run.

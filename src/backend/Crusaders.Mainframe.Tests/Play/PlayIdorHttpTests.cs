@@ -33,7 +33,11 @@ public sealed class PlayIdorHttpTests(PostgresFixture pg) : IClassFixture<Postgr
             Assert.Equal(HttpStatusCode.NotFound, (await RecordAsync(outsider, booking, [U(club.Bystander)], [U(club.Sam)])).StatusCode);
             Assert.Equal(HttpStatusCode.NotFound, (await outsider.PutAsJsonAsync($"/api/v1/bookings/{booking}/result", new
             {
-                expectedVersion = version, format = "best_of_5", sideA = new[] { U(club.Organiser) }, sideB = new[] { U(club.Sam) }, games = ThreeOne,
+                expectedVersion = version,
+                format = "best_of_5",
+                sideA = new[] { U(club.Organiser) },
+                sideB = new[] { U(club.Sam) },
+                games = ThreeOne,
             })).StatusCode);
             foreach (var action in new[] { "confirm", "dispute", "withdraw" })
             {

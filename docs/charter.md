@@ -25,7 +25,7 @@ The first deployment is at Crusaders Squash Club. The architecture is multi-tena
 ## What "done" means for v1
 - A Crusaders member can register on a phone, get approved, top up via PeachPayments, book a court slot 7 days out, walk to the court, biometric-on the lights, finish their hour, and see the receipt land in their inbox. End-to-end, no admin intervention required.
 - A Crusaders admin can configure the club's settings, approve new members, book on behalf of someone, refund a disputed penalty, and pull a monthly transaction report.
-- A second club can be onboarded by the platform admin (Dean) in <2 hours and run independently.
+- A second club can be onboarded by the operator (Dean, with the `tenant` CLI) in <2 hours and run independently.
 - Zero cross-tenant data leakage in security tests.
 
 ## Where the boundaries are

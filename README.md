@@ -1,6 +1,6 @@
 # Crusaders Mainframe
 
-Multi-tenant SaaS for racquet-sport club court-light scheduling on a credit + on-court biometric model. First customer: **Crusaders Squash Club**.
+Multi-tenant SaaS for racquet-sport club court-light scheduling on a minutes-based booking model (members buy minute packages; a booking costs its playing minutes) with on-court identification. First customer: **Crusaders Squash Club**.
 
 A FrostAura Technologies project. Strategic context, charter, feature spec, design system, biometric/lights/payments specs, and deploy story all live in [`CLAUDE.md`](./CLAUDE.md) and [`docs/`](./docs/).
 
@@ -11,7 +11,7 @@ A FrostAura Technologies project. Strategic context, charter, feature spec, desi
 - **Biometric peripheral:** abstracted via `IBiometricDevice` — see [`docs/specs/biometric-abstraction.md`](./docs/specs/biometric-abstraction.md)
 - **Lights:** WeMos Mega 2560 + ESP8266 court box driving a 4-channel relay board on the club LAN — see [`src/iot/court-box/README.md`](./src/iot/court-box/README.md)
 - **Doors:** one ESP32 per door — QR scanner, one relay on the lock — asking the same API who may come in — see [`src/iot/door-gate/README.md`](./src/iot/door-gate/README.md)
-- **Deploy:** GitHub Actions → multi-arch images → Docker Hub, where **CI stops by decision** — there is no redeploy job. Pulling the published `:latest` manifests onto the club machine is a **manual** step, and so are the two stack checks the removed job used to make; members reach it through a Cloudflared tunnel — see [`docs/specs/deployment.md`](./docs/specs/deployment.md) and [`docs/go-live-checklist.md`](./docs/go-live-checklist.md) §2
+- **Deploy:** GitHub Actions → multi-arch images → Docker Hub, where **CI stops by decision** — there is no redeploy job. Every main push publishes an immutable `sha-<commit>` release of all three images (`:latest` follows, forward only); pinning the club's Portainer stack to one is a **manual** step with its own runbook ([`docs/runbooks/redeploy-and-rollback.md`](./docs/runbooks/redeploy-and-rollback.md)), and the stack backs itself up daily ([`docs/runbooks/backup-and-restore.md`](./docs/runbooks/backup-and-restore.md)); members reach it through the stack's own Cloudflared tunnel — see [`docs/specs/deployment.md`](./docs/specs/deployment.md) and [`docs/go-live-checklist.md`](./docs/go-live-checklist.md) §2
 
 ## Quick start (local dev)
 ```bash

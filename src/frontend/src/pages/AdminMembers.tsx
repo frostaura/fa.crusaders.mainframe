@@ -32,6 +32,9 @@ import {
 import { FEATURES } from "../lib/features";
 import { typography } from "../lib/typography";
 import { describeFailure } from "../lib/errors";
+import { adminEndpoints } from "../lib/adminApi";
+import { DownloadCsvButton } from "../components/monitoring/parts";
+import { exportStatus, membersExportLabel } from "../lib/membersCopy";
 
 /**
  * Admin · Members (P5) — the club's people, the application queue, and the way into any one
@@ -78,7 +81,15 @@ export default function AdminMembersPage() {
   const counts = useMemo(() => statusCounts(countable), [countable]);
   const rows = useMemo(() => visibleRows(list.members ?? [], status, query, sort), [list.members, status, query, sort]);
   const reload = list.load;
-  const split = useMemo(() => ({ listHref: filters.listHref, onMemberDeleted: () => void reload() }), [filters.listHref, reload]);
+  const setMembers = list.setMembers;
+  const split = useMemo(() => ({
+    listHref: filters.listHref,
+    onMemberDeleted: () => void reload(),
+    onMemberBalance: (userId: string, balanceMinutes: number) => setMembers((rows) => {
+      if (!rows || !rows.some((r) => r.user_id === userId && r.balance_minutes !== balanceMinutes)) return rows;
+      return rows.map((r) => (r.user_id === userId ? { ...r, balance_minutes: balanceMinutes } : r));
+    }),
+  }), [filters.listHref, reload, setMembers]);
 
   const handlers: RowActionHandlers = {
     approve: lifecycle.approve,
@@ -149,7 +160,17 @@ export default function AdminMembersPage() {
       <PageHeader
         title={COPY.title}
         description={COPY.description}
-        actions={<RefreshButton label={COPY.refresh} onRefresh={() => void list.load()} loading={list.loading} />}
+        actions={(
+          <div className="flex flex-wrap items-center gap-2">
+            {/* BA-08: the club's member list as a file — names, numbers, status, groups, balance; no contact details. */}
+            <DownloadCsvButton
+              path={adminEndpoints.membersCsvPath(exportStatus(status))}
+              fallbackName="members.csv"
+              label={membersExportLabel(status)}
+            />
+            <RefreshButton label={COPY.refresh} onRefresh={() => void list.load()} loading={list.loading} />
+          </div>
+        )}
         freshness={<Freshness at={list.readAt} />}
       />
       <div className="flex flex-col gap-4">

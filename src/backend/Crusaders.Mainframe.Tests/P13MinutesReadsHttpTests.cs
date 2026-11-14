@@ -22,14 +22,20 @@ public sealed class P13MinutesReadsHttpTests(PostgresFixture pg) : IClassFixture
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var group = new MemberGroup
         {
-            TenantId = club.TenantId, Name = name, PackageDiscountBps = discountBps, SortOrder = sortOrder,
+            TenantId = club.TenantId,
+            Name = name,
+            PackageDiscountBps = discountBps,
+            SortOrder = sortOrder,
         };
         db.MemberGroups.Add(group);
         foreach (var userId in members)
         {
             db.MemberGroupMembers.Add(new MemberGroupMember
             {
-                TenantId = club.TenantId, GroupId = group.Id, UserId = userId, AddedByUserId = club.AdminUserId,
+                TenantId = club.TenantId,
+                GroupId = group.Id,
+                UserId = userId,
+                AddedByUserId = club.AdminUserId,
             });
         }
         await db.SaveChangesAsync();
@@ -98,18 +104,32 @@ public sealed class P13MinutesReadsHttpTests(PostgresFixture pg) : IClassFixture
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             Booking Book(DateTimeOffset at, int minutes, BookingStatus status) => new()
             {
-                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
-                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId, ActorUserId = club.MemberUserId,
-                StartsAt = at, EndsAt = at.AddMinutes(minutes), SliceMinutes = 15, SliceCount = minutes / 15,
-                AmountChargedMinutes = minutes, Status = status, ChargedAt = at.AddDays(-1),
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId,
+                PaidByUserId = club.MemberUserId,
+                ActorUserId = club.MemberUserId,
+                StartsAt = at,
+                EndsAt = at.AddMinutes(minutes),
+                SliceMinutes = 15,
+                SliceCount = minutes / 15,
+                AmountChargedMinutes = minutes,
+                Status = status,
+                ChargedAt = at.AddDays(-1),
             };
             var noShow = Book(startsAt, 60, BookingStatus.NoShow);
             var played = Book(startsAt.AddHours(2), 45, BookingStatus.Completed);
             db.Bookings.AddRange(noShow, played);
             LedgerEntry Row(Booking b, LedgerEntryType type, int amount) => new()
             {
-                TenantId = club.TenantId, UserId = club.MemberUserId, ActorUserId = club.MemberUserId,
-                Type = type, AmountMinutes = amount, RelatedBookingId = b.Id, CreatedAt = b.StartsAt.ToUniversalTime(),
+                TenantId = club.TenantId,
+                UserId = club.MemberUserId,
+                ActorUserId = club.MemberUserId,
+                Type = type,
+                AmountMinutes = amount,
+                RelatedBookingId = b.Id,
+                CreatedAt = b.StartsAt.ToUniversalTime(),
             };
             db.LedgerEntries.AddRange(
                 Row(noShow, LedgerEntryType.BookingCharge, -60),

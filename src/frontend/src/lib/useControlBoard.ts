@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { STREAM_SILENCE_MS } from "./api";
 import { adminEndpoints, type ControlBoardCourt, type ControlBoardView } from "./adminApi";
 import { type FreshnessMode } from "./monitoringCopy";
@@ -159,8 +159,14 @@ export function useControlBoard(options: Options = {}): ControlBoardRead {
     };
   }, [degraded, pollMs, refresh]);
 
+  // BA-14 (the console's half): a hidden tab parks its stream. Over plain HTTP/1.1 a browser
+  // keeps six connections per host across every tab, and an open stream per hidden tab starved
+  // the console's ordinary reads ("Connecting to the club…" for 12 s). Showing the tab again
+  // reconnects, and the connect's snapshot catches it up.
+  const visible = useSyncExternalStore(subscribeVisibility, tabVisible, () => true);
+
   useEffect(() => {
-    if (!stream || degraded) return;
+    if (!stream || degraded || !visible) return;
     // A browser with no EventSource can never stream, so this is a one-shot capability check
     // and not a render loop: `degraded` is in this effect's deps precisely so that setting it
     // stops the effect running again.
@@ -258,7 +264,7 @@ export function useControlBoard(options: Options = {}): ControlBoardRead {
       clearSilence();
       es?.close();
     };
-  }, [stream, degraded, fallbackAfterFailures, fallbackWindowMs, refresh]);
+  }, [stream, degraded, visible, fallbackAfterFailures, fallbackWindowMs, refresh]);
 
   /*
    * `lost` outranks both live and polling, and it is the one mode derived rather than set:
@@ -269,4 +275,13 @@ export function useControlBoard(options: Options = {}): ControlBoardRead {
   const resolved: FreshnessMode = error ? "lost" : mode;
 
   return { view, loading, error, mode: resolved, readAt, refresh };
+}
+
+function subscribeVisibility(listener: () => void): () => void {
+  document.addEventListener("visibilitychange", listener);
+  return () => document.removeEventListener("visibilitychange", listener);
+}
+
+function tabVisible(): boolean {
+  return document.visibilityState !== "hidden";
 }

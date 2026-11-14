@@ -27,9 +27,10 @@ import {
   LIVE_PUSH_NOTE, LIVE_SAID, LOST_REPLY, PAYMENT_CHOICES, REASON_MISSING, SELL_COPY as COPY, doneSentence,
   parseZar, percentOfBps, reasonLabel, validateZar, zarField,
 } from "@/lib/deskMinutesCopy";
-import { formatMoney } from "@/lib/utils";
+import { cn, formatMoney } from "@/lib/utils";
 import type { AdjustmentKey } from "./adjustmentAttempt";
 import { attemptSale, type ShelfDiscount } from "./sellAttempt";
+import { DESK_FOOTER_CLASS, DeskConfirmFooter } from "./DeskConfirmFooter";
 import { useMenuReturnFocus } from "./useMenuReturnFocus";
 import { useStepFocus } from "./useStepFocus";
 import { focusFirstComplaint, settleOnSell } from "./saleFocus";
@@ -307,7 +308,7 @@ export function SellPackageSheet(props: SellPackageSheetProps) {
           ) : null}
           <SaleBody flow={flow} shelf={shelf} balance={props.balance} name={name} />
         </SheetBody>
-        <SheetFooter className="sm:items-end">
+        <SheetFooter className={cn("sm:items-end", flow.step === 3 && !flow.done && DESK_FOOTER_CLASS)}>
           <SendingNote text={sale.busy ? COPY.sending(name) : null} refused={guard.refused} />
           <SaleFooter flow={flow} guard={guard} sale={sale} shelf={shelf.state} name={name} />
         </SheetFooter>
@@ -472,8 +473,9 @@ function FreeStep({ flow }: { flow: Flow }) {
 function NoteField({ flow }: { flow: Flow }) {
   return (
     <Field>
-      <FieldLabel>{COPY.detailLabel}</FieldLabel>
-      <Input autoComplete="off" value={flow.detail} placeholder={COPY.detailPlaceholder} onChange={(e) => flow.setDetail(e.target.value)} />
+      {/* BA-20: the note is required, and the label says so before a failed Next does. */}
+      <FieldLabel>{COPY.detailLabel} <span className="font-normal text-text-muted">(required)</span></FieldLabel>
+      <Input autoComplete="off" aria-required="true" value={flow.detail} placeholder={COPY.detailPlaceholder} onChange={(e) => flow.setDetail(e.target.value)} />
       <FieldDescription>{COPY.detailHint}</FieldDescription>
       <FieldError>{flow.complaints.detail}</FieldError>
     </Field>
@@ -545,8 +547,8 @@ function SaleFooter({ flow, guard, sale, shelf, name }: FooterProps) {
   const pkg = flow.pkg;
   if (!pkg) return null;
   return (
-    <>
-      <Button variant="outline" disabled={sale.busy} onClick={() => flow.setStep(2)}>{COPY.back}</Button>
+    // BA-20: the one desk footer, shared with Adjust minutes and Refund or chargeback.
+    <DeskConfirmFooter backLabel={COPY.back} onBack={() => flow.setStep(2)} busy={sale.busy}>
       <div className="min-w-0" data-sale-confirm="">
         <ConfirmButton
           idleLabel={COPY.idleFor(pkg.minutes, isGiven(flow))}
@@ -568,6 +570,6 @@ function SaleFooter({ flow, guard, sale, shelf, name }: FooterProps) {
           className="min-h-touch w-full"
         />
       </div>
-    </>
+    </DeskConfirmFooter>
   );
 }

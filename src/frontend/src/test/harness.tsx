@@ -1,5 +1,5 @@
 import { render, type RenderOptions } from "@testing-library/react";
-import { MemoryRouter, type InitialEntry } from "react-router-dom";
+import { MemoryRouter, useLocation, type InitialEntry } from "react-router-dom";
 import { vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 import { ToastProvider } from "../components/Toast";
@@ -251,6 +251,12 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
  * nothing — {@link signIn} is what turns it on.
  * </p>
  */
+/** As `App` does: toasts leave with the page they were raised on (BM-14). */
+function RoutedToasts({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  return <ToastProvider routeKey={pathname}>{children}</ToastProvider>;
+}
+
 function Providers({ children, entries }: { children: ReactNode; entries?: InitialEntry[] }) {
   return (
     <MemoryRouter initialEntries={entries}>
@@ -262,7 +268,7 @@ function Providers({ children, entries }: { children: ReactNode; entries?: Initi
           /api/v1/wallet, so a test that calls `signIn` stubs that route too.
         */}
         <BalanceProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <RoutedToasts>{children}</RoutedToasts>
         </BalanceProvider>
       </AuthProvider>
     </MemoryRouter>
@@ -446,6 +452,14 @@ export function applyDevicePatch(
   if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
   if (Array.isArray(patch.court_numbers)) next.court_numbers = patch.court_numbers;
   if ("button_map" in patch) next.button_map = patch.button_map;
+  // v3 (device-api §5, §12): three-valued exactly like button_map — present (a value or null) is
+  // applied, absent is left alone.
+  for (const key of ["lcd_layout", "lcd_marquee_enabled", "hw_relay_active_level", "hw_lcd_i2c_address",
+    "hw_scanner_baud", "hw_scanner_line_end", "hw_scanner_gap_ms"]) {
+    if (key in patch) next[key] = patch[key];
+  }
+  // §8: a pushed board is no longer on its own portal's network once it adopts the club's.
+  if (patch.push_network === true && next.net_src === "local") next.net_src = "server";
   // The whole point: null is not a clear, it is an absence. Only a string is applied.
   if (typeof patch.gate_key === "string") {
     const trimmed = patch.gate_key.trim();
@@ -593,7 +607,14 @@ export function deviceServer(
         // Tenant-blind and device-blind by design: this stands in for one club's one
         // board. A new device simply has an empty list, which is the real API's answer too.
         path: "/api/v1/admin/devices/",
-        respond: (request) => (request.path.includes("/activity") ? { items: activity } : [row]),
+        // The v3 routes beside the list (network, firmware, member codes) are NOT this board's:
+        // a 404 is what an API without them answers, and the panels read that as "not served".
+        // A test that wants them adds its own, longer route.
+        respond: (request) => {
+          if (request.path.includes("/activity")) return { items: activity };
+          if (/\/admin\/devices\/(network|firmware|member-codes)/.test(request.path)) return refuse(404, { error: "not_found" });
+          return [row];
+        },
       },
       {
         method: "PATCH",
@@ -1474,4 +1495,17 @@ export function memberCodeRoutes(options: {
       ...options.status,
     },
   ];
+}
+
+/**
+ * BA-02: Approve is armed — the first press shows the consequence, the second ("go") approves.
+ * `index` picks the row's Approve among several. Returns once the armed go has been pressed.
+ */
+export async function approveFromRow(index = 0): Promise<void> {
+  const { fireEvent, screen } = await import("@testing-library/react");
+  const idle = (await screen.findAllByRole("button", { name: "Approve" }))[index];
+  fireEvent.click(idle);
+  const go = document.querySelector<HTMLButtonElement>("[data-confirm='go']");
+  if (!go) throw new Error("Approve did not arm");
+  fireEvent.click(go);
 }

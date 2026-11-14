@@ -530,19 +530,47 @@ void test_roster_before_its_first_load_is_stale_not_empty() {
   TEST_ASSERT_TRUE(cache.decide("tok-alice", 0U, kBaseMid).verdict == roster::Verdict::Stale);
 }
 
-void test_roster_an_abandoned_replacement_leaves_the_old_one_live() {
+void test_roster_forget_is_a_fresh_roster_in_place() {
+  // forget() replaced `roster = Roster(maxAge)`, which built a whole second
+  // table on the stack (the gate's 3.9 KB frame). It must be indistinguishable
+  // from that: never loaded, stale not empty, and a half-done replacement gone.
   Cache cache(kSixHoursMs);
   const roster::Entry entries[] = {booking("tok-alice", 1U, 0U, 3600000UL)};
   loadRoster(cache, kBaseMid, entries, 1U);
-
-  // A push that starts and dies halfway — the WiFi went away mid-response.
   cache.beginReplace(kBaseMid + 1000U);
   static_cast<void>(cache.add(booking("tok-bob", 1U, 0U, 3600000UL)));
-  // ...no commitReplace().
+  cache.forget();
+  TEST_ASSERT_FALSE(cache.everLoaded());
+  TEST_ASSERT_EQUAL_UINT8(0U, cache.size());
+  TEST_ASSERT_TRUE(cache.stale(kBaseMid + 2000U));
+  TEST_ASSERT_TRUE(cache.decide("tok-alice", 1U, kBaseMid + 2000U).verdict == roster::Verdict::Stale);
+  // A commit after forget() starts from nothing: bob's staged entry went with it.
+  cache.commitReplace();
+  TEST_ASSERT_TRUE(cache.decide("tok-bob", 1U, kBaseMid + 3000U).verdict != roster::Verdict::Allow);
+}
 
-  // The court keeps working on what it already knew.
-  TEST_ASSERT_TRUE(cache.decide("tok-alice", 1U, kBaseMid + 2000U).verdict == roster::Verdict::Allow);
-  TEST_ASSERT_TRUE(cache.decide("tok-bob", 1U, kBaseMid + 2000U).verdict == roster::Verdict::Unknown);
+// The roster replaces IN PLACE (bridge 3.1.0: the staging copy was 640 bytes
+// of the bridge's heap floor). Every caller commits what it begins, with the
+// whole answer already in RAM and its unreadable case decided by a first pass
+// (devlink::applyRoster), so nothing ever depends on the old roster serving
+// mid-replacement — and between the two it admits nobody, never a mixture.
+void test_roster_a_replacement_is_in_place_and_wipes_the_old_tail() {
+  Cache cache(kSixHoursMs);
+  const roster::Entry entries[] = {booking("tok-alice", 1U, 0U, 3600000UL),
+                                   booking("tok-carol", 2U, 0U, 3600000UL)};
+  loadRoster(cache, kBaseMid, entries, 2U);
+  TEST_ASSERT_TRUE(cache.decide("tok-carol", 2U, kBaseMid + 500U).verdict == roster::Verdict::Allow);
+
+  cache.beginReplace(kBaseMid + 1000U);
+  // Mid-replacement: neither the old nor a half-new roster admits anybody.
+  TEST_ASSERT_TRUE(cache.decide("tok-alice", 1U, kBaseMid + 1500U).verdict == roster::Verdict::Unknown);
+  static_cast<void>(cache.add(booking("tok-bob", 1U, 0U, 3600000UL)));
+  cache.commitReplace();
+
+  TEST_ASSERT_TRUE(cache.decide("tok-bob", 1U, kBaseMid + 2000U).verdict == roster::Verdict::Allow);
+  TEST_ASSERT_TRUE(cache.decide("tok-alice", 1U, kBaseMid + 2000U).verdict == roster::Verdict::Unknown);
+  TEST_ASSERT_TRUE(cache.decide("tok-carol", 2U, kBaseMid + 2000U).verdict == roster::Verdict::Unknown);
+  TEST_ASSERT_EQUAL_UINT8(1U, cache.size());
 }
 
 void test_roster_a_cancelled_booking_disappears_on_the_next_push() {
@@ -1504,7 +1532,8 @@ int main(int, char**) {
   RUN_TEST(test_roster_before_its_first_load_is_stale_not_empty);
   RUN_TEST(test_roster_an_age_past_the_millis_wrap_never_reads_fresh_again);
   RUN_TEST(test_roster_observing_a_fresh_roster_every_pass_does_not_age_it);
-  RUN_TEST(test_roster_an_abandoned_replacement_leaves_the_old_one_live);
+  RUN_TEST(test_roster_forget_is_a_fresh_roster_in_place);
+  RUN_TEST(test_roster_a_replacement_is_in_place_and_wipes_the_old_tail);
   RUN_TEST(test_roster_a_cancelled_booking_disappears_on_the_next_push);
   RUN_TEST(test_roster_reports_entries_that_did_not_fit);
   RUN_TEST(test_roster_token_copy_refuses_rather_than_truncates);

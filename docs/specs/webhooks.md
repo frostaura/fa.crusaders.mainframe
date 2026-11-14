@@ -56,7 +56,7 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `booking.cancelled_lights_charged` | A cancelled booking was lit from an offline box's roster and charged pro rata for the lit minutes |
 | `booking.displacement_reversed` | The box's own `release` proved the earlier court went dark before a displaced booking's slot, so it was reinstated and re-charged (settlement model I9) |
 | `booking.completed` | A booking's slice ends naturally |
-| `booking.payer_changed` | Somebody took a booking's charge over — D10's pay-for at the box, or a payer override at the court. **Subject and `data.user_id` are the NEW payer**, so a member-registered endpoint hears that its member paid; `data` also carries `booker_user_id`, `previous_payer_user_id`, `amount_minutes`, `court_id`, `court_number`, `starts_at`, `ends_at` (sold end). The previous payer's refund is its own `minutes.refunded` (review round 6, E6-4). `Webhooks/BookingEvents.cs` |
+| `booking.payer_changed` | Somebody took a booking's charge over — D10's pay-for at the box, or a payer override at the court. **Subject and `data.user_id` are the NEW payer**, so a consumer following a member sees that they paid; `data` also carries `booker_user_id`, `previous_payer_user_id`, `amount_minutes`, `court_id`, `court_number`, `starts_at`, `ends_at` (sold end). The previous payer's refund is its own `minutes.refunded` (review round 6, E6-4). `Webhooks/BookingEvents.cs` |
 | `minutes.purchased` | PayFast confirms a package purchase (ITN). Was `credit.topped_up` |
 | `minutes.sold_at_desk` | The desk sells a member a package (an `AdminTopUp` ledger row). Was `credit.topped_up_by_admin` |
 | `minutes.refunded` | A cancellation/no-show refund ledger entry is written. Was `credit.refunded` |
@@ -64,6 +64,7 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `minutes.adjusted` | An admin adjusts a member's minutes by hand (goodwill, a correction). Was `credit.adjusted` |
 | `minutes.refund_reversed` | A NEGATIVE refund row is written — a refund taken back, e.g. by the late-evidence reversal of a no-show. It went out as `minutes.refunded` with a negative figure until review round 6 (E6-11) |
 | `minutes.penalty_returned` | A POSITIVE penalty row is written — a penalty given back, e.g. by the same reversal. It went out as `minutes.penalty_applied` with a positive figure until review round 6 (E6-11) |
+| `minutes.payment_reversed` | Rand given back for a purchase — a desk refund or a recorded chargeback (a `PaymentReversal` row naming the purchase, money lane BM-6). `amount_minutes` is the minutes taken back (0 when the member keeps them) |
 | `peripheral.unhealthy` | A court box has not heart-beaten for longer than `offline_after_seconds`. Fires **once per outage**, from `PeripheralHealthWorker`. It means "the box is not reporting" — never "the reader is faulty": `BiometricDeviceState.Faulted` is still set by no driver, so a fingerprint reader failing behind a healthy box remains invisible. See `feature-spec.md` §6a and §9. |
 | `peripheral.recovered` | The same box called in again; carries how long the outage lasted |
 | `webhook.test` | The "send test ping" button is clicked |
@@ -87,8 +88,7 @@ All payloads are JSON, structured:
   "data": { /* event-specific fields */ },
   "actor": {
     "user_id": "<uuid-or-null>",
-    "is_admin": false,
-    "is_platform_admin": false
+    "is_admin": false
   }
 }
 ```
@@ -141,14 +141,14 @@ nothing until it is re-filtered. The constants are in `Webhooks/MinutesEvents.cs
 `member_class` are gone: there is no rate, and the renamed event has no template naming `{member_class}`
 to protect.
 
-`data` for the six ledger mirrors (`minutes.sold_at_desk`, `minutes.refunded`, `minutes.penalty_applied`,
-`minutes.adjusted`, `minutes.refund_reversed`, `minutes.penalty_returned` — the event is chosen by the row's type
+`data` for the seven ledger mirrors (`minutes.sold_at_desk`, `minutes.refunded`, `minutes.penalty_applied`,
+`minutes.adjusted`, `minutes.refund_reversed`, `minutes.penalty_returned`, `minutes.payment_reversed` — the event is chosen by the row's type
 AND its sign, `LedgerService.MirrorTypeOf`). Their envelope actor is the person whose act wrote the row: the scanner on a late check-in's reversal legs and re-collected shares, the organiser, partner or admin on share moves — no longer null or the system (R14 E14-2, E14-3):
 ```json
 { "entry_id": "<uuid>", "user_id": "<uuid>", "entry_type": "AdminAdjustment",
   "amount_minutes": -45, "booking_id": "<uuid-or-null>", "reason": "Goodwill — lights failed" }
 ```
-`minutes.sold_at_desk` also carries `zar_received` (rand; `0` on a give) and `given` (true when the desk recorded no rand — the one "given" rule reports, the Night and the desk mail use), so a consumer can tell a give from a sale (R15 E15-5).
+`minutes.sold_at_desk` also carries `zar_received` (rand; `0` on a give) and `given` (true when the desk recorded no rand — the one "given" rule reports, the Night and the desk mail use), so a consumer can tell a give from a sale (R15 E15-5). `minutes.payment_reversed` also carries `zar_reversed` (rand, positive) and `reverses_entry_id` (the funding row it gives rand back for).
 
 `topup.failed` is **not** a webhook: it is an admin-notice kind (`AdminEventCatalogue.TopUpFailed`) and keeps its
 code, because admins' stored opt-outs and the outbox dedupe keys name it. Its display name is "Package purchases
@@ -174,8 +174,9 @@ release after the Groups page ships.
 - **At-least-once.** Receivers must be idempotent on `id`.
 - **Signed.** `X-Crusaders-Signature: sha256=<hex>` header — HMAC-SHA256 of the raw body using the endpoint's secret.
 - **Timestamped.** `X-Crusaders-Timestamp: <unix-seconds>` — receivers should reject events older than 5 minutes to mitigate replay.
-- **Retry policy.** On any non-2xx response (or timeout >10s): retry with exponential backoff at 1m, 5m, 30m, 2h, 12h, 24h. After 6 failures the endpoint is auto-disabled and the owner is emailed. Driven by `WebhookRetryWorker`, which sweeps due deliveries every 30s in batches of 50. A blocked destination is exempt and is abandoned on the first attempt — and is disabled on that attempt, with the same email. **For a club endpoint the owner is the club, so the email is the `webhook.auto_disabled` admin notice to every administrator** (R23, non-optional), staged in the same save as the disable and naming the destination by scheme and host only. **A member-registered endpoint's owner is not yet emailed** — that mail is still owed.
-- **Per-endpoint queue.** Slow / failing endpoints don't block others. Each endpoint has its own delivery worker.
+- **Retry policy.** On any non-2xx response (or timeout >10s): retry with exponential backoff at 1m, 5m, 30m, 2h, 12h, 24h. After 6 failures the endpoint is auto-disabled and the owner is emailed. Driven by `WebhookRetryWorker`, which sweeps due deliveries every 30s in batches of 50. A blocked destination is exempt and is abandoned on the first attempt — and is disabled on that attempt, with the same email. **For a club endpoint the owner is the club, so the email is the `webhook.auto_disabled` admin notice to every administrator** (R23, non-optional), staged in the same save as the disable and naming the destination by scheme and host only. (Member-registered endpoints no longer exist — see below.)
+- **Durable before the first attempt; no endpoint behind another (BP-08).** `WebhookDeliveryWorker` saves every delivery `pending` — due for `WebhookRetryWorker` after a two-minute grace — before sending anything, attempts an event's endpoints at once, and has up to four events in flight. A process that dies after that save loses nothing; the remaining in-memory window is the event's time in the channel between its emit and the save. (This line used to promise a worker per endpoint; there was one serial loop for every club, saving after it finished.) Consumers order by `occurred_at`, never by arrival.
+- **Club endpoints only.** Webhooks are the club's integration surface, set by its admins at `/api/v1/admin/webhooks`. The member-registered route (`/api/v1/webhooks`) had no caller in the app and no cap, and was removed with its rows (migration `PlatformTenantOnboarding`); nothing delivers to an `OwnerKind = User` endpoint.
 - **Retention.** Each event keeps its delivery log (status code, response time, retry count) for 30 days, viewable in admin UI.
 
 ## Player-scoped vs tenant-wide

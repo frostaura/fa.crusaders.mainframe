@@ -42,35 +42,14 @@ export type NumericSettingRule = {
   zeroMeans?: string;
 };
 
-/**
- * The device-facing timings — GOAL items 1, 2 and 18.
- *
- * <p>
- * These three reach the box through the heartbeat response with compile-time fallbacks in
- * the firmware, which is the only shape available: the court box is pull-only and is never
- * told anything except in the answer to a beat it made itself. A club that changes one of
- * these sees it take effect within one heartbeat, and the hints say so rather than implying
- * the change is instant.
- * </p>
+/*
+ * The court box's own timings used to be here (lcd_revert_seconds and a rapid-scan window) with
+ * ranges copied from a design note. Both copies drifted: the console offered 5–120 s for the
+ * screen's revert while the API accepted 3–60 (FA-2), and the rapid-scan window was a key the API
+ * never served or bound (FA-10, BoxSettings: the rapid-scan window IS the revert hold). Every box
+ * and device setting now lives in `settingsSchema.ts` with NO client range at all: its bounds are
+ * the ones the settings GET serves in `bounds` (device-api §10), so they cannot drift again.
  */
-export const DEVICE_TIMING_RULES: readonly NumericSettingRule[] = [
-  {
-    key: "lcd_revert_seconds",
-    label: "Screen returns to the start after (seconds)",
-    hint: "5–120. How long the box's screen stays on a result — a scan, a refusal, "
-      + "a court chosen — before it goes back to “Scan code to get started”. Every screen on "
-      + "the box has this timeout, which is what stops one getting stuck with no way out.",
-    min: 5, max: 120, integer: true,
-  },
-  {
-    key: "rapid_scan_window_seconds",
-    label: "Next person may scan within (seconds)",
-    hint: "0–60. After somebody scans, the box stays ready for the next person "
-      + "for this long and shows the time left. 0 turns rapid scanning off, and the box goes "
-      + "straight back to the start after each scan.",
-    min: 0, max: 60, integer: true, zeroMeans: "one person at a time",
-  },
-] as const;
 
 /**
  * The per-day ceiling — GOAL item 19, and ruling 3 settles what it counts.
@@ -180,7 +159,7 @@ export const REALTIME_RULES: readonly NumericSettingRule[] = [
 
 /** Every numeric key this release adds, in the order the page shows them. */
 export const ECO_NUMERIC_RULES: readonly NumericSettingRule[] = [
-  ...DEVICE_TIMING_RULES, ...CAP_RULES, ...SCHEDULE_RULES, ...MONITORING_RULES, ...REALTIME_RULES,
+  ...CAP_RULES, ...SCHEDULE_RULES, ...MONITORING_RULES, ...REALTIME_RULES,
 ];
 
 // ---------------------------------------------------------------------------------------
@@ -241,6 +220,7 @@ export const MEMBER_TRACE_HINT
  * </p>
  */
 export function ecoSettingComplaints(settings: Record<string, unknown>): SettingComplaint[] {
+  // A bound the API serves outranks the one mirrored here — see servedBound.
   return [
     ...numericComplaints(settings),
     ...bookingHorizonComplaint(settings),
@@ -255,10 +235,11 @@ function numericComplaints(settings: Record<string, unknown>): SettingComplaint[
     const value = settings[rule.key];
     if (typeof value !== "number") continue; // absent, null or not a number: nothing to judge
     if (!Number.isFinite(value)) continue; // the page's emptied-field check owns this one
-    if (!Number.isInteger(value) || value < rule.min || value > rule.max) {
+    const { min, max } = servedBound(settings, rule.key) ?? rule;
+    if (!Number.isInteger(value) || value < min || value > max) {
       out.push({
         key: rule.key,
-        message: `${rule.label} has to be a whole number between ${rule.min} and ${rule.max}.`,
+        message: `${rule.label} has to be a whole number between ${min} and ${max}.`,
       });
     }
   }
@@ -318,3 +299,32 @@ export const ECO_SETTING_LABELS: Record<string, string> = Object.fromEntries([
   ["currency_symbol", CURRENCY_SYMBOL_LABEL] as const,
   ["member_trace_enabled", MEMBER_TRACE_LABEL] as const,
 ]);
+
+/**
+ * The range the settings GET serves for one key (`bounds`, device-api §10), or null when the API
+ * serves none. Where it exists it is the ONLY range: a client copy is how FA-2 happened.
+ */
+export function servedBound(settings: Record<string, unknown>, key: string): { min: number; max: number } | null {
+  const bounds = settings.bounds;
+  if (typeof bounds !== "object" || bounds === null) return null;
+  const one = (bounds as Record<string, unknown>)[key];
+  if (typeof one !== "object" || one === null) return null;
+  const { min, max } = one as { min?: unknown; max?: unknown };
+  return typeof min === "number" && typeof max === "number" && Number.isFinite(min) && Number.isFinite(max) && min <= max
+    ? { min, max } : null;
+}
+
+/** The values the settings GET serves for one enumerated key (`{"values": [...]}`), or null. */
+export function servedValues(settings: Record<string, unknown>, key: string): readonly string[] | null {
+  const bounds = settings.bounds;
+  if (typeof bounds !== "object" || bounds === null) return null;
+  const one = (bounds as Record<string, unknown>)[key];
+  if (typeof one !== "object" || one === null) return null;
+  const values = (one as { values?: unknown }).values;
+  // A numeric enumeration (`hw_lcd_i2c_address`, `hw_scanner_baud`) arrives as numbers: read as
+  // the strings a select holds, and turned back into numbers by the row (`numericChoice`).
+  if (!Array.isArray(values) || values.length === 0) return null;
+  if (values.every((v) => typeof v === "string")) return values as string[];
+  if (values.every((v) => typeof v === "number" && Number.isFinite(v))) return values.map((v) => String(v));
+  return null;
+}

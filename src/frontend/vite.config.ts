@@ -6,6 +6,11 @@ import type { Plugin } from "vite";
 import { createHash } from "node:crypto";
 import { SHIPPED_ICON_WEIGHTS } from "./src/components/ui/iconWeights";
 import { stampServiceWorker } from "./src/swBuild";
+import { staleDependencies, staleDependenciesMessage } from "./src/depsFreshness";
+
+// FM-12: every gate that loads this config (build, vitest, dev) stops over a stale install.
+const stale = staleDependencies(__dirname);
+if (stale.length > 0) throw new Error(staleDependenciesMessage(stale));
 
 /**
  * F4.3 — `precache.json`: every JS and CSS file the build emitted, for the service worker to fetch
@@ -241,6 +246,7 @@ export default defineConfig({
     proxy: {
       "/api": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
       "/healthz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
+      "/readyz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
 
       // Uploaded member photos. The API stores a relative path
       // (/uploads/<tenant>/photos/<hash>.png) and the browser resolves it against the WEB
@@ -267,6 +273,7 @@ export default defineConfig({
     proxy: {
       "/api": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
       "/healthz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
+      "/readyz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
       "/uploads": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
     },
   },
@@ -316,6 +323,10 @@ export default defineConfig({
     // would otherwise silently unpin every clock assertion in the product.
     env: { TZ: process.env.VITEST_TZ ?? "Africa/Johannesburg" },
     setupFiles: ["./src/test/setup.ts"],
+    // FM-7: Node 26 ships a flag-gated localStorage global that prints an ExperimentalWarning in
+    // every worker the first time anything touches it (557 lines in a full run). The suite's own
+    // in-memory Storage (test/setup.ts) is the one under test, so Node's is switched off.
+    execArgv: ["--no-experimental-webstorage"],
 
     // vitest's default include is `**/*.{test,spec}.?(c|m)[jt]s?(x)` from the project
     // root, which swallows the Playwright specs in e2e/ and then fails with
@@ -323,5 +334,12 @@ export default defineConfig({
     // reads as a broken Playwright install and is not one. Two runners, two
     // directories: unit tests live under src/, browser tests under e2e/.
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+
+    // FA-13: at a load average near 50 the admin set reported 15 "timed out in 5000ms" — specs
+    // that pass in a second on a quiet machine. A busy CI runner or a parallel local session
+    // read them as regressions. The per-test ceiling is 20 s, still far below anything that is
+    // genuinely stuck; nothing here waits on a real clock for longer than a few hundred ms.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });

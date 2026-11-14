@@ -10,11 +10,22 @@
 
 namespace arduino_hal {
 
-SerialScanner::SerialScanner(HardwareSerial& port) : port_(port) {
+SerialScanner::SerialScanner(HardwareSerial& port) : port_(port), baud_(kScannerBaud) {
 }
 
 void SerialScanner::begin() {
-  port_.begin(kScannerBaud);
+  port_.begin(baud_);
+}
+
+void SerialScanner::setBaud(uint32_t baud) {
+  // HW-5: the scanner's rate is found at run time. Re-opening the UART drops
+  // whatever was half-received, which is what a rate change means anyway.
+  if (baud == baud_) {
+    return;
+  }
+  baud_ = baud;
+  port_.end();
+  port_.begin(baud_);
 }
 
 bool SerialScanner::read(uint8_t& out) {

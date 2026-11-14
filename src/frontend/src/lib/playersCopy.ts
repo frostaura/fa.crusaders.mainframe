@@ -201,6 +201,14 @@ function withFigures(e: ApiError, timezone?: string): string | null {
         ? "Your share has changed since you opened this. Check the new figure and say yes again."
         : `Your share is now ${minutesSpoken(share)}. Check it and say yes again if you're happy.`;
     }
+    case "share_affordable": {
+      // BM-5: pay-what-you-can is for a partner who is short. The wallet this phone showed was stale —
+      // the partner now has enough, so the whole share is theirs to pay.
+      const share = numberDetail(e, "share_minutes");
+      return share === null
+        ? "You now have enough minutes for your whole share, so pay all of it rather than part."
+        : `You now have enough minutes for your whole share of ${minutesSpoken(share)}, so pay all of it rather than part.`;
+    }
     case "insufficient_balance": {
       const have = numberDetail(e, "current_minutes");
       const need = numberDetail(e, "required_minutes");
@@ -296,6 +304,7 @@ export const BOOK_PLAYERS = {
   pickerTitle: (seat: number, team: string) => `Seat ${seat}, ${team}`,
   pickerBack: "Back to the seats",
   full: "All four seats are taken.",
+  noneAdded: "Nobody added yet — Continue books the court for just you, and you pay all of it.",
   guestShort: (name: string) => `${name} (guest)`,
 } as const;
 
@@ -638,15 +647,16 @@ export const LEFT_TO_COVER = {
 } as const;
 
 /** R1 F2.1 — a player added to an amount or ratio split is asked for a share the organiser names. */
+/** Go-live BM-18e — an open seat is nobody yet: "What should Open seat pay?" read it as a name. */
 export const SHARE_ASK = {
-  title: (who: string) => `What should ${who} pay?`,
+  title: (who: string, open = false) => (open ? "What should whoever takes the open seat pay?" : `What should ${who} pay?`),
   amountBody: (covered: string) => `You cover ${covered} now. What you ask for comes off that.`,
   ratioBody: "Shares follow the weights. Give them a weight from 0 to 100.",
-  amountLabel: (who: string) => `Minutes for ${who}`,
-  weightLabel: (who: string) => `Weight for ${who}`,
+  amountLabel: (who: string, open = false) => (open ? "Minutes for the open seat" : `Minutes for ${who}`),
+  weightLabel: (who: string, open = false) => (open ? "Weight for the open seat" : `Weight for ${who}`),
   amountHint: "In whole minutes. 0 means you cover them.",
   weightHint: "A whole number from 0 to 100.",
-  confirm: (who: string) => `Invite ${who}`,
+  confirm: (who: string, open = false) => (open ? "Add the open seat" : `Invite ${who}`),
   cancel: "Cancel",
 } as const;
 

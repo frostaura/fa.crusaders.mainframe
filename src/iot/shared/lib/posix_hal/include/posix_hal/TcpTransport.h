@@ -89,7 +89,7 @@ public:
 
   bool read(uint8_t& out) override;
 
-  /// Drop the current peer, as a real link drops when the ESP reboots for OTA.
+  /// Drop the current peer, as a real link drops when the ESP restarts.
   void dropPeer();
 
   void close();

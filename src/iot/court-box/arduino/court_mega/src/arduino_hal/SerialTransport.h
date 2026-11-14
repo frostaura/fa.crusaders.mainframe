@@ -17,7 +17,7 @@
 //
 // connected() is honest about what a UART can know: there is no carrier on this
 // link, so the only detectable failure is the port never having been opened.
-// The peer being absent, resetting or mid-OTA is indistinguishable from the peer
+// The peer being absent or resetting is indistinguishable from the peer
 // being quiet, which is why the protocol has `!PING`/`!PONG` and why the Mega's
 // timer does not depend on the answer either way.
 
@@ -61,9 +61,14 @@ public:
 
   bool read(uint8_t& out) override;
 
+  /// Reads that found the receive ring full (64 bytes on the AVR core): the
+  /// peer's bytes may have been lost (Mega 3.0.0 `!DIAG` arg 2).
+  uint16_t rxOverruns() const override { return rxOverruns_; }
+
 private:
   HardwareSerial& port_;
   bool open_;
+  uint16_t rxOverruns_;
 };
 
 } // namespace arduino_hal

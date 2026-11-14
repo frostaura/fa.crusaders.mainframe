@@ -1,5 +1,7 @@
 #include "gatelogic/ScanAssembler.h"
 
+#include "timebase/TimeBase.h"
+
 namespace gatelogic {
 namespace {
 
@@ -111,6 +113,23 @@ ScanEvent ScanAssembler::feed(uint8_t byte) {
 
   reset();
   return result;
+}
+
+ScanEvent ScanAssembler::feed(uint8_t byte, uint32_t nowMs) {
+  lastByteMs_ = nowMs;
+  return feed(byte);
+}
+
+ScanEvent ScanAssembler::idle(uint32_t nowMs) {
+  if (!partial() || tb::since(nowMs, lastByteMs_) < kScanIdleGapMs) {
+    return ScanEvent::None;
+  }
+  if (corrupt_ || (!overflow_ && len_ < kIdleTokenMinLen)) {
+    reset();
+    return ScanEvent::None;
+  }
+  // The line as if its terminator had arrived.
+  return feed(0x0DU);
 }
 
 } // namespace gatelogic

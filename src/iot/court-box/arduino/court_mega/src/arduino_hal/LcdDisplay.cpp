@@ -9,61 +9,52 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-#include "../arduino_hal/Pins.h"
-
-// The pinned core (framework-arduino-avr 5.2.0) has Wire::setWireTimeout(). It
-// exposes no feature macro, so the guard against a core that lacks it is the
-// call itself: a core without the method does not compile this file, which is
-// the right outcome — the alternative is silently rebuilding the driver that
-// spins forever on a wedged bus.
+#include "../courtlogic/LcdProbe.h"
 
 namespace arduino_hal {
 
 namespace {
 
-/// The PCF8574 backpack's bit layout, as LiquidCrystal_I2C uses it: data in the
-/// high nibble, then backlight, En, Rw, Rs. Repeated here rather than borrowed
-/// because the library keeps write4bits() private and the re-sync below has to
-/// drive the reset sequence itself. They cannot drift silently: a wrong layout
-/// makes the panel unreadable the first time a re-sync runs, which is the same
-/// symptom the re-sync exists to cure.
+// The PCF8574 backpack's bit layout (the de-facto standard every LCD backpack
+// uses): data in the high nibble, then backlight, En, Rw, Rs.
+constexpr uint8_t kRsBit = 0x01U;
 constexpr uint8_t kEnBit = 0x04U;
 constexpr uint8_t kBacklightBit = 0x08U;
 
+// HD44780 commands.
+constexpr uint8_t kClear = 0x01U;
+constexpr uint8_t kEntryLeft = 0x06U;     // entry mode: increment, no shift
+constexpr uint8_t kDisplayOn = 0x0CU;     // display on, cursor off, blink off
+constexpr uint8_t kFunction4Bit2 = 0x28U; // 4-bit, 2-line, 5x8 (1602 and 2004 alike)
+constexpr uint8_t kSetDdram = 0x80U;
+
+/// DDRAM row starts of a 20x4; a 16x2 uses the first two.
+constexpr uint8_t kRowOffset[4] = {0x00U, 0x40U, 0x14U, 0x54U};
+
+/// One bounded bus transaction: does anything ACK at `address`?
+bool addressAnswers(uint8_t address, void* context) {
+  static_cast<void>(context);
+  Wire.beginTransmission(address);
+  const uint8_t result = Wire.endTransmission();
+  if (Wire.getWireTimeoutFlag()) {
+    Wire.clearWireTimeoutFlag();
+    return false;
+  }
+  return result == 0U;
+}
+
+constexpr uint32_t kFastClock = 400000UL;
+constexpr uint32_t kSlowClock = 100000UL;
+
 /// Clocks that many SCL edges before a STOP, which is the only thing that
-/// frees a slave holding SDA low mid-byte. Nine because a PCF8574 caught
+/// frees a slave holding SDA low mid-byte: nine, because a PCF8574 caught
 /// mid-transfer can be holding at most eight data bits plus the ACK.
 constexpr uint8_t kBusReleaseClocks = 9U;
 
-void pulseExpander(uint8_t data) {
-  // Three transactions per nibble, exactly as the library's write4bits does:
-  // the value, the value with En high, the value with En low. The falling En
-  // edge is what clocks the nibble in.
-  Wire.beginTransmission(kLcdI2cAddress);
-  Wire.write(static_cast<uint8_t>(data | kBacklightBit));
-  static_cast<void>(Wire.endTransmission());
-
-  Wire.beginTransmission(kLcdI2cAddress);
-  Wire.write(static_cast<uint8_t>(data | kBacklightBit | kEnBit));
-  static_cast<void>(Wire.endTransmission());
-  delayMicroseconds(1); // the enable pulse must be > 450 ns
-
-  Wire.beginTransmission(kLcdI2cAddress);
-  Wire.write(static_cast<uint8_t>(data | kBacklightBit));
-  static_cast<void>(Wire.endTransmission());
-  delayMicroseconds(50); // commands need > 37 us to settle
-}
-
-/// Bit-bangs up to nine SCL clocks and a STOP while SDA reads low.
-///
-/// `Wire`'s own reset-on-timeout does twi_disable()/twi_init() and nothing
-/// else — it re-initialises the MASTER, which does not help when it is the
-/// SLAVE holding the line. A PCF8574 interrupted mid-ACK keeps SDA down until
-/// it sees enough clock edges to finish the byte it thinks it is in, and until
-/// then every later transaction times out too.
-///
-/// Costs at most ~100 us. Safe to call when nothing is stuck: SDA reads high
-/// and this returns without touching the pins.
+/// Bit-bangs up to nine SCL clocks and a STOP while SDA reads low. Wire's own
+/// reset-on-timeout re-initialises the MASTER, which does not help when it is
+/// the SLAVE holding the line. Costs at most ~100 us; returns at once when
+/// nothing is stuck.
 void releaseBus() {
   pinMode(SDA, INPUT_PULLUP);
   if (digitalRead(SDA) == HIGH) {
@@ -76,7 +67,6 @@ void releaseBus() {
     digitalWrite(SCL, HIGH);
     delayMicroseconds(5);
   }
-  // A STOP: SDA low to high while SCL is high.
   pinMode(SDA, OUTPUT);
   digitalWrite(SDA, LOW);
   delayMicroseconds(5);
@@ -88,131 +78,208 @@ void releaseBus() {
   pinMode(SCL, INPUT_PULLUP);
 }
 
-/// Brings the bus up with the timeout armed. The ORDER is the point — see
-/// begin().
-void beginBusWithTimeout() {
+/// The bus up with the timeout armed BEFORE any transaction (review 3,
+/// finding 10: a backpack holding SDA low across a Mega-only reset hung
+/// setup() forever when the timeout was armed after the panel's init).
+void beginBus(bool slow) {
   releaseBus();
   Wire.begin();
   Wire.setWireTimeout(kWireTimeoutMicros, true);
+  Wire.setClock(slow ? kSlowClock : kFastClock);
 }
 
 } // namespace
 
-LcdDisplay::LcdDisplay() : lcd_(kLcdI2cAddress, hal::kDisplayCols, hal::kDisplayRows), holdoff_() {
+LcdDisplay::LcdDisplay()
+    : holdoff_(), requested_(0U), address_(0U), cellsPerPass_(8U), recoveries_(0U), glassLost_(true),
+      errorSinceProbe_(true), slowBus_(false) {
 }
 
 void LcdDisplay::begin() {
-  // THE BUS AND ITS TIMEOUT FIRST, THEN THE PANEL.
-  //
-  // This used to run lcd_.init() first, on the stated reasoning that "the
-  // library cannot re-initialise the peripheral over the setting". It cannot —
-  // twi_init() does not touch twi_timeout_us, verified in the pinned core — so
-  // the reasoning was false and the cost was real (review 3, finding 10):
-  // init() is Wire.begin(), delay(50), an expander write, delay(1000) and the
-  // 4-bit reset sequence, ALL of it synchronous Wire traffic, running with the
-  // timeout still 0. A backpack holding SDA low across a Mega-only reset — a
-  // watchdog reset, a 9 V brown-out under an ESP transmit burst, a DIP or DTR
-  // reset, none of which resets the LCD on its own 5 V rail — hung setup()
-  // forever, with every relay already open but no `!STATE`, no `!PONG` and no
-  // scanner. Arming the timeout first bounds every one of those writes.
-  beginBusWithTimeout();
-  lcd_.init();
-  static_cast<void>(busTimedOut());
-  lcd_.backlight();
-  lcd_.clear();
+  beginBus(slowBus_);
+  // The HD44780 needs > 40 ms after VCC; the bootloader's second has normally
+  // covered it, and a cold power-on is the case this is for.
+  delay(50);
+  address_ = findAddress();
+  if (address_ == 0U) {
+    return;
+  }
+  initController();
+  static_cast<void>(command(kClear));
+  delayMicroseconds(2000);
+  glassLost_ = true;
 }
 
-bool LcdDisplay::busTimedOut() {
-  if (!Wire.getWireTimeoutFlag()) {
+void LcdDisplay::setAddress(uint8_t address) {
+  if (address == requested_) {
+    return;
+  }
+  requested_ = address;
+  // The next ready() re-probes (or drives the forced address) and re-inits.
+  errorSinceProbe_ = true;
+  holdoff_.noteTimeout();
+}
+
+uint8_t LcdDisplay::findAddress() {
+  errorSinceProbe_ = false;
+  for (uint8_t pass = 0U; pass < 2U; ++pass) {
+    const uint8_t found = courtlogic::probeLcdAddress(requested_, addressAnswers, nullptr);
+    if (found != 0U) {
+      return found;
+    }
+    // Nothing answered at 400 kHz: a PCF8574 is only rated for 100 kHz, so
+    // try once more there and stay there for the rest of the boot.
+    if (slowBus_) {
+      break;
+    }
+    slowBus_ = true;
+    Wire.setClock(kSlowClock);
+  }
+  return 0U;
+}
+
+bool LcdDisplay::nibble(uint8_t data) {
+  const uint8_t base = static_cast<uint8_t>(data | kBacklightBit);
+  Wire.beginTransmission(address_);
+  Wire.write(base);
+  Wire.write(static_cast<uint8_t>(base | kEnBit)); // the En pulse (> 450 ns at either clock)
+  Wire.write(base);                                // the falling edge clocks it in
+  const uint8_t result = Wire.endTransmission();
+  if (Wire.getWireTimeoutFlag() || result != 0U) {
+    Wire.clearWireTimeoutFlag();
+    busError();
     return false;
   }
-  Wire.clearWireTimeoutFlag();
   return true;
 }
 
-void LcdDisplay::resync() {
-  // The 4-bit reset sequence WITHOUT the library's 1.05 s of power-on delays.
-  // Those exist to wait for a panel that has just been powered; this panel has
-  // been powered all along and only needs its nibble phase re-established. What
-  // is left is the datasheet's own timing — 4.5 ms, 4.5 ms, 150 us — plus four
-  // commands, so the whole thing is ~10 ms and sits comfortably inside the
-  // watchdog's two seconds. It does not need splitting across passes.
-  beginBusWithTimeout();
+bool LcdDisplay::send(uint8_t value, uint8_t mode) {
+  return nibble(static_cast<uint8_t>((value & 0xF0U) | mode)) &&
+         nibble(static_cast<uint8_t>(static_cast<uint8_t>(value << 4U) | mode));
+}
 
-  pulseExpander(0x30U); // 0x03 << 4: still in 8-bit mode, ask for it again
+bool LcdDisplay::command(uint8_t value) {
+  const bool ok = send(value, 0U);
+  delayMicroseconds(40); // commands need > 37 us to settle
+  return ok;
+}
+
+void LcdDisplay::initController() {
+  // The 4-bit reset sequence with the datasheet's own timing, WITHOUT a
+  // library's second of power-on delays: this panel has been powered all
+  // along and only needs its nibble phase re-established. ~10 ms in all.
+  static_cast<void>(nibble(0x30U));
   delayMicroseconds(4500);
-  pulseExpander(0x30U);
+  static_cast<void>(nibble(0x30U));
   delayMicroseconds(4500);
-  pulseExpander(0x30U);
+  static_cast<void>(nibble(0x30U));
   delayMicroseconds(150);
-  pulseExpander(0x20U); // 0x02 << 4: 4-bit interface from here on
+  static_cast<void>(nibble(0x20U));
+  static_cast<void>(command(kFunction4Bit2));
+  static_cast<void>(command(kDisplayOn));
+  static_cast<void>(command(kEntryLeft));
+}
 
-  // From here the library's own send path works again, because the controller
-  // is back in the phase it believes it is in.
-  lcd_.command(static_cast<uint8_t>(LCD_FUNCTIONSET | LCD_4BITMODE |
-                                    (hal::kDisplayRows > 1U ? LCD_2LINE : LCD_1LINE) | LCD_5x8DOTS));
-  lcd_.command(static_cast<uint8_t>(LCD_DISPLAYCONTROL | LCD_DISPLAYON | LCD_CURSOROFF | LCD_BLINKOFF));
-  lcd_.command(static_cast<uint8_t>(LCD_ENTRYMODESET | LCD_ENTRYLEFT | LCD_ENTRYSHIFTDECREMENT));
-  lcd_.clear();
-
-  // A re-sync that itself timed out has left the controller no better off. The
-  // holdoff takes it from the top rather than painting over a bus that is still
-  // wedged.
-  if (busTimedOut()) {
-    holdoff_.noteTimeout();
+void LcdDisplay::busError() {
+  holdoff_.noteTimeout();
+  errorSinceProbe_ = true;
+  glassLost_ = true;
+  // A second error on the fast clock: this backpack does not like 400 kHz.
+  if (!slowBus_ && holdoff_.timeouts() >= 2U) {
+    slowBus_ = true;
+    Wire.setClock(kSlowClock);
   }
 }
 
-/// True when the write about to start may proceed, having re-synchronised the
-/// controller first if one was owed.
+/// A re-sync owed after a bus error: the bus released and re-armed, the
+/// address re-probed (HW-2), the controller re-initialised. The caller
+/// repaints every cell.
+void LcdDisplay::recover() {
+  if (recoveries_ < UINT16_MAX) {
+    ++recoveries_;
+  }
+  beginBus(slowBus_);
+  address_ = findAddress();
+  if (address_ != 0U) {
+    initController();
+  }
+  glassLost_ = true;
+}
+
 bool LcdDisplay::ready() {
   if (!holdoff_.allow()) {
     return false;
   }
   if (holdoff_.takeResync()) {
-    resync();
-    // resync() re-arms the holdoff if the bus is still bad; ask again rather
-    // than painting into it.
-    return !holdoff_.holding();
+    recover();
+    return !holdoff_.holding() && address_ != 0U;
+  }
+  if (address_ == 0U) {
+    // Nothing answered: keep looking, one probe per holdoff period, so a
+    // backpack plugged back in (or a corrected LCDA) is found unaided.
+    holdoff_.noteTimeout();
+    return false;
   }
   return true;
 }
 
-void LcdDisplay::clear() {
-  if (!ready()) {
+bool LcdDisplay::writable() {
+  return ready();
+}
+
+bool LcdDisplay::takeGlassLost() {
+  const bool lost = glassLost_;
+  glassLost_ = false;
+  return lost;
+}
+
+void LcdDisplay::reinit() {
+  if (address_ == 0U || holdoff_.holding()) {
     return;
   }
-  lcd_.clear();
-  if (busTimedOut()) {
-    holdoff_.noteTimeout();
+  if (errorSinceProbe_) {
+    recover();
+    return;
   }
+  initController();
+  glassLost_ = true;
+}
+
+void LcdDisplay::clear() {
+  if (address_ == 0U || holdoff_.holding()) {
+    return;
+  }
+  static_cast<void>(command(kClear));
+  delayMicroseconds(2000);
+  glassLost_ = true;
 }
 
 void LcdDisplay::print(uint8_t row, uint8_t col, const char* text) {
-  if (row >= hal::kDisplayRows || col >= hal::kDisplayCols || text == nullptr) {
-    // A partially rendered screen on the wrong line is worse than a missing
-    // line: the operator reads whatever is on the glass as current.
+  if (row >= hal::kDisplayRows || col >= hal::kDisplayCols || text == nullptr || address_ == 0U ||
+      holdoff_.holding()) {
     return;
   }
-  if (!ready()) {
-    return;
-  }
-  lcd_.setCursor(col, row);
-  if (busTimedOut()) {
-    holdoff_.noteTimeout();
+  const uint32_t started = micros();
+  if (!command(static_cast<uint8_t>(kSetDdram | (kRowOffset[row] + col)))) {
     return;
   }
   uint8_t c = col;
+  uint8_t n = 0U;
   for (uint16_t i = 0U; text[i] != '\0' && c < hal::kDisplayCols; ++i) {
-    lcd_.write(static_cast<uint8_t>(text[i]));
-    if (busTimedOut()) {
-      // Abandon the row. Each remaining character would be another bounded
-      // stall, and sixteen of them add up to more than the watchdog allows.
-      holdoff_.noteTimeout();
+    if (!send(static_cast<uint8_t>(text[i]), kRsBit)) {
+      // Abandon the row: each remaining character would be another bounded
+      // stall. The holdoff and the re-sync take it from here.
       return;
     }
     ++c;
+    ++n;
   }
+  // The budget follows the bus actually measured: cells that fit in 8 ms,
+  // counting the cursor move as one.
+  const uint32_t spent = micros() - started;
+  const uint32_t perCell = spent / static_cast<uint32_t>(n + 1U);
+  const uint32_t cells = perCell == 0U ? 80U : kPaintBudgetMicros / perCell;
+  cellsPerPass_ = static_cast<uint8_t>(cells < 2U ? 2U : (cells > 80U ? 80U : cells));
 }
 
 } // namespace arduino_hal

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { resetUnread } from "@/components/inbox/useUnreadCount";
 import type { MemberNotification } from "@/lib/playersApi";
@@ -6,6 +7,10 @@ import { INBOX_COPY, inboxUnreadLine } from "@/lib/playersCopy";
 import { renderPage, signIn, signOut, stubFetch } from "@/test/harness";
 import InboxPage from "@/pages/Inbox";
 import { resetHeldMarksForTests } from "../heldMarks";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 /**
  * A notice tapped on a phone opens its target, so the inbox UNMOUNTS with the mark still on the

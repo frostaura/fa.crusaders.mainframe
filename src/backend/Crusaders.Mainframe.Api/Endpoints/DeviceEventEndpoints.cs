@@ -80,6 +80,42 @@ public static class DeviceEventEndpoints
     public const string ReleaseKind = "release";
 
     /// <summary>
+    /// The release's money settlement — except for a relay a Mega reset opened or a provisional
+    /// light the box itself withdrew, which measure nothing the member did (device-api.md §3, §9):
+    /// the court is re-lit from the snapshot, so settling would refund minutes for time the member
+    /// goes on playing, and the later real release would settle the same booking a second time.
+    /// </summary>
+    private static async Task<string> SettleUnlessBoxsOwnAsync(
+        BookingService bookings, Booking booking, LitWindow window, string? cause, CancellationToken ct)
+    {
+        if (IsBoxsOwnRelease(cause)) return ActivationOutcome.Ok;
+        // The charge's minutes, rounded down: the release may only move money the payer's way.
+        var settled = await bookings.SettleReleaseAsync(booking, window.ChargeMinutes, window.End, Guid.Empty, ct);
+        return settled.Code == ReleaseSettlement.NotApplicable.Code ? ActivationOutcome.Ok : settled.Code;
+    }
+
+    /// <summary>Longest a relay can stay closed: <c>relay_authorisation_cap_minutes</c> at its upper bound plus a minute (§9).</summary>
+    public static readonly long ImplausibleReleaseMs = (DeviceSettings.RelayAuthorisationCapMinutes.Max + 1) * 60_000L;
+
+    /// <summary>The audit row for a release no relay could produce (MCV1-01).</summary>
+    public const string ReleaseImplausibleAction = "device.release_implausible";
+
+    /// <summary>The release causes that are the box's own doing rather than a measurement of play: a Mega reset, and a provisional light withdrawn.</summary>
+    internal static bool IsBoxsOwnRelease(string? cause) =>
+        ReleaseCause(cause) is "mega_reset" or "reconcile";
+
+    /// <summary>
+    /// A release's <c>cause</c> as the receipt keeps it: trimmed and cut to the column, an empty
+    /// one read as absent. Unknown values are kept as given — never a 400 (device-api.md §9).
+    /// </summary>
+    internal static string? ReleaseCause(string? cause)
+    {
+        var text = cause?.Trim();
+        if (string.IsNullOrEmpty(text)) return null;
+        return text.Length <= DeviceEventReceipt.CauseMaxLength ? text : text[..DeviceEventReceipt.CauseMaxLength];
+    }
+
+    /// <summary>
     /// How far a release's implied lit end may sit from the release's own time before the
     /// pairing is refused.
     ///
@@ -866,7 +902,7 @@ public static class DeviceEventEndpoints
         }
 
         var code = outcome?.Code;
-        if (code is null or ActivationOutcome.Ok or ActivationOutcome.ReversedNoShow or DoorTrail.RefusedOffline) return;
+        if (code is null or ActivationOutcome.Ok or ActivationOutcome.ReversedNoShow or DoorTrail.RefusedOffline or DoorTrail.Replayed) return;
 
         // A relay the box lit that is not wired to the booking's court is its own fault: the
         // member is standing on the wrong court, which no other refusal means.
@@ -1016,7 +1052,9 @@ public static class DeviceEventEndpoints
         var court = time.Kind == CourtUnknownScanKind && e.Court is { } relay && relay >= 0 && relay < device.CourtNumbers.Count
             ? device.CourtNumbers[relay]
             : (int?)null;
-        return new ActivationOutcome(DoorTrail.RefusedOffline, null, time.Kind, SubjectUserId: genuine.Match.UserId) { CourtNumber = court };
+        // MCV1-10: the board's own replay refusal, made online, is a replay — not an offline refusal.
+        var code = ReleaseCause(e.Cause) == DoorTrail.Replayed ? DoorTrail.Replayed : DoorTrail.RefusedOffline;
+        return new ActivationOutcome(code, null, time.Kind, SubjectUserId: genuine.Match.UserId) { CourtNumber = court };
     }
 
     /// <summary>
@@ -1030,7 +1068,7 @@ public static class DeviceEventEndpoints
 
         var rows = new List<AuditLog>(3) { Row($"device.{time.Kind}") };
         // A board's own refusal named by the server (D11-2) is the event row itself, not a second verdict on it.
-        if (outcome is not null && outcome.Code != ActivationOutcome.Ok && outcome.Code != DoorTrail.RefusedOffline)
+        if (outcome is not null && outcome.Code != ActivationOutcome.Ok && outcome.Code is not (DoorTrail.RefusedOffline or DoorTrail.Replayed))
         {
             rows.Add(Row($"device.{AuditKind(outcome.Kind)}_{outcome.Code}"));
         }
@@ -1181,6 +1219,16 @@ public static class DeviceEventEndpoints
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
         var (db, _, _, _, bookings, _, _, _, _, _, _, _, _) = services;
+
+        // MCV1-01 (device-api.md §9): longer than any relay can stay closed — the authorisation
+        // cap at its upper bound plus a minute — is a box's arithmetic, not a member leaving (a
+        // 2.3.0 bridge sent 4294967272 after a wrapped age). Receipted and audited, never paired,
+        // never settled, and never a reason to drop a booking from the snapshot.
+        // MCV1-01 (device-api.md §9): longer than any relay can stay closed is a box's arithmetic,
+        // not a member leaving. The upload's verdict row for it is the audit,
+        // `device.release_implausible`, carrying the event's own details.
+        if (e.DurationMs > ImplausibleReleaseMs) return new ActivationOutcome(RelayRestorePlan.ImplausibleOutcome, null, ReleaseKind);
+
         if (e.Court is not { } relay || relay < 0) return new ActivationOutcome("unpaired", null, ReleaseKind);
 
         var session = await db.DeviceEventReceipts.AsNoTracking()
@@ -1206,9 +1254,8 @@ public static class DeviceEventEndpoints
         // Grant zero: the release carries the measurement, and the sold window is the only
         // other bound that applies to it.
         var window = LitWindowOf(booking, session.OccurredAt, grantMs: 0, heldMs: e.DurationMs);
-        // The charge's minutes, rounded down: the release may only move money the payer's way.
-        var settled = await bookings.SettleReleaseAsync(booking, window.ChargeMinutes, window.End, Guid.Empty, ct);
-        var code = settled.Code == ReleaseSettlement.NotApplicable.Code ? ActivationOutcome.Ok : settled.Code;
+
+        var code = await SettleUnlessBoxsOwnAsync(bookings, booking, window, e.Cause, ct);
 
         // The lights are believed OFF, and the MEASURED end is kept on the row so the control
         // board and the night trace can still say how long the court was actually lit. This is
@@ -1465,6 +1512,11 @@ public static class DeviceEventEndpoints
             // The verdict beside the evidence, so a reader of receipts alone — the night trace —
             // can tell a relay the server accepted from one it refused (E7-1).
             Outcome = outcome?.Code,
+
+            // Device contract v3 §9: why a release opened the relay. Stored as given (cut to the
+            // column, never refused) so a cause a later image invents is still evidence; only
+            // `member` or absent takes a booking out of the heartbeat snapshot (RelayRestorePlan).
+            Cause = time.Kind is ReleaseKind or UnknownScanKind or CourtUnknownScanKind ? ReleaseCause(e.Cause) : null,
         };
         db.DeviceEventReceipts.Add(receipt);
 
@@ -2232,7 +2284,12 @@ public sealed record DeviceEventDto(
     [property: JsonPropertyName("court")] int? Court,
     [property: JsonPropertyName("method")] string? Method,
     [property: JsonPropertyName("subject")] string? Subject,
-    [property: JsonPropertyName("duration_ms")] long DurationMs);
+    [property: JsonPropertyName("duration_ms")] long DurationMs,
+    /// <summary>
+    /// Device contract v3 §9: why a release opened the relay — <c>member</c>, <c>autooff</c>,
+    /// <c>cap</c>, <c>mega_reset</c>, <c>reconcile</c>. Absent (every 2.x box) reads as <c>member</c>.
+    /// </summary>
+    [property: JsonPropertyName("cause")] string? Cause = null);
 
 /// <summary>
 /// A batch, plus the box's uptime at the moment it sent them — which is what turns each
@@ -2253,9 +2310,10 @@ public sealed record DeviceEventDto(
 /// <para>
 /// So the board sends a per-boot random 32-bit value and the key is
 /// <c>(tenant, device, boot_id, seq)</c>. <b>Absent means 0</b>, which is exactly the
-/// behaviour <c>(device, seq)</c> always had: a court box, whose renderer omits the field,
-/// and every gate image flashed before this change share one boot identity and dedup
-/// against themselves as before. <c>long</c> rather than <c>int</c> because the value is a
+/// behaviour <c>(device, seq)</c> always had: a court box before bridge 2.3.0 and every gate
+/// image flashed before this change share one boot identity and dedup against themselves as
+/// before. (BD-11: this said the court box's renderer omits the field — bridge 2.3.0 sends its
+/// per-boot <c>gBootId</c>, and every v3 image does.) <c>long</c> rather than <c>int</c> because the value is a
 /// full unsigned 32-bit number, up to 4294967295.
 /// </para>
 ///

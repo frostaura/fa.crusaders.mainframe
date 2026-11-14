@@ -37,7 +37,10 @@ public sealed class R9BookedByClubHttpTests(PostgresFixture pg) : IClassFixture<
         // The desk books a court for Sam, through the admin route.
         var made = await JsonAsync(await club.Client(f, club.Admin, admin: true).PostAsJsonAsync("/api/v1/admin/bookings", new
         {
-            userId = club.Sam, courtId = club.CourtId, startsAt = PlayersClub.Tomorrow(9), sliceCount = 2,
+            userId = club.Sam,
+            courtId = club.CourtId,
+            startsAt = PlayersClub.Tomorrow(9),
+            sliceCount = 2,
         }));
         var forSam = made.GetProperty("booking_id").GetGuid();
         // Alex holds an accepted seat on it: the club did not book anything FOR him.

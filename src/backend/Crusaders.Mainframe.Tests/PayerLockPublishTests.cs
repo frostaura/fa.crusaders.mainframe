@@ -42,7 +42,10 @@ public sealed class PayerLockPublishTests : IClassFixture<PostgresFixture>
 
         var member = new User
         {
-            TenantId = tenant.Id, Email = $"{slug}@test.local", PasswordHash = "x", EmailVerified = true,
+            TenantId = tenant.Id,
+            Email = $"{slug}@test.local",
+            PasswordHash = "x",
+            EmailVerified = true,
         };
         db.Users.Add(member);
         await db.SaveChangesAsync();

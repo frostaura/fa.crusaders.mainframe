@@ -154,6 +154,12 @@ bool readUnsigned(const char* body, size_t len, size_t& at, uint32_t& out) {
   if (digits == 0U) {
     return false;
   }
+  // EXACT KINDS (device-api.md §11.2, FC-11): `45.9` and `4.5e1` are not the
+  // integer 45 or 4 — they are a value this reader does not know, read as
+  // absent so the caller keeps what it had and reports drift. 2.3.0 truncated.
+  if (at < len && (body[at] == '.' || body[at] == 'e' || body[at] == 'E')) {
+    return false;
+  }
   out = value;
   return true;
 }

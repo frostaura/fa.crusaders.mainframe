@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DotSeparated } from "@/components/ui/dot-separated";
 import {
-  Bell, CaretRight, Clock, Coins, Door, Envelope, Receipt, Repeat, ShieldCheck, ShieldWarning, UserMinus, UserPlus, Warning,
+  Bell, CaretRight, Clock, Coins, Door, Envelope, Key, Receipt, Repeat, ShieldCheck, ShieldWarning, UserMinus, UserPlus, Warning,
   WebhooksLogo, WifiHigh, WifiSlash, type Icon,
 } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,8 +46,12 @@ const KIND_ICON: Record<string, Icon> = {
   "webhook.auto_disabled": WebhooksLogo,
   "schedule.conflict": Repeat,
   "booking.overdraft_authorised": Coins,
+  // Past bookings nobody settled (BM-11 of the money pass): booked, a payer, never checked in.
+  "booking.unsettled": Clock,
   "admin.role_changed": ShieldCheck,
   "code.forgery_suspected": ShieldWarning,
+  // MCV1-09: the member-code rollout moved on by itself.
+  "member_code.phase_moved": Key,
   "member.deleted": UserMinus,
   // A mail the outbox gave up on after every retry.
   "email.undeliverable": Envelope,

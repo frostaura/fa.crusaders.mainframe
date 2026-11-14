@@ -49,6 +49,13 @@ bool LedPattern::on(uint32_t nowMs) const {
     // the link blink below, which is where it belongs once the cue is over.
   }
 
+  // 2.0.0's portal state (door-gate.md §14.5) outranks the fault and link
+  // patterns because it says why the door is behaving oddly.
+  if (setup_) {
+    const uint32_t t = nowMs % kSetupPeriodMs;
+    return t < 600U || (t >= 800U && t < 1000U);
+  }
+
   if (fault_) {
     // Four times the link blink's rate, and it outranks it: a board with no
     // watchdog AND no radio is a board to look at for the first reason, and a
@@ -67,7 +74,9 @@ bool LedPattern::on(uint32_t nowMs) const {
     return ((nowMs / kLinkDownHalfMs) % 2U) == 0U;
   }
 
-  return false;
+  // The idle blip: a door running on a roster it may not be able to refresh
+  // (DG-6). Never louder than a blip.
+  return degraded_ && (nowMs % kIdlePeriodMs) < kBlipMs;
 }
 
 } // namespace gatelogic

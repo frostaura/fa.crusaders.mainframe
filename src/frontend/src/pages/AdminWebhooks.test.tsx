@@ -123,6 +123,20 @@ describe("AdminWebhooks", () => {
     expect(screen.queryByText("undefinedms")).not.toBeInTheDocument();
   });
 
+  /** BA-23: Escape meant for the {variable} suggestions closed the dialog and lost the URL. */
+  it("keeps a typed URL through Escape — the suggestions close, the dialog does not", async () => {
+    stubFetch(routes());
+    renderPage(<AdminWebhooksPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    const url = await screen.findByRole("combobox", { name: /URL template/ });
+    fireEvent.focus(url);
+    fireEvent.change(url, { target: { value: "https://hook.example/c/{c" } });
+    fireEvent.keyDown(url, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement ?? url, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /URL template/ })).toHaveValue("https://hook.example/c/{c");
+  });
+
   /**
    * D-F7. Seven of fifteen classes were offered, and the whole member lifecycle — the two
    * the spec names inside the registration flow by name — was missing.
@@ -143,6 +157,8 @@ describe("AdminWebhooks", () => {
       "booking.payer_changed", "minutes.refund_reversed", "minutes.penalty_returned",
       // P13 §5: the money events are named for minutes; the old unit's names are gone.
       "minutes.purchased", "minutes.refunded", "minutes.penalty_applied", "minutes.adjusted", "minutes.sold_at_desk",
+      // Money lane BM-6: rand given back for a purchase.
+      "minutes.payment_reversed",
       "member.registered", "member.approved", "member.rejected",
       "member.suspended", "member.reactivated",
       // The last of the nine, reinstated. It was absent because §9 asserted no liveness

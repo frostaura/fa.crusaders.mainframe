@@ -6,6 +6,9 @@ import { renderPage, stubFetch, type StubRoute } from "../../../test/harness";
 import { PACKAGE_IDS, seededShelf, shelfPackage } from "../../../test/minutesFixtures";
 import { ADJUST_SHEET, PAYMENT_CHOICES, SELL_COPY as COPY } from "../../../lib/deskMinutesCopy";
 
+/** BA-20: the note's label says "(required)" up front, so it is found by its first word. */
+const SALE_NOTE = new RegExp(`^${COPY.detailLabel}\\b`);
+
 /**
  * Review round 7 on the desk's sheets: the payment step's refusal names the payment (J7-6); a
  * package that costs the member nothing is GIVEN — no payment questions, not revenue, `package_free`
@@ -53,7 +56,7 @@ describe("J7-10 — a R0.00 package is given, not sold for cash", () => {
     // Still a note: the member sees why on their wallet.
     fireEvent.click(screen.getByRole("button", { name: COPY.next }));
     expect(await screen.findByText(/Say why this one/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(COPY.detailLabel), { target: { value: "League prize" } });
+    fireEvent.change(screen.getByLabelText(SALE_NOTE), { target: { value: "League prize" } });
     fireEvent.click(screen.getByRole("button", { name: COPY.next }));
     expect(await screen.findByText(COPY.revenueFor(0))).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(PAYMENT_CHOICES[0].label);
@@ -76,7 +79,7 @@ describe("J7-10 — a R0.00 package is given, not sold for cash", () => {
     expect(screen.queryByText(COPY.freeNote)).toBeNull();
     fireEvent.pointerDown(screen.getByRole("combobox", { name: COPY.paymentLabel }), POINTER);
     fireEvent.click(await screen.findByRole("option", { name: PAYMENT_CHOICES[0].label }));
-    fireEvent.change(screen.getByLabelText(COPY.detailLabel), { target: { value: "Receipt 1" } });
+    fireEvent.change(screen.getByLabelText(SALE_NOTE), { target: { value: "Receipt 1" } });
     fireEvent.click(screen.getByRole("button", { name: COPY.next }));
     expect(await screen.findByText(COPY.revenueFor(120))).toBeInTheDocument();
   });

@@ -203,12 +203,13 @@ test("V-13: at 1280 the save bar does not cover the error under the field being 
   expect(errorBox.y + errorBox.height, "the error sits under the save bar").toBeLessThanOrEqual(barTop + 1);
 });
 
-test("V-5: at 1280 'Regenerate key' is on one line", async ({ page }) => {
+// BA-01: Regenerate is gone (a reflash of every board); the key's control is "Rotate key" now.
+test("V-5: at 1280 'Rotate key' is on one line", async ({ page }) => {
   await open(page, "/admin/monitoring/devices", [
-    { path: "/api/v1/admin/devices/api-key", body: { api_key: "W6wWabcdefghQWpI", regenerated_at: "2026-09-29T17:05:00Z" } },
+    { path: "/api/v1/admin/devices/api-key", body: { api_key: "W6wWabcdefghQWpI", regenerated_at: "2026-09-29T17:05:00Z", key_id: "k1", rotation: null } },
     { path: "/api/v1/admin/devices", body: [] },
   ], { width: 1280 });
-  const button = page.getByRole("button", { name: "Regenerate key" });
+  const button = page.getByRole("button", { name: "Rotate key" });
   await expect(button).toBeVisible(ARRIVES);
   const lines = await button.evaluate((el) => {
     const range = document.createRange();

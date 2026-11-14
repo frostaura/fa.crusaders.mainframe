@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../bridgelogic/FlashTable.h"
 #include "../memcode/Token.h"
 
 namespace bridgelogic {
@@ -30,7 +31,8 @@ struct ReasonLines {
   bool arms;
 };
 
-constexpr ReasonLines kReasons[] = {
+/// BRIDGE_FLASH: on the ESP8266 a row is copied out whole (it has a bool).
+constexpr ReasonLines kReasons[] BRIDGE_FLASH = {
     {"no_booking", "NO BOOKING", "SEE THE DESK", true},
     {"insufficient_balance", "TOO FEW MINUTES", "BUY & RETRY", true},
     {"wrong_court", "WRONG COURT", "SEE THE DESK", true},
@@ -81,7 +83,9 @@ court::Outcome refusedFor(const char* body, size_t len) {
     if (strcmp(reason, "too_early") == 0) {
       return tooEarly(body, len);
     }
-    for (const ReasonLines& row : kReasons) {
+    for (size_t i = 0U; i < sizeof(kReasons) / sizeof(kReasons[0]); ++i) {
+      ReasonLines row;
+      flashCopy(&row, &kReasons[i], sizeof(row));
       if (strcmp(reason, row.reason) == 0) {
         return refusal(row.line1, row.line2, row.arms);
       }
@@ -218,8 +222,9 @@ Attempt ScanFlow::onScan(const LinkState& link) const {
 ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body, size_t len,
                                               const int16_t courtNumbers[devlink::kMaxCourts],
                                               uint8_t courtCount) const {
-  if (status != 200U || body == nullptr) {
-    // Includes 0, 401, 429 and every 5xx. Only a 200 carries a decision.
+  if (status < 200U || status > 299U || body == nullptr) {
+    // Includes 0, 401, 429 and every 5xx. Every 2xx carries a decision
+    // (device-api.md §11.2, FC-4: 2.3.0 read a 201 as no decision at all).
     return fallback();
   }
 
@@ -271,7 +276,17 @@ ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body,
     return result;
   }
 
-  return granted(grantedSeconds, relay);
+  ActivationResult result = granted(grantedSeconds, relay);
+  // v3 (device-api.md §9, FSF-05): the UNCAPPED time to the end of the chained
+  // run, which arms the !EXT relighting past the 90-minute relay cap. Absent
+  // (a pre-v3 server) or unreadable falls back to granted_seconds.
+  uint32_t playRemaining = 0U;
+  result.playRemainingSeconds =
+      devapi::json::topLevelUnsignedField(body, len, "play_remaining_seconds", playRemaining) &&
+              playRemaining >= grantedSeconds
+          ? playRemaining
+          : grantedSeconds;
+  return result;
 }
 
 } // namespace bridgelogic

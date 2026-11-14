@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "gatelogic/GateHeartbeat.h"
+#include "gatelogic/GateKeys.h"
+#include "gatelogic/GateReply.h"
 
 namespace gatelogic {
 
@@ -16,7 +18,23 @@ HttpOutcome GateApi::post(const char* path, const char* body, char* out, size_t 
   if (out != nullptr && outCap > 0U) {
     out[0] = '\0';
   }
-  const HttpOutcome outcome = http_.post(path, body, out, outCap);
+  HttpOutcome outcome = http_.post(path, body, out, outCap);
+  if (outcome.peerStatus == 401U && keys_ != nullptr && keys_->switchForRetry()) {
+    // THE SAME REQUEST ONCE MORE, with the other key this board holds (§6). A
+    // 401 is never a reason to erase a key: it is as likely a server restored
+    // from a backup taken before the rotation as a key that was retired.
+    ++keyRetries_;
+    if (between_ != nullptr) {
+      between_->betweenCalls();
+    }
+    if (out != nullptr && outCap > 0U) {
+      out[0] = '\0';
+    }
+    outcome = http_.post(path, body, out, outCap);
+    if (outcome.peerStatus == 401U) {
+      keys_->retryFailed();
+    }
+  }
   // A fresh clock read: the call may have just spent its whole timeout, and a
   // backoff window that starts four seconds in the past is four seconds short.
   // The fault below is stamped from the same instant, for the same reason.
@@ -64,11 +82,23 @@ ScanDecision GateApi::scan(const char* mac, const char* token, uint32_t adoptedU
     return decision;
   }
 
-  char response[kScanResponseCap] = {};
+  // STATIC, and 256 rather than 1.x's 128 (FC-6): an over-cap body became
+  // status 0, which taught the breaker the server was down.
+  static char response[kGateScanResponseCap];
+  response[0] = '\0';
   const HttpOutcome outcome = post(kPathGate, body, response, sizeof(response));
-  // `status`, deliberately: a 200 whose body this board could not read is not a
-  // decision anybody may act on, and it goes to the roster.
-  return onGateResponse(outcome.status, response, strlen(response), adoptedUnlockMs, hardCapMs);
+  // `adoptedUnlockMs` no longer fills in a missing `unlock_seconds`: an open
+  // without one is unreadable (§11.2) and is decided offline instead.
+  static_cast<void>(adoptedUnlockMs);
+  return readScanReply(outcome.status, response, strlen(response), hardCapMs);
+}
+
+HttpOutcome GateApi::heartbeatV3(const GateBeat& beat, char* out, size_t outCap) {
+  static char body[kGateHeartbeatRequestCap];
+  if (renderGateHeartbeatV3(body, sizeof(body), beat) == 0U) {
+    return noCall();
+  }
+  return post(kPathHeartbeat, body, out, outCap);
 }
 
 HttpOutcome GateApi::heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs,

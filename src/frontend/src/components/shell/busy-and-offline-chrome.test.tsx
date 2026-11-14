@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../../App";
 import { resetRefreshBackoff, tokenStore } from "@/lib/api";
@@ -26,7 +26,7 @@ function json(status: number, body: unknown) {
 }
 
 async function header(): Promise<HTMLElement> {
-  return vi.waitFor(() => {
+  return waitFor(() => {
     const found = document.querySelector<HTMLElement>("[data-app-header]");
     if (!found) throw new Error("no app header yet");
     return found;

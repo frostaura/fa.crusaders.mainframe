@@ -129,8 +129,13 @@ public sealed class R14ReviewFixesHttpTests(PostgresFixture pg) : IClassFixture<
 
         await g.Club.WriteAsync(g.App, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = g.Club.TenantId, UserId = g.Club.Organiser, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = 16,
-            ActorUserId = g.Club.Admin, RelatedBookingId = g.BookingId, Reason = "Goodwill on the court",
+            TenantId = g.Club.TenantId,
+            UserId = g.Club.Organiser,
+            Type = LedgerEntryType.AdminAdjustment,
+            AmountMinutes = 16,
+            ActorUserId = g.Club.Admin,
+            RelatedBookingId = g.BookingId,
+            Reason = "Goodwill on the court",
         }));
         await SettleAsync(g);
 
@@ -236,8 +241,13 @@ public sealed class R14ReviewFixesHttpTests(PostgresFixture pg) : IClassFixture<
         var club = await PlayersClub.SeedAsync(app, "r14l5given");
         await club.WriteAsync(app, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = club.Sam, Type = LedgerEntryType.AdminTopUp, AmountMinutes = 60,
-            ActorUserId = club.Admin, ZarPaid = null, Reason = "desk sale, no rand recorded",
+            TenantId = club.TenantId,
+            UserId = club.Sam,
+            Type = LedgerEntryType.AdminTopUp,
+            AmountMinutes = 60,
+            ActorUserId = club.Admin,
+            ZarPaid = null,
+            Reason = "desk sale, no rand recorded",
         }));
 
         var revenue = await club.Client(app, club.Admin, admin: true).GetFromJsonAsync<JsonElement>("/api/v1/admin/reports/revenue");

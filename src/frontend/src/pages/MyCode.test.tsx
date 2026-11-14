@@ -23,6 +23,7 @@ import { fromHex, importHmacKey, isSoftHmacKey } from "../lib/memberCode/hotp";
 import { loadMemberCode, saveMemberCode } from "../lib/memberCode/keyStore";
 import { GATE_ROSTER_MAX_ENTRIES } from "../lib/gateCopy";
 import { MY_CODE } from "../lib/myCodeCopy";
+import { CODE_HELP } from "../lib/onboardingCopy";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 
 /**
@@ -1775,7 +1776,7 @@ describe("MyCode at a club with a door", () => {
     expect(qr).toBeLessThan(order(screen.getByText(/The lock released/)));
     // The explanation sits behind the help icon now, not on the page by default.
     expect(screen.queryByText(/Show this at the club door/)).toBeNull();
-    expect(screen.getByRole("button", { name: /Help with your code/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: CODE_HELP.label })).toBeTruthy();
     expect(qr).toBeLessThan(order(screen.getByRole("heading", { name: /What opens the door/ })));
     // D1: there is no choice of code to put above it — the heading is the only thing that is.
     expect(screen.queryByRole("tablist")).toBeNull();

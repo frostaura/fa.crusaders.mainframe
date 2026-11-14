@@ -77,7 +77,10 @@ describe("the admin members table", () => {
     // rows against 60.5-69px on one line. Wrapping is the cause of the tall row, not the cure.
     expect(actions.className).toContain("flex-row");
     expect(actions.className).not.toContain("flex-col");
-    expect(actions.className).not.toContain("flex-wrap");
+    // Only an armed confirm may wrap the row (V-1); at rest it is one line.
+    const tokens = actions.className.split(/\s+/);
+    expect(tokens).toContain("flex-nowrap");
+    expect(tokens).not.toContain("flex-wrap");
   });
 
   it("pins the actions column so the buttons do not start off-screen", async () => {
@@ -179,12 +182,23 @@ describe("the members table's own controls", () => {
    * a finger. P5 uses the design system's dense admin size — 36px to the eye, 44px to the finger
    * through the button's own extended hit area — so a pending row's three controls fit its line.
    */
+  it("gives the date column room for its tracked capitals and its caret (BA-16)", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+    const head = (await screen.findByRole("button", { name: /^Joined/i })).closest("th")!;
+    // 6rem cut "JOINED" to "JOIN…" at 1440; 7rem holds the word, the tracking and the caret.
+    expect(head.className.split(" ")).toContain("w-28");
+  });
+
   it("gives Approve and Reject a 44px target", async () => {
     stubFetch(routes());
     renderPage(<AdminMembersPage />);
     for (const name of [ROW_ACTIONS.approve, ROW_ACTIONS.reject]) {
       const control = await screen.findByRole("button", { name });
-      expect(control.className, `${name} lost its extended hit area`).toContain("after:-inset-y-[5px]");
+      // Reject is a sm Button with the extended hit area; Approve is an armed ConfirmButton,
+      // which is a full 44px control (min-h-touch) of its own (BA-02).
+      const classes = control.className.split(" ");
+      expect(classes.includes("after:-inset-y-[5px]") || classes.includes("min-h-touch"), `${name} lost its 44px target`).toBe(true);
     }
     const more = screen.getByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") });
     expect(more.className).toContain("after:-inset-[5px]");

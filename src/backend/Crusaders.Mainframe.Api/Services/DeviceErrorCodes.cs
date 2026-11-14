@@ -106,6 +106,54 @@ public static class DeviceErrorCodes
     /// </summary>
     public const string RestoreNotConfirmed = "restore_not_confirmed";
 
+    // ---- Device contract v3 (device-api.md §4, device-serial-protocol.md v3, door-gate.md §14) ----
+
+    /// <summary>A tagged bridge→Mega frame went unacknowledged after its three retries (serial v3).</summary>
+    public const string MegaUnacked = "mega_unacked";
+
+    /// <summary>The bridge tried three times to re-light a court the snapshot says is paid for, and could not (§4).</summary>
+    public const string RelightFailed = "relight_failed";
+
+    /// <summary>The bridge's screen queue was full and dropped a whole screen, oldest first (serial v3).</summary>
+    public const string ScreenDropped = "screen_dropped";
+
+    /// <summary>A door's heartbeat answer named another kind of board; no roster was adopted (door-gate.md §14.4, DG-9).</summary>
+    public const string KindMismatch = "kind_mismatch";
+
+    /// <summary>
+    /// A door could not reach the club on a network or server address it was sent, and went back to
+    /// the previous one it knew worked (door-gate.md §14.5); that version is never adopted again.
+    /// </summary>
+    public const string NetFallback = "net_fallback";
+
+    // ---- What a v3 board reports about itself (device-api.md §13), raised by the server ----
+
+    /// <summary>The board restarted for a reason other than power-on or its own software restart (a crash, a watchdog, a brown-out).</summary>
+    public const string BoardRestarted = "board_restarted";
+
+    /// <summary>The largest free heap block fell below the 4096-byte planning floor.</summary>
+    public const string HeapLow = "heap_low";
+
+    /// <summary>The stack low-water mark fell below the 512-byte planning floor.</summary>
+    public const string StackLow = "stack_low";
+
+    /// <summary>The board could not read part of the server's last answer (§11.2 <c>drift</c>); the detail names the keys.</summary>
+    public const string AnswerDrift = "answer_drift";
+
+    /// <summary>No LCD backpack answered the Mega's address probe (<c>mega.lcd</c> = <c>00</c>).</summary>
+    public const string LcdAbsent = "lcd_absent";
+
+    /// <summary>The server had to leave member-code keys out of a heartbeat (the ring's cap or the body budget, member-code.md §5.4).</summary>
+    public const string CodeKeysTrimmed = "code_keys_trimmed";
+
+    // ---- What the bookings and the box disagree about (BA-04), raised by the server ----
+
+    /// <summary>The box says a court is lit and nothing is booked on it, past the grace window (<see cref="LightsMismatch"/>).</summary>
+    public const string LightsOnNothingBooked = "lights_on_nothing_booked";
+
+    /// <summary>Somebody checked in on a court and the box says its lights are off, past the grace window (<see cref="LightsMismatch"/>).</summary>
+    public const string CheckedInLightsOff = "checked_in_lights_off";
+
     /// <summary>
     /// What a code this server has never heard of is recorded as. The raw string goes into the
     /// row's detail, so a firmware ahead of this server is visible rather than silent.
@@ -139,7 +187,7 @@ public static class DeviceErrorCodes
         return code switch
         {
             // Critical — the club cannot sell or deliver court time until somebody attends.
-            RelayCmdDropped or RestoreFailed or RestoreNotConfirmed or MegaLinkLost => DeviceErrorSeverity.Critical,
+            RelayCmdDropped or RestoreFailed or RestoreNotConfirmed or MegaLinkLost or RelightFailed => DeviceErrorSeverity.Critical,
 
             // Error — a board is failing at something it is for.
             SerialBadCrc or SerialBadFrame or SerialOverrunRx or SerialOverrunTx
@@ -147,7 +195,8 @@ public static class DeviceErrorCodes
                 or OnNotAcked or ExtRefused or LcdI2cTimeout
                 or WdtReset or StoreWriteFailed or Http5xx or ApiBreakerOpen
                 or ScannerUartError or NvsWriteFailed or RelockOverdue
-                or AuthFailed or CourtNotMapped or Unknown => DeviceErrorSeverity.Error,
+                or AuthFailed or CourtNotMapped or Unknown or MegaUnacked or KindMismatch
+                or BoardRestarted or LcdAbsent or CheckedInLightsOff => DeviceErrorSeverity.Error,
 
             // Warning — degraded, self-correcting, or a rule the club set being hit.
             LcdResync or QueueOverflow or RosterRejected or Http4xx or HttpTimeout
@@ -156,7 +205,9 @@ public static class DeviceErrorCodes
                 or UnregisteredMac or MalformedBody or ClockClamped or EventRejected
                 or SeqRegression or OutageOpened or WalkupRefused or ActivationRefused
                 or TooManyUnacknowledgedDevices or QueueNoPush or QueueEventsLost
-                or ErrorLogOverflow => DeviceErrorSeverity.Warning,
+                or ErrorLogOverflow or ScreenDropped
+                or HeapLow or StackLow or AnswerDrift or CodeKeysTrimmed or NetFallback
+                or LightsOnNothingBooked => DeviceErrorSeverity.Warning,
 
             // Info — worth counting, not worth waking anybody.
             MegaLinkBack or Boot => DeviceErrorSeverity.Info,
@@ -249,6 +300,19 @@ public static class DeviceErrorCodes
             QueueNoPush => "The board could not send some of its check-ins",
             QueueEventsLost => "The board lost some records before it could send them",
             ErrorLogOverflow => "This board is reporting more distinct problems than the club records",
+            MegaUnacked => "The court box's screen-and-relay half did not acknowledge an instruction",
+            RelightFailed => "A paid court should be lit and the box could not switch it back on",
+            ScreenDropped => "The court box had to skip a screen because too many were waiting",
+            KindMismatch => "A door was sent another kind of board's settings and ignored them",
+            NetFallback => "A door could not reach the club on the new network settings and went back to the ones that worked",
+            BoardRestarted => "The board restarted on its own (a crash, a watchdog or a power dip), not because it was switched on",
+            HeapLow => "The board is running short of working memory",
+            StackLow => "The board came close to running out of stack memory",
+            AnswerDrift => "The board could not read part of the server's answer",
+            LcdAbsent => "The court box's screen did not answer",
+            CodeKeysTrimmed => "Some members' codes could not be sent to the board, so it cannot check them offline",
+            LightsOnNothingBooked => "A court's lights are on and nothing is booked on it",
+            CheckedInLightsOff => "Somebody checked in on a court and its lights are off",
             Unknown => "An error the club's software does not have a name for",
             _ => "An error the club's software does not have a name for",
         };
@@ -270,6 +334,9 @@ public static class DeviceErrorCodes
         SeqRegression, OutageOpened, CourtNotMapped, WalkupRefused, ActivationRefused,
         TooManyUnacknowledgedDevices, QueueNoPush, QueueEventsLost, RestoreNotConfirmed,
         Unknown, ErrorLogOverflow,
+        MegaUnacked, RelightFailed, ScreenDropped, KindMismatch, NetFallback,
+        BoardRestarted, HeapLow, StackLow, AnswerDrift, LcdAbsent, CodeKeysTrimmed,
+        LightsOnNothingBooked, CheckedInLightsOff,
     ];
 
     private static readonly HashSet<string> Known = new(All, StringComparer.Ordinal);

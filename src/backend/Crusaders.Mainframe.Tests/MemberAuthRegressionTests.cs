@@ -224,8 +224,12 @@ public class MemberAuthRegressionTests
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             Assert.True((await db.Users.FirstAsync(u => u.Id == userId)).EmailVerified);
-            // And the ingress that used to refuse them now lets them in.
-            Assert.IsType<LoginResult.Ok>(await Auth(scope).LoginAsync("magic@test.local", "Pass1234!", default));
+            // The link signed them in and proved the mailbox — but NOT the password the form chose
+            // while the address was unproven: whoever typed the address chose it (BP-02). It is
+            // retired, and the member sets their own from the signed-in session. Before the
+            // platform pass this asserted the form's password still worked, which is the hole.
+            Assert.Null((await db.Users.FirstAsync(u => u.Id == userId)).PasswordHash);
+            Assert.IsType<LoginResult.InvalidCredentials>(await Auth(scope).LoginAsync("magic@test.local", "Pass1234!", default));
         }
     }
 

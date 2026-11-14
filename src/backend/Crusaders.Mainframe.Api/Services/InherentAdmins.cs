@@ -47,10 +47,8 @@ public sealed record InherentAdmins(IReadOnlySet<string> Emails, IReadOnlyList<s
     /// The configuration key, in the form an operator sets it: <c>Admins__Emails__0</c>.
     ///
     /// <para>
-    /// <c>Admins</c> rather than <c>Platform</c>, which would have been the obvious word and is
-    /// taken: <see cref="Domain.User.IsPlatformAdmin"/> already means something else — an account
-    /// that is not tenant-scoped at all — and a <c>Platform:AdminEmails</c> key that did not set
-    /// that flag would be read as a bug by the next person to open either file.
+    /// <c>Admins</c> rather than <c>Platform</c>: these addresses are club admins wherever they
+    /// hold an account, never accounts above the clubs — there is no such account (BP-13).
     /// </para>
     /// </summary>
     public const string SectionKey = "Admins:Emails";

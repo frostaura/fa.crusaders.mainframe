@@ -56,16 +56,30 @@ public static class QrEndpoints
             MainframeDbContext db,
             IdentificationResolver identities,
             CourtActivationService activation,
+            [AsParameters] KioskCodes kiosk,
             CancellationToken ct) =>
         {
             if (string.IsNullOrEmpty(req.Token)) return Results.BadRequest(new { error = "token_required" });
+
+            // MCV1-04 (member-code §13): the kiosk accepts the v1 member code the phone shows — it
+            // took legacy codes only, while the phone has shown nothing but v1 since 42d3990d. A v1
+            // code is checked exactly as at a court box and spends its court use; a legacy one goes
+            // through the shared resolver as before (and is refused after the cut-off, §8).
+            var (v1, match) = await KioskV1Async(req.Token, kiosk, ct);
+            var claim = match is null ? null
+                : await kiosk.MemberCodes.TryClaimAsync(match, MemberCodeUseClass.Court, null, "kiosk", ct);
+            if (match is not null && claim is null) return Results.Ok(new { matched = false, reason = MemberCodeIdentity.CodeUsed });
 
             // Resolved through the shared resolver rather than inline here. There were two
             // copies of this — one for the courtside camera and one that would have been
             // written for the court box's walk-up path — and two implementations of "is this
             // code real" is one implementation more than a security check should ever have.
-            var resolved = await identities.ResolveForActivationAsync("qr", req.Token, ct);
-            if (resolved is null) return Results.Ok(new { matched = false, reason = "invalid_or_expired" });
+            var resolved = v1 ?? (MemberCodeMath.IsV1Shaped(req.Token.Trim()) ? null : await identities.ResolveForActivationAsync("qr", req.Token, ct));
+            if (resolved is null)
+            {
+                await kiosk.MemberCodes.ReleaseAsync(claim);
+                return Results.Ok(new { matched = false, reason = "invalid_or_expired" });
+            }
             var userId = resolved.UserId;
 
             // Identify AND activate. This used to confirm a booking existed and return a
@@ -84,11 +98,22 @@ public static class QrEndpoints
             // court the booking is not on, it is no booking at all here.
             if (booking is null || (resolved.BookingId is { } named && booking.Id != named))
             {
+                await kiosk.MemberCodes.ReleaseAsync(claim);
                 return Results.Ok(new { matched = false, reason = "no_active_booking" });
             }
 
-            var result = await activation.ActivateAsync(
-                court, booking, identifiedUserId: userId, payerOverrideUserId: null, method: "qr", ct);
+            ActivationResult result;
+            try
+            {
+                result = await activation.ActivateAsync(
+                    court, booking, identifiedUserId: userId, payerOverrideUserId: null, method: "qr", ct);
+            }
+            catch
+            {
+                await kiosk.MemberCodes.ReleaseAsync(claim);
+                throw;
+            }
+            if (result is not ActivationResult.Activated) await kiosk.MemberCodes.ReleaseAsync(claim);
 
             return CourtActivationResponse.For(result, userId);
         }).RequireAuthorization(p => p.RequireRole("admin"))
@@ -96,6 +121,18 @@ public static class QrEndpoints
 
         return app;
     }
+
+    /// <summary>A v1-shaped token checked as a member code at the instant it arrived; (null, null) for anything else or a code that does not verify.</summary>
+    private static async Task<(ResolvedAccessCode? Resolved, MemberCodeMatch? Match)> KioskV1Async(string token, KioskCodes kiosk, CancellationToken ct)
+    {
+        if (!MemberCodeMath.IsV1Shaped(token.Trim())) return (null, null);
+        var settings = await kiosk.Settings.GetAsync(ct);
+        return await MemberCodeIdentity.ResolveAsync(
+            kiosk.Codes, kiosk.MemberCodes, new ScannedCode(token, 0), settings, kiosk.Clock.GetUtcNow(), ct);
+    }
+
+    /// <summary>What the kiosk needs to check a v1 member code, bundled for the parameter gate.</summary>
+    public sealed record KioskCodes(AccessCodeService Codes, MemberCodeService MemberCodes, TenantSettingsAccessor Settings, TimeProvider Clock);
 
     /// <summary>What the caller asked for. <c>?kind=</c> on <c>POST /me/qr/generate</c>.</summary>
     private const string KindAuto = "auto";

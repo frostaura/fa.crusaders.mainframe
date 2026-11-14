@@ -39,8 +39,13 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
-                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountMinutes = posting.AmountMinutes,
-                    ActorUserId = posting.ActorUserId, RelatedBookingId = bookingId, ExternalReference = posting.ExternalReference,
+                    TenantId = club.TenantId,
+                    UserId = posting.UserId,
+                    Type = posting.Type,
+                    AmountMinutes = posting.AmountMinutes,
+                    ActorUserId = posting.ActorUserId,
+                    RelatedBookingId = bookingId,
+                    ExternalReference = posting.ExternalReference,
                 });
             }
         });
@@ -71,7 +76,11 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
 
         var booked = await desk.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
-            courtId = club.CourtId, userId = club.Organiser, startsAt, sliceCount = 1, allowNegativeBalance = true,
+            courtId = club.CourtId,
+            userId = club.Organiser,
+            startsAt,
+            sliceCount = 1,
+            allowNegativeBalance = true,
         });
         Assert.True(booked.StatusCode == HttpStatusCode.OK, await booked.Content.ReadAsStringAsync());
 
@@ -86,7 +95,8 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
 
         var mail = EmailTemplates.AdminOverdraftAuthorised(EmailCatalogue.Riverside, "x@test.local", new OverdraftNotice(
             payload.ActorName, payload.MemberName, payload.Self, payload.CourtName, payload.StartsAtLocal,
-            payload.AmountMinutes, payload.BalanceAfterMinutes, "https://club.test/admin/changes") { HeldMinutes = payload.HeldMinutes });
+            payload.AmountMinutes, payload.BalanceAfterMinutes, "https://club.test/admin/changes")
+        { HeldMinutes = payload.HeldMinutes });
         var text = MailText.Unwrap(mail.PlainBody);
         Assert.Contains("Can spend after", text, StringComparison.Ordinal);
         Assert.Contains(MoneyFormat.Minutes(-14), text, StringComparison.Ordinal);

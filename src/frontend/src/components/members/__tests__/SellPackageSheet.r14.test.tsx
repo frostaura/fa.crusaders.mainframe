@@ -5,6 +5,9 @@ import { renderPage, stubFetch } from "../../../test/harness";
 import { seededShelf } from "../../../test/minutesFixtures";
 import { PAYMENT_CHOICES, SELL_COPY as COPY } from "../../../lib/deskMinutesCopy";
 
+/** BA-20: the note's label says "(required)" up front, so it is found by its first word. */
+const SALE_NOTE = new RegExp(`^${COPY.detailLabel}\\b`);
+
 /**
  * Review round 14, J14-5: a priced package taken for R0.00 at the desk is a gift — the confirm
  * already read "Give … at no charge?", but the button that opened it still said "Sell 1 hour", and
@@ -23,7 +26,7 @@ async function toCheck(zar: string) {
   fireEvent.pointerDown(await screen.findByRole("combobox", { name: COPY.paymentLabel }), POINTER);
   fireEvent.click(await screen.findByRole("option", { name: PAYMENT_CHOICES[0].label }));
   fireEvent.change(screen.getByLabelText(COPY.zarLabel), { target: { value: zar } });
-  fireEvent.change(screen.getByLabelText(COPY.detailLabel), { target: { value: "Staff" } });
+  fireEvent.change(screen.getByLabelText(SALE_NOTE), { target: { value: "Staff" } });
   fireEvent.click(screen.getByRole("button", { name: COPY.next }));
   await screen.findByText(COPY.revenueFor(Number(zar)));
 }

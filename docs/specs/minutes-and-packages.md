@@ -505,6 +505,18 @@ Dean's answer 1 removes the cap entirely. This disappears:
 - It answers the same shape as `/sell` without `package` and with `zar_received: null`.
 - The `snake_case` aliases `reason_code` and `zar_received` stay bound on both routes, as they are today.
 
+**`POST /api/v1/admin/minutes/{userId}/reverse-payment`** records rand given back for a purchase (money lane BM-6) — the route `refund_outside_system` never was, because that code moves minutes only and Revenue kept the sale. Full contract in [`payments-payfast.md`](./payments-payfast.md), "Money going back".
+
+```json
+{ "entry_id": "uuid of a TopUp or AdminTopUp row that took rand", "kind": "refund|chargeback",
+  "zar_reversed": 120.00, "minutes_taken_back": 60, "reason": "…", "idempotency_key": "…" }
+```
+
+- Posts one `PaymentReversal`: `AmountMinutes = −minutes_taken_back` (0 allowed — the member keeps them), `ZarPaid = −zar_reversed`, `ReversesEntryId` = the purchase, `Reason = "Refund of R120.00 for {the purchase's own reason}"`, `ExternalReference = adjust:{tenant:N}:{key}` (key required).
+- Refused: `entry_not_found` (404 — not this member's, or another club's), `entry_not_reversible` (409 — not a paid funding row), `reversal_exceeds_payment {zar_left, minutes_left}` (409, summed over every earlier reversal under the payer lock), `kind_invalid`, `zar_reversed_out_of_range` / `_not_whole_cents`, `minutes_out_of_range`, `reason_required`, `idempotency_key_required` / `_invalid`, `idempotency_key_reused` (409).
+- Change action `payment.reversed` (no "credit" — §2.5 only shrinks), audit `credit.adjusted`, mail `EmailTemplates.PaymentReversed`, webhook `minutes.payment_reversed`. The balance may go below zero.
+- `GET /api/v1/admin/minutes/{userId}/reversible` → `{entries: [{entry_id, type, created_at, reason, zar_paid, amount_minutes, zar_reversed, minutes_taken_back, zar_left, minutes_left}]}`, newest first, at most 200.
+
 ### 3.8 Groups and tariff
 
 **Group wire** (`GET /api/v1/admin/member-groups`, the POST and PATCH answers):
@@ -653,6 +665,8 @@ Upcoming games become `my_share_minutes`, `my_paid_minutes` and `my_owing_minute
 `net_minutes = refunded − penalty − Σ partner_refunds.minutes`; the partner figures are read after the cancel (R19 J19-4, `players-and-splits.md` §3). The bare `ToHttpResult` answer is `{refunded_minutes, penalty_minutes}`.
 
 **A member cannot cancel a booking they have checked in to (R15 D15-5):** `409 {"error":"already_checked_in"}`. **Why:** the scan proved the court was used, a self-cancel refunds nothing, and the freed slot could be resold — the club would take the minutes twice for one lit slot. The admin cancel is not refused for a started or checked-in session, including the admin's own booking; it cancels with nothing refunded and the booker gets the `cancelled_no_refund` frame.
+
+**Bookings nobody settled (BM-11, pass 2).** `GET /api/v1/admin/bookings/unsettled?cursor=&limit=` lists, oldest first, the bookings the daily `booking.unsettled` notice counts — and only those, by one shared query: older than `no_show_lookback_days`, still `Booked`, never checked in, with a payer. Each row is `{booking_id, court_id, court_name, starts_at, ends_at, charged_minutes, member {user_id, name, photo_url}, payer}` (`payer` only when somebody else paid at the box), beside `total`, `lookback_days`, `timezone` and a keyset `next_cursor`. The notice links to the console's `/admin/bookings`, whose "Never settled" filter is this list; cancelling one from there is the desk's ordinary cancel, which gives the member the whole charge back (the penalty window is long past), and leaving it keeps the charge.
 
 **The desk is told why a booking it can see is not cancellable (R17 E17-6 / J17-7).** `POST /api/v1/admin/bookings/{id}/cancel` on a booking already cancelled answers `409 {"error":"booking_not_open"}` (the split and add routes' word); on one that is played, a no-show or a club hold, `409 {"error":"not_cancellable","status":"completed|no_show|blocked"}`. Both were a bare 404. **Since R18 (J18-8) a member's cancel of their OWN such booking answers the same** — `409 booking_not_open` on a cancelled one, `409 not_cancellable {status}` on a played one, a no-show or a hold — the losing half of a double-tap included, which read "That booking is no longer there" about a game the member could see. A stranger's cancel is still 404: the ownership check comes first, so a 409 never tells a stranger the id is real. The member's sheet treats both as final (`feature-spec.md` §7). In a bulk cancel, an already-cancelled row is `already_cancelled` and a settled one is `failed` with `error: "not_cancellable"`.
 

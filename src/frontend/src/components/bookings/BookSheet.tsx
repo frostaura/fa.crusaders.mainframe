@@ -10,7 +10,8 @@ import { Warning } from "@/components/ui/icons";
 import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
 import { worthRetrying } from "@/lib/bookingErrors";
-import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine, heldPartsLine } from "@/lib/bookingsCopy";
+import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine, heldPartsLine, lateStartLine } from "@/lib/bookingsCopy";
+import { useTicker } from "@/lib/useTicker";
 import { firstNameOf, heldPartsOf, type HeldPart } from "@/lib/bookingsApi";
 import { useBalance } from "@/lib/useBalance";
 import { BUY_MINUTES_PATH } from "@/lib/minutes";
@@ -120,6 +121,7 @@ function BookFlowView(props: ViewProps) {
   // R18 L18-2 — a refusal is scrolled into view and takes the keyboard, except from "Pick another
   // time" (R11 X11-3), which the refusal describes instead.
   useRefusalInView(flow.action.status === "error" ? flow.action.error : null, "[data-sheet='book']", flow.primary.kind !== "gone");
+  useRefusalInView(flow.splitRefusal, "[data-sheet='book']");
 
   // A new step is a new screen: take a screen reader to its top rather than leaving it on a
   // button that has just changed meaning under it. R8 L8-5 — and the EYE to its top too: the
@@ -208,6 +210,25 @@ function CancelTerms({ terms }: { terms: BookSheetProps["cancelTerms"] }) {
 }
 
 /**
+ * Go-live BM-06 — the soonest slot already starts inside the late-cancellation window: a warning
+ * above the terms, so a booking made by mistake is not a penalty the member never saw coming. The
+ * clock is re-read every 15 s while the window can still apply, so a sheet left open catches up.
+ */
+function LateStartNotice({ flow, terms }: { flow: BookFlow; terms: BookSheetProps["cancelTerms"] }) {
+  const armed = Boolean(terms && terms.penaltyPct > 0 && terms.windowMinutes > 0 && flow.sendable.length > 0);
+  const now = useTicker(armed, 15_000);
+  if (!armed || !terms) return null;
+  const soonest = Math.min(...flow.sendable.map((s) => Date.parse(s.startsAt)));
+  const away = Math.floor((soonest - now) / 60_000);
+  if (!(away < terms.windowMinutes)) return null;
+  return (
+    <Alert tone="warning" live="polite" data-late-start="">
+      {lateStartLine(away, terms.penaltyPct, flow.sendable.length)}
+    </Alert>
+  );
+}
+
+/**
  * "12 min held until Wed 30 Sep, 20:00", under the money, when any of it is held (§3a) — and
  * "16 min owed back to partners — paid from the next minutes you buy" when any is owed back (P11),
  * which is why "Balance now" can read below zero for a member.
@@ -254,6 +275,7 @@ function ConfirmStep({ flow, reasonId, terms }: { flow: BookFlow; reasonId: stri
       <ConfirmPlayers players={flow.players} />
       {flow.money ? <MoneyRows rows={flow.money} label={BOOK_SHEET.total} /> : null}
       <HeldNote flow={flow} />
+      {flow.hold ? null : <LateStartNotice flow={flow} terms={terms} />}
       {flow.hold ? null : <CancelTerms terms={terms} />}
       {flow.quote.state.status === "loading" ? <span role="status" className="sr-only">{BOOK_SHEET.quoteReading}</span> : null}
       {flow.godMode ? <GodModeNotice name={flow.godMode.name} balanceAfter={flow.godMode.balanceAfter} owedBack={flow.godMode.owedBack} /> : null}

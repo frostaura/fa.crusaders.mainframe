@@ -36,8 +36,6 @@ describe("every new key has a row, a bound and a sentence", () => {
 
   /** D2 §14's bounds, restated here so a drift in either direction fails a test. */
   it.each([
-    ["lcd_revert_seconds", 5, 120],
-    ["rapid_scan_window_seconds", 0, 60],
     ["member_max_slots_per_day", 0, 96],
     ["admin_bulk_max_items", 1, 500],
     ["schedule_materialisation_days", 7, 365],
@@ -155,5 +153,22 @@ describe("what the page refuses, and what it deliberately does not", () => {
     expect(ecoSettingComplaints({})).toEqual([]);
     expect(ecoSettingComplaints({ currency_symbol: undefined })).toEqual([]);
     expect(ecoSettingComplaints({ currency_symbol: null })).toEqual([]);
+  });
+});
+
+describe("the box and device settings carry no client range (FA-2, FA-10)", () => {
+  it("has no rule for a box timing or the dead rapid-scan window", () => {
+    // Those bounds are served by the API (`bounds`); a mirrored copy is how 5–120 met 3–60.
+    for (const key of ["lcd_revert_seconds", "rapid_scan_window_seconds", "lcd_choice_seconds"]) {
+      expect(ECO_NUMERIC_RULES.find((r) => r.key === key), key).toBeUndefined();
+    }
+  });
+
+  it("judges a mirrored rule by the API's served bound when one is served", () => {
+    const settings = { member_max_slots_per_day: 50, bounds: { member_max_slots_per_day: { min: 0, max: 40 } } };
+    const said = ecoSettingComplaints(settings);
+    expect(said).toHaveLength(1);
+    expect(said[0].message).toContain("between 0 and 40");
+    expect(ecoSettingComplaints({ ...settings, member_max_slots_per_day: 40 })).toEqual([]);
   });
 });

@@ -18,9 +18,13 @@ public static class BiometricEndpoints
         {
             var actor = ctx.User.Id() ?? Guid.Empty;
             var result = await svc.EnrollAsync(req.UserId, actor, req.FingerLabel, req.ConsentReceiptHash ?? "v1", ct);
-            return result.Ok
-                ? Results.Ok(new { template_id = result.TemplateId })
-                : Results.BadRequest(new { error = result.FailureReason ?? "enrollment_failed" });
+            if (result.Ok) return Results.Ok(new { template_id = result.TemplateId });
+            return result.FailureReason switch
+            {
+                BiometricService.MemberNotFound => Results.NotFound(new { error = result.FailureReason }),
+                NoBiometricDevice.Unavailable => Results.Json(new { error = result.FailureReason }, statusCode: StatusCodes.Status503ServiceUnavailable),
+                _ => Results.BadRequest(new { error = result.FailureReason ?? "enrollment_failed" }),
+            };
         });
 
         admin.MapGet("/enrollments", async (MainframeDbContext db, CancellationToken ct) =>

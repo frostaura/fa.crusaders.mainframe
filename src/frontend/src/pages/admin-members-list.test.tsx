@@ -102,11 +102,43 @@ describe("the row is the way into a member", () => {
     ]);
     renderPage(<AdminMembersPage />, { initialEntries: ["/admin/members?status=PendingApproval"] });
     const first = (await screen.findAllByRole("button", { name: ROW_ACTIONS.approve }))
-      .find((b) => b.getAttribute("data-approve-row") === GRACE.user_id)!;
+      .find((b) => b.closest("[data-approve-row]")?.getAttribute("data-approve-row") === GRACE.user_id)!;
     first.focus();
     fireEvent.click(first);
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-confirm='go']")!);
 
-    await waitFor(() => expect(document.activeElement).toHaveAttribute("data-approve-row", HEDY.user_id));
+    await waitFor(() => expect(document.activeElement?.closest("[data-approve-row]")).toHaveAttribute("data-approve-row", HEDY.user_id));
+  });
+
+  it("never approves the next applicant with the second click of a double-click (BA-02)", async () => {
+    const GRACE2 = memberFixture({ membership_id: "m9", user_id: "u9", full_name: "Grace Two", status: "PendingApproval" });
+    const stub = stubFetch([
+      { path: "/api/v1/admin/members/", body: [GRACE2] },
+      { path: "/api/v1/admin/biometric/enrollments", body: [] },
+      { method: "POST", path: "/api/v1/admin/members/", body: { approved: true, member_email_queued: true } },
+    ]);
+    renderPage(<AdminMembersPage />, { initialEntries: ["/admin/members?status=PendingApproval"] });
+    const approve = (await screen.findAllByRole("button", { name: ROW_ACTIONS.approve }))[0];
+    // One press arms it and says who; nothing is sent until the armed control is pressed.
+    fireEvent.click(approve, { detail: 1 });
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-confirm='go']")!, { detail: 2 });
+    expect(stub.calls.some((c) => c.method === "POST")).toBe(false);
+    expect(screen.getAllByText(/Approve Grace Two\? They are emailed a welcome/).length).toBeGreaterThan(0);
+  });
+
+  it("gives an armed Approve the whole row so its sentence never runs under Reject (V-1)", async () => {
+    const GRACE3 = memberFixture({ membership_id: "m9", user_id: "u9", full_name: "Grace Three", status: "PendingApproval" });
+    stubFetch([
+      { path: "/api/v1/admin/members/", body: [GRACE3] },
+      { path: "/api/v1/admin/biometric/enrollments", body: [] },
+    ]);
+    renderPage(<AdminMembersPage />, { initialEntries: ["/admin/members?status=PendingApproval"] });
+    const approve = (await screen.findAllByRole("button", { name: ROW_ACTIONS.approve }))[0];
+    const row = approve.closest<HTMLElement>("[data-row-actions]")!;
+    expect(row.className.split(/\s+/)).toContain("has-[[data-confirm-pair]]:flex-wrap");
+    expect(row.className).toContain("[&_[data-confirm-group]:has([data-confirm-pair])]:basis-full");
+    fireEvent.click(approve, { detail: 1 });
+    expect(row.querySelector("[data-confirm-group] [data-confirm-pair]")).not.toBeNull();
   });
 
   it("offers a turned-down applicant's approval from the row ⋯ (F3.23)", async () => {
@@ -235,7 +267,10 @@ describe("the application queue", () => {
     });
     const approve = await screen.findByRole("button", { name: ROW_ACTIONS.approve });
     fireEvent.click(approve);
-    fireEvent.click(approve);
+    // BA-02: armed — the go is pressed twice, and the club is still asked once.
+    const go = document.querySelector<HTMLButtonElement>("[data-confirm='go']")!;
+    fireEvent.click(go);
+    fireEvent.click(go);
     expect(await screen.findByText("Grace Hopper approved.")).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.path.endsWith("/approve"))).toHaveLength(1);
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/admin/members/")).length).toBe(2));

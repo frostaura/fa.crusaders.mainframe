@@ -38,4 +38,19 @@ describe("member detail — an approval whose reply was lost", () => {
     expect(await screen.findByText(ACTIONS_COPY.approvedAfterLostReply(name))).toBeInTheDocument();
     expect(screen.queryByText(/couldn't approve|Approval failed/i)).not.toBeInTheDocument();
   });
+
+  it("keeps the dialog open and says an unconfirmed address cannot be approved yet (BP-02)", async () => {
+    const pending = detailFixture({ status: "PendingApproval" });
+    const name = pending.full_name ?? "";
+    serve([
+      ...baseRoutes(pending),
+      { method: "POST", path: `/api/v1/admin/members/${pending.membership_id}/approve`, status: 409, body: { error: "email_not_verified" } },
+    ]);
+    renderMember();
+
+    await approveFromHeader(name);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(new RegExp(ACTIONS_COPY.approveUnverified(name).slice(0, 40)))).toBeInTheDocument();
+  });
 });

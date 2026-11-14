@@ -525,8 +525,12 @@ public sealed class MonitoringErrorsHttpTests : IClassFixture<PostgresFixture>
             factory, club, DeviceErrorCodes.LcdI2cTimeout,
             new ErrorRow
             {
-                DeviceId = box, Fingerprint = print, FirstSeenAt = now.AddDays(-30),
-                LastSeenAt = now.AddDays(-30), ResolvedAt = now.AddDays(-29), ResolvedByUserId = club.AdminUserId,
+                DeviceId = box,
+                Fingerprint = print,
+                FirstSeenAt = now.AddDays(-30),
+                LastSeenAt = now.AddDays(-30),
+                ResolvedAt = now.AddDays(-29),
+                ResolvedByUserId = club.AdminUserId,
             });
         var current = await MonitoringFixture.AddErrorAsync(
             factory, club, DeviceErrorCodes.LcdI2cTimeout,

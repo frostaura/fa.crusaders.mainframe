@@ -30,6 +30,7 @@
 
 #include "gatelogic/FaultLog.h"
 #include "gatelogic/GateConfig.h"
+#include "gatelogic/GateReply.h"
 
 namespace gatelogic {
 
@@ -148,6 +149,51 @@ size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const cha
 /// The search starts at the `gate` key rather than running over the whole body,
 /// so an `unlock_seconds` that appears anywhere else in a future response
 /// cannot be picked up as this one.
+/// What a 2.0.0 gate says about itself (door-gate.md §14, device-api.md §2,
+/// §13): every field after the 1.x ones, in the contract's order. A pointer
+/// left null omits its field.
+struct GateDiag {
+  /// `esp_reset_reason()` as a word: power_on, external, software, panic,
+  /// int_wdt, task_wdt, brownout, deep_sleep, unknown.
+  const char* reset = "unknown";
+  uint32_t exc = 0U;
+  uint32_t epc1 = 0U;
+  uint32_t heap = 0U;
+  uint32_t heapMin = 0U;
+  uint32_t block = 0U;
+  uint32_t stackMin = 0U;
+  /// The size of the app slot an image is flashed into (ESP.getFreeSketchSpace()).
+  uint32_t sketchFree = 0U;
+  uint32_t flashMb = 0U;
+};
+
+struct GateReport {
+  uint32_t netVer = 0U;
+  const char* netSrc = "compiled";
+  /// warm / cold / none: until the first accepted heartbeat of a boot only.
+  const char* restore = nullptr;
+  const GateDiag* diag = nullptr;
+  /// Names the board could not read in the previous answer; omitted when none.
+  const Drift* drift = nullptr;
+};
+
+/// Every v3 capability this image has. The server keys every new response
+/// field on it, so a 1.x gate is answered exactly as before.
+inline constexpr char kGateCapsV3[] = ",\"caps\":[\"codes:m1\",\"key:1\",\"net:1\"]";
+
+/// Everything one 2.0.0 heartbeat says about the board.
+struct GateBeat {
+  const char* mac;
+  const char* firmwareVersion;
+  uint64_t uptimeMs;
+  const GateDiagnostics& counters;
+  const GateReport& report;
+};
+
+/// The 2.0.0 heartbeat request (`gate/` `gate-heartbeat-request-v3*`). 0 when
+/// it does not fit `cap`, which is kGateHeartbeatRequestCap on the board.
+size_t renderGateHeartbeatV3(char* out, size_t cap, const GateBeat& beat);
+
 bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs);
 
 /// True when the body's `gate.unlock_seconds` was OUTSIDE the contract's

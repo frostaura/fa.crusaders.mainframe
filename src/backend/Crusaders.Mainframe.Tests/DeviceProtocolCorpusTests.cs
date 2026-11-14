@@ -201,7 +201,10 @@ public class DeviceProtocolCorpusTests
             if (c.GetProperty("kind").GetString() != "heartbeat") continue;
 
             using var body = JsonDocument.Parse(Hex(c, "body_hex"));
-            var roster = body.RootElement.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList();
+            // v3-heartbeat-response-lifeline-only carries no roster (and no court_numbers) by
+            // design: a lifeline-only body is "no opinion" on both (device-api.md §11.1).
+            if (!body.RootElement.TryGetProperty("roster", out var rosterElement)) continue;
+            var roster = rosterElement.EnumerateArray().Select(e => e.GetString()!).ToList();
 
             Assert.True(roster.Count <= DeviceRosterBuilder.RosterMaxEntries);
             Assert.All(roster, entry => Assert.Matches(RosterEntryPattern, entry));

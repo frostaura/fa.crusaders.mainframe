@@ -160,9 +160,30 @@ public static class AdminNotificationEndpoints
                 sent_at = row.State == AdminNotificationState.Sent ? row.SentAt : null,
                 finished_at = row.SentAt,
                 recipients = row.RecipientCount,
+                // BA-12: WHY a suppressed notice was not mailed, so a demo club's feed can say "a demo
+                // club sends no mail" instead of "told recently", and a live club's cooldown is named.
+                reason = row.State == AdminNotificationState.Suppressed ? SuppressionReason(row.LastError) : null,
             },
         };
     }
+
+    /// <summary>The wire word for why a notice was suppressed (BA-12).</summary>
+    public const string ReasonDemoClub = "demo_club";
+
+    /// <inheritdoc cref="ReasonDemoClub"/>
+    public const string ReasonToldRecently = "told_recently";
+
+    /// <summary>
+    /// The dispatcher's stored suppression cause, as the feed names it: <c>demo_club</c> for a demo
+    /// club (which mails nobody, live or seeded), <c>told_recently</c> for the kind's cooldown (the
+    /// one suppression that stores no cause), and any other stored cause as it was written.
+    /// </summary>
+    public static string SuppressionReason(string? stored) => stored switch
+    {
+        null => ReasonToldRecently,
+        AdminNotificationDispatcher.DemoModeCause => ReasonDemoClub,
+        _ => stored,
+    };
 
     /// <summary>The wire's word for a state. Lower-case, and a closed set the frontend can switch on.</summary>
     public static string StateName(AdminNotificationState state)

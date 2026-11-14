@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -27,8 +28,13 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
     {
         var body = JsonSerializer.SerializeToNode(new
         {
-            sliceMinutes = 15, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
-            penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15,
+            sliceMinutes = 15,
+            advanceBookingDays = 14,
+            dayStartMinute = 0,
+            dayEndMinute = 1440,
+            penaltyPct = 30,
+            graceWindowMinutes = 5,
+            penaltyWindowMinutes = 15,
         })!.AsObject();
         foreach (var p in JsonSerializer.SerializeToNode(extra)!.AsObject().ToList()) body[p.Key] = p.Value?.DeepClone();
         return (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode;
@@ -117,8 +123,14 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
         Assert.Equal("v1", (await SettingsAsync(admin)).GetProperty("member_code_phase").GetString());
     }
 
+    /// <summary>
+    /// MCV1-03 (member-code §8 step 3, 2026-11-13): an enabled court box nobody has acknowledged,
+    /// heard this week, BLOCKS the cut-over — one named door cut a club over while every court box
+    /// was unacknowledged and held no keys — and it is released by acknowledging the box or by
+    /// disabling it. A spare unplugged for over a week stops blocking. It never votes.
+    /// </summary>
     [SkippableFact]
-    public async Task An_unacknowledged_board_neither_blocks_the_cut_over_nor_can_cast_the_deciding_vote()
+    public async Task An_unacknowledged_court_box_heard_this_week_blocks_the_cut_over_and_never_votes()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var factory = pg.SharedHost;
@@ -127,26 +139,87 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
         var device = app.CreateClient();
         var admin = club.Member(app, club.AdminId, "admin");
 
-        // A spare on a bench: auto-registered, enabled, old firmware, never acknowledged.
+        // A box on a bench: auto-registered, enabled, never acknowledged — and heard just now.
         var spare = Guid.NewGuid().ToString("N")[..12];
         await club.WriteAsync(app, db =>
         {
             db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = $"box-{spare[^6..]}", Name = "Spare", Kind = DeviceKind.CourtBox,
-                MacAddress = spare, CourtNumbers = [1], AutoRegistered = true,
+                TenantId = club.TenantId,
+                DeviceCode = $"box-{spare[^6..]}",
+                Name = "Spare",
+                Kind = DeviceKind.CourtBox,
+                MacAddress = spare,
+                CourtNumbers = [1],
+                AutoRegistered = true,
             });
             return Task.CompletedTask;
         });
-        Assert.Equal(HttpStatusCode.OK, (await device.SendAsync(club.Heartbeat(spare, m1: false))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await device.SendAsync(club.Heartbeat(spare, m1: true))).StatusCode);
 
         await BeatBothAsync(device, club);
-        Assert.Equal("v1", (await SettingsAsync(admin)).GetProperty("member_code_phase").GetString());
+        await BeatBothAsync(device, club);
+        Assert.Equal("legacy", (await SettingsAsync(admin)).GetProperty("member_code_phase").GetString());
 
         var rollout = JsonDocument.Parse(await admin.GetStringAsync("/api/v1/admin/devices/member-codes")).RootElement;
-        Assert.Empty(rollout.GetProperty("blocking").EnumerateArray());
-        Assert.Equal($"box-{spare[^6..]}", Assert.Single(rollout.GetProperty("unacknowledged").EnumerateArray()).GetProperty("device_code").GetString());
+        var blocker = Assert.Single(rollout.GetProperty("blocking").EnumerateArray());
+        Assert.Equal($"box-{spare[^6..]}", blocker.GetProperty("device_code").GetString());
+        Assert.Equal("unacknowledged", blocker.GetProperty("blocks").GetString());
         Assert.Equal(2, rollout.GetProperty("enabled_boards").GetInt32());
+        Assert.Equal(2, rollout.GetProperty("ready_boards").GetInt32());
+
+        // Every acknowledged board's keys, the ready ones included (the console's per-board line,
+        // MCV1-07); the unacknowledged spare is on the blocking list and not here.
+        var keys = rollout.GetProperty("keys").EnumerateArray().ToList();
+        Assert.Equal(2, keys.Count);
+        Assert.DoesNotContain(keys, k => k.GetProperty("device_code").GetString() == $"box-{spare[^6..]}");
+        Assert.All(keys, k => Assert.True(k.GetProperty("acknowledged").GetBoolean()));
+        Assert.All(keys, k => Assert.Equal(JsonValueKind.Number, k.GetProperty("keys_sent").ValueKind));
+
+        // Heard more than a week ago — unplugged — it no longer blocks.
+        await club.WriteAsync(app, async db =>
+            (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == spare)).LastSeenAt = DateTimeOffset.UtcNow.AddDays(-8));
+        await BeatBothAsync(device, club);
+        Assert.Equal("v1", (await SettingsAsync(admin)).GetProperty("member_code_phase").GetString());
+    }
+
+    /// <summary>MCV1-03, the release: acknowledging the blocking box, or disabling it, lets the cut-over happen.</summary>
+    [SkippableTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Acknowledging_or_disabling_the_blocking_box_releases_the_cut_over(bool acknowledge)
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, acknowledge ? "unackack" : "unackoff");
+        var device = app.CreateClient();
+        var admin = club.Member(app, club.AdminId, "admin");
+
+        var spare = Guid.NewGuid().ToString("N")[..12];
+        Assert.Equal(HttpStatusCode.OK, (await device.SendAsync(club.Heartbeat(spare, m1: true))).StatusCode);
+        var spareId = await club.ReadAsync(app, db => db.Devices.IgnoreQueryFilters().Where(d => d.MacAddress == spare).Select(d => d.Id).SingleAsync());
+        await BeatBothAsync(device, club);
+        Assert.Equal("legacy", (await SettingsAsync(admin)).GetProperty("member_code_phase").GetString());
+
+        var patch = acknowledge ? new JsonObject { ["name"] = "Annex box" } : new JsonObject { ["enabled"] = false };
+        var response = await admin.PatchAsync($"/api/v1/admin/devices/{spareId}",
+            new StringContent(patch.ToJsonString(), System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // Acknowledged, it now votes and needs a keyed beat of its own; disabled, it has no say.
+        if (acknowledge) Assert.Equal(HttpStatusCode.OK, (await device.SendAsync(club.Heartbeat(spare, m1: true))).StatusCode);
+        await BeatBothAsync(device, club);
+        Assert.Equal("v1", (await SettingsAsync(admin)).GetProperty("member_code_phase").GetString());
+    }
+
+    [SkippableFact]
+    public async Task An_unacknowledged_board_alone_can_never_cast_the_deciding_vote()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var device = app.CreateClient();
 
         // The other way round: with every acknowledged board disabled, an unacknowledged m1 board
         // alone does not cut a club over.
@@ -157,8 +230,14 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
             var stranger = Guid.NewGuid().ToString("N")[..12];
             db.Devices.Add(new Device
             {
-                TenantId = other.TenantId, DeviceCode = $"box-{stranger[^6..]}", Name = "Stranger", Kind = DeviceKind.CourtBox,
-                MacAddress = stranger, CourtNumbers = [1], AutoRegistered = true, Capabilities = ["codes:m1"],
+                TenantId = other.TenantId,
+                DeviceCode = $"box-{stranger[^6..]}",
+                Name = "Stranger",
+                Kind = DeviceKind.CourtBox,
+                MacAddress = stranger,
+                CourtNumbers = [1],
+                AutoRegistered = true,
+                Capabilities = ["codes:m1"],
             });
         });
         var strangerMac = await other.ReadAsync(app, db => db.Devices.IgnoreQueryFilters()

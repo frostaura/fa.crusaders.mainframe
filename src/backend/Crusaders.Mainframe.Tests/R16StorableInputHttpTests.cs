@@ -95,7 +95,10 @@ public sealed class R16StorableInputHttpTests(PostgresFixture pg) : IClassFixtur
         await using var _ = r.App;
         (await r.Http.SendAsync(r.Club.Device("/api/v1/device/heartbeat", new JsonObject
         {
-            ["mac"] = r.Club.BoxMac, ["firmware_version"] = "2.2.6", ["mega_version"] = "2.0.0", ["uptime_ms"] = 1000,
+            ["mac"] = r.Club.BoxMac,
+            ["firmware_version"] = "2.2.6",
+            ["mega_version"] = "2.0.0",
+            ["uptime_ms"] = 1000,
         }))).EnsureSuccessStatusCode();
 
         var body = new JsonObject { ["mac"] = r.Club.BoxMac, ["uptime_ms"] = 2000, [field] = new string('9', 33) };
@@ -122,7 +125,10 @@ public sealed class R16StorableInputHttpTests(PostgresFixture pg) : IClassFixtur
 
         (await r.Http.SendAsync(r.Club.Device("/api/v1/device/heartbeat", new JsonObject
         {
-            ["mac"] = r.Club.BoxMac, ["firmware_version"] = version, ["mega_version"] = version, ["uptime_ms"] = 1000,
+            ["mac"] = r.Club.BoxMac,
+            ["firmware_version"] = version,
+            ["mega_version"] = version,
+            ["uptime_ms"] = 1000,
         }))).EnsureSuccessStatusCode();
 
         var box = await BoxAsync(r);
@@ -224,11 +230,18 @@ public sealed class R16StorableInputHttpTests(PostgresFixture pg) : IClassFixtur
         await using var _ = r.App;
         var body = new JsonObject
         {
-            ["mac"] = r.Club.BoxMac, ["boot_id"] = 7, ["uptime_ms"] = batchUptime,
+            ["mac"] = r.Club.BoxMac,
+            ["boot_id"] = 7,
+            ["uptime_ms"] = batchUptime,
             ["events"] = new JsonArray(new JsonObject
             {
-                ["seq"] = 14, ["uptime_ms"] = eventUptime, ["kind"] = "activation", ["court"] = 0, ["method"] = "qr",
-                ["subject"] = "NOBODY", ["duration_ms"] = 600_000,
+                ["seq"] = 14,
+                ["uptime_ms"] = eventUptime,
+                ["kind"] = "activation",
+                ["court"] = 0,
+                ["method"] = "qr",
+                ["subject"] = "NOBODY",
+                ["duration_ms"] = 600_000,
             }),
         };
 
@@ -259,11 +272,18 @@ public sealed class R16StorableInputHttpTests(PostgresFixture pg) : IClassFixtur
 
         var release = new JsonObject
         {
-            ["mac"] = c.BoxMac, ["boot_id"] = 7, ["uptime_ms"] = 100_000_000,
+            ["mac"] = c.BoxMac,
+            ["boot_id"] = 7,
+            ["uptime_ms"] = 100_000_000,
             ["events"] = new JsonArray(new JsonObject
             {
-                ["seq"] = 2, ["uptime_ms"] = 99_999_000, ["kind"] = "release", ["court"] = 0, ["method"] = "button",
-                ["subject"] = "", ["duration_ms"] = long.MaxValue,
+                ["seq"] = 2,
+                ["uptime_ms"] = 99_999_000,
+                ["kind"] = "release",
+                ["court"] = 0,
+                ["method"] = "button",
+                ["subject"] = "",
+                ["duration_ms"] = long.MaxValue,
             }),
         };
         var (status, text) = await SendAsync(r.Http, c.Device("/api/v1/device/events", release));
@@ -318,10 +338,8 @@ public sealed class R16StorableInputHttpTests(PostgresFixture pg) : IClassFixtur
     [SkippableTheory]
     [InlineData("/api/v1/admin/webhooks", "description", "x\\u0000y", "invalid_body")]
     [InlineData("/api/v1/admin/webhooks", "eventFilter", "booking.*\\u0000", "invalid_body")]
-    [InlineData("/api/v1/webhooks", "description", "x\\u0000y", "invalid_body")]
     [InlineData("/api/v1/admin/webhooks", "description", "LONG256", "description_too_long")]
     [InlineData("/api/v1/admin/webhooks", "eventFilter", "LONG1025", "event_filter_too_long")]
-    [InlineData("/api/v1/webhooks", "eventFilter", "LONG1025", "event_filter_too_long")]
     public async Task A_webhook_field_that_cannot_be_stored_is_400_with_a_code(string path, string field, string value, string code)
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
@@ -471,8 +489,13 @@ public sealed class R16DeviceRateHttpTests(PostgresFixture pg) : IClassFixture<P
             {
                 db.Devices.Add(new Device
                 {
-                    TenantId = club.TenantId, DeviceCode = $"box-{otherMac[^6..]}", Name = "Box 2", Kind = DeviceKind.CourtBox,
-                    MacAddress = otherMac, CourtNumbers = [1, 2, 3, 4], AutoRegistered = false,
+                    TenantId = club.TenantId,
+                    DeviceCode = $"box-{otherMac[^6..]}",
+                    Name = "Box 2",
+                    Kind = DeviceKind.CourtBox,
+                    MacAddress = otherMac,
+                    CourtNumbers = [1, 2, 3, 4],
+                    AutoRegistered = false,
                 });
                 return Task.CompletedTask;
             });

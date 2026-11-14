@@ -33,6 +33,26 @@ bool isTwelveLowerHex(const char* mac) {
   return i == 12U;
 }
 
+/// `"qr"` and friends, quoted, or `null` for an event with no identification
+/// method (a release).
+void renderMethod(const eventq::Event& event, char* out, size_t cap) {
+  const char* method = eventq::methodName(event.method);
+  if (method == nullptr) {
+    snprintf(out, cap, "null");
+  } else {
+    snprintf(out, cap, "\"%s\"", method);
+  }
+}
+
+/// `,"cause":"…"` for a v3 release (device-api.md §9), or nothing: absent on
+/// every other kind, and on cause None, reads as `member`.
+void renderCause(const eventq::Event& event, char* out, size_t cap) {
+  const char* cause = eventq::causeName(event.cause);
+  if (event.kind == eventq::Kind::Release && cause[0] != '\0') {
+    snprintf(out, cap, ",\"cause\":\"%s\"", cause);
+  }
+}
+
 } // namespace
 
 size_t renderEventBody(char* out, size_t cap, const char* mac, uint32_t bootId, uint64_t nowUptimeMs,
@@ -61,11 +81,8 @@ size_t renderEventBody(char* out, size_t cap, const char* mac, uint32_t bootId, 
   // Omitted as a null rather than sent as the string "none", matching what
   // eventq::methodName returns — a release has no identification method, and
   // pretending it had one puts a fiction in the audit trail.
-  const char* method = eventq::methodName(event.method);
-  char methodJson[16] = "null";
-  if (method != nullptr) {
-    snprintf(methodJson, sizeof(methodJson), "\"%s\"", method);
-  }
+  char methodJson[16] = {};
+  renderMethod(event, methodJson, sizeof(methodJson));
 
   // OMITTED AT ZERO, exactly as the two heartbeat counters are, and for a
   // compatibility reason rather than a tidiness one: the server reads an absent
@@ -84,14 +101,19 @@ size_t renderEventBody(char* out, size_t cap, const char* mac, uint32_t bootId, 
     return 0U;
   }
 
+  // v3: a release says why the relay opened (device-api.md §9), after
+  // duration_ms; absent (every 2.x box, and cause None) reads as `member`.
+  char causeJson[32] = {};
+  renderCause(event, causeJson, sizeof(causeJson));
+
   const int written =
       snprintf(out, cap,
                "{\"mac\":\"%s\"%s,\"uptime_ms\":%s,\"events\":[{\"seq\":%lu,\"uptime_ms\":%s,"
-               "\"kind\":\"%s\",\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
+               "\"kind\":\"%s\",\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu%s}]}",
                mac, bootJson, batchUptime, static_cast<unsigned long>(event.seq), eventUptime,
                eventq::kindName(event.kind),
                event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson,
-               subject, static_cast<unsigned long>(event.durationMs));
+               subject, static_cast<unsigned long>(event.durationMs), causeJson);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     // snprintf truncated. A half-rendered body is a request the server refuses
     // as malformed, and the drain path treats a 4xx as "the box caused this"

@@ -62,9 +62,19 @@ public sealed class AdminBulkBookingService
     /// same key would otherwise collide, and the loser's cancellation would fail to post a
     /// refund for money that had been taken.
     /// </para>
+    /// <para>
+    /// <b>The key is hashed</b>, as <see cref="BookReference"/>'s is (money lane BM-8): the raw key beside
+    /// two guids and <c>:penalty</c> overflowed the 255-character column for any key over about 170
+    /// characters — inside the documented 200 — and the whole cancel was refused <c>400 invalid_body</c>
+    /// with the booking left booked.
+    /// </para>
     /// </summary>
     public string CancelReference(string key, Guid bookingId)
-        => $"bulkcancel:{_tenant.TenantId:N}:{key}:{bookingId:N}";
+        => $"bulkcancel:{_tenant.TenantId:N}:{KeyDigest(key)}:{bookingId:N}";
+
+    /// <summary>The first 128 bits of the key's SHA-256, lower-case hex: fixed length whatever the console sent.</summary>
+    private static string KeyDigest(string key) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..32].ToLowerInvariant();
 
     /// <summary>
     /// The reference one booked item is posted under.
@@ -89,9 +99,7 @@ public sealed class AdminBulkBookingService
     /// </summary>
     public string BookReference(string key, Guid payerUserId, int index)
     {
-        var digest = Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..32].ToLowerInvariant();
-        return $"bulkbook:{_tenant.TenantId:N}:{payerUserId:N}:{digest}:{index}";
+        return $"bulkbook:{_tenant.TenantId:N}:{payerUserId:N}:{KeyDigest(key)}:{index}";
     }
 
     // ------------------------------------------------------------------ cancel

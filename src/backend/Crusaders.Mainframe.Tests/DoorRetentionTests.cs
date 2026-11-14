@@ -243,20 +243,32 @@ public sealed class DoorRetentionTests
             // Inside the 30-day horizon though well past the club's seven days.
             db.DeviceEventReceipts.Add(new DeviceEventReceipt
             {
-                TenantId = host.Tenant.Id, DeviceId = doorId, Seq = 1,
-                Kind = DeviceEventEndpoints.GateOpenKind, OccurredAt = now.AddDays(-20), CreatedAt = now.AddDays(-20),
+                TenantId = host.Tenant.Id,
+                DeviceId = doorId,
+                Seq = 1,
+                Kind = DeviceEventEndpoints.GateOpenKind,
+                OccurredAt = now.AddDays(-20),
+                CreatedAt = now.AddDays(-20),
             });
 
             // Past both.
             db.DeviceEventReceipts.Add(new DeviceEventReceipt
             {
-                TenantId = host.Tenant.Id, DeviceId = doorId, Seq = 2,
-                Kind = DeviceEventEndpoints.GateOpenKind, OccurredAt = now.AddDays(-40), CreatedAt = now.AddDays(-40),
+                TenantId = host.Tenant.Id,
+                DeviceId = doorId,
+                Seq = 2,
+                Kind = DeviceEventEndpoints.GateOpenKind,
+                OccurredAt = now.AddDays(-40),
+                CreatedAt = now.AddDays(-40),
             });
             db.DeviceEventReceipts.Add(new DeviceEventReceipt
             {
-                TenantId = host.Tenant.Id, DeviceId = doorId, Seq = 3,
-                Kind = DeviceEventEndpoints.UnknownScanKind, OccurredAt = now.AddDays(-40), CreatedAt = now.AddDays(-40),
+                TenantId = host.Tenant.Id,
+                DeviceId = doorId,
+                Seq = 3,
+                Kind = DeviceEventEndpoints.UnknownScanKind,
+                OccurredAt = now.AddDays(-40),
+                CreatedAt = now.AddDays(-40),
             });
             await db.SaveChangesAsync();
         }
@@ -288,8 +300,12 @@ public sealed class DoorRetentionTests
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.DeviceEventReceipts.Add(new DeviceEventReceipt
             {
-                TenantId = host.Tenant.Id, DeviceId = doorId, Seq = 9,
-                Kind = "activation", OccurredAt = now.AddDays(-400), CreatedAt = now.AddDays(-400),
+                TenantId = host.Tenant.Id,
+                DeviceId = doorId,
+                Seq = 9,
+                Kind = "activation",
+                OccurredAt = now.AddDays(-400),
+                CreatedAt = now.AddDays(-400),
             });
             await db.SaveChangesAsync();
         }

@@ -895,19 +895,15 @@ void test_lcd_settings_a_wrong_type_or_a_cut_body_adopts_nothing() {
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(75U, probe.faultMaxPerHour, kUnreadable[i]);
   }
 
-  // A FRACTION IS READ AS ITS INTEGER PART, and that is devapi's behaviour
-  // rather than this parser's: `readUnsigned` stops at the `.` and reports the
-  // digits it took, so `30.5` adopts 30. `devapi::json::unsignedField`'s own
-  // doc comment says it is false when "the value is not a bare integer", and
-  // 30.5 is not one — every caller of it in this tree inherits the same
-  // narrowing, `heartbeat_seconds` and `granted_seconds` included. Pinned here
-  // as what actually happens rather than left to look like a passing case;
-  // fixing it is devapi's, not devlink's.
+  // A FRACTION IS NOT AN INTEGER (device-api.md §11.2, FC-11). This used to be
+  // pinned the other way — `readUnsigned` stopped at the `.` and `30.5`
+  // adopted 30 — as devapi's defect, owed to devapi. devapi now reads an
+  // integer by its exact kind, so the setting keeps its value.
   {
     devlink::LcdSettings fraction = s;
     const char body[] = "{\"config\":{\"lcd_revert_seconds\":30.5}}";
-    TEST_ASSERT_TRUE(devlink::parseLcdSettings(body, len(body), fraction));
-    TEST_ASSERT_EQUAL_UINT32(30000UL, fraction.revertMs);
+    TEST_ASSERT_FALSE(devlink::parseLcdSettings(body, len(body), fraction));
+    TEST_ASSERT_EQUAL_UINT32(25000UL, fraction.revertMs);
   }
 
   // Cut inside the config object, and cut inside one of its strings. The

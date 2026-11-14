@@ -12,7 +12,7 @@ A player sees their own data:
 
 ## Admin view
 A tenant admin sees the above for any individual member, plus tenant-wide:
-- **Revenue** — sum of `top_up` net of `payment_reversal` in the period. Money the tenant actually took, in rand, beside the minutes it sold for it and the rate between them (below).
+- **Revenue** — sum of `top_up` net of `payment_reversal` in the period. Money the tenant actually took, in rand, beside the minutes it sold for it and the rate between them (below). A reversal's rand always counts as given back, even when it took back no minutes (money lane BM-6, the desk's `reverse-payment`); the figures are summed by the database (BM-10), never by loading the window's rows.
 - **Bookings issued** — count, broken down by court / weekday / hour-of-day.
 - **Court utilisation** — % of available slices booked, per court, per day. Heatmap chart (court × hour).
 - **No-show rate** — count and % of bookings that no-showed; trend line over time.
@@ -93,14 +93,31 @@ out (a magnitude) and their difference over the filtered range.
 Charts render with Recharts. See `design-system.md` § Charts for color rotation and styling rules.
 
 ## Exports
-Every report has an "Export" button with format options:
-- **CSV** — flat table, one row per ledger entry / booking.
-- **XLSX** — same data, with column types preserved and a header row formatted in bold.
-- **PDF** — formatted report including the charts (Puppeteer-rendered backend job).
+What is built (2026-11-13, FA-7/BA-08), and what is not:
 
-Export respects the active filters. Filename pattern: `crusaders-mainframe_<tenant-slug>_<report-name>_<from>-<to>.<ext>`.
-
-Exports run as a backend job; for >10k rows the user gets an email with a download link rather than a synchronous download. Generated files are kept for 7 days, then deleted.
+- **Transactions › Export CSV** — every ledger movement the page's filters select (range, type,
+  one member, and the name search on top), read a page at a time to the end, capped at 50 000
+  movements with the cap said in the toast. Columns: when (UTC), type, signed whole minutes,
+  member, who did it, reason, from, to, booking, movement id.
+- **Reports › Days (CSV)** and **Courts (CSV)** — the day-by-day movement and court use, exactly
+  the figures the page shows for its range.
+- Both are built in the console from the reads the page already makes and fetched with the
+  session's token, in the API's CSV conventions (`CsvCell`: a cell starting `= + - @` is defused
+  with `'`, quoting per RFC 4180, CRLF lines; numbers are written as numbers). Filenames:
+  `transactions-<from>-to-<to>.csv`, `report-days-…`, `report-courts-…`.
+- **Not built, and cut from this spec:** XLSX, PDF with charts, the backend export job and the
+  emailed link for >10k rows. A CSV opens in every spreadsheet, and a PDF of a Recharts page is a
+  browser print.
+- **Members and no-shows (BA-08, 2026-11-14)** — server-built files, admin only, tenant-scoped:
+  `GET /api/v1/admin/exports/members.csv?status=` (`membership_number,full_name,status,groups,joined_date,balance_minutes`,
+  by name; `groups` joined with `; `) and `GET /api/v1/admin/exports/no-shows.csv?from=&to=` (club days,
+  default the last 30, at most 366: `date,time,timezone,court,full_name,membership_number,booked_minutes,penalty_minutes,refunded_for_outage`,
+  oldest first; a no-show refunded for an outage is listed with `yes`). **PII minimal by decision:** a
+  saved file leaves the app's access control, so neither carries an email address, phone number,
+  photo, PIN or fingerprint — only what a committee list and a treasurer's reconciliation need. Both
+  are audited (`members.exported`, `no_shows.exported`: who, what was asked, how many rows — never
+  who is in it), carry `X-Crusaders-Rows`, a BOM and `CsvCell` defusing, and are offered on the
+  Members page and on Reports.
 
 ## The door log is not a report
 

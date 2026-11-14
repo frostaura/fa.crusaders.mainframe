@@ -412,26 +412,44 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
         void Adjustment(DateTimeOffset at, int minutes, string reason) =>
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.AdminAdjustment,
-                AmountMinutes = minutes, ActorUserId = admin.Id, Reason = reason, CreatedAt = at,
+                TenantId = tenant.Id,
+                UserId = member.Id,
+                Type = LedgerEntryType.AdminAdjustment,
+                AmountMinutes = minutes,
+                ActorUserId = admin.Id,
+                Reason = reason,
+                CreatedAt = at,
             });
 
         void TopUp(DateTimeOffset at, int minutes, decimal zar, string reason) =>
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.TopUp,
-                AmountMinutes = minutes, ZarPaid = zar,
-                ActorUserId = member.Id, Reason = reason, CreatedAt = at,
+                TenantId = tenant.Id,
+                UserId = member.Id,
+                Type = LedgerEntryType.TopUp,
+                AmountMinutes = minutes,
+                ZarPaid = zar,
+                ActorUserId = member.Id,
+                Reason = reason,
+                CreatedAt = at,
             });
 
         void Booking(DateTimeOffset startsAt, BookingStatus status) =>
             db.Bookings.Add(new Booking
             {
-                TenantId = tenant.Id, CourtId = court.Id, UserId = member.Id,
-                BookedByUserId = member.Id, PaidByUserId = member.Id, ActorUserId = member.Id,
-                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
-                SliceMinutes = 30, SliceCount = 1, AmountChargedMinutes = 30,
-                Status = status, ChargedAt = startsAt.AddDays(-1),
+                TenantId = tenant.Id,
+                CourtId = court.Id,
+                UserId = member.Id,
+                BookedByUserId = member.Id,
+                PaidByUserId = member.Id,
+                ActorUserId = member.Id,
+                StartsAt = startsAt,
+                EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 30,
+                SliceCount = 1,
+                AmountChargedMinutes = 30,
+                Status = status,
+                ChargedAt = startsAt.AddDays(-1),
             });
 
         // Outside, on the `from` side. It is also what seeds the member report's running

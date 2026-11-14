@@ -10,10 +10,19 @@
 # club LAN. Cloudflared is a service of THIS stack (2026-09-19), so it reaches the gateway by
 # service name over the compose bridge rather than via a published port. The gateway is still
 # published on 8088 anyway, because the court box is on the LAN and does not come in through
-# the tunnel; the box's secrets.h names http://<this machine's LAN address>:8088. The stack
+# the tunnel; it dials http://<this machine's LAN address>:8088 (compiled in as the first-boot
+# default, changeable afterwards over the heartbeat), so give this machine a DHCP reservation —
+# an address that moves after a power cut is a fleet that cannot find its server. The stack
 # keeps compose's own bridge rather than host networking because the gateway image reaches the
 # API and the SPA by service name (backend:5000, frontend:80), and because the API only believes
 # X-Forwarded-* headers from that bridge's pinned subnet — see the note on `networks` below.
+#
+# WHICH RELEASE RUNS is one variable: CRUSADERS_IMAGE_TAG (Portainer: the stack's
+# "Environment variables" panel). Every main push publishes an immutable sha-<commit> tag for all
+# three images, and :latest moves to it only after all six image builds passed and only FORWARD.
+# Set CRUSADERS_IMAGE_TAG=sha-<40-hex commit> on every redeploy, so the stack itself records what
+# it runs and a rollback is that variable put back — docs/runbooks/redeploy-and-rollback.md. Left
+# unset it falls back to :latest, which is what this file pulled before 2026-11-13.
 #
 # Names are the ones the API READS. .NET configuration maps Section__Key to Section:Key; a flat
 # name like JWT_SECRET reaches nothing and the API boots on the appsettings.json placeholder,
@@ -36,13 +45,24 @@ networks:
       config:
         - subnet: 10.83.29.0/24
 
+# Every service rotates its json-file log. Docker's default keeps a container's log forever, and
+# with the backend logging at Information on a Pi's SD card a full disk was a matter of weeks; a
+# full disk stops Postgres writing, which stops bookings and the ledger. 5 x 10 MB per container.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: crusaders
-      POSTGRES_PASSWORD: CHANGE-ME-strong-database-password
+      # Anchored: the backup service below reads the same value (*db-password), so it is changed
+      # here and in the backend's connection string — two places, not three.
+      POSTGRES_PASSWORD: &db-password CHANGE-ME-strong-database-password
       POSTGRES_DB: crusaders_mainframe
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -51,13 +71,17 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
   backend:
-    image: frostaura/crusaders-mainframe-backend:latest
+    image: frostaura/crusaders-mainframe-backend:${CRUSADERS_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5000
+      # Every EF Core command used to be logged at Information — 46 lines and ~35 KB a minute with
+      # nobody using the club, from the background workers alone. Warnings and errors still log.
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
       # Same password as POSTGRES_PASSWORD above.
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=crusaders_mainframe;Username=crusaders;Password=CHANGE-ME-strong-database-password
       Database__AutoMigrateOnStartup: "true"
@@ -81,6 +105,10 @@ services:
       Bootstrap__AdminEmail: dean.martin@frostaura.net
       Bootstrap__AdminPassword: CHANGE-ME-at-least-12-characters
       Bootstrap__Courts: "4"
+      # ---- Device keys (docs/specs/device-api.md §6, §7) ----
+      # After a database loss ONLY: the device key every board already holds, from the password
+      # manager. Applied to a club with no key, never over a live one; empty does nothing.
+      Bootstrap__DeviceApiKey: ""
       # ---- Inherent administrators ----
       # Whoever is listed here holds club-admin rights in every club on this deployment where
       # that address ALREADY has an account. It is applied at sign-in, so an address added
@@ -130,7 +158,7 @@ services:
       # moves images and nothing else, so the image still carries the old 172.29.83.0/24
       # default. Without this line the gateway is an untrusted peer, X-Forwarded-For/-Proto/
       # -Host are ignored, the whole club lands in one rate-limit bucket, and every absolute
-      # URL the API composes (verification links, PayFast returns, OTA and provisioning URLs)
+      # URL the API composes (verification links, PayFast returns, provisioning URLs)
       # is built from the gateway's port-less host instead of the public one.
       # Comma-delimited SCALAR, never the indexed form — .NET merges arrays by index, so the
       # indexed form cannot narrow a default, only add to it.
@@ -153,7 +181,9 @@ services:
       - media_data:/app/media
       - biometric_data:/app/biometric
     healthcheck:
-      test: [ "CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/healthz >/dev/null || exit 1" ]
+      # /readyz, not /healthz (IO-16): healthy means the API reached its database, so a Postgres
+      # outage shows as an unhealthy backend in Portainer instead of a "healthy" one answering 503.
+      test: [ "CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/readyz >/dev/null || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -161,18 +191,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *default-logging
 
   frontend:
-    image: frostaura/crusaders-mainframe-frontend:latest
+    image: frostaura/crusaders-mainframe-frontend:${CRUSADERS_IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       - backend
+    logging: *default-logging
 
   gateway:
     # A built image, not stock nginx:alpine with the config bind-mounted: the release chain moves
     # images and nothing else, so a stack that does not NAME this image keeps its old gateway
     # config through every redeploy. CI no longer checks for that — it is on whoever redeploys.
-    image: frostaura/crusaders-mainframe-gateway:latest
+    image: frostaura/crusaders-mainframe-gateway:${CRUSADERS_IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       # STILL PUBLISHED, even though cloudflared now runs inside this stack and reaches the
@@ -187,6 +219,7 @@ services:
         condition: service_healthy
       frontend:
         condition: service_started
+    logging: *default-logging
 
   # The public edge. Inside this stack rather than beside it, so it reaches the gateway by
   # service name over the pinned bridge — which also puts it inside Gateway__TrustedProxies
@@ -197,12 +230,157 @@ services:
   # ForwardLimit is 2 in appsettings.json, which is exactly this chain: cloudflared -> gateway
   # -> API. Adding another proxy in front means raising it, or every member's client IP
   # collapses to the gateway's.
+  #
+  # PINNED to a release rather than :latest, like every third-party image here: a redeploy then
+  # changes only what this repository changed. Bump it deliberately (Docker Hub
+  # cloudflare/cloudflared tags are the CalVer releases).
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.7
     restart: always
     depends_on:
       - gateway
     command: tunnel run --token "CHANGE-ME-cloudflare-tunnel-token"
+    logging: *default-logging
+
+  # Backups — the database AND the uploaded photos, daily, with retention. Money is ledger-only
+  # and the device API key every court box and door carries lives only in the `tenants` table:
+  # a lost Postgres volume, restored from nothing, is every member's balance gone AND a fleet of
+  # boxes holding a key the new database has never seen.
+  #
+  # What it does: at BACKUP_HOUR_UTC every day (and at once on a host with no backup at all) it
+  # writes crusaders-daily-<UTC stamp>.dump (pg_dump custom format, verified readable with
+  # pg_restore --list before it is kept) and a .media.tar.gz of the photos beside it, into
+  # CRUSADERS_BACKUP_DIR on the HOST. Backups older than BACKUP_KEEP_DAYS are deleted, but never
+  # the newest BACKUP_KEEP_MIN, however old: a job that failed for a month must not prune away the
+  # last good copy. The container goes unhealthy when the newest dump is over 26 hours old.
+  #
+  # THE SAME SD CARD IS NOT A BACKUP. This writes to the host so the offsite copy is a host-level
+  # step — docs/runbooks/backup-and-restore.md has the command, and go-live checklist §2b makes it
+  # a precondition. The dumps hold password hashes, members' e-mail addresses and the device key:
+  # encrypt them on the way off the host.
+  #
+  # Three commands are installed in the container, all documented in that runbook:
+  #   docker exec <this container> crusaders-backup predeploy     # a backup now, before a redeploy
+  #   docker exec <this container> crusaders-prune                # apply retention now
+  #   docker exec <this container> crusaders-restore <file.dump> crusaders_mainframe
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: crusaders
+      PGPASSWORD: *db-password
+      PGDATABASE: crusaders_mainframe
+      # 00:00 UTC is 02:00 at the club: after the last court, before the first.
+      BACKUP_HOUR_UTC: "0"
+      BACKUP_KEEP_DAYS: "14"
+      BACKUP_KEEP_MIN: "3"
+    volumes:
+      - ${CRUSADERS_BACKUP_DIR:-/var/backups/crusaders-mainframe}:/backups
+      # Read-write because crusaders-restore puts the photos back.
+      - media_data:/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "find /backups -maxdepth 1 -name 'crusaders-*.dump' -mmin -1560 | grep -q ." ]
+      interval: 5m
+      timeout: 10s
+      retries: 1
+      start_period: 10m
+    logging: *default-logging
+    entrypoint: [ "/bin/sh", "-c" ]
+    # Inline because a Portainer stack has no files beside it. Every `$$` is compose's escape for
+    # a literal `$`; the scripts are written into the container at start and the loop runs them.
+    command:
+      - |
+        set -eu
+        cat > /usr/local/bin/crusaders-backup <<'EOF'
+        #!/bin/sh
+        # crusaders-backup [label] - the database and the photos, now, side by side in /backups.
+        set -eu
+        umask 077
+        label="$${1:-manual}"
+        case "$$label" in
+          ""|*[!a-z0-9-]*) echo "backup: the label is lower-case letters, digits and dashes" >&2; exit 2 ;;
+        esac
+        name="crusaders-$$label-$$(date -u +%Y%m%dT%H%M%SZ)"
+        part="/backups/.$$name.partial"
+        trap 'rm -f "$$part.dump" "$$part.media.tar.gz"' EXIT
+        pg_dump --format=custom --compress=6 --file="$$part.dump"
+        pg_restore --list "$$part.dump" > /dev/null
+        tar -C /media -czf "$$part.media.tar.gz" .
+        mv "$$part.media.tar.gz" "/backups/$$name.media.tar.gz"
+        mv "$$part.dump" "/backups/$$name.dump"
+        trap - EXIT
+        echo "backup: wrote /backups/$$name.dump ($$(du -k "/backups/$$name.dump" | cut -f1) KiB) and its media archive"
+        EOF
+        cat > /usr/local/bin/crusaders-prune <<'EOF'
+        #!/bin/sh
+        # crusaders-prune - deletes backups older than BACKUP_KEEP_DAYS, never the newest BACKUP_KEEP_MIN.
+        set -eu
+        keep_days="$${BACKUP_KEEP_DAYS:-14}"
+        keep_min="$${BACKUP_KEEP_MIN:-3}"
+        n=0
+        for f in $$(ls -1t /backups/crusaders-*.dump 2> /dev/null); do
+          n=$$((n + 1))
+          if [ "$$n" -le "$$keep_min" ]; then continue; fi
+          if [ -n "$$(find "$$f" -mtime +"$$keep_days")" ]; then
+            rm -f "$$f" "$${f%.dump}.media.tar.gz"
+            echo "backup: pruned $$f"
+          fi
+        done
+        EOF
+        cat > /usr/local/bin/crusaders-restore <<'EOF'
+        #!/bin/sh
+        # crusaders-restore <file.dump> <database name> - REPLACES the database (and the photos).
+        set -eu
+        dump="$${1:-}"
+        confirm="$${2:-}"
+        if [ -z "$$dump" ]; then echo "usage: crusaders-restore <crusaders-...dump> $$PGDATABASE" >&2; exit 2; fi
+        case "$$dump" in /*) ;; *) dump="/backups/$$dump" ;; esac
+        if [ ! -f "$$dump" ]; then echo "restore: $$dump does not exist" >&2; exit 2; fi
+        if [ "$$confirm" != "$$PGDATABASE" ]; then
+          echo "restore: this REPLACES database $$PGDATABASE; repeat its name as the second argument" >&2; exit 2
+        fi
+        pg_restore --list "$$dump" > /dev/null
+        others="$$(psql -d postgres -Atc "select count(*) from pg_stat_activity where datname = '$$PGDATABASE'")"
+        if [ "$$others" != "0" ]; then
+          echo "restore: $$others connection(s) to $$PGDATABASE are open - stop the backend first" >&2; exit 3
+        fi
+        if ! crusaders-backup pre-restore; then
+          echo "restore: WARNING - the safety backup of the current database failed; restoring anyway" >&2
+        fi
+        psql -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$$PGDATABASE\"" -c "CREATE DATABASE \"$$PGDATABASE\""
+        pg_restore --dbname="$$PGDATABASE" --exit-on-error --no-owner "$$dump"
+        media="$${dump%.dump}.media.tar.gz"
+        if [ -f "$$media" ]; then
+          find /media -mindepth 1 -delete
+          tar -C /media -xzf "$$media"
+          echo "restore: photos restored from $$media"
+        else
+          echo "restore: no media archive beside the dump; the photos were left as they are" >&2
+        fi
+        echo "restore: newest migration is $$(psql -Atc 'select max("MigrationId") from "__EFMigrationsHistory"')"
+        echo "restore: done - start the backend"
+        EOF
+        cat > /usr/local/bin/crusaders-backup-loop <<'EOF'
+        #!/bin/sh
+        set -u
+        echo "backup: daily at $${BACKUP_HOUR_UTC:-0}:00 UTC into /backups, kept $${BACKUP_KEEP_DAYS:-14} days, never fewer than $${BACKUP_KEEP_MIN:-3}"
+        while :; do
+          today="$$(date -u +%Y%m%d)"
+          hour="$$(date -u +%H | sed 's/^0//')"
+          if ! ls /backups/crusaders-daily-"$$today"T*.dump > /dev/null 2>&1; then
+            if [ "$${hour:-0}" -ge "$${BACKUP_HOUR_UTC:-0}" ] || ! ls /backups/crusaders-*.dump > /dev/null 2>&1; then
+              if crusaders-backup daily; then crusaders-prune; else echo "backup: FAILED - retrying in five minutes" >&2; fi
+            fi
+          fi
+          sleep 300
+        done
+        EOF
+        chmod 755 /usr/local/bin/crusaders-backup /usr/local/bin/crusaders-prune /usr/local/bin/crusaders-restore /usr/local/bin/crusaders-backup-loop
+        exec crusaders-backup-loop
 
 volumes:
   postgres_data:

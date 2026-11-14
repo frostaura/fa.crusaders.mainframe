@@ -14,15 +14,18 @@
 // (build_src_filter = -<*>) and behaviour that turns a court's lights on is not
 // allowed to live where no test can reach it.
 //
-// WHY THIS HALF EXISTS AT ALL
-// ---------------------------
+// WHY THIS HALF EXISTS AT ALL, AND WHY 3.0.0 IS ITS LAST IMAGE
+// -------------------------------------------------------------
 // The ATmega cannot be flashed over WiFi: its ESP8266 sits on Serial3, not the
 // Serial0 bootloader port, and no GPIO reaches RESET. So the Mega is the
-// near-static half and the ESP is the half that changes. What the Mega keeps is
-// the one thing that must survive the ESP being dead: the relay deadline. In
-// the system this replaces, the off command was scheduled by a VBA macro on a
-// Windows PC — close the workbook mid-session and a court burned until somebody
-// noticed. The timer running here, behind nothing, is the fix.
+// near-static half and the ESP — reflashed by cable on its own — is the half
+// that changes. Mega 3.0.0 is a generic renderer and relay guard the
+// bridge steers (docs/specs/device-serial-protocol.md, chapter v3), with every
+// timeout bounded here: the relay deadline and authorisation cap, the screen
+// ceiling, the return to landing, the bridge-liveness verdict. Every hardware
+// fact the old images compiled in — the relay drive level, the LCD address,
+// the scanner's baud and line end, which keys are court keys — is a runtime
+// `!CFG` setting whose compiled value is only the first-boot default.
 //
 // WHAT THIS FIRMWARE DELIBERATELY DEFERS
 // --------------------------------------
@@ -31,12 +34,12 @@
 //     peer is an ESP running firmware from this repo — so the case only arises
 //     when a v2 Mega is paired with Carl's original bridge, which is a bench
 //     scenario, not an installation.
-//   * Persistence. arduino_hal::EepromStore is built and compiled by this
-//     environment but nothing here instantiates it: the Mega has nothing of its
-//     own to remember. The one thing the box persists — the event queue's
-//     sequence high-water mark — is the ESP's, because the event queue is. An
-//     unused store would cost SRAM on a part that has 8 KB of it.
-//   * Anything that knows what a member is. Bookings, credits and the roster
+//   * Persistence. No relay state is kept on the Mega: a Mega-only reset is
+//     recovered by the bridge re-applying its snapshot (`!WANT`) within
+//     seconds of `!BOOT`, and a power cut takes both chips, which the bridge's
+//     persisted snapshot covers. A second, EEPROM-held copy would be a second
+//     source of truth that could disagree with the server.
+//   * Anything that knows what a member is. Bookings, minutes and the roster
 //     are the ESP's, because they will change and this half cannot be updated.
 
 #include <Arduino.h>
@@ -93,25 +96,26 @@ void setup() {
   // periods costs one extra instruction and closes it.
   arduino_hal::watchdogBeginBoot();
 
-  // Relays next, before anything else can take time. begin() drives every pin
-  // to the released level BEFORE configuring it as an output, so the pin
-  // becomes an output already at "off" whichever polarity RELAY_ACTIVE_LOW
-  // names. The club's solid-state relays are active HIGH (released = LOW);
-  // on an active-LOW board the other order is four courts' lights coming on
-  // at every reset.
+  // Relays next, before anything else can take time. begin() leaves every
+  // relay pin an INPUT — the state the AVR's reset already left it in, and off
+  // for either relay module (HW-1) — so nothing here can flash a court on.
   gRelay.begin();
 
   gButtons.begin();
-  arduino_hal::watchdogKick();
-  // The longest step by far: the bus release, the timeout and the panel's own
-  // power-on sequence. Kicked either side of it rather than inside it, so a
-  // driver can never hide the stall the watchdog is for.
-  gDisplay.begin();
-  arduino_hal::watchdogKick();
   gScanner.begin();
   gBridge.begin();
 
-  gBox.begin();
+  // `!BOOT` and `!STATE` BEFORE the LCD (FWM-01): the panel's init and the
+  // address probe take time, and a bridge that hears `!BOOT` at once re-applies
+  // its snapshot within seconds of a Mega-only reset. The queued frames are
+  // pushed out as the UART ring has room, here and from loop().
+  gBox.boot(arduino_hal::resetCause());
+  arduino_hal::watchdogKick();
+  // The longest step: the bus release, the timeout, the address probe and the
+  // panel's power-on sequence. Kicked either side of it rather than inside it,
+  // so a driver can never hide the stall the watchdog is for.
+  gDisplay.begin();
+  arduino_hal::watchdogKick();
 
   // Re-armed at two seconds, once nothing above can spend a second in an init
   // delay(). From here on a pass of loop() that does not return within two

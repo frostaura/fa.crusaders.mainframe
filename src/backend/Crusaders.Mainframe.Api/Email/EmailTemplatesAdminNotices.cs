@@ -3,6 +3,9 @@ namespace Crusaders.Mainframe.Api.Email;
 /// <summary>Applications that have waited past the club's reminder threshold.</summary>
 public sealed record ApplicationsWaiting(int Count, string OldestName, int OldestHours, string ConsoleUrl);
 
+/// <summary>Bookings the no-show sweep can no longer reach, still charged (money lane BM-11).</summary>
+public sealed record UnsettledBookings(int Count, string OldestLocal, int LookbackDays, string ConsoleUrl);
+
 /// <summary>Several different faults open across the club's boards at once.</summary>
 public sealed record FaultSpike(int Faults, int Minutes, IReadOnlyList<string> Boards, string ConsoleUrl);
 
@@ -42,6 +45,9 @@ public sealed record OverdraftNotice(
 public sealed record ForgeryNotice(string DeviceCode, string? MemberName, string Detail, string ConsoleUrl);
 
 /// <summary>A board that reported firmware without the member-code capability after the club's cut-over.</summary>
+/// <summary>MCV1-09: the rollout's automatic move, as the mail words it.</summary>
+public sealed record CodesPhaseMoved(string From, string To, string? CutoffDueLocal, int CutoffDays, string ConsoleUrl);
+
 public sealed record BoardLostMemberCodes(string DeviceName, string DeviceCode, string? FirmwareVersion, string ConsoleUrl);
 
 /// <summary>
@@ -76,6 +82,30 @@ public static partial class EmailTemplates
                 ]),
                 new Paragraph("Each applicant was told this takes a day or two. You'll get this reminder at most once a day while any application is waiting."),
                 new CallToAction("Review the applications", w.ConsoleUrl),
+            ],
+            WhyThis: WhyAdmin));
+
+    /// <summary>
+    /// A daily nudge while bookings older than the no-show sweep's reach were never settled (BM-11):
+    /// nobody checked in and nothing refunded or penalised them, so each member still carries its
+    /// full charge. The sweep does not settle them on its own — after that long it cannot know
+    /// whether the court was played — so an administrator decides, booking by booking.
+    /// </summary>
+    public static EmailMessage AdminBookingsUnsettled(ClubIdentity club, string to, UnsettledBookings u) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: u.Count == 1 ? "1 past booking was never settled" : $"{u.Count} past bookings were never settled",
+            Preheader: $"The oldest is from {u.OldestLocal}. Each member still carries its full charge.",
+            Heading: "Past bookings need a decision",
+            Blocks:
+            [
+                new Paragraph($"{Plural(u.Count, "booking at", "bookings at")} {club.Name} started more than {u.LookbackDays} days ago and {(u.Count == 1 ? "was" : "were")} never settled: nobody checked in, and no refund or no-show penalty was posted. That happens when the system was down for longer than the no-show sweep reaches back."),
+                new Facts(
+                [
+                    new FactRow("Never settled", u.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                    new FactRow("Oldest", u.OldestLocal),
+                ]),
+                new Paragraph("Cancelling one gives its member the whole charge back. Leaving it keeps the charge. You'll get this reminder at most once a day while any is left."),
+                new CallToAction("Review the bookings", u.ConsoleUrl),
             ],
             WhyThis: WhyAdmin));
 
@@ -298,6 +328,37 @@ public static partial class EmailTemplates
     /// A board went back to firmware that cannot check member codes offline — a spare flashed
     /// with an old image, usually. Online it still works; offline it now admits nobody on a code.
     /// </summary>
+    /// <summary>
+    /// MCV1-09: the member-code rollout moved on by itself. Said the day it happens — the cut-over
+    /// with the date old codes stop, the cut-off with what it means at the door and the courts — and
+    /// with the one control that stops the next automatic step: the hold on the Member codes panel.
+    /// </summary>
+    public static EmailMessage AdminCodesPhaseMoved(ClubIdentity club, string to, CodesPhaseMoved m) =>
+        EmailChrome.Compose(club, to, m.To == Services.MemberCodeSettings.V1Only
+            ? new EmailContent(
+                Subject: "Old member codes have stopped working",
+                Preheader: "Every board now accepts only members' rotating codes.",
+                Heading: "The club is on new member codes only",
+                Blocks:
+                [
+                    new Paragraph($"{club.Name}'s switch to members' rotating codes reached its cut-off by itself: old booking and door codes are refused everywhere from now on. Members' phones have shown the new code for a while, so nobody should notice."),
+                    new Paragraph("If a member is turned away, check the board's firmware on the Boards page. Going back to accepting old codes is on the Member codes panel, and it holds the rollout where you put it."),
+                    new CallToAction("Open Member codes", m.ConsoleUrl),
+                ],
+                WhyThis: WhyAdmin)
+            : new EmailContent(
+                Subject: "The club moved to new member codes",
+                Preheader: m.CutoffDueLocal is null ? $"Old codes stop working in {m.CutoffDays} days." : $"Old codes stop working on {m.CutoffDueLocal}.",
+                Heading: "Every board reads the new member codes",
+                Blocks:
+                [
+                    new Paragraph($"Every board at {club.Name} reported it can check members' rotating codes, so the club moved to them by itself. Old codes still work until the cut-off."),
+                    new Facts([new FactRow("Old codes stop", m.CutoffDueLocal ?? $"In {m.CutoffDays} days")]),
+                    new Paragraph("To keep old codes working past that date, set the hold on the Member codes panel: nothing then moves on by itself until you lift it."),
+                    new CallToAction("Open Member codes", m.ConsoleUrl),
+                ],
+                WhyThis: WhyAdmin));
+
     public static EmailMessage AdminBoardLostMemberCodes(ClubIdentity club, string to, BoardLostMemberCodes b) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"A board stopped reading member codes — {b.DeviceCode}",

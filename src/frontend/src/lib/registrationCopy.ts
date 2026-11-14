@@ -61,9 +61,15 @@ export const REGISTER_FIELD = {
 export const REGISTER_MESSAGES: Record<string, string> = {
   missing_fields: "Please fill in every field — name, email, membership number and password.",
   password_too_short: "Your password must be at least 8 characters.",
-  email_in_use: "An account with that email already exists. Sign in instead, or reset your password.",
-  membership_number_in_use:
-    "That membership number is already registered. Check the number on your card — if it's right, contact the club committee.",
+
+  // BP-06: the application names a photo the club's own upload issued, still on file and nobody
+  // else's. Reaching one of these means the upload a moment ago was lost or refused — choosing the
+  // photo again uploads it again.
+  photo_required: "Add a photo of yourself — the club's booking grid shows it beside your name.",
+  photo_url_invalid: "The club's system didn't recognise that photo. Pick it again and resubmit.",
+  photo_missing: "The club's system no longer has that photo. Pick it again and resubmit.",
+  // BP-04: the club's uploads are paused for a while because too much has been uploaded recently.
+  uploads_paused: "The club's system isn't taking photos for a little while. Try again in an hour.",
 
   // The upload endpoint's own refusals. They were absent, and that absence is what made a
   // rejected photo read as a network fault: uploadPhoto throws before register() is ever
@@ -77,6 +83,16 @@ export const REGISTER_MESSAGES: Record<string, string> = {
   file_missing: "The photo didn't reach the club's system. Pick it again and resubmit.",
   expected_multipart: "The photo didn't upload correctly. Pick it again and resubmit.",
 };
+
+/**
+ * FM-4 — the application's reply went missing (a timeout, a dropped connection, the gateway saying
+ * the club's system did not answer): it may have arrived. Said beside the failure. Sending it again
+ * is safe: every well-formed application is answered the same way (BP-14), and what actually
+ * happened — a confirmation link, or "you already have an account" — goes to the mailbox.
+ */
+export const REGISTER_UNSURE = {
+  mayHaveArrived: "It may have arrived anyway — check your email for a confirmation link before sending it again.",
+} as const;
 
 /**
  * <b>The sentence that could not be reached, and the bug it is the other half of.</b>
@@ -134,6 +150,22 @@ export const VERIFY_WORKING = "Confirming your email address…";
 export const VERIFY_OK_HEADING = "Email confirmed";
 export const VERIFY_OK_BODY = "That's your address confirmed. Somebody at the club now checks your membership "
   + "number against their records and approves your account — you'll get a second email when they have.";
+
+/**
+ * Go-live BM-11 — an admin may approve before the address is confirmed, and the page told that
+ * member to wait for an approval that had already happened. When the API says so, it says the
+ * account is ready; when the API does not say, it claims neither.
+ */
+export const VERIFY_OK_BODY_APPROVED = "That's your address confirmed, and the club has already approved your account. "
+  + "You can sign in now.";
+export const VERIFY_OK_BODY_UNKNOWN = "That's your address confirmed. If the club hasn't approved your account yet, "
+  + "somebody there checks your membership number against their records — you'll get an email when they have.";
+
+export function verifyOkBody(approved: boolean | undefined): string {
+  if (approved === true) return VERIFY_OK_BODY_APPROVED;
+  if (approved === false) return VERIFY_OK_BODY;
+  return VERIFY_OK_BODY_UNKNOWN;
+}
 
 /**
  * <b>"Try registering again" was the dead end.</b>

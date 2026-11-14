@@ -2,9 +2,9 @@
 //
 // WHAT IT CAN SIMULATE, AND WHY EACH ONE IS REAL
 // ----------------------------------------------
-//   setConnected(false)  the peer is absent, resetting, or mid-OTA. The ESP
-//                        reboots itself on every firmware update, so the Mega
-//                        sees this several times per release.
+//   setConnected(false)  the peer is absent or resetting. The ESP restarts
+//                        itself (the link supervisor, the stall watchdog, a
+//                        portal save), so the Mega sees this in service.
 //   setWriteFailure()    the driver accepts the call and writes nothing, while
 //                        still claiming space in writable(). Real drivers do
 //                        not know they are failing; a fake where failure is
@@ -49,7 +49,7 @@ public:
   /// the same offered length it happens at on the bench.
   static constexpr size_t kTxCapacity = 64U;
   static constexpr uint16_t kRxCapacity = 256U;
-  static constexpr uint8_t kMaxLines = 12U;
+  static constexpr uint8_t kMaxLines = 96U;
   static constexpr uint8_t kMaxLineLen = 48U;
 
   bool connected() override { return connected_; }
@@ -137,6 +137,13 @@ public:
 
   /// Feed a whole frame including its '\n', the way the peer sends one.
   bool feedLine(const char* text) { return feed(text) && feedByte(static_cast<uint8_t>('\n')); }
+
+  /// Forget the captured transcript (not the TX ring), so a long scenario can
+  /// assert on what happened since a point.
+  void clearLines() {
+    lineCount_ = 0U;
+    captureOverflowed_ = false;
+  }
 
   // --- observation ---------------------------------------------------------
 

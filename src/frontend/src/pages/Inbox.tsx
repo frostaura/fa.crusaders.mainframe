@@ -13,13 +13,15 @@ import { TextLink } from "@/components/ui/text-link";
 import { usePickParam, useSplitLayout } from "@/components/ui/use-split-layout";
 import { appPath } from "@/components/inbox/notificationKinds";
 import { InviteDetail } from "@/components/players/invites/InviteDetail";
-import { useKeptInvites } from "@/lib/offline/useKeptInvites";
+import { useKeptInvites, type KeptInvites } from "@/lib/offline/useKeptInvites";
+import { OfflineNothingKeptRetry } from "@/components/bookings/OfflineNothingKeptRetry";
+import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import type { Invite, MemberNotification } from "@/lib/playersApi";
 import { BookingDetailPanel } from "./BookingDetail";
 import { StaleNotice } from "@/components/shell/StaleNotice";
 import { cn } from "@/lib/utils";
 import { keepFiguresWhole } from "@/components/ui/figure-text";
-import { INBOX_COPY as COPY, inboxUnreadLine } from "@/lib/playersCopy";
+import { INBOX_COPY as COPY, INVITES_COPY, inboxUnreadLine } from "@/lib/playersCopy";
 import { SPLIT_PANE_COPY } from "@/lib/inboxCopy";
 import { typography } from "@/lib/typography";
 
@@ -126,8 +128,23 @@ function InviteTarget({ seat, notice }: { seat: string; notice: MemberNotificati
   if (fromList && fromList !== held) setHeld(fromList);
   const invite = fromList ?? held;
   // Answered already, or gone: the notice and its link say what the club knows.
-  if (!invite) return invites.items === null ? <Skeleton className="h-64 rounded-xl" /> : <NoticeCard notice={notice} />;
+  if (!invite && invites.items !== null) return <NoticeCard notice={notice} />;
+  // FM-3 — a FAILED read is not a loading one: three states, never a skeleton for ever. The notice
+  // and its link stay under the failure, so the member still has the way to the invite's own page.
+  if (!invite && invites.error != null) return <InviteReadFailed invites={invites} notice={notice} onRetry={reread} />;
+  if (!invite) return <Skeleton className="h-64 rounded-xl" />;
   return <InviteDetail invite={invite} onReread={reread} />;
+}
+
+function InviteReadFailed({ invites, notice, onRetry }: { invites: KeptInvites; notice: MemberNotification; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col gap-4" data-invite-read-failed="">
+      {invites.offline
+        ? <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.invites} onRetry={onRetry} />
+        : <StateBlock error={invites.error} action={INVITES_COPY.readAction} onRetry={onRetry} />}
+      <NoticeCard notice={notice} />
+    </div>
+  );
 }
 
 function NoticeCard({ notice }: { notice: MemberNotification }) {

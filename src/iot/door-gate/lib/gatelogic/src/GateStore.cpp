@@ -1,0 +1,42 @@
+#include "gatelogic/GateStore.h"
+
+#include <stddef.h>
+
+namespace gatelogic {
+
+uint32_t crc32(const void* data, size_t len, uint32_t seed) {
+  // Reflected CRC-32 (IEEE 802.3), bitwise: about 4 KB a pass at most, so a
+  // table would be 1 KB of flash to save microseconds nobody waits for.
+  const uint8_t* p = static_cast<const uint8_t*>(data);
+  uint32_t crc = ~seed;
+  for (size_t i = 0U; i < len; ++i) {
+    crc ^= p[i];
+    for (int bit = 0; bit < 8; ++bit) {
+      crc = (crc >> 1U) ^ (0xEDB88320UL & (0U - (crc & 1U)));
+    }
+  }
+  return ~crc;
+}
+
+namespace {
+
+constexpr size_t kWarmPayloadAt = offsetof(WarmImage, rosterAtUs);
+
+uint32_t warmCrc(const WarmImage& image) {
+  const uint8_t* base = reinterpret_cast<const uint8_t*>(&image);
+  return crc32(base + kWarmPayloadAt, sizeof(WarmImage) - kWarmPayloadAt);
+}
+
+} // namespace
+
+void sealWarm(WarmImage& image) {
+  image.magic = kWarmMagic;
+  image.length = static_cast<uint32_t>(sizeof(WarmImage));
+  image.crc = warmCrc(image);
+}
+
+bool warmValid(const WarmImage& image) {
+  return image.magic == kWarmMagic && image.length == sizeof(WarmImage) && image.crc == warmCrc(image);
+}
+
+} // namespace gatelogic

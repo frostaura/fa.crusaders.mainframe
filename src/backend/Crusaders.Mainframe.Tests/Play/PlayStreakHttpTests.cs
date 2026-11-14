@@ -27,7 +27,11 @@ public sealed class PlayStreakHttpTests(PostgresFixture pg) : IClassFixture<Post
     private static Task PauseAsync(PlayersClub club, TestWebAppFactory f, Guid user, DateTimeOffset from, DateTimeOffset? to) =>
         club.WriteAsync(f, db => db.MemberStreakPauses.Add(new MemberStreakPause
         {
-            TenantId = club.TenantId, UserId = user, StartedAt = from, EndedAt = to, CreatedAt = from,
+            TenantId = club.TenantId,
+            UserId = user,
+            StartedAt = from,
+            EndedAt = to,
+            CreatedAt = from,
         }));
 
     /// <summary>

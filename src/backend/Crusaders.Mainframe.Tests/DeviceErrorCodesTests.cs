@@ -92,6 +92,21 @@ public sealed class DeviceErrorCodesTests
         [DeviceErrorCodes.QueueEventsLost] = DeviceErrorSeverity.Warning,
         [DeviceErrorCodes.ErrorLogOverflow] = DeviceErrorSeverity.Warning,
 
+        // Device contract v3 (device-api.md §4, §13; serial v3; door-gate §14).
+        [DeviceErrorCodes.RelightFailed] = DeviceErrorSeverity.Critical,
+        [DeviceErrorCodes.MegaUnacked] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.KindMismatch] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.BoardRestarted] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.LcdAbsent] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.ScreenDropped] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.HeapLow] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.StackLow] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.AnswerDrift] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.CodeKeysTrimmed] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.LightsOnNothingBooked] = DeviceErrorSeverity.Warning,
+        [DeviceErrorCodes.CheckedInLightsOff] = DeviceErrorSeverity.Error,
+        [DeviceErrorCodes.NetFallback] = DeviceErrorSeverity.Warning,
+
         // Info — worth counting, not worth waking anybody.
         [DeviceErrorCodes.MegaLinkBack] = DeviceErrorSeverity.Info,
         [DeviceErrorCodes.Boot] = DeviceErrorSeverity.Info,
@@ -105,6 +120,40 @@ public sealed class DeviceErrorCodesTests
     /// </summary>
     private static List<string> Ungraded(IEnumerable<string> codes)
         => [.. codes.Where(c => !Expected.ContainsKey(c))];
+
+    /// <summary>
+    /// Every fault the firmware can raise is a code this server stores as itself. A board ahead of
+    /// the server is filed as <c>unknown</c> by design — but a code both sides ship in the same
+    /// release must not be, and the integration of the v3 lanes found <c>net_fallback</c> (a door
+    /// that abandoned a network it was sent) filed as <c>unknown</c> on every occurrence. The
+    /// firmware's own tables are read, so a fault added there without a server entry goes red here.
+    /// </summary>
+    [Fact]
+    public void Every_fault_the_firmware_raises_is_a_code_the_server_knows()
+    {
+        var iot = Path.Combine(RepoRoot(), "src", "iot");
+        var bridge = File.ReadAllText(Path.Combine(iot, "court-box", "lib", "bridgelogic", "src", "FaultLog.cpp"));
+        var table = bridge[bridge.IndexOf('{', bridge.IndexOf("kFaultNames", StringComparison.Ordinal))..];
+        table = table[..table.IndexOf("};", StringComparison.Ordinal)];
+        var gate = File.ReadAllText(Path.Combine(iot, "door-gate", "lib", "gatelogic", "include", "gatelogic", "FaultLog.h"));
+
+        var raised = System.Text.RegularExpressions.Regex.Matches(table, "\"([a-z0-9_]+)\"").Select(m => m.Groups[1].Value)
+            .Concat(System.Text.RegularExpressions.Regex.Matches(gate, "inline constexpr char kFault(?!BootReasonPrefix)\\w+\\[\\] = \"([a-z0-9_]+)\";")
+                .Select(m => m.Groups[1].Value))
+            .Distinct().ToList();
+
+        Assert.Contains("mega_unacked", raised);
+        Assert.Contains("net_fallback", raised);
+        var unknown = raised.Where(code => !DeviceErrorCodes.IsKnown(code)).ToList();
+        Assert.True(unknown.Count == 0, $"filed as unknown: {string.Join(", ", unknown)}");
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "CLAUDE.md"))) dir = dir.Parent;
+        return dir?.FullName ?? throw new InvalidOperationException("repository root not found");
+    }
 
     [Fact]
     public void Every_code_has_an_explicitly_expected_severity()

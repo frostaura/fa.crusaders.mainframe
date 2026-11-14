@@ -206,7 +206,7 @@ export type CsvFile = { blob: Blob; filename: string };
  * shipped that once; every audited export here is fetched instead.
  * </p>
  */
-async function fetchCsv(path: string, fallbackName: string): Promise<CsvFile> {
+export async function fetchCsv(path: string, fallbackName: string): Promise<CsvFile> {
   const token = tokenStore.get();
   const res = await fetchWithTimeout(path, { headers: token ? { authorization: `Bearer ${token}` } : {} });
   if (!res.ok) {

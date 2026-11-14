@@ -27,7 +27,10 @@ import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { Skeleton } from "../components/ui/skeleton";
 import { StateBlock } from "../components/ui/state-block";
-import { CaretDown, CaretUp, Funnel, MagnifyingGlass } from "../components/ui/icons";
+import { CaretDown, CaretUp, DownloadSimple, Funnel, MagnifyingGlass } from "../components/ui/icons";
+import { useToast } from "../components/toastContext";
+import { csvBlob, ledgerCsv, readLedgerForExport } from "../lib/csvExport";
+import { saveFile } from "../lib/memberDetailApi";
 import { FilterBar, FilterDate, FilterSelect, TableSkeleton, type FilterOption } from "../components/monitoring/parts";
 import { ADMIN_LEDGER_TYPES, ledgerTypeLabel } from "../lib/deskLedger";
 import { LedgerDetailPanel, LedgerDetailSheet } from "../components/admin/LedgerDetailSheet";
@@ -95,7 +98,13 @@ export default function AdminLedgerPage() {
       <PageHeader
         title="Transactions"
         description="Every movement of minutes across the club — packages bought and sold, charges, refunds, penalties and adjustments."
-        actions={<RefreshButton onRefresh={() => void load()} loading={loading} />}
+        actions={(
+          <div className="flex flex-wrap items-center gap-2">
+            {/* FA-7 / BA-08: the book the filters select, every row, for the treasurer. */}
+            <ExportLedgerButton filters={read.filtersNow} query={typed} from={from} to={to} disabled={rows === null} />
+            <RefreshButton onRefresh={() => void load()} loading={loading} />
+          </div>
+        )}
         freshness={<Freshness at={readAt} />}
       />
 
@@ -241,6 +250,35 @@ function usePinnedRange(
     }, { replace: true });
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
+}
+
+/**
+ * "Export CSV" (FA-7, BA-08): every movement the screen's filters select — read a page at a time
+ * to the end, with the name search applied on top — as a CSV in the API's own conventions
+ * (`lib/csvExport`). A file past the export cap says so, and a failed read saves nothing.
+ */
+function ExportLedgerButton(props: { filters: () => LedgerFilters; query: string; from: string; to: string; disabled: boolean }) {
+  const { filters, query, from, to, disabled } = props;
+  const toast = useToast();
+  const [pending, setPending] = useState(false);
+  async function run() {
+    if (pending) return;
+    setPending(true);
+    try {
+      const { rows, truncated } = await readLedgerForExport(filters(), (row) => byName([row], query).length === 1);
+      saveFile({ blob: csvBlob(ledgerCsv(rows)), filename: `transactions-${from || "start"}-to-${to || "today"}.csv` });
+      toast.push({ tone: truncated ? "warning" : "success", text: LEDGER_COPY.exported(rows.length, truncated), durationMs: 8000 });
+    } catch (e) {
+      toast.push({ tone: "danger", text: `${describeFailure(e, { action: "export the transactions" })} Nothing was downloaded.`, durationMs: 8000 });
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <Button variant="outline" size="sm" pending={pending} disabled={disabled} onClick={() => void run()} icon={<DownloadSimple aria-hidden="true" />}>
+      Export CSV
+    </Button>
+  );
 }
 
 /** The name search, over the rows read: subject, actor, from and to. */
@@ -426,7 +464,10 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [from, to, type, userId]);
 
-  return { rows, loading, loadError, readAt, totals, next, more, load, loadMore, stale };
+  /** The filters the rows on screen were read with, for the export (the same range and type). */
+  const filtersNow = () => filters.current;
+
+  return { rows, loading, loadError, readAt, totals, next, more, load, loadMore, stale, filtersNow };
 }
 
 /**

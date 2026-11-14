@@ -4,8 +4,8 @@ import { Button } from "../ui/button";
 import { CaretDown, CaretUp, Warning } from "../ui/icons";
 import { cn } from "../../lib/utils";
 import {
-  EXPECTATION_WORD, courtAnnouncement, courtExpectation, expectationMeaning, healthLine,
-  lightsLine, nextLine, startedLine, type CourtExpectation,
+  COUNTDOWN_LABEL, EXPECTATION_WORD, LIGHTS_MISMATCH_WORDS, courtAnnouncement, courtExpectation, expectationMeaning,
+  healthLine, lightsLine, lightsMismatch, lightsSecondsLeft, nextLine, startedLine, type CountdownSource, type CourtExpectation,
   DUPLICATE_BOXES_BOARDS, DUPLICATE_BOXES_HIDE, DUPLICATE_BOXES_OTHERS, DUPLICATE_BOXES_REVIEW, duplicateBoxesParts,
 } from "../../lib/monitoringCopy";
 import { type ControlBoardCourt } from "../../lib/adminApi";
@@ -79,16 +79,33 @@ function countdownFace(seconds: number): string {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
-export function CourtTile({ court, now, timezone, graceMinutes }: {
+/**
+ * FA-8: while the lights are on, the big number is the LIGHTS' time left; the booking's end is
+ * said apart from it when the two differ by more than a minute.
+ */
+function tileCountdown(court: ControlBoardCourt, now: number, generatedAt: string | null | undefined): {
+  left: number | null; source: CountdownSource; bookingApart: number | null;
+} {
+  const lightsLeft = lightsSecondsLeft(court.lights, now, generatedAt);
+  const bookingLeft = secondsLeft(court.current?.ends_at, now);
+  if (lightsLeft === null) return { left: bookingLeft, source: "booking", bookingApart: null };
+  const apart = bookingLeft !== null && Math.abs(lightsLeft - bookingLeft) > 60;
+  return { left: lightsLeft, source: "lights", bookingApart: apart ? bookingLeft : null };
+}
+
+export function CourtTile({ court, now, timezone, graceMinutes, generatedAt }: {
   court: ControlBoardCourt;
   /** One instant per paint, from the page's `useTicker`. Three tiles must not print two moments. */
   now: number;
   timezone: string | undefined;
   /** The club's grace window, for the DUE sentence, or null where the settings read failed. */
   graceMinutes: number | null;
+  /** When the server computed this view: what `lights.seconds_remaining` is relative to. */
+  generatedAt?: string | null;
 }) {
   const state = courtExpectation(court);
-  const left = secondsLeft(court.current?.ends_at, now);
+  const { left, source, bookingApart } = tileCountdown(court, now, generatedAt);
+  const mismatch = lightsMismatch(court, now, graceMinutes);
   const lights = lightsLine(court.lights, timezone);
   const started = startedLine(court.current, court.lights, timezone);
   const boxLine = healthLine(court.device, now, "Box");
@@ -139,6 +156,9 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
             className="font-mono text-[length:min(calc(2.25rem*var(--board-scale,1)),22cqi)] font-bold leading-none tabular-nums"
           >
             {countdownFace(left)}
+            <span className="ml-2 align-middle font-sans text-[length:min(calc(0.75rem*var(--board-scale,1)),8cqi)] font-medium" data-countdown={source}>
+              {COUNTDOWN_LABEL[source]}
+            </span>
           </p>
         )}
         <StateSpeech
@@ -146,6 +166,15 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
           state={state}
         />
       </div>
+
+      {/* BA-04: lights burning on an empty court, or a checked-in court the box says is dark. */}
+      {mismatch && (
+        <p role="status" data-lights-mismatch={mismatch}
+          className="flex items-start gap-2 rounded-lg bg-warning-soft px-2 py-1 text-[calc(0.8125rem*var(--board-scale,1))] font-medium text-warning-strong">
+          <Warning aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span>{LIGHTS_MISMATCH_WORDS[mismatch]}</span>
+        </p>
+      )}
 
       <p className="text-[calc(0.75rem*var(--board-scale,1))] text-text-secondary">
         {expectationMeaning(state, graceMinutes)}
@@ -164,6 +193,12 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
           <>
             <dt className="text-text-muted">Started</dt>
             <dd className="min-w-0 break-words text-text-primary">{started.replace(/^Started /, "")}</dd>
+          </>
+        )}
+        {bookingApart !== null && (
+          <>
+            <dt className="text-text-muted">Booking ends in</dt>
+            <dd className="min-w-0 break-words text-text-primary" data-booking-apart="">{countdownFace(bookingApart)}</dd>
           </>
         )}
         <dt className="text-text-muted">Next</dt>

@@ -1,3 +1,5 @@
+using Crusaders.Mainframe.Api.Payments;
+using Crusaders.Mainframe.Api.Payments.PayFast;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -90,6 +92,19 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     public string? EnvironmentName { get; init; }
 
     /// <summary>
+    /// What PayFast's validate call answers for every ITN this host receives. The real validator
+    /// POSTs to PayFast; no test may, so every host swaps in <see cref="StubItnValidator"/> answering
+    /// this (default <see cref="ItnValidation.Valid"/>, so a suite about the API's own handling is
+    /// testing that). A test of the refusal sets <c>Invalid</c> or <c>Unavailable</c>; the real
+    /// validator's HTTP leg has its own unit tests over a fake handler.
+    /// </summary>
+    public ItnValidation PayFastValidation { get; init; } = ItnValidation.Valid;
+
+    /// <summary>The stub every host's ITN path asks; <see cref="StubItnValidator.Calls"/> counts what it was asked.</summary>
+    public StubItnValidator ItnValidator => _itnValidator ??= new StubItnValidator(PayFastValidation);
+    private StubItnValidator? _itnValidator;
+
+    /// <summary>
     /// The member-code master key every factory host runs with: 48 RANDOM bytes, drawn once per
     /// test process. Random rather than a committed constant because the host runs under the same
     /// key policy Production does (only Development is lenient) and that policy refuses every key
@@ -166,6 +181,9 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         // EnvironmentName = "Production" must start: Production refuses the development key and
         // every placeholder.
         builder.UseSetting("MemberCodes:MasterKey", TestMemberCodeMasterKey);
+        // The biometric simulator, which the suite's courtside tests drive. The base file says
+        // "None" (BP-09); the simulator is honoured in Testing, never in Production.
+        builder.UseSetting("Biometric:Driver", "Null");
 
         if (ConnectionString is not null)
         {
@@ -217,6 +235,10 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
             services.AddSingleton<Crusaders.Mainframe.Api.Email.IEmailTransport>(
                 sp => new ForwardingEmailTransport(sp.GetRequiredService<Crusaders.Mainframe.Api.Email.IEmailService>()));
 
+            // Never PayFast's real validate endpoint from a test — see PayFastValidation.
+            services.RemoveAll<IPayFastItnValidator>();
+            services.AddSingleton<IPayFastItnValidator>(ItnValidator);
+
             // A startup filter runs ahead of everything Program.cs adds, so the remote
             // address is in place before UseForwardedHeaders looks at it.
             if (RemoteIpAddress is { } remote)
@@ -243,5 +265,23 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
             });
             next(app);
         };
+    }
+}
+
+/// <summary>
+/// Stands in for PayFast's <c>/eng/query/validate</c>: answers one fixed verdict and counts the
+/// calls, so a test can prove the ITN path asked (or, on a no-op retry, did not).
+/// </summary>
+public sealed class StubItnValidator(ItnValidation answer) : IPayFastItnValidator
+{
+    private int _calls;
+
+    public int Calls => Volatile.Read(ref _calls);
+
+    public Task<ItnValidation> ValidateAsync(
+        IReadOnlyList<KeyValuePair<string, string>> fields, PerTenantCredentials creds, CancellationToken ct)
+    {
+        Interlocked.Increment(ref _calls);
+        return Task.FromResult(answer);
     }
 }

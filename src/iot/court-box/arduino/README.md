@@ -90,10 +90,10 @@ Set those, then **power-cycle the box**.
 
 | When | Glass |
 |---|---|
-| After the Mega upload, run DIPs | `CRUSADERS COURTS / SCAN TO START` — the Mega is alive |
+| After the Mega upload, run DIPs | `SCAN YOUR QR` / `STARTING UP` — Mega 3.0.0 is alive. `CRUSADERS COURTS / SCAN YOUR CODE` means the Mega upload did NOT land (that is the 2.1.0 image) |
 | During the bridge upload and monitor | **Nothing new.** DIP 1 and 2 are off, so the Mega is not on the other end of that UART. Watch the monitor, not the glass. |
-| Run DIPs restored, box on the WiFi | `CONNECTED / SCAN TO START` — and the box appears on the admin **Devices** page by itself within one heartbeat, with its court numbers against it |
-| Run DIPs restored, box **not** on the WiFi | `CRUSADERS COURTS / SCAN TO START` — the two halves are talking and the radio is not. Check the SSID and password in `secrets.h`. |
+| Run DIPs restored, box on the WiFi | `SCAN YOUR QR` / `READY` — and the box appears on the admin **Devices** page by itself within one heartbeat, with its court numbers and `mega_version` 3.0.0 against it |
+| Run DIPs restored, box **not** on the WiFi | `SCAN YOUR QR` / `NO WIFI` — the two halves are talking and the radio is not. Check the SSID and password in `secrets.h`. `OUT OF SERVICE` means they are not talking: check DIP 1 and 2. |
 
 If nothing ever appears, the two halves are not talking: check DIP 1 and 2.
 
@@ -102,8 +102,8 @@ If nothing ever appears, the two halves are not talking: check DIP 1 and 2.
 | | `court_mega` | `court_bridge` |
 |---|---|---|
 | PlatformIO environment | `[env:court_mega]` | `[env:court_bridge]` |
-| `lib/` modules | `arduino_hal`, `courtlogic`, `fwversion`, `hal`, `protocol`, `timebase` | `arduino_hal`, `bridgelogic`, `court`, `courtlogic`, `devapi`, `devcrypto`, `devlink`, `eventq`, `fwversion`, `hal`, `memcode`, `protocol`, `roster`, `timebase` |
-| Build flags in `src/build_config.h` | 13 | 14 |
+| `lib/` modules | `arduino_hal`, `courtlogic`, `fwversion`, `hal`, `protocol`, `timebase` | `arduino_hal`, `bridgelogic`, `court`, `courtlogic`, `devapi`, `devcrypto`, `devlink`, `devnet`, `eventq`, `fwversion`, `hal`, `memcode`, `protocol`, `roster`, `timebase` |
+| Build flags in `src/build_config.h` | 9 | 10 |
 
 Vendored third-party libraries — copied out of `src/iot/court-box/.pio/libdeps/<env>/`,
 which is what PlatformIO resolved from `lib_deps`, so the Library Manager is
@@ -112,10 +112,9 @@ is copied whole apart from its `examples/` (the IDE would try to compile them):
 
 | Library | Version | Where | Licence file |
 |---|---|---|---|
-| `LiquidCrystal_I2C` | 1.1.4 | `court_mega/src/LiquidCrystal_I2C/` | none shipped upstream |
-| `ArduinoJson` | 7.2.1 | `court_bridge/src/ArduinoJson/` | `LICENSE.txt` |
+| _(none)_ | | | |
+| _(none)_ | | | |
 
-`ArduinoJson` is vendored because `[env:court_bridge]` declares it in `lib_deps`, but **nothing in the firmware includes it** — it costs nothing to compile (header-only, and no translation unit pulls it in) and it is here so the two builds resolve the same dependency set. Deleting the `lib_deps` line is what would remove it from both.
 
 `src/build_config.h` carries every `-D` its PlatformIO environment sets and is
 included first in every file of the sketch, because the IDE cannot pass a build

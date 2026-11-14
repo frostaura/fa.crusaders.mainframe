@@ -330,6 +330,15 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
 
   // ---- package ---- P13 §3.5 / §4.5: area `credit`, subject `package`, none reason-required
   row({
+    // BM-6: rand given back for a PayFast purchase (refund or chargeback), naming the funding row.
+    action: "payment.reversed", area: "credit", headline: "Recorded rand given back to a member — Thandi Mokoena",
+    writer: "WalletEndpoints.Reversal (POST /admin/minutes/{id}/reverse-payment)", before: { balance_minutes: 300 },
+    after: {
+      balance_minutes: 0, amount_minutes: -300, kind: "refund", zar_reversed: dec("-550.00"),
+      reverses_entry_id: ID.entry, entry_id: ID.entry,
+    },
+  }),
+  row({
     action: "package.created", area: "credit", headline: "Created a minutes package — 5 hours",
     writer: "AdminPackageEndpoints.CreateAsync", before: null, after: PACKAGE,
   }),
@@ -442,8 +451,18 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     action: "member.admin_revoked", area: "member", headline: "Removed a member's administrator rights — Thandi Mokoena",
     writer: "AdminRoleService.StageRecordsAsync", before: { is_admin: true }, after: { is_admin: false },
   }),
+  row({
+    action: "member.pin_set", area: "member", headline: "Set a member's court PIN — Thandi Mokoena",
+    writer: "PinEndpoints (admin set)", before: null, after: { pin_set: true },
+  }),
 
   // ---- setting ----
+  row({
+    // BM-4: the passphrase is never recorded — only whether it was set, changed or cleared.
+    action: "payments.payfast_updated", area: "setting", headline: "Changed the club's PayFast payment settings",
+    writer: "AdminPaymentEndpoints.SaveAsync", before: { merchant_id: null, passphrase: "not set" },
+    after: { merchant_id: "10000100", environment: "test", passphrase: "set" },
+  }),
   row({
     action: "settings.updated", area: "setting", headline: "Changed the club's settings",
     writer: "AdminConfigEndpoints (PUT settings) → ChangedKeys",
@@ -541,6 +560,28 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     action: "device.api_key_regenerated", area: "device", headline: "Regenerated the club's device key",
     writer: "DeviceRegistryService.IssueApiKeyAsync (never the key)", before: null, after: null,
   }),
+  // ---- device contract v3 (device-api.md §6–§8): never a key, never a password ----
+  row({
+    action: "device.api_key_rotated", area: "device", headline: "Started a device key rotation",
+    writer: "DeviceKeyRing.RotateAsync (never the key)", before: null, after: null,
+  }),
+  row({
+    action: "device.api_key_retired", area: "device", headline: "Retired the club's old device key",
+    writer: "DeviceKeyRing.RetireAsync (never the key)", before: null, after: null,
+  }),
+  row({
+    action: "device.api_key_restored", area: "device", headline: "Restored a known device key",
+    writer: "DeviceKeyRing.RestoreAsync (never the key)", before: null, after: null,
+  }),
+  row({
+    action: "device.network_updated", area: "device", headline: "Changed the club's device network",
+    writer: "DeviceNetworkService.SaveAsync (never a password)", before: null,
+    after: { ver: 4, base: "http://192.168.1.20:8088", ssids: ["CRUSADERS", "CRUSADERS-NEW"] },
+  }),
+  row({
+    action: "device.network_pushed", area: "device", headline: "Sent the club's network to a board — Court 1 box",
+    writer: "AdminDeviceEndpoints.UpdateAsync (push_network)", before: null, after: { push_network: true },
+  }),
   row({
     action: "doors.shut_all", area: "device", headline: "Shut every door at once",
     writer: "AdminDoorFleetEndpoint.ApplyAsync", before: null, after: { doors: 2, door_names: ["Front door", "Side door"] },
@@ -579,6 +620,9 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
 // What "raw" means
 // ---------------------------------------------------------------------------------------
 
+/** Names written in camel case by their owners, which a volunteer reads exactly so. Shrinks, never grows casually. */
+const PROPER_NAMES: ReadonlySet<string> = new Set(["PayFast"]);
+
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const AREA_CODE = /\b(?:bookings?|schedule|credit|package|group|member|settings|court|device|doors|monitoring|play|webhook|changes)\.[a-z_]+\b/;
 
@@ -593,7 +637,8 @@ export function rawIn(text: string | null | undefined, field?: string): string |
   if (/\\u[0-9a-f]{4}/i.test(text)) return "a JSON escape sequence";
   if (/\d{4}-\d{2}-\d{2}/.test(text)) return "an ISO date or instant";
   if (UUID.test(text)) return "an id (UUID)";
-  const pascal = /\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b/.exec(text);
+  // A provider's own name is spelled as it spells it (PayFast), not a leaked enum.
+  const pascal = Array.from(text.matchAll(/\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b/g)).find((m) => !PROPER_NAMES.has(m[0]));
   if (pascal) return `a PascalCase enum token (${pascal[0]})`;
   const snake = /\b[a-z0-9]+(?:_[a-z0-9]+)+\b/i.exec(text);
   if (snake) return `a snake_case code (${snake[0]})`;

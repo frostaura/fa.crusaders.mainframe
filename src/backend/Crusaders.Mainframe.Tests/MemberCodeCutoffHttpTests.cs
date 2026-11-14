@@ -16,7 +16,11 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
 {
     private static AccessCode Code(MemberCodeClub club, Guid user, AccessCodePurpose purpose, Guid? booking = null) => new()
     {
-        TenantId = club.TenantId, Code = AccessCodeService.NewCode(), Purpose = purpose, UserId = user, BookingId = booking,
+        TenantId = club.TenantId,
+        Code = AccessCodeService.NewCode(),
+        Purpose = purpose,
+        UserId = user,
+        BookingId = booking,
         ExpiresAt = DateTimeOffset.UtcNow.AddHours(2),
     };
 
@@ -103,8 +107,15 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
         var admin = club.Member(app, club.AdminId, "admin");
         var body = JsonSerializer.SerializeToNode(new
         {
-            sliceMinutes = 15, slicePriceCredits = 8, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
-            penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15, member_code_phase = "v1_only",
+            sliceMinutes = 15,
+            slicePriceCredits = 8,
+            advanceBookingDays = 14,
+            dayStartMinute = 0,
+            dayEndMinute = 1440,
+            penaltyPct = 30,
+            graceWindowMinutes = 5,
+            penaltyWindowMinutes = 15,
+            member_code_phase = "v1_only",
         });
         Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode);
 
@@ -153,8 +164,15 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
         {
             var body = JsonSerializer.SerializeToNode(new
             {
-                sliceMinutes = 15, slicePriceCredits = 8, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
-                penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15, member_code_phase = phase,
+                sliceMinutes = 15,
+                slicePriceCredits = 8,
+                advanceBookingDays = 14,
+                dayStartMinute = 0,
+                dayEndMinute = 1440,
+                penaltyPct = 30,
+                graceWindowMinutes = 5,
+                penaltyWindowMinutes = 15,
+                member_code_phase = phase,
             });
             Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode);
         }
@@ -199,8 +217,15 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
         {
             var body = JsonSerializer.SerializeToNode(new
             {
-                sliceMinutes = 15, slicePriceCredits = 8, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
-                penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15, member_code_phase = phase,
+                sliceMinutes = 15,
+                slicePriceCredits = 8,
+                advanceBookingDays = 14,
+                dayStartMinute = 0,
+                dayEndMinute = 1440,
+                penaltyPct = 30,
+                graceWindowMinutes = 5,
+                penaltyWindowMinutes = 15,
+                member_code_phase = phase,
             });
             Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode);
         }

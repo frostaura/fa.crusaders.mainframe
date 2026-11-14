@@ -25,6 +25,12 @@ was live — a scoreboard for a system nobody used would be re-done. A productio
 since 2026-09-19 ([`state.md`](state.md)), so it is now a debt: the kind discovered late, when the
 number is wanted this week.
 
+**Two of them gained a lever on 2026-11-13** (backend-platform pass): a second club is created with
+`tenant create` instead of raw SQL ([`decisions-platform-pass.md`](decisions-platform-pass.md)),
+and `/readyz` gives an uptime monitor something true to poll
+([`decisions-platform-ops.md`](decisions-platform-ops.md)). Neither is measured yet: no
+second club has been timed and no monitor polls `/readyz`.
+
 **A door gate contributes to none of these.** Walking through a door is not attendance
 ([`decisions-gate.md`](decisions-gate.md)), so entry traffic can never appear in the lights-on
 match rate; the `gate.opened` audit rows are the only entry statistics there are or will be.

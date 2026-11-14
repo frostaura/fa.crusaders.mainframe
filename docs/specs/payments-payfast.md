@@ -61,30 +61,50 @@ document.**
 
 ## Receiving an ITN
 
-In order, and each step exists because skipping it has a specific cost:
+In order, and each step exists because skipping it has a specific cost (`Endpoints/TopUpEndpoints.Itn.cs`,
+money lane BM-1/BM-2/BM-3, platform BP-01 — all four reproduced live before the fix):
 
 1. **Verify the signature.** Everything except `signature`, in the order posted, against the
-   tenant's passphrase.
-2. **Check the source address** against `PayFastProvider.KnownSourceHosts`. Advisory and
-   configurable, never primary — a reverse proxy that rewrites the source would otherwise
-   reject every genuine notification. It exists because a merchant with no passphrase has
-   nothing else.
-3. **Check the amount** against the purchase row's locked `AmountZar` (the price after any
-   group discount). A signature says the message is authentic; it does not say the amount is
-   the one that was asked for. A mismatch fails the row (`amount_mismatch`) for good.
-4. **`payment_status == "COMPLETE"` is the only success.** A valid signature on a `FAILED`
-   notification is a valid message saying no money moved. Treating them as the same gives a
-   member minutes for a payment that failed.
-5. **Post the LOCKED minutes idempotently** — `pending.Minutes`, never the live package. PayFast
-   **retries ITNs by design**, so a duplicate is
-   normal traffic rather than an attack. The filtered unique index on
-   `LedgerEntry.ExternalReference` is the only database-level guarantee, and it is what makes
-   a retry safe rather than a double posting. The reference is
-   `topup:{tenant:N}:{pf_payment_id}`, so two clubs on one merchant account never collide.
+   tenant's passphrase. Refused `401`.
+2. **The club's own merchant.** `merchant_id` must equal the club's; a signed notification for
+   another merchant account is not this club's money. Refused `401 merchant_mismatch`.
+3. **Check the source address** (`PayFast:SourceCheck`: `advisory` — the default — `enforce` or
+   `off`) against PayFast's published ranges (`PayFast:SourceRanges`, default
+   `PayFastSourceCheck.PublishedRanges`) and the addresses `PayFastProvider.KnownSourceHosts`
+   resolve to (cached ten minutes; a failed lookup recognises nothing and refuses nothing).
+   Advisory raises a `topup.failed` admin notice once a day and carries on; enforce refuses
+   `403`. Never primary — a reverse proxy that does not hand the real peer through would reject
+   every genuine notification, so enforcing is a deployment's explicit choice.
+4. **A `COMPLETE` must carry `pf_payment_id` and `amount_gross`.** Without the first nothing can
+   make it idempotent; without the second there is nothing to check the price against — a forged
+   notification carrying only `m_payment_id` and `payment_status` used to credit. Refused `400`
+   without touching the row, so a well-formed retry can still complete it.
+5. **Ask PayFast.** Anything that would change the row is first POSTed back to the environment's
+   `/eng/query/validate` (PayFast's own parameter string, no passphrase); only `VALID` proceeds.
+   Anything else is `401 validation_failed` (admin notice); PayFast unreachable is `503`, which
+   PayFast retries into. `PayFast:ValidateUrl` overrides the endpoint (the imposter answers it);
+   `PayFast:ServerValidation=off` exists for a stack with no route to PayFast and is logged on every
+   ITN. A retry of an already-settled payment is answered without the call.
+6. **Check the amount** against the purchase row's locked `AmountZar` (the price after any
+   group discount). A mismatch fails the row (`amount_mismatch`) for good.
+7. **`payment_status == "COMPLETE"` is the only success.** `PENDING` (an EFT clearing) changes
+   nothing; `FAILED` and `CANCELLED` close the row.
+8. **Credit one checkout exactly once — the database decides.** Under the member's payer lock the
+   `Pending → Completed` move is a conditional `UPDATE … WHERE` the row is still open, and the
+   `TopUp` ledger row carries `PurchaseId` under a unique `(TenantId, PurchaseId)` index beside the
+   global `ExternalReference` one (`topup:{tenant:N}:{pf_payment_id}`). Eight concurrent
+   `COMPLETE`s with different payment ids used to credit one R120 purchase three times; now exactly
+   one wins and the others are answered for what actually happened. Every failure write is
+   conditional too, so a `FAILED` racing a `COMPLETE` cannot overwrite it.
+9. **A second genuine payment is flagged, never swallowed.** A confirmed `COMPLETE` with a
+   different `pf_payment_id` for a checkout already credited (`paid_twice`), or for one the gateway
+   had closed (`paid_after_close`), is raised to the admins as `topup.failed` (once per PayFast id),
+   mailed to the member ("No minutes were added for it"), and acknowledged `200` so PayFast stops
+   retrying. The desk then sells the package by hand (`/sell`) or refunds it outside the system;
+   neither payment's rand is on the ledger until it does.
 
-There is no status polling. `GetStatusAsync` returns an explicit "not supported" rather than
-throwing, so a caller that reaches it gets a decision instead of a 500. PayFast's query API
-needs a separate signed request and the ITN already retries until acknowledged.
+There is no status polling: `GetStatusAsync` returns an explicit "not supported", and the ITN
+retries until acknowledged.
 
 ### A checkout PayFast never reports on
 
@@ -134,22 +154,51 @@ truncated to 100 characters — a dash would put a non-ASCII byte into the strin
 
 ## Configuration
 
-Per tenant, never global:
+Per tenant, never global, in `tenant_settings.payfast`, and set from the console:
+`GET /api/v1/admin/payments/payfast` and `PUT /api/v1/admin/payments/payfast` (admin role,
+snake_case, money lane BM-4). The passphrase is **write-only** — never returned, never written
+to the change record (`payments.payfast_updated` says only set / changed / cleared); omit it, or
+send null, to keep the stored one. The read answers `{configured, problems[], merchant_id,
+merchant_key, passphrase_set, passphrase_required, environment, notify_url}`; a save PayFast
+would refuse is `400 payfast_credentials_invalid {problems}`.
 
-| Setting | Notes |
+| Setting | Rule (`PayFastCredentialRules`) |
 |---|---|
-| Merchant ID | from the PayFast dashboard |
-| Merchant key | from the PayFast dashboard |
-| Passphrase | optional at PayFast, **required here** — without one the signature protects nothing |
-| Environment | `sandbox` or `live`, selecting the process URL |
+| Merchant ID | exactly 8 digits (`merchant_id_invalid`) — PayFast's own rule |
+| Merchant key | exactly 13 letters or digits (`merchant_key_invalid`) |
+| Passphrase | optional at PayFast, **required here outside Development** (`passphrase_required`) — without one the signature is an MD5 of fields the member's own checkout form shows them; 12–100 characters, no control characters or edge spaces |
+| Environment | `test` (sandbox) or `live`; anything else is refused, never defaulted |
 
-**None of these belong in the repository.** They are tenant payment settings.
+A value carrying the old seeder's `REPLACE_` marker is never configured. A club whose stored
+credentials break any rule is **not configured for payments**: the shelf refuses
+`payments_not_configured` instead of sending a member to PayFast's error page (browser lane
+BM-03), and the ITN answers `503`. The Development seeder writes PayFast's published sandbox
+merchant and a passphrase drawn fresh per database (BM-12), so nobody can sign an ITN a dev or
+demo stack credits; a harness sets its own through the PUT (`test/e2e-device/scenario.py`).
+
+**None of these belong in the repository.**
+
+## Money going back: refunds and chargebacks
+
+Rand the club gives back for a purchase — a refund (cash, an EFT, a refund on PayFast's own
+dashboard) or a card chargeback it was told of — is recorded at the desk (money lane BM-6):
+`POST /api/v1/admin/minutes/{userId}/reverse-payment {entry_id, kind: refund|chargeback,
+zar_reversed, minutes_taken_back, reason, idempotency_key}` posts one `PaymentReversal` naming the
+funding row (`ReversesEntryId`), rand negative, minutes taken back from 0 to what the purchase
+carried. The total over every reversal of one purchase can never exceed its rand or its minutes
+(`409 reversal_exceeds_payment {zar_left, minutes_left}`, read under the payer lock); the balance
+may go below zero (a chargeback on minutes already played). `GET …/reversible` lists the member's
+paid funding rows with what is left. The member is mailed, the change record files
+`payment.reversed`, and `minutes.payment_reversed` mirrors it. PayFast sends no ITN for a refund
+or a chargeback, so this is always the desk's act.
 
 ## Testing it
 
 The corpus proves the algorithm. The [mountebank imposter](../../test/virtualization/README.md)
 proves the handling: a decline, a gateway timeout, a replayed ITN, a tampered signature —
 cases you cannot ask a sandbox for on demand.
+
+The imposter also answers `/eng/query/validate` with `VALID`; point `PayFast:ValidateUrl` at it.
 
 Neither proves the integration works against PayFast. **The first live transaction is a real
 milestone** and is item 3 on the [go-live checklist](../go-live-checklist.md).

@@ -11,7 +11,7 @@ import { PrintSheet } from "../components/doors/PrintSheet";
 import { DOORS_READ_FAILED, describePowerLoss, doorDisplayName } from "../lib/doorsCopy";
 import { clubDate } from "../lib/clubClock";
 import { UNNAMED_GATE } from "../lib/gateCopy";
-import { APP_NAME } from "../lib/routeAnnouncer";
+import { useClubShortName } from "../lib/clubIdentity";
 import { withDoorsBoundary } from "../components/doors/withDoorsBoundary";
 import { doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings } from "../lib/api";
 
@@ -37,6 +37,7 @@ import { doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings } fr
  * </p>
  */
 function AdminDoorsCardPageBody() {
+  const club = useClubShortName();
   const { id = "" } = useParams();
   const [door, setDoor] = useState<AdminDoorDevice | null>(null);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -148,7 +149,8 @@ function AdminDoorsCardPageBody() {
       </div>
 
       <PrintSheet>
-        <p className="text-sm">Crusaders Squash</p>
+        {/* FM-8: the club this console serves, from its own record — never the first club's literal. */}
+        {club && <p className="text-sm">{club}</p>}
         {/* B22 / C13: the club's OWN name for the door is the headline, and the slug goes
             beneath it. The heading was the slug — "front-door" in 36 px on a card taped to a
             wall — which is the one word on the sheet a member or a volunteer does not use.
@@ -171,13 +173,13 @@ function AdminDoorsCardPageBody() {
           {`${describePowerLoss(door.power_loss_behaviour).toUpperCase()} — this is a property of the lock, not of the app.`}
         </CardBlock>
         <CardBlock title="If this door is not working">
-          {`Check its power and the club WiFi, then open Doors in the ${APP_NAME} app.`}
+          {`Check its power and the club WiFi, then open Doors in the ${club ?? "club's"} app.`}
         </CardBlock>
         <CardBlock title="Club contact">
           {contact || "No club contact is recorded. Ask at the club."}
         </CardBlock>
         <p className="mt-6 text-xs">
-          {`Printed ${printedOn} from ${APP_NAME}. Check it is still right.`}
+          {`Printed ${printedOn}${club ? ` from ${club}` : ""}. Check it is still right.`}
         </p>
       </PrintSheet>
     </PageShell>

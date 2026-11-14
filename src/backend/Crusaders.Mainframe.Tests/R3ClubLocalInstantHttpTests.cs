@@ -43,9 +43,16 @@ public sealed class R3ClubLocalInstantHttpTests(PostgresFixture pg) : IClassFixt
 
     private static object Rule(DoorClub club, DateOnly from, string start = "18:00", string? reason = null) => new
     {
-        name = "Tuesday league", label = "League", days = new[] { "tue" }, start, end = "21:00",
-        startDate = from.ToString("yyyy-MM-dd"), endDate = from.AddDays(35).ToString("yyyy-MM-dd"),
-        intervalWeeks = 1, courts = new[] { club.CourtId }, reason,
+        name = "Tuesday league",
+        label = "League",
+        days = new[] { "tue" },
+        start,
+        end = "21:00",
+        startDate = from.ToString("yyyy-MM-dd"),
+        endDate = from.AddDays(35).ToString("yyyy-MM-dd"),
+        intervalWeeks = 1,
+        courts = new[] { club.CourtId },
+        reason,
     };
 
     private static async Task<Guid> CreateAsync(HttpClient client, DoorClub club, DateOnly from)
@@ -79,9 +86,16 @@ public sealed class R3ClubLocalInstantHttpTests(PostgresFixture pg) : IClassFixt
 
         var response = await client.PatchAsJsonAsync($"{Path}/{id}", new
         {
-            name = "Tuesday league", label = "League", days = new[] { "tue" }, start = "18:30", end = "21:00",
-            startDate = from.ToString("yyyy-MM-dd"), endDate = from.AddDays(35).ToString("yyyy-MM-dd"),
-            intervalWeeks = 1, courts = new[] { club.CourtId }, reason = "later start",
+            name = "Tuesday league",
+            label = "League",
+            days = new[] { "tue" },
+            start = "18:30",
+            end = "21:00",
+            startDate = from.ToString("yyyy-MM-dd"),
+            endDate = from.AddDays(35).ToString("yyyy-MM-dd"),
+            intervalWeeks = 1,
+            courts = new[] { club.CourtId },
+            reason = "later start",
             effectiveFrom = effective.ToString("yyyy-MM-dd"),
         });
 
@@ -117,7 +131,8 @@ public sealed class R3ClubLocalInstantHttpTests(PostgresFixture pg) : IClassFixt
 
         var response = await client.PostAsJsonAsync($"{Path}/{id}/end", new
         {
-            effectiveFrom = effective.ToString("yyyy-MM-dd"), reason = "Season ends early",
+            effectiveFrom = effective.ToString("yyyy-MM-dd"),
+            reason = "Season ends early",
         });
 
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");

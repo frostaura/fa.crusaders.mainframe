@@ -305,7 +305,9 @@ describe("members (lib/api.ts)", () => {
   const route = (path: string) => ({ route: `g.MapPost("/{memberId:guid}/${path}"` });
 
   it("the lifecycle transitions and the password reset", () => {
-    reads(only(ok(FILE, route("approve"))), F.approveAnswer());
+    // BP-02: the route delegates its answer, so a 409 email_not_verified has one place to live.
+    expect(serverBody(FILE, route("approve"))).toContain("return ApprovalResult(r);");
+    reads(only(ok(FILE, "ApprovalResult")), F.approveAnswer());
     reads(only(ok(FILE, route("reject"))), F.rejectAnswer());
     reads(only(at(FILE, route("suspend"), "TransitionResult(r.Result, ")), F.suspendAnswer());
     reads(only(at(FILE, route("reactivate"), "TransitionResult(r.Result, ")), F.reactivateAnswer());
@@ -359,7 +361,8 @@ describe("devices, courts and doors (lib/api.ts)", () => {
     reads(only(ok("Endpoints/DeviceView.cs", "Of")), F.adminDevice());
     reads(only(ok("Endpoints/DeviceView.cs", "Of")), { unchanged: false });
     reads(last(ok(DEVICES, "DeleteAsync")), F.deviceDeleteAnswer());
-    reads(only(ok(DEVICES, "ApiKeyView")), F.deviceApiKey());
+    // v3 §6: the key's status (and every rotate / retire / restore answer) is DeviceKeyRing's.
+    reads(last(ok("Services/DeviceKeyRing.cs", "StatusAsync")), F.deviceApiKey());
   });
 
   it("a board's own trail", () => {

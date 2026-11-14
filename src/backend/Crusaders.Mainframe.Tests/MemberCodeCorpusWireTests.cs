@@ -245,6 +245,60 @@ public partial class MemberCodeCorpusTests
         Assert.Equal(Declared("http.json", "responses"), responses);
     }
 
+    // ---- payfor.json (server only) --------------------------------------------------------------
+
+    /// <summary>
+    /// D10 pay-for left the court box's image in v3 (the unreachable flow, removed from the last
+    /// Mega flash), so its bodies moved out of <c>http.json</c> — which the firmware reads — into
+    /// <c>payfor.json</c>, read by this suite alone. The server still speaks the route, and every
+    /// body it binds or writes is pinned here exactly as before.
+    /// </summary>
+    [Fact]
+    public void Pay_for_bodies_are_what_the_server_binds_and_serialises()
+    {
+        var doc = Load("payfor.json");
+        var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        var requests = 0;
+        foreach (var c in Cases(doc, "requests"))
+        {
+            Assert.Equal("/api/v1/device/pay-for", Str(c, "path_and_query"));
+            var render = c.GetProperty("render");
+            var pf = JsonSerializer.Deserialize<PayForRequest>(Hex(c, "body_hex"), web)!;
+            Assert.Equal(Str(render, "token"), pf.Token);
+            Assert.Equal(render.GetProperty("court").GetInt32(), pf.Court);
+            Assert.Equal(Str(render, "nonce"), pf.Nonce);
+            Assert.Equal(render.GetProperty("confirm").GetBoolean(), pf.Confirm);
+            Assert.Equal(render.TryGetProperty("amount_label", out var l) ? l.GetString() : null, pf.AmountLabel);
+            Assert.Equal(render.TryGetProperty("scan_age_ms", out var a) ? a.GetInt64() : null, pf.ScanAgeMs);
+            requests++;
+        }
+        Assert.Equal(Declared("payfor.json", "requests"), requests);
+
+        var responses = 0;
+        foreach (var c in Cases(doc, "responses"))
+        {
+            var text = Encoding.UTF8.GetString(Hex(c, "body_hex"));
+            var id = Str(c, "id");
+            switch (Str(c, "kind"))
+            {
+                case "payfor_quote":
+                    Assert.Equal(text, JsonSerializer.Serialize(JsonSerializer.Deserialize<PayForQuoteResponse>(text)));
+                    AssertLabelRule(text, id, c.GetProperty("expect"));
+                    break;
+                case "payfor_confirm":
+                    Assert.Equal(text, JsonSerializer.Serialize(JsonSerializer.Deserialize<PayForConfirmResponse>(text)));
+                    AssertLabelRule(text, id, c.GetProperty("expect"));
+                    break;
+                default:
+                    Assert.Fail($"pay-for response '{id}' has a kind this suite does not know");
+                    break;
+            }
+            responses++;
+        }
+        Assert.Equal(Declared("payfor.json", "responses"), responses);
+    }
+
     /// <summary>The activation refusals the member-code corpus pins the box's reading of.</summary>
     private static readonly string[] ActivateRefusals =
         [MemberCodeIdentity.CodeUsed, "no_booking", "wrong_court", "not_recognised"];
@@ -369,7 +423,10 @@ public partial class MemberCodeCorpusTests
     {
         var device = new Device
         {
-            DeviceCode = "box-" + new string('c', 12), Name = "x", MacAddress = "5ccf7f0a1b2c", CourtNumbers = [1, 2, 3, 4],
+            DeviceCode = "box-" + new string('c', 12),
+            Name = "x",
+            MacAddress = "5ccf7f0a1b2c",
+            CourtNumbers = [1, 2, 3, 4],
         };
         var s = WidestSettings();
         var roster = Enumerable.Range(0, 16)
@@ -392,8 +449,11 @@ public partial class MemberCodeCorpusTests
     {
         var device = new Device
         {
-            DeviceCode = "gate-" + new string('c', 12), Name = "x", MacAddress = "5ccf7f0a1b2c",
-            Kind = DeviceKind.Gate, GateKey = new string('g', 64),
+            DeviceCode = "gate-" + new string('c', 12),
+            Name = "x",
+            MacAddress = "5ccf7f0a1b2c",
+            Kind = DeviceKind.Gate,
+            GateKey = new string('g', 64),
         };
         var roster = Enumerable.Range(0, 48)
             .Select(i => $"m{Ref(i * 4)}{Ref((i * 4) + 1)}{Ref((i * 4) + 2)}{Ref((i * 4) + 3)}|0|-864000|999999")
@@ -439,8 +499,14 @@ public partial class MemberCodeCorpusTests
         240, 30, 60, 15, 14, "Africa/Johannesburg", 60, "16:00-19:00", 1, 2, 0, 1440, 7,
         ButtonMap.Default())
     {
-        WalkUpMaxMinutes = 90, HeartbeatSeconds = 300,
-        LcdRevertSeconds = 60, LcdChoiceSeconds = 60, LcdCardSeconds = 10, LcdHintSeconds = 10,
-        ScanMemorySeconds = 300, ClockTrustMinutes = 1440, DeviceFaultMaxPerHour = 120,
+        WalkUpMaxMinutes = 90,
+        HeartbeatSeconds = 300,
+        LcdRevertSeconds = 60,
+        LcdChoiceSeconds = 60,
+        LcdCardSeconds = 10,
+        LcdHintSeconds = 10,
+        ScanMemorySeconds = 300,
+        ClockTrustMinutes = 1440,
+        DeviceFaultMaxPerHour = 120,
     };
 }

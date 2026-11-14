@@ -18,7 +18,7 @@ Code: `Endpoints/{PackageEndpoints,AdminPackageEndpoints,TopUpEndpoints{,.Abando
   the discount's group, amount — written from the LIVE shelf before PayFast. A `quotedPriceZar` that
   differs → 409 `package_price_changed`, no row; the screen re-reads the WHOLE shelf (R8 J8-2: a discount gained or lost moves every price and the banner, not one) and names the fresh price — never re-prices on its own.
   The ITN credits `pending.Minutes`, checks the amount against `pending.AmountZar`, never reads
-  `minute_packages`. *Why:* an admin edit under an open card page must not change what paid money buys.
+  `minute_packages`. *Why:* an admin edit under an open card page must not change what paid money buys. Its trust chain: [`decisions-money-golive.md`](decisions-money-golive.md).
 - **The shelf** (pure): club packages at `floor_cent(list × (10000 − d) / 10000)`, d = the LOWEST
   discount among the member's active groups; the member's groups' own packages at their own price,
   listed first under the group's name; the saving is against the smallest-minutes item on the

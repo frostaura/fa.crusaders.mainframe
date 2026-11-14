@@ -63,9 +63,15 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         {
             await club.WriteAsync(app, db => db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = $"box-{prefix}", Name = "Box", Kind = DeviceKind.CourtBox,
-                MacAddress = Guid.NewGuid().ToString("N")[..12], CourtNumbers = [1], AutoRegistered = false,
-                CreatedAt = DateTimeOffset.UtcNow.AddDays(-3), LastSeenAt = DateTimeOffset.UtcNow.AddDays(-1),
+                TenantId = club.TenantId,
+                DeviceCode = $"box-{prefix}",
+                Name = "Box",
+                Kind = DeviceKind.CourtBox,
+                MacAddress = Guid.NewGuid().ToString("N")[..12],
+                CourtNumbers = [1],
+                AutoRegistered = false,
+                CreatedAt = DateTimeOffset.UtcNow.AddDays(-3),
+                LastSeenAt = DateTimeOffset.UtcNow.AddDays(-1),
             }));
         }
         await club.CreditAsync(app, club.Sam, 50);

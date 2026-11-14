@@ -54,6 +54,13 @@ public sealed class DoorAuditActionsTests
 
         // The member-code rollout's notice kind — likewise an admin notice, never an audit row.
         "device.codes_capability_lost",
+
+        // Device contract v3 (device-api.md §4, §6, §8, §9): a court box's per-court re-light, a
+        // release no relay could produce, and the club's key and network changes — all about the
+        // boards and the club, none a door event.
+        "device.relay_relit", "device.release_implausible",
+        "device.api_key_rotated", "device.api_key_retired", "device.api_key_restored",
+        "device.network_updated", "device.network_pushed",
     ];
 
     private static string ApiSourceRoot()

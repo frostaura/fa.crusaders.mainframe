@@ -11,8 +11,18 @@ networks:
       config:
         - subnet: 172.29.83.0/24
 
+# Every service's container log, capped (IO-07): the json-file driver keeps a log forever by
+# default, and a club running this file with the on-premises overlay is on one small disk that
+# Postgres shares. Same cap as docker-compose.prod.yml.
+x-capped-log: &capped-log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
+    logging: *capped-log
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crusaders}
@@ -29,7 +39,8 @@ services:
       retries: 5
 
   mailhog:
-    image: jcalonso/mailhog:latest
+    logging: *capped-log
+    image: jcalonso/mailhog:v1.0.1
     ports:
       - "${MAILHOG_SMTP_PORT:-11025}:1025"
       - "${MAILHOG_UI_PORT:-8025}:8025"
@@ -38,6 +49,7 @@ services:
       - "8025"
 
   backend:
+    logging: *capped-log
     build:
       context: .
       dockerfile: ./src/backend/Dockerfile
@@ -88,6 +100,8 @@ services:
       Bootstrap__AdminEmail: ${BOOTSTRAP_ADMIN_EMAIL:-}
       Bootstrap__AdminPassword: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       Bootstrap__Courts: ${BOOTSTRAP_COURTS:-4}
+      # Device contract v3 (docs/specs/device-api.md §6): the boards' key on a rebuilt stack.
+      Bootstrap__DeviceApiKey: ${BOOTSTRAP_DEVICE_API_KEY:-}
       # Inherent administrators of the deployment — club-admin rights in every club where that
       # address already has an account. Deployment-owned, not club-owned; not a secret, but
       # security-relevant. The full note is in docker-compose.prod.yml and appsettings.json.
@@ -118,11 +132,15 @@ services:
       - media_data:/app/media
       - biometric_data:/app/biometric
     # Biometric peripheral passthrough — enabled when a real driver is selected.
-    # Example for a USB fingerprint reader:
+    # Example for a USB fingerprint reader. The API runs as uid 1654, not root, so the device
+    # node's group must be added too (`ls -ln /dev/bus/usb/001/004` shows its gid):
     # devices:
     #   - "/dev/bus/usb/001/004:/dev/bus/usb/001/004"
+    # group_add:
+    #   - "<gid of that device node>"
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/healthz >/dev/null || exit 1"]
+      # Readiness (IO-16): healthy means the API reached its database, not merely that it answers.
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/readyz >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -134,6 +152,7 @@ services:
         condition: service_started
 
   frontend:
+    logging: *capped-log
     # No build args. `VITE_SHOW_DEV_LOGIN` used to be passed through here, defaulting to
     # false — which reads as safe and is not, because it made "print the seeded admin's
     # e-mail and password on the sign-in screen" a one-word change in an unreviewed .env
@@ -148,6 +167,7 @@ services:
       - backend
 
   gateway:
+    logging: *capped-log
     # Built and pushed like the other two, NOT stock nginx:alpine with the config
     # bind-mounted. The deploy chain moves images and nothing else, so a bind-mounted
     # nginx.conf is a file the release cannot deliver: a club merging a gateway fix got a

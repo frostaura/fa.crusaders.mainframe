@@ -63,8 +63,10 @@ public sealed class TenantSlugCacheHttpTests(PostgresFixture pg) : IClassFixture
         {
             var tenant = new Tenant
             {
-                Slug = slug, DisplayName = "Late Club",
-                DeviceApiKey = DeviceApiKey.Generate(), DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
+                Slug = slug,
+                DisplayName = "Late Club",
+                DeviceApiKey = DeviceApiKey.Generate(),
+                DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
             };
             db.Tenants.Add(tenant);
             db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = PlayersClub.Settings });

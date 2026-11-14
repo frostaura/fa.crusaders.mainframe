@@ -7,9 +7,11 @@ import type { Celebration } from "@/lib/playApi";
 
 /**
  * Where a celebration must never appear: the pass at the court (`/my-code`, and its old path),
- * an invite link, and every auth or first-run page. The public landing too.
+ * an invite link, and every auth or first-run page. The public landing too — and the admin console
+ * (BA-24): a member's badge popped over an admin approving applicants, and again after the tour.
+ * Held back, not dropped: it shows once the admin leaves the console.
  */
-const QUIET = /^\/(my-code|court-code|j|invites|login|register|verify-email|welcome|forgot-password|reset-password|change-password|get-started)(\/|$)/;
+const QUIET = /^\/(my-code|court-code|j|invites|login|register|verify-email|welcome|forgot-password|reset-password|change-password|get-started|admin)(\/|$)/;
 
 /** More than this many waiting, and they are one moment rather than a queue of overlays. */
 export const COLLAPSE_OVER = 3;

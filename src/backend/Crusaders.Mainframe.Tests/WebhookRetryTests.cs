@@ -395,7 +395,10 @@ public class WebhookRetryTests
         Assert.Equal(host.AdminUser.Email, mail.To);
         Assert.Equal("A webhook has been switched off", mail.Subject);
         Assert.Contains("https://hooks.example.com", mail.HtmlBody, StringComparison.Ordinal);
-        Assert.DoesNotContain("/crusaders", mail.HtmlBody, StringComparison.Ordinal);
+        // The destination's path (the receiver's own) is never in the mail. Probed with the host in
+        // front: the club's console link now carries the club's slug in its host (BP-03), and a
+        // bare "/crusaders" matched "//crusaders.localhost".
+        Assert.DoesNotContain("hooks.example.com/crusaders", mail.HtmlBody, StringComparison.Ordinal);
         Assert.Contains("failed 6 deliveries", MailText.Unwrap(mail.PlainBody), StringComparison.Ordinal);
     }
 
@@ -431,6 +434,143 @@ public class WebhookRetryTests
         await WorkerFor(host, new ScriptedHandler(HttpStatusCode.InternalServerError)).SweepAsync(default);
 
         Assert.Empty(await DisableNoticesAsync(host));
+    }
+
+    // ---- First delivery: durable before the attempt, endpoints in parallel (BP-08) ----
+
+    /// <summary>A transport that holds every request until released, counting how many wait at once.</summary>
+    private sealed class GateHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _open = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _waiting;
+
+        public int MaxWaiting { get; private set; }
+
+        public void Open() => _open.TrySetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            lock (this) { _waiting++; MaxWaiting = Math.Max(MaxWaiting, _waiting); }
+            try
+            {
+                await _open.Task.WaitAsync(ct);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") };
+            }
+            finally
+            {
+                lock (this) _waiting--;
+            }
+        }
+    }
+
+    private static WebhookDeliveryWorker DeliveryWorkerFor(TestHost host, HttpMessageHandler handler) =>
+        new(new InMemoryEventBus(), host.Services, Sender(handler), NullLogger<WebhookDeliveryWorker>.Instance);
+
+    private static DomainEvent EventFor(TestHost host) => new(
+        Guid.NewGuid().ToString(), "booking.created", host.Tenant.Id, host.Tenant.Slug, DateTimeOffset.UtcNow,
+        host.PlayerUser.Id, false, host.PlayerUser.Id, new Dictionary<string, object?>());
+
+    private static async Task<List<WebhookEndpoint>> SeedEndpointsAsync(TestHost host, int count)
+    {
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var made = Enumerable.Range(0, count).Select(i => new WebhookEndpoint
+        {
+            TenantId = host.Tenant.Id,
+            OwnerKind = WebhookOwnerKind.Tenant,
+            UrlTemplate = $"https://hooks{i}.example.com/crusaders",
+            EventFilter = "*",
+            Secret = "test-secret",
+        }).ToList();
+        db.WebhookEndpoints.AddRange(made);
+        await db.SaveChangesAsync();
+        return made;
+    }
+
+    /// <summary>
+    /// A process that dies while the first attempt is out loses nothing: the delivery row was
+    /// saved pending, due for the retry sweep, before anything was sent. It used to be saved
+    /// only after the whole loop, so a deploy mid-fan-out dropped the event for every endpoint.
+    /// </summary>
+    [Fact]
+    public async Task A_dispatch_interrupted_mid_attempt_leaves_a_pending_row_the_sweep_delivers()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await SeedEndpointsAsync(host, 1);
+        var gate = new GateHandler();
+        using var crash = new CancellationTokenSource();
+
+        var dispatch = DeliveryWorkerFor(host, gate).DispatchAsync(EventFor(host), crash.Token);
+        await WaitUntilAsync(() => gate.MaxWaiting == 1);
+        crash.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatch);
+
+        using (var scope = host.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.WebhookDeliveries.SingleAsync();
+            Assert.Equal("pending", row.FinalState);
+            Assert.NotNull(row.NextRetryAt);
+            Assert.InRange(row.NextRetryAt!.Value, DateTimeOffset.UtcNow.AddSeconds(30), DateTimeOffset.UtcNow.Add(WebhookDeliveryWorker.FirstAttemptGrace));
+            row.NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(-1); // the grace has passed
+            await db.SaveChangesAsync();
+        }
+
+        var handler = new ScriptedHandler(HttpStatusCode.OK);
+        Assert.Equal(1, await WorkerFor(host, handler).SweepAsync(default));
+        using var check = host.NewScope();
+        Assert.Equal("delivered", (await check.ServiceProvider.GetRequiredService<MainframeDbContext>().WebhookDeliveries.SingleAsync()).FinalState);
+    }
+
+    /// <summary>
+    /// One slow receiver no longer holds the others: every endpoint's attempt for an event is out
+    /// at once (they were awaited one after another, ten seconds each at worst).
+    /// </summary>
+    [Fact]
+    public async Task Every_endpoint_of_an_event_is_attempted_at_once_and_each_row_finishes_delivered()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await SeedEndpointsAsync(host, 3);
+        var gate = new GateHandler();
+
+        var dispatch = DeliveryWorkerFor(host, gate).DispatchAsync(EventFor(host), default);
+        await WaitUntilAsync(() => gate.MaxWaiting == 3);
+        gate.Open();
+        await dispatch;
+
+        using var scope = host.NewScope();
+        var rows = await scope.ServiceProvider.GetRequiredService<MainframeDbContext>().WebhookDeliveries.ToListAsync();
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, r => { Assert.Equal("delivered", r.FinalState); Assert.Null(r.NextRetryAt); });
+    }
+
+    /// <summary>A member-owned endpoint left in a database from before BP-08 receives nothing.</summary>
+    [Fact]
+    public async Task A_member_owned_endpoint_is_never_delivered_to()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var endpoints = await SeedEndpointsAsync(host, 1);
+        using (var scope = host.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.WebhookEndpoints.SingleAsync(e => e.Id == endpoints[0].Id);
+            row.OwnerKind = WebhookOwnerKind.User;
+            row.OwnerUserId = host.PlayerUser.Id;
+            await db.SaveChangesAsync();
+        }
+
+        var handler = new ScriptedHandler(HttpStatusCode.OK);
+        await DeliveryWorkerFor(host, handler).DispatchAsync(EventFor(host), default);
+
+        Assert.Empty(handler.Requests);
+        using var check = host.NewScope();
+        Assert.Empty(await check.ServiceProvider.GetRequiredService<MainframeDbContext>().WebhookDeliveries.ToListAsync());
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (var i = 0; i < 200 && !condition(); i++) await Task.Delay(25);
+        Assert.True(condition(), "the condition never held within 5 s");
     }
 
     [Fact]

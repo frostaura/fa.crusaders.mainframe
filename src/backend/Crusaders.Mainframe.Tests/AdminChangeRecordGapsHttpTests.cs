@@ -35,8 +35,12 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = club.MemberUserId, Type = LedgerEntryType.TopUp,
-            AmountMinutes = memberMinutes, ActorUserId = Guid.Empty, Reason = "fixture float",
+            TenantId = club.TenantId,
+            UserId = club.MemberUserId,
+            Type = LedgerEntryType.TopUp,
+            AmountMinutes = memberMinutes,
+            ActorUserId = Guid.Empty,
+            Reason = "fixture float",
         });
         await db.SaveChangesAsync();
         return club;
@@ -78,11 +82,18 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
 
         var adjusted = await admin.PostAsJsonAsync(path, new
         {
-            amountMinutes = 10, reason = "Lights failed mid-session", reasonCode = "goodwill", idempotencyKey = "gm_adj",
+            amountMinutes = 10,
+            reason = "Lights failed mid-session",
+            reasonCode = "goodwill",
+            idempotencyKey = "gm_adj",
         });
         var toppedUp = await admin.PostAsJsonAsync($"/api/v1/admin/minutes/{club.MemberUserId}/sell", new
         {
-            packageId = hour, reason = "Paid cash at the bar", reasonCode = "top_up_cash", zarReceived = 100m, idempotencyKey = "gm_top",
+            packageId = hour,
+            reason = "Paid cash at the bar",
+            reasonCode = "top_up_cash",
+            zarReceived = 100m,
+            idempotencyKey = "gm_top",
         });
         Assert.Equal(HttpStatusCode.OK, adjusted.StatusCode);
         Assert.Equal(HttpStatusCode.OK, toppedUp.StatusCode);
@@ -121,7 +132,10 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         // A replayed click is not a second decision.
         await admin.PostAsJsonAsync(path, new
         {
-            amountMinutes = 10, reason = "Lights failed mid-session", reasonCode = "goodwill", idempotencyKey = "gm_adj",
+            amountMinutes = 10,
+            reason = "Lights failed mid-session",
+            reasonCode = "goodwill",
+            idempotencyKey = "gm_adj",
         });
         Assert.Single(await ChangesAsync(factory, club.TenantId), r => r.Action == AdminChangeActions.MinutesAdjusted);
 
@@ -151,7 +165,8 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
 
         var renamed = await admin.PatchAsJsonAsync($"{Groups}/{id}", new
         {
-            name = "Junior squad", packageDiscountBps = 500,
+            name = "Junior squad",
+            packageDiscountBps = 500,
         });
         Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
         var unchanged = await admin.PatchAsJsonAsync($"{Groups}/{id}", new { name = "Junior squad" });

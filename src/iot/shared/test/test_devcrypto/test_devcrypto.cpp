@@ -1,4 +1,4 @@
-// Unity tests for lib/devcrypto — which, as of firmware 2.0.0, is hex.
+// Unity tests for lib/devcrypto — hex.
 //
 // WHAT THIS SUITE USED TO BE
 // --------------------------

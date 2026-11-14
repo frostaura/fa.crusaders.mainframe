@@ -133,13 +133,23 @@ public sealed class R6AdminRecordHttpTests(PostgresFixture pg) : IClassFixture<P
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = c.TenantId, UserId = c.Olga, Type = LedgerEntryType.ShareTransfer, AmountMinutes = 15,
-                ActorUserId = c.Pam, RelatedBookingId = booking.Id, Reason = "share", ExternalReference = $"share:{Guid.NewGuid():N}:1:in",
+                TenantId = c.TenantId,
+                UserId = c.Olga,
+                Type = LedgerEntryType.ShareTransfer,
+                AmountMinutes = 15,
+                ActorUserId = c.Pam,
+                RelatedBookingId = booking.Id,
+                Reason = "share",
+                ExternalReference = $"share:{Guid.NewGuid():N}:1:in",
             });
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = c.TenantId, UserId = c.Olga, Type = LedgerEntryType.PaymentReversal, AmountMinutes = -20,
-                ActorUserId = c.AdminId, Reason = "chargeback",
+                TenantId = c.TenantId,
+                UserId = c.Olga,
+                Type = LedgerEntryType.PaymentReversal,
+                AmountMinutes = -20,
+                ActorUserId = c.AdminId,
+                Reason = "chargeback",
             });
             return Task.CompletedTask;
         });

@@ -247,6 +247,17 @@ public:
   /// after is how a queue loses exactly the events a flaky link produces.
   bool peek(Event& out) const;
 
+  /// The event `offset` places behind the oldest, for writing the queue out
+  /// to flash (bridge 3.1.0 persists every undelivered event, BR-07). False
+  /// past the end.
+  bool at(uint16_t offset, Event& out) const {
+    if (offset >= count_) {
+      return false;
+    }
+    out = ring_[static_cast<uint16_t>((head_ + offset) % Slots)];
+    return true;
+  }
+
   /// Discards the oldest event, which the API has now acknowledged.
   /// False when there was nothing to release.
   bool release();

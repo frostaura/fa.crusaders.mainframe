@@ -11,6 +11,15 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </summary>
 public sealed record MemberCodeSync(long Step, int StepMs, IReadOnlyList<string> Days, IReadOnlyList<string> Keys)
 {
+    /// <summary>
+    /// How many keys this board was owed before any cap or budget (member-code §5.4) — so the
+    /// heartbeat can count what it trimmed, per board, instead of shedding silently (FC-3, MCV1-07).
+    /// </summary>
+    public int Wanted { get; init; }
+
+    /// <summary>Keys owed and not sent: the ring's cap and the body budget together.</summary>
+    public int Trimmed => Math.Max(0, Wanted - Keys.Count);
+
     /// <summary>The four keys, in wire order, onto a response body being assembled.</summary>
     public void WriteTo(IDictionary<string, object?> body)
     {
@@ -85,7 +94,11 @@ public static class MemberCodeHeartbeat
         var slots = new List<(long First, long End)> { today };
         if (entries.Any(e => LastStep(e) >= tomorrow.First)) slots.Add(tomorrow);
 
-        var keys = new List<string>(keyCap);
+        // Every (REF, slot) owed, once, then IN PRIORITY ORDER (§5.4, MCV1-07): slot-0 keys of
+        // entries whose window is already open first, then by window start, slot-1 keys last — so
+        // the cap and the budget's last-first shedding drop the least-needed key, never a member
+        // standing at the court now.
+        var owed = new List<(int Slot, DateTimeOffset Opens, string Key)>();
         var seen = new HashSet<(int, int)>();
         foreach (var entry in entries)
         {
@@ -95,18 +108,23 @@ public static class MemberCodeHeartbeat
             {
                 for (var slot = 0; slot < slots.Count; slot++)
                 {
-                    if (keys.Count == keyCap) return Done(step, stepMs, slots, keys);
                     var (dayFirst, dayEnd) = slots[slot];
                     if (first >= dayEnd || last < dayFirst) continue;
                     if (!seen.Add((player.Ref, slot))) continue;
 
                     var kday = codes.KdayOf(player, MemberCodeMath.ClubDay(dayFirst, zone));
-                    keys.Add(MemberCodeWire.KeyElement(MemberCodeMath.RefText(player.Ref), slot, kday));
+                    owed.Add((slot, entry.OpensAt, MemberCodeWire.KeyElement(MemberCodeMath.RefText(player.Ref), slot, kday)));
                 }
             }
         }
 
-        return Done(step, stepMs, slots, keys);
+        var keys = owed
+            .Select((k, i) => (k, i))
+            .OrderBy(x => x.k.Slot).ThenBy(x => x.k.Opens).ThenBy(x => x.i)
+            .Take(keyCap)
+            .Select(x => x.k.Key)
+            .ToList();
+        return Done(step, stepMs, slots, keys) with { Wanted = owed.Count };
     }
 
     private static long LastStep(MemberCodeEntry e) => MemberCodeMath.StepOf(e.ClosesAt.AddMilliseconds(-1));

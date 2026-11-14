@@ -150,7 +150,10 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         // An organiser cannot invite another club's member by id.
         var invite = await home.Client(f, home.Organiser).PostAsJsonAsync("/api/v1/bookings", new
         {
-            courtId = home.CourtId, startsAt = PlayersClub.Tomorrow(14).AddDays(1), sliceCount = 1, players = new[] { new { userId = away.Jo } },
+            courtId = home.CourtId,
+            startsAt = PlayersClub.Tomorrow(14).AddDays(1),
+            sliceCount = 1,
+            players = new[] { new { userId = away.Jo } },
         });
         Assert.Equal(HttpStatusCode.NotFound, invite.StatusCode);
         Assert.Equal(PlayerErrors.MemberNotFound, Error(await JsonAsync(invite)));
@@ -421,7 +424,11 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         // Collect only by name, with a reason — and then even below zero.
         await club.WriteAsync(f, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = club.Sam, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = -45, ActorUserId = club.Admin,
+            TenantId = club.TenantId,
+            UserId = club.Sam,
+            Type = LedgerEntryType.AdminAdjustment,
+            AmountMinutes = -45,
+            ActorUserId = club.Admin,
         }));
         Assert.Equal(PlayerErrors.OverdraftNotAuthorised, Error(await JsonAsync(await admin.PostAsJsonAsync($"{path}/collect", new { reason = "Owed" }))));
         var collect = await admin.PostAsJsonAsync($"{path}/collect", new { reason = "Paid in cash, took it off the wallet", allowNegativeBalance = true });

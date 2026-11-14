@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { CheckCircle, Info, Warning, WarningCircle, X, type Icon } from "./ui/icons";
 import { toastReadingMs } from "./toastTiming";
@@ -14,7 +14,18 @@ type ToastItem = {
   durationMs: number;
   /** Whether this failure left the world exactly as it was. See {@link NOTHING_CHANGED}. */
   unchanged: boolean;
+  /** When it was raised (ms). A move to another page drops toasts older than {@link TOAST_KEEP_ACROSS_NAV_MS}. */
+  raisedAt: number;
 };
+
+/**
+ * Go-live BM-14 — a toast is about the page it was raised on. "Couldn't add the passkey" from the
+ * get-started wizard stayed over My Code for 40 s after Finish, on the screen held to the door
+ * scanner. Moving to another page now dismisses every toast raised more than this long before the
+ * move; one raised in the same breath as the navigation ("Booking cancelled", then the list) is the
+ * news of the move, and travels with it.
+ */
+export const TOAST_KEEP_ACROSS_NAV_MS = 1500;
 
 /**
  * The sentence, in one place, because it is a claim about the world and not a wording.
@@ -27,9 +38,18 @@ export const NOTHING_CHANGED = "Nothing changed.";
 /** The toast's own words that are not a call site's (R19 X19-3: its dismiss button's name). */
 export const TOAST_COPY = { dismiss: "Dismiss" } as const;
 
-export function ToastProvider({ children }: { children: React.ReactNode }) {
+export function ToastProvider({ children, routeKey }: { children: React.ReactNode; routeKey?: string }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const idRef = useRef(0);
+
+  // BM-14: a change of page drops what the last page said, unless it was said just now.
+  const lastRoute = useRef(routeKey);
+  useEffect(() => {
+    if (lastRoute.current === routeKey) return;
+    lastRoute.current = routeKey;
+    const cutoff = Date.now() - TOAST_KEEP_ACROSS_NAV_MS;
+    setToasts((t) => (t.some((x) => x.raisedAt < cutoff) ? t.filter((x) => x.raisedAt >= cutoff) : t));
+  }, [routeKey]);
 
   const remove = useCallback((id: number) => {
     setToasts((t) => t.filter((x) => x.id !== id));
@@ -47,13 +67,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       // "until dismissed".
       durationMs: asked === 0 ? 0 : Math.max(asked, toastReadingMs(unchanged ? `${input.text} ${NOTHING_CHANGED}` : input.text)),
       unchanged,
+      raisedAt: Date.now(),
     };
     setToasts((t) => [...t, item]);
   }, []);
 
 
+  // One value for the life of the provider: it re-renders on every change of page now (BM-14),
+  // and a fresh object each time would re-render every `useToast` caller — the whole grid.
+  const value = useMemo(() => ({ push }), [push]);
+
   return (
-    <ToastContext.Provider value={{ push }}>
+    <ToastContext.Provider value={value}>
       {children}
       <ToastViewport toasts={toasts} onDismiss={remove} />
     </ToastContext.Provider>

@@ -1,10 +1,15 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it as vitestIt, vi } from "vitest";
+import { settledIt } from "@/test/settled";
 import App from "../../App";
 import { resetRefreshBackoff, tokenStore } from "@/lib/api";
 import { INBOX_TITLE } from "@/lib/bellCopy";
 import { memberReads } from "@/lib/offline/memberReads";
 import { primeQuery, setDataOwner, wipeMemberData } from "@/lib/offline/queryCache";
+
+
+// FM-7: every test here waits for the screen it drew to settle before it ends.
+const it = settledIt(vitestIt);
 
 /**
  * P5-6 (review round 5) — on one bar of signal the session check (`whoami`) can be out for many
@@ -50,7 +55,7 @@ describe("the header while the session check is out", () => {
     whoamiStalled();
     render(<App />);
 
-    const header = await vi.waitFor(() => {
+    const header = await waitFor(() => {
       const found = document.querySelector<HTMLElement>("[data-app-header]");
       if (!found) throw new Error("no app header yet");
       return found;
@@ -71,7 +76,7 @@ describe("the header while the session check is out", () => {
     whoamiStalled();
     render(<App />);
 
-    const header = await vi.waitFor(() => {
+    const header = await waitFor(() => {
       const found = document.querySelector<HTMLElement>("[data-app-header]");
       if (!found) throw new Error("no app header yet");
       return found;

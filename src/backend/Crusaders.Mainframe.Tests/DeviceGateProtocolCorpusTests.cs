@@ -168,6 +168,14 @@ public class DeviceGateProtocolCorpusTests
         // scanned, not as the bytes that were sent: a quote inside a token is a quote, and a
         // corpus that only ever carried safe subjects would be pinning nothing.
         Assert.Equal("A\"B", refusal.Subject);
+
+        // MCV1-10: an online replay refusal is the same unknown_scan with the v3 event field
+        // `cause` = "replayed" — the field the server reads to record `replayed` rather than
+        // `refused_offline`. The gate's first 2.0.0 cut wrote `reason`, which binds to nothing.
+        var replay = Assert.Single(JsonSerializer.Deserialize<DeviceEventBatch>(
+            Body("requests", "gate-events-request-replayed"))!.Events!);
+        Assert.Equal(DeviceEventEndpoints.UnknownScanKind, replay.Kind);
+        Assert.Equal("replayed", replay.Cause);
     }
 
     // ---- Response bodies ---------------------------------------------------
@@ -288,10 +296,10 @@ public class DeviceGateProtocolCorpusTests
             var body = GateHeartbeatView.Of(
                 device,
                 root.GetProperty("tenant_slug").GetString()!,
-                root.GetProperty("heartbeat_seconds").GetInt32(),
-                root.GetProperty("gate").GetProperty("unlock_seconds").GetInt32(),
+                new GateTiming(root.GetProperty("heartbeat_seconds").GetInt32(), root.GetProperty("gate").GetProperty("unlock_seconds").GetInt32()),
                 root.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList(),
-                VectorNow);
+                VectorNow,
+                V3PartsOf(root));
 
             Assert.Equal(
                 System.Text.Encoding.UTF8.GetString(Hex(c, "body_hex")),
@@ -470,8 +478,34 @@ public class DeviceGateProtocolCorpusTests
         // and two bytes above 0x7F, escaped. 12 and 25 since scan-to-extend: the extend body, five
         // extend answers (ok, truncated, court_not_lit, no_time_available, insufficient_balance)
         // and the activate answer carrying greeting_name and balance_minutes.
-        Assert.Equal(12, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
-        Assert.Equal(25, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
+        // 17 and 35 since device contract v3: the v3 heartbeat request, first beat, relight,
+        // telemetry and widest requests plus the release cause (six), the pay-for request leaving
+        // with D10 (one), and ten v3 responses (snapshot, unacknowledged, display expanded and out
+        // of range, key_next, net, widest, play_remaining, hardware, lifeline-only). The roll-back
+        // request and the OTA offer went with the remote update (device-api.md §7).
+        Assert.Equal(17, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
+        Assert.Equal(35, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
+    }
+
+    /// <summary>
+    /// A v3 vector's gate settings and lifeline objects, as the server would be handed them — null
+    /// for a 1.x vector, whose bytes the server must reproduce unchanged (device-api.md §1).
+    /// </summary>
+    private static GateV3Parts? V3PartsOf(JsonElement root)
+    {
+        var gate = root.GetProperty("gate");
+        GateV3Settings? settings = gate.TryGetProperty("power_restore_trust_minutes", out var trust)
+            ? new GateV3Settings(
+                trust.GetInt32(),
+                gate.GetProperty("net_fallback_minutes").GetInt32(),
+                gate.GetProperty("device_fault_reporting").GetBoolean(),
+                gate.GetProperty("device_fault_max_per_hour").GetInt32())
+            : null;
+
+        System.Text.Json.Nodes.JsonObject? Obj(string name) =>
+            root.TryGetProperty(name, out var o) ? System.Text.Json.Nodes.JsonNode.Parse(o.GetRawText())!.AsObject() : null;
+        var lifeline = new DeviceLifeline(Obj("key_next"), Obj("net"));
+        return settings is null && !lifeline.Any ? null : new GateV3Parts(settings, lifeline);
     }
 
     private static string Body(string section, string id) =>

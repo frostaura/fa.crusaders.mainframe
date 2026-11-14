@@ -407,7 +407,8 @@ public sealed class DeploymentPostureTests : IClassFixture<PostgresFixture>
             .ToList();
 
         var entrypoint = Assert.Single(lines, line => line.StartsWith("ENTRYPOINT", StringComparison.Ordinal));
-        Assert.Matches(@"^ENTRYPOINT\s*\[\s*""/usr/bin/tini""\s*,\s*""--""\s*,\s*""dotnet""", entrypoint);
+        // tini is PID 1; the entrypoint script hands over the volumes and drops to uid 1654 before dotnet.
+        Assert.Matches(@"^ENTRYPOINT\s*\[\s*""/usr/bin/tini""\s*,\s*""--""\s*,\s*""/usr/local/bin/docker-entrypoint.sh""\s*,\s*""dotnet""", entrypoint);
         Assert.Contains(lines, line => line.Contains("install", StringComparison.Ordinal)
             && Regex.IsMatch(line, @"\btini\b"));
     }

@@ -98,7 +98,7 @@ public sealed record PaymentStatusSnapshot(
 /// </summary>
 /// <param name="MerchantId">PayFast <c>merchant_id</c>.</param>
 /// <param name="MerchantKey">PayFast <c>merchant_key</c>.</param>
-/// <param name="SigningSecret">PayFast <c>passphrase</c>. May be empty — a merchant need not set one.</param>
+/// <param name="SigningSecret">PayFast <c>passphrase</c>. Required outside Development (<c>PayFastCredentialRules</c>): without one the signature protects nothing.</param>
 /// <param name="Environment">"test" or "production". Selects the gateway host.</param>
 public sealed record PerTenantCredentials(
     string MerchantId,

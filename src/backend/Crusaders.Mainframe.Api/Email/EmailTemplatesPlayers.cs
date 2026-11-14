@@ -148,6 +148,9 @@ public sealed record ShareLapsedNotice(
 /// <paramref name="ShareMinutes"/> share; the organiser covers the rest — <paramref name="ShortfallMinutes"/> —
 /// until they split it with the other players. Told to the organiser.
 /// </summary>
+/// <summary>A partner who will not be at the organiser's game: declined the invite, or withdrew after accepting (BM-20).</summary>
+public sealed record PartnerNotComingNotice(string PartnerName, string CourtName, string StartsAtLocal, bool Withdrew, string BookingUrl);
+
 public sealed record ShareShortfallNotice(
     string PartnerName, string CourtName, string StartsAtLocal, int PaidMinutes, int ShareMinutes, int ShortfallMinutes, string BookingUrl);
 
@@ -213,6 +216,10 @@ public static partial class EmailTemplates
 {
     private const string WhyGame =
         "You're getting this because a member of the club added you to a court booking.";
+
+    /// <summary>The footer for the organiser's own mails (browser lane BM-21): they made the booking; nobody added them to it.</summary>
+    private const string WhyOrganiser =
+        "You're getting this because you organised this court booking.";
 
     /// <summary>A member has been asked to play, with their share and a link that opens the invite.</summary>
     public static EmailMessage PlayerInvite(ClubIdentity club, string to, PlayerInviteNotice n) =>
@@ -318,7 +325,7 @@ public static partial class EmailTemplates
     /// </summary>
     public static EmailMessage ShareShortfall(ClubIdentity club, string to, ShareShortfallNotice n) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"{n.PartnerName} paid part of their share — {n.CourtName}",
+            Subject: $"{n.PartnerName} paid {Min(n.PaidMinutes)} of their {Min(n.ShareMinutes)} share — {n.CourtName}",
             Preheader: $"{Min(n.ShortfallMinutes)} {Is(n.ShortfallMinutes)} left to cover. You can split it with the other players.",
             Heading: "Part of a share is left to cover",
             Blocks:
@@ -334,7 +341,26 @@ public static partial class EmailTemplates
                     "You're covering it for now — your booking already paid for the court, so nothing more is taken. You can split it with the other players from the booking."),
                 new CallToAction("Split what's left", n.BookingUrl),
             ],
-            WhyThis: WhyGame));
+            WhyThis: WhyOrganiser));
+
+    /// <summary>
+    /// To the organiser: a partner declined, or withdrew (BM-20). The court stays booked and paid
+    /// for; the organiser can ask somebody else. Any share the partner had paid has its own receipt.
+    /// </summary>
+    public static EmailMessage PartnerNotComing(ClubIdentity club, string to, PartnerNotComingNotice n) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: n.Withdrew ? $"{n.PartnerName} has pulled out — {n.CourtName}" : $"{n.PartnerName} can't make it — {n.CourtName}",
+            Preheader: "Your court is still booked. You can ask somebody else from the booking.",
+            Heading: n.Withdrew ? "A player pulled out of your game" : "A player declined your invite",
+            Blocks:
+            [
+                new Paragraph(n.Withdrew
+                    ? $"{n.PartnerName} has pulled out of your game on {CourtOn(n.CourtName, n.StartsAtLocal)}."
+                    : $"{n.PartnerName} declined your invite to play on {CourtOn(n.CourtName, n.StartsAtLocal)}."),
+                new Paragraph("Your court is still booked and paid for. You can invite somebody else from the booking."),
+                new CallToAction("Open the booking", n.BookingUrl),
+            ],
+            WhyThis: WhyOrganiser));
 
     /// <summary>A share still waiting: the club's reminder, or the organiser's nudge.</summary>
     public static EmailMessage ShareReminder(ClubIdentity club, string to, ShareReminderNotice n) =>
@@ -370,7 +396,7 @@ public static partial class EmailTemplates
                     : $"Your share for {CourtOn(n.CourtName, n.StartsAtLocal)} closed before it was paid. {n.OtherName}'s booking covers it and nothing is owed."),
                 new CallToAction("Open the booking", n.BookingUrl),
             ],
-            WhyThis: WhyGame));
+            WhyThis: n.ToOrganiser ? WhyOrganiser : WhyGame));
 
     /// <summary>
     /// A return of a paid share is waiting: the organiser's minutes do not cover it yet. Told once
@@ -391,7 +417,7 @@ public static partial class EmailTemplates
                     : $"{Min(n.AmountMinutes)} of your share for {CourtOn(n.CourtName, n.StartsAtLocal)} {Is(n.AmountMinutes)} due back to you from {n.OtherName}. It will reach your balance automatically as soon as it can be sent."),
                 new CallToAction("Open the booking", n.BookingUrl),
             ],
-            WhyThis: WhyGame));
+            WhyThis: n.ToOrganiser ? WhyOrganiser : WhyGame));
 
     /// <summary>
     /// A game the reader was in has been cancelled — and, since review round 13 (E13-6), by whom and

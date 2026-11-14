@@ -30,7 +30,11 @@ public sealed class R13MailWordsTests
     {
         var change = new AdminRoleChange
         {
-            SubjectName = "Sam Partner", ActorName = "Ada Admin", Granted = false, Reason = reason, ConsoleUrl = "https://x.review.test/admin",
+            SubjectName = "Sam Partner",
+            ActorName = "Ada Admin",
+            Granted = false,
+            Reason = reason,
+            ConsoleUrl = "https://x.review.test/admin",
         };
         var revoked = Flat(EmailTemplates.AdminRoleRevoked(EmailCatalogue.Riverside, "s@x.review.test", change).PlainBody);
         var granted = Flat(EmailTemplates.AdminRoleGranted(EmailCatalogue.Riverside, "s@x.review.test",

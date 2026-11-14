@@ -181,6 +181,12 @@ const EVENTS: EventDef[] = [
     vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
   },
   {
+    name: "minutes.payment_reversed",
+    label: "Payment refunded or charged back",
+    description: "The club gave rand back for a purchase — a refund at the desk or a card chargeback it recorded. Names the purchase; amount_minutes is the minutes taken back with it (0 when the member keeps them).",
+    vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason", "zar_reversed", "reverses_entry_id"],
+  },
+  {
     name: "minutes.adjusted",
     label: "Minutes adjusted by hand",
     description: "An admin added minutes to a member or took them back from the console — a goodwill gesture, a correction, or a refund made outside the system. NOT money the club took: that is minutes.sold_at_desk.",
@@ -553,6 +559,11 @@ type EndpointForm = {
 };
 
 /** The create form, as a dialog: events, the URL template, a description, and Create. */
+/** Whether the admin has typed anything a dismissal would throw away. */
+function endpointFormTouched(form: EndpointForm): boolean {
+  return form.url.trim() !== "" || form.description.trim() !== "";
+}
+
 function NewEndpointDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -574,7 +585,17 @@ function NewEndpointDialog(props: {
   }, [urlError, props.error]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent
+        className="sm:max-w-2xl"
+        // BA-23: Escape meant for the {variable} suggestions closed the whole dialog and threw the
+        // typed URL away. Escape closes the suggestions first; with anything typed, neither Escape
+        // nor a click outside discards it — Cancel does, on purpose.
+        onEscapeKeyDown={(e) => {
+          const suggesting = document.activeElement?.getAttribute("aria-expanded") === "true";
+          if (suggesting || endpointFormTouched(form)) e.preventDefault();
+        }}
+        onInteractOutside={(e) => { if (endpointFormTouched(form)) e.preventDefault(); }}
+      >
         <DialogHeader>
           <DialogTitle>New webhook endpoint</DialogTitle>
           <DialogDescription>Choose what to send, and where. The signing secret is shown once, after it is created.</DialogDescription>

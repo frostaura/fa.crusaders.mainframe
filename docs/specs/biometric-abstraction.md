@@ -75,7 +75,9 @@ Records:
 - `DeviceHealthSnapshot` — `LastSeenUtc`, `TempC` (if available), `FailedReadsLastHour`, `FirmwareVersion`.
 
 ## Implementations to ship
-- `NullBiometricDevice` — returns deterministic match results based on a config-injected lookup. Used in dev, CI, and as a graceful fallback when hardware is absent.
+- `NullBiometricDevice` — the simulator: it matches the FIRST enrolled candidate at 0.99 confidence. Used in Development and CI only, and only when `Biometric:Driver` is `Null` (`BiometricDrivers.For`).
+- `NoBiometricDevice` — what every other deployment runs until a vendor driver exists: it captures nothing, enrols nobody (`503 biometric_unavailable`) and matches nobody. It replaced the simulator as "the graceful fallback when hardware is absent" (BP-09, 2026-11-13): registered unconditionally, the simulator would have checked in and charged whichever member was enrolled first at Production's courtside biometric match.
+- Enrolment refuses a user who is not a member of the club (`404 member_not_found`).
 - `MockSimulatorBiometricDevice` — for the demo flow: prints "tap your finger" to a console, accepts a keystroke as the "match", returns the configured user.
 - `<Vendor>BiometricDevice` — to be added once the hardware is selected. Candidates: DigitalPersona U.are.U (good .NET SDK), Suprema BioMini (well-documented, ZA distributors), ZKTeco SilkID (cheap, weaker SDK). Decision deferred until first hardware purchase.
 

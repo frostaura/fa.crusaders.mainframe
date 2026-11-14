@@ -213,6 +213,29 @@ bool Frame::pushArgU32(uint32_t v) {
   return true;
 }
 
+bool Frame::pushArgHex(uint32_t v, uint8_t digits) {
+  if (argc_ >= kMaxArgs) {
+    return false;
+  }
+  args_[argc_].clear();
+  for (uint8_t i = digits; i > 0U; --i) {
+    const uint8_t nibble = static_cast<uint8_t>((v >> (4U * (i - 1U))) & 0x0FU);
+    static_cast<void>(args_[argc_].push(nibble < 10U ? static_cast<char>('0' + nibble)
+                                                     : static_cast<char>('A' + (nibble - 10U))));
+  }
+  argc_ = static_cast<uint8_t>(argc_ + 1U);
+  return true;
+}
+
+bool Frame::pushArgOpinion(int32_t v, uint32_t lowest, uint32_t highest) {
+  if (v < 0) {
+    return pushArg("-");
+  }
+  uint32_t u = static_cast<uint32_t>(v);
+  u = u < lowest ? lowest : (u > highest ? highest : u);
+  return pushArgU32(u);
+}
+
 Frame Frame::fromValidated(const VerbSpec& spec, const Arg* args, uint8_t argc) {
   Frame f = ofVerb(spec.verb);
   for (uint8_t i = 0; i < argc && i < kMaxArgs; ++i) {
@@ -292,6 +315,110 @@ Frame Frame::auth(uint16_t seconds) {
   return f;
 }
 
+Frame Frame::on(Court court, uint32_t seconds, uint8_t tag) {
+  Frame f = on(court, seconds);
+  if (tag != kNoTag) {
+    static_cast<void>(f.pushArgU32(tag));
+  }
+  return f;
+}
+
+Frame Frame::off(Court court, uint8_t tag) {
+  Frame f = off(court);
+  if (tag != kNoTag) {
+    static_cast<void>(f.pushArgU32(tag));
+  }
+  return f;
+}
+
+Frame Frame::ext(Court court, uint32_t seconds, uint8_t tag) {
+  Frame f = ext(court, seconds);
+  if (tag != kNoTag) {
+    static_cast<void>(f.pushArgU32(tag));
+  }
+  return f;
+}
+
+Frame Frame::auth(uint16_t seconds, uint8_t tag) {
+  Frame f = auth(seconds);
+  if (tag != kNoTag) {
+    static_cast<void>(f.pushArgU32(tag));
+  }
+  return f;
+}
+
+Frame Frame::rw(uint8_t seq, uint8_t row, uint8_t offset, const char* text) {
+  if (row >= kMaxRows || (offset != 0U && offset != kRwSegment)) {
+    return Frame();
+  }
+  Frame f = ofVerb(Verb::Rw);
+  static_cast<void>(f.pushArgU32(seq));
+  static_cast<void>(f.pushArgU32(row));
+  static_cast<void>(f.pushArgU32(offset));
+  static_cast<void>(f.pushArg(text));
+  return f;
+}
+
+Frame Frame::cmt(uint8_t seq, uint8_t mask, uint32_t holdSeconds, uint8_t flags, uint16_t crc) {
+  if (mask == 0U || mask > 15U) {
+    return Frame();
+  }
+  Frame f = ofVerb(Verb::Cmt);
+  static_cast<void>(f.pushArgU32(seq));
+  static_cast<void>(f.pushArgU32(mask));
+  static_cast<void>(f.pushArgU32(clampSeconds(holdSeconds, kShowHoldMinSeconds, kShowHoldMaxSeconds)));
+  static_cast<void>(f.pushArgU32(flags));
+  static_cast<void>(f.pushArgHex(crc, 4U));
+  return f;
+}
+
+Frame Frame::want(uint8_t tag, const int32_t seconds[4]) {
+  Frame f = ofVerb(Verb::Want);
+  static_cast<void>(f.pushArgU32(tag));
+  for (size_t i = 0; i < 4; ++i) {
+    static_cast<void>(f.pushArgOpinion(seconds[i], kRelayMinSeconds, kRelayHardCapSeconds));
+  }
+  return f;
+}
+
+Frame Frame::cfg(uint8_t tag, const char* key, uint16_t value) {
+  size_t n = 0;
+  for (; key != nullptr && key[n] != '\0'; ++n) {
+    if (key[n] < 'A' || key[n] > 'Z' || n >= 6U) {
+      return Frame();
+    }
+  }
+  if (n == 0U) {
+    return Frame();
+  }
+  Frame f = ofVerb(Verb::Cfg);
+  static_cast<void>(f.pushArgU32(tag));
+  static_cast<void>(f.pushArg(key));
+  static_cast<void>(f.pushArgU32(value));
+  return f;
+}
+
+Frame Frame::land(const int32_t seconds[4]) {
+  Frame f = ofVerb(Verb::Land);
+  for (size_t i = 0; i < 4; ++i) {
+    static_cast<void>(f.pushArgOpinion(seconds[i], 0U, kLandMaxSeconds));
+  }
+  return f;
+}
+
+Frame Frame::note(uint32_t ttlSeconds, const char* text) {
+  Frame f = ofVerb(Verb::Note);
+  static_cast<void>(f.pushArgU32(clampSeconds(ttlSeconds, 0U, kNoteMaxSeconds)));
+  static_cast<void>(f.pushArg(text));
+  return f;
+}
+
+Frame Frame::live(uint32_t periodSeconds) {
+  Frame f = ofVerb(Verb::Live);
+  static_cast<void>(f.pushArgU32(clampSeconds(periodSeconds, kLiveMinSeconds, kLiveMaxSeconds)));
+  return f;
+}
+
 Frame Frame::rst() {
   return ofVerb(Verb::Rst);
 }
@@ -351,6 +478,60 @@ Frame Frame::evt(const char* name, const char* detail) {
 Frame Frame::err(DecodeError code) {
   Frame f = ofVerb(Verb::Err);
   static_cast<void>(f.pushArg(errorName(code)));
+  return f;
+}
+
+Frame Frame::ack(uint8_t tag, AckCode code) {
+  Frame f = ofVerb(Verb::Ack);
+  static_cast<void>(f.pushArgU32(tag));
+  static_cast<void>(f.pushArgU32(static_cast<uint8_t>(code)));
+  return f;
+}
+
+Frame Frame::ackScreen(uint8_t seq, AckCode code) {
+  Frame f = ofVerb(Verb::Ack);
+  Arg id;
+  static_cast<void>(id.push('S'));
+  Arg digits;
+  digits.setU32(seq);
+  for (size_t i = 0; i < digits.size(); ++i) {
+    static_cast<void>(id.push(digits.c_str()[i]));
+  }
+  static_cast<void>(f.pushArg(id.c_str()));
+  static_cast<void>(f.pushArgU32(static_cast<uint8_t>(code)));
+  return f;
+}
+
+Frame Frame::boot(const char* version, uint8_t cause, uint8_t held) {
+  Frame f = ofVerb(Verb::Boot);
+  static_cast<void>(f.pushArg(version));
+  static_cast<void>(f.pushArgHex(cause, 2U));
+  static_cast<void>(f.pushArgHex(held, 2U));
+  return f;
+}
+
+Frame Frame::held(uint8_t mask, uint32_t seconds) {
+  Frame f = ofVerb(Verb::Held);
+  static_cast<void>(f.pushArgHex(mask, 2U));
+  static_cast<void>(f.pushArgU32(clampSeconds(seconds, kHeldMinSeconds, kHeldMaxSeconds)));
+  return f;
+}
+
+Frame Frame::diag(const uint16_t counters[5]) {
+  Frame f = ofVerb(Verb::Diag);
+  for (size_t i = 0; i < 5; ++i) {
+    static_cast<void>(f.pushArgU32(counters[i]));
+  }
+  return f;
+}
+
+Frame Frame::hw(uint8_t lcdAddress, uint8_t relayLevel, uint8_t baudCode, uint8_t lineEnd, uint8_t keys) {
+  Frame f = ofVerb(Verb::Hw);
+  static_cast<void>(f.pushArgHex(lcdAddress, 2U));
+  static_cast<void>(f.pushArgU32(relayLevel > 1U ? 1U : relayLevel));
+  static_cast<void>(f.pushArgU32(baudCode > 5U ? 5U : baudCode));
+  static_cast<void>(f.pushArgU32(lineEnd > 1U ? 1U : lineEnd));
+  static_cast<void>(f.pushArgHex(keys, 2U));
   return f;
 }
 

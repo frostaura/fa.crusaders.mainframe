@@ -90,6 +90,186 @@ void renderRelayState(char* out, size_t cap, const RelayState* state, uint8_t co
   }
 }
 
+/// A bounded appender: every put() is refused once anything has not fitted,
+/// and the caller then renders nothing — a truncated body is a lie.
+class Out {
+public:
+  Out(char* buf, size_t cap) : buf_(buf), cap_(cap), at_(0U), ok_(cap > 0U) {
+    if (ok_) {
+      buf_[0] = '\0';
+    }
+  }
+
+  void put(const char* s) {
+    for (size_t i = 0U; ok_ && s != nullptr && s[i] != '\0'; ++i) {
+      putc(s[i]);
+    }
+  }
+
+  void putc(char c) {
+    if (!ok_ || at_ + 1U >= cap_) {
+      ok_ = false;
+      return;
+    }
+    buf_[at_] = c;
+    ++at_;
+    buf_[at_] = '\0';
+  }
+
+  void u32(uint32_t v) {
+    char digits[11];
+    snprintf(digits, sizeof(digits), "%lu", static_cast<unsigned long>(v));
+    put(digits);
+  }
+
+  void hex2(uint8_t v) {
+    char digits[3];
+    snprintf(digits, sizeof(digits), "%02X", static_cast<unsigned>(v));
+    put(digits);
+  }
+
+  /// `,"key":"value"`
+  void str(const char* key, const char* value) {
+    put(",\"");
+    put(key);
+    put("\":\"");
+    put(value);
+    putc('"');
+  }
+
+  void num(const char* key, uint32_t value) {
+    put(",\"");
+    put(key);
+    put("\":");
+    u32(value);
+  }
+
+  bool ok() const { return ok_; }
+
+  size_t size() const { return at_; }
+
+private:
+  char* buf_;
+  size_t cap_;
+  size_t at_;
+  bool ok_;
+};
+
+void renderMega(Out& o, const MegaReport& m) {
+  o.put(",\"mega\":{\"reset\":\"");
+  o.hex2(m.reset);
+  o.put("\",\"lcd\":\"");
+  o.hex2(m.lcd);
+  o.put("\",\"relay\":\"");
+  o.put(m.relayLow ? "low" : "high");
+  o.put("\",\"scan_baud\":");
+  o.u32(m.scanBaud);
+  o.put(",\"scan_end\":\"");
+  o.put(m.scanCrlf ? "crlf" : "auto");
+  o.put("\",\"keys\":\"");
+  o.hex2(m.keys);
+  o.put("\",\"diag\":[");
+  for (uint8_t i = 0U; i < 5U; ++i) {
+    if (i > 0U) {
+      o.putc(',');
+    }
+    o.u32(m.counters[i]);
+  }
+  o.put("]}");
+}
+
+void renderDiag(Out& o, const DiagReport& d) {
+  o.put(",\"diag\":{\"reset\":\"");
+  o.put(d.reset);
+  o.putc('"');
+  o.num("exc", d.exc);
+  o.num("epc1", d.epc1);
+  o.num("heap", d.heap);
+  o.num("heap_min", d.heapMin);
+  o.num("block", d.block);
+  o.num("stack_min", d.stackMin);
+  o.num("sketch_free", d.sketchFree);
+  o.num("flash_mb", d.flashMb);
+  o.putc('}');
+}
+
+void renderCaps(Out& o, uint8_t caps) {
+  static const char* const kNames[5] = {"codes:m1", "hb:3", "key:1", "net:1", "lcd:2"};
+  if (caps == 0U) {
+    return;
+  }
+  o.put(",\"caps\":[");
+  bool first = true;
+  for (uint8_t i = 0U; i < 5U; ++i) {
+    if ((caps & (1U << i)) == 0U) {
+      continue;
+    }
+    o.put(first ? "\"" : ",\"");
+    o.put(kNames[i]);
+    o.putc('"');
+    first = false;
+  }
+  o.putc(']');
+}
+
+/// `relight`: the relays the bridge re-lit this boot, as `relay|ref` strings.
+void renderRelight(Out& o, const HeartbeatV3& v) {
+  if (v.relight == nullptr || v.relightCount == 0U) {
+    return;
+  }
+  o.put(",\"relight\":[");
+  const uint8_t n = v.relightCount > kMaxRelightElements ? kMaxRelightElements : v.relightCount;
+  for (uint8_t i = 0U; i < n; ++i) {
+    o.put(i == 0U ? "\"" : ",\"");
+    o.u32(v.relight[i].relay);
+    o.putc('|');
+    o.put(v.relight[i].ref);
+    o.putc('"');
+  }
+  o.putc(']');
+}
+
+/// `drift`: the keys of the server's last answer the board could not read (§11.2).
+void renderDrift(Out& o, const HeartbeatV3& v) {
+  if (v.drift == nullptr || v.driftCount == 0U) {
+    return;
+  }
+  o.put(",\"drift\":[");
+  const uint8_t n = v.driftCount > kMaxDriftNames ? kMaxDriftNames : v.driftCount;
+  for (uint8_t i = 0U; i < n; ++i) {
+    o.put(i == 0U ? "\"" : ",\"");
+    o.put(v.drift[i]);
+    o.putc('"');
+  }
+  o.putc(']');
+}
+
+/// Everything after `relay_state`, in device-api.md §2's order, then caps.
+void renderV3(Out& o, const HeartbeatV3& v) {
+  if (v.megaVersion != nullptr) {
+    o.str("mega_version", v.megaVersion);
+  }
+  if (v.netReported) {
+    o.num("net_ver", v.netVer);
+    o.str("net_src", v.netSrc);
+  }
+  if (v.lcdLayout != nullptr) {
+    o.str("lcd_layout", v.lcdLayout);
+  }
+  if (v.restore != nullptr) {
+    o.str("restore", v.restore);
+  }
+  renderRelight(o, v);
+  if (v.mega != nullptr) {
+    renderMega(o, *v.mega);
+  }
+  if (v.diag != nullptr) {
+    renderDiag(o, *v.diag);
+  }
+  renderDrift(o, v);
+  renderCaps(o, v.caps);
+}
+
 } // namespace
 
 size_t renderHeartbeatBody(char* out, size_t cap, const char* mac, const char* firmwareVersion,
@@ -118,6 +298,26 @@ size_t renderHeartbeatBody(char* out, size_t cap, const char* mac, const char* f
   char relayState[80] = {};
   renderRestored(restored, sizeof(restored), report.restoredRelays);
   renderRelayState(relayState, sizeof(relayState), report.relayState, report.relayStateCount);
+
+  if (report.v3 != nullptr) {
+    // v3 (device-api.md §2): no `restored_relays` (a v3 box reports `relight`),
+    // then `relay_state`, the v3 fields in order, and `caps` last.
+    Out o(out, cap);
+    o.put("{\"mac\":\"");
+    o.put(mac);
+    o.put("\",\"firmware_version\":\"");
+    o.put(firmwareVersion);
+    o.put("\",\"uptime_ms\":");
+    o.put(uptime);
+    o.put(relayState);
+    renderV3(o, *report.v3);
+    o.putc('}');
+    if (!o.ok()) {
+      out[0] = '\0';
+      return 0U;
+    }
+    return o.size();
+  }
 
   // `caps` LAST, after every diagnostic, and absent unless the firmware speaks
   // something the server must negotiate — so a board that names no capability

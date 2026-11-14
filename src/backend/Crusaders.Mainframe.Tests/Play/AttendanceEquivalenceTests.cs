@@ -54,8 +54,16 @@ public sealed class AttendanceEquivalenceTests(PostgresFixture pg) : IClassFixtu
             var booker = rng.Next(8) == 0 ? (Guid?)null : members[rng.Next(members.Length)];
             var booking = new Booking
             {
-                TenantId = club.TenantId, CourtId = club.CourtId, UserId = booker, BookedByUserId = booker, PaidByUserId = booker,
-                ActorUserId = booker ?? club.Admin, StartsAt = starts, EndsAt = starts.AddMinutes(45), SliceMinutes = 15, SliceCount = 3,
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = booker,
+                BookedByUserId = booker,
+                PaidByUserId = booker,
+                ActorUserId = booker ?? club.Admin,
+                StartsAt = starts,
+                EndsAt = starts.AddMinutes(45),
+                SliceMinutes = 15,
+                SliceCount = 3,
                 AmountChargedMinutes = booker is null ? 0 : 24,
                 Status = booker is null ? BookingStatus.AdminBlock : (BookingStatus)rng.Next(4),
                 CheckedInAt = rng.Next(3) > 0 ? starts.AddMinutes(rng.Next(1, 10)) : null,
@@ -93,9 +101,16 @@ public sealed class AttendanceEquivalenceTests(PostgresFixture pg) : IClassFixtu
 
     private static BookingParticipant Seat(PlayersClub club, Booking booking, int seat, Guid? user, ParticipantStatus status, Random rng) => new()
     {
-        TenantId = club.TenantId, BookingId = booking.Id, Seat = seat, UserId = user, Status = status, ShareWeight = 1,
+        TenantId = club.TenantId,
+        BookingId = booking.Id,
+        Seat = seat,
+        UserId = user,
+        Status = status,
+        ShareWeight = 1,
         CheckedInAt = rng.Next(3) == 0 ? booking.StartsAt.AddMinutes(rng.Next(0, 20)) : null,
-        InvitedAt = booking.StartsAt.AddDays(-1), CreatedAt = booking.StartsAt.AddDays(-1), UpdatedAt = booking.StartsAt.AddDays(-1),
+        InvitedAt = booking.StartsAt.AddDays(-1),
+        CreatedAt = booking.StartsAt.AddDays(-1),
+        UpdatedAt = booking.StartsAt.AddDays(-1),
     };
 
     /// <summary>The statement <see cref="AttendanceQuery.SessionsAsync"/> used before P12, verbatim — the reference.</summary>
@@ -106,7 +121,12 @@ public sealed class AttendanceEquivalenceTests(PostgresFixture pg) : IClassFixtu
                         && (b.UserId == userId || db.BookingParticipants.Any(p => p.BookingId == b.Id && p.UserId == userId)))
             .Select(b => new
             {
-                b.Id, b.UserId, b.StartsAt, b.EndsAt, b.CancelledAt, b.CheckedInAt,
+                b.Id,
+                b.UserId,
+                b.StartsAt,
+                b.EndsAt,
+                b.CancelledAt,
+                b.CheckedInAt,
                 Own = db.BookingParticipants
                     .Where(p => p.BookingId == b.Id && p.UserId == userId && p.CheckedInAt != null)
                     .Min(p => p.CheckedInAt),

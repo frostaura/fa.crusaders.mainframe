@@ -23,11 +23,22 @@ public sealed class BiometricService
     private readonly CourtActivationService _activation;
     private readonly ILogger<BiometricService> _logger;
 
+    /// <summary>The refusal for an enrolment naming somebody who is not a member of this club.</summary>
+    public const string MemberNotFound = "member_not_found";
+
     public BiometricService(MainframeDbContext db, ITenantContext tenant, IBiometricDevice device, IEventBus bus, CourtActivationService activation, ILogger<BiometricService> logger)
     { _db = db; _tenant = tenant; _device = device; _bus = bus; _activation = activation; _logger = logger; }
 
     public async Task<BiometricEnrollmentResult> EnrollAsync(Guid memberUserId, Guid adminUserId, string? fingerLabel, string consentReceiptHash, CancellationToken ct)
     {
+        // BP-09: only a member of THIS club. The id used to go to the device and into
+        // enrolled_templates unchecked, so another club's user (or the all-zeros id a malformed
+        // body binds to) got a template row here. The membership read is tenant-filtered.
+        if (!await _db.Memberships.AnyAsync(m => m.UserId == memberUserId, ct))
+        {
+            return new BiometricEnrollmentResult(Ok: false, TemplateId: null, FailureReason: MemberNotFound);
+        }
+
         var result = await _device.EnrollAsync(new EnrollmentRequest(_tenant.TenantId, memberUserId, adminUserId, fingerLabel, consentReceiptHash), ct);
         if (result.Ok && result.TemplateId is not null)
         {

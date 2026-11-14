@@ -6,7 +6,8 @@ import { ActionsMenu, type ActionsMenuItem } from "@/components/admin/ActionsMen
 import { useResetMemberCodeConfirm } from "@/components/member-code/useResetMemberCodeConfirm";
 import { useToast } from "@/components/toastContext";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { ArrowCounterClockwise, Envelope, HourglassMedium, Key, Lock, Prohibit, ShieldCheck, ShieldWarning, Trash, UserMinus, UserPlus } from "@/components/ui/icons";
+import { ArrowCounterClockwise, Envelope, HourglassMedium, Key, Lock, Prohibit, Receipt, ShieldCheck, ShieldWarning, Trash, UserMinus, UserPlus } from "@/components/ui/icons";
+import { REVERSAL_COPY } from "@/lib/reversalCopy";
 import { Textarea } from "@/components/ui/textarea";
 import { endpoints } from "@/lib/api";
 import { ACTIONS_COPY as COPY, ADMIN_ROLE_COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
@@ -42,7 +43,7 @@ type Props = { detail: MemberDetail; name: string; onChanged: () => void | Promi
  * and opens "Adjust minutes" (P13 §3.7) — goodwill and corrections, kept off the header beside the
  * sale so a phone's header stays short, exactly as the members list keeps it in the row's ⋯.
  */
-type ActionsProps = Props & { onRole: (result: AdminRoleResult) => void | Promise<void>; onAdjust?: () => void };
+type ActionsProps = Props & { onRole: (result: AdminRoleResult) => void | Promise<void>; onAdjust?: () => void; onReverse?: () => void };
 
 function ReasonField({ id, value, onChange }: { id: string; value: string; onChange: (next: string) => void }) {
   return (
@@ -80,7 +81,7 @@ function useLifecycleItems({ detail, name, onChanged }: Props): LifecycleItems |
     label: COPY.approve, icon: <UserPlus aria-hidden="true" />,
     confirm: {
       title: COPY.approveTitle(name), description: COPY.approveBody, confirmLabel: COPY.approveConfirm, tone: "primary",
-      action: COPY.approveAction,
+      action: COPY.approveAction, codes: { email_not_verified: COPY.approveUnverified(name) },
       onConfirm: async () => {
         try {
           const r = await endpoints.adminApprove(id);
@@ -172,11 +173,16 @@ export function MemberActions(props: ActionsProps) {
   const adjust: ActionsMenuItem | null = props.onAdjust && detail.status === "Active"
     ? { label: MEMBER_COPY.adjust, icon: <HourglassMedium aria-hidden="true" />, onSelect: props.onAdjust }
     : null;
+  // BM-6: money given back is recorded for anybody who bought something — a suspended or departed
+  // member's refund is still the club's revenue going down, so it is not limited to Active.
+  const reverse: ActionsMenuItem | null = props.onReverse && detail.membership_id
+    ? { label: REVERSAL_COPY.menu, icon: <Receipt aria-hidden="true" />, onSelect: props.onReverse }
+    : null;
 
   return (
     // `contents`: the wrapper is only there to find the ⋯ again, for the role dialog's focus return.
     <span ref={anchor} data-member-actions="" className="contents">
-      <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[adjust, resend, role.item, resetCode, ...lifecycle, removal.item]} />
+      <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[adjust, reverse, resend, role.item, resetCode, ...lifecycle, removal.item]} />
       {role.attempt ? (
         <AdminRoleDialog
           key={role.attempt.n}

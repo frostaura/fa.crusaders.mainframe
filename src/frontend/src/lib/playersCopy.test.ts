@@ -56,3 +56,13 @@ describe("R8 E8-2 — the member who paid at the box is told about himself", () 
     expect(DETAIL_MONEY.paidAtBoxNoteSelf(null, "30 minutes")).toMatch(/^You paid .* the organiser was refunded/);
   });
 });
+
+describe("BM-5 — pay what you can is refused when the whole share is affordable", () => {
+  it("says to pay the whole share, with its figure, and never 'short'", async () => {
+    const { playersRefusal } = await import("./playersCopy");
+    const { ApiError } = await import("./api");
+    const said = playersRefusal(new ApiError(409, { error: "share_affordable", share_minutes: 45, paid_minutes: 0, spendable_minutes: 60 }));
+    expect(said).toBe("You now have enough minutes for your whole share of 45 minutes, so pay all of it rather than part.");
+    expect(playersRefusal(new ApiError(409, { error: "share_affordable" }))).toMatch(/pay all of it rather than part/);
+  });
+});

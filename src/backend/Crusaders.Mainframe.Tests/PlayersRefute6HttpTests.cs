@@ -112,8 +112,13 @@ public sealed class PlayersRefute6HttpTests(PostgresFixture pg) : IClassFixture<
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
-                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountMinutes = posting.AmountMinutes,
-                    ActorUserId = posting.ActorUserId, RelatedBookingId = bookingId, ExternalReference = posting.ExternalReference,
+                    TenantId = club.TenantId,
+                    UserId = posting.UserId,
+                    Type = posting.Type,
+                    AmountMinutes = posting.AmountMinutes,
+                    ActorUserId = posting.ActorUserId,
+                    RelatedBookingId = bookingId,
+                    ExternalReference = posting.ExternalReference,
                 });
             }
         });

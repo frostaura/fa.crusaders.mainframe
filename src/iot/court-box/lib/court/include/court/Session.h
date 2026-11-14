@@ -168,7 +168,11 @@ public:
   /// A court's lights went out — the Mega's timer expired, or somebody pressed
   /// off. Recorded so the club can see how long the court was actually used,
   /// which is the number a dispute about a 45-minute booking turns on.
-  Outcome onRelease(uint8_t court, uint32_t heldMs, uint32_t nowMs);
+  /// A court went dark. `cause` says why (v3, device-api.md §9): only a
+  /// `member` release paired with the session takes a booking out of the
+  /// server's snapshot. None renders no cause (a 2.x-shaped release).
+  Outcome onRelease(uint8_t court, uint32_t heldMs, uint32_t nowMs,
+                    eventq::Cause cause = eventq::Cause::None);
 
   /// The box started. One event, so an unexplained gap in the sequence has an
   /// explanation next to it.
@@ -323,7 +327,8 @@ Outcome Session<RosterT, QueueT>::applyDecision(const roster::Decision& decision
 }
 
 template <typename RosterT, typename QueueT>
-Outcome Session<RosterT, QueueT>::onRelease(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
+Outcome Session<RosterT, QueueT>::onRelease(uint8_t court, uint32_t heldMs, uint32_t nowMs,
+                                            eventq::Cause cause) {
   Outcome outcome;
   outcome.action = Action::Refuse; // nothing to switch on; the lights are already out
   outcome.court = court;
@@ -335,6 +340,7 @@ Outcome Session<RosterT, QueueT>::onRelease(uint8_t court, uint32_t heldMs, uint
   event.kind = eventq::Kind::Release;
   event.court = court;
   event.durationMs = heldMs;
+  event.cause = cause;
 
   outcome = record(outcome, event);
   outcome.court = court;

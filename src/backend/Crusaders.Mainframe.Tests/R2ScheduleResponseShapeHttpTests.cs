@@ -55,8 +55,14 @@ public sealed class R2ScheduleResponseShapeHttpTests(PostgresFixture pg) : IClas
         var from = NextTuesday(1);
         object Rule(string name) => new
         {
-            name, label = "League", days = new[] { "tue" }, start = "18:00", end = "21:00",
-            startDate = from.ToString("yyyy-MM-dd"), intervalWeeks = 1, courts = new[] { club.CourtId },
+            name,
+            label = "League",
+            days = new[] { "tue" },
+            start = "18:00",
+            end = "21:00",
+            startDate = from.ToString("yyyy-MM-dd"),
+            intervalWeeks = 1,
+            courts = new[] { club.CourtId },
         };
 
         var created = await OkAsync(client.PostAsJsonAsync(Path, Rule("Tuesday league")));
@@ -74,8 +80,15 @@ public sealed class R2ScheduleResponseShapeHttpTests(PostgresFixture pg) : IClas
 
         var edited = await OkAsync(client.PatchAsJsonAsync($"{Path}/{id}", new
         {
-            name = "Tuesday league", label = "League", days = new[] { "tue" }, start = "18:30", end = "21:00",
-            startDate = from.ToString("yyyy-MM-dd"), intervalWeeks = 1, courts = new[] { club.CourtId }, reason = "later start",
+            name = "Tuesday league",
+            label = "League",
+            days = new[] { "tue" },
+            start = "18:30",
+            end = "21:00",
+            startDate = from.ToString("yyyy-MM-dd"),
+            intervalWeeks = 1,
+            courts = new[] { club.CourtId },
+            reason = "later start",
         }));
         Keys(edited, "schedule", "rows_created", "effective_from", "effective_from_clamped_to");
         Keys(edited.GetProperty("schedule"), ScheduleKeys);

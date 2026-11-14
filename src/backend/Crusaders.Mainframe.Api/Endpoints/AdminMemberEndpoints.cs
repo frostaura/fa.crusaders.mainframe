@@ -31,7 +31,7 @@ public static class AdminMemberEndpoints
             // out of the service and hand the console a 500 for a member who was already Active.
             // The transition is the status change; the mail is a consequence of it, and the answer
             // says whether it was queued, never that it has arrived.
-            return r.Ok ? Results.Ok(new { approved = true, member_email_queued = r.EmailQueued }) : Results.NotFound();
+            return ApprovalResult(r);
         });
 
         g.MapPost("/{memberId:guid}/reject", async (Guid memberId, RejectRequest req, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
@@ -269,6 +269,18 @@ public static class AdminMemberEndpoints
     /// was well-formed and the row was simply not in the state it names, which is a
     /// different repair (reload the list) from a malformed one.
     /// </summary>
+    /// <summary>
+    /// The approve route's answer. 409 <c>email_not_verified</c> when the applicant has not
+    /// confirmed their address (BP-02) — the row's "Resend verification" is the way on.
+    /// </summary>
+    private static IResult ApprovalResult(TransitionReport r)
+    {
+        if (r.Ok) return Results.Ok(new { approved = true, member_email_queued = r.EmailQueued });
+        return r.Result == MembershipTransition.EmailNotVerified
+            ? Results.Json(new { error = "email_not_verified" }, statusCode: 409)
+            : Results.NotFound();
+    }
+
     private static IResult TransitionResult(MembershipTransition outcome, object ok, string alreadyError, string wrongStatusError)
     {
         return outcome switch

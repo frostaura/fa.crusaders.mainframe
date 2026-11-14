@@ -57,6 +57,38 @@
       "path_and_query": "/api/v1/device/events",
       "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
       "body_hex": "7b226d6163223a22356363663766306131623263222c22757074696d655f6d73223a38363430303030302c226576656e7473223a5b7b22736571223a382c22757074696d655f6d73223a38363339303030302c226b696e64223a22756e6b6e6f776e5f7363616e222c22636f757274223a2d312c226d6574686f64223a227172222c227375626a656374223a22415c2242222c226475726174696f6e5f6d73223a307d5d7d"
+    },
+    {
+      "id": "gate-events-request-replayed",
+      "note": "MCV1-10: a replay the door refused from its OWN state while its link was up. It is the `unknown_scan` event every offline refusal already is, with the v3 event field `cause` set to `replayed` and the link as it was (`online`), appended inside the event after `duration_ms`. The server re-checks the code as for any offline refusal and records the outcome `replayed` rather than `refused_offline`, which is what lets the console say 'code used again' instead of 'the door could not check it'. `cause` is the one additive field every v3 event has (a court box's release carries it too); the gate's first 2.0.0 cut sent `reason` instead, which the server ignores as unknown — so the wire is pinned here, on both sides.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/events",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c22626f6f745f6964223a323539363036393130342c22757074696d655f6d73223a38363430303030302c226576656e7473223a5b7b22736571223a392c22757074696d655f6d73223a38363339353030302c226b696e64223a22756e6b6e6f776e5f7363616e222c22636f757274223a2d312c226d6574686f64223a227172222c227375626a656374223a223141424344454647484a4b4d4e505152535455222c226475726174696f6e5f6d73223a302c226361757365223a227265706c61796564222c226f6e6c696e65223a747275657d5d7d"
+    },
+    {
+      "id": "gate-heartbeat-request-v3",
+      "note": "gate 2.0.0 on a quiet beat. The 1.x fields, then net_ver and net_src, then caps LAST. `caps` names every v3 capability the image has; the server keys every new response field on it, so a 1.x gate is answered exactly as before.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/heartbeat",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226669726d776172655f76657273696f6e223a22322e302e30222c22757074696d655f6d73223a38363430303030302c226b696e64223a2267617465222c226e65745f766572223a342c226e65745f737263223a22736572766572222c2263617073223a5b22636f6465733a6d31222c226b65793a31222c226e65743a31225d7d"
+    },
+    {
+      "id": "gate-heartbeat-request-v3-cold-restore",
+      "note": "the first beat after a POWER-ON reset that found the server down: `restore` says what the board ran on meanwhile — cold (its flash roster, trusted for power_restore_trust_minutes from boot because the outage length is unknowable), warm (an RTC-dated roster after a watchdog or panic reset), or none. Sent on the first accepted beat of a boot only; the server records it on the board's activity.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/heartbeat",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226669726d776172655f76657273696f6e223a22322e302e30222c22757074696d655f6d73223a3431323030302c226b696e64223a2267617465222c226e65745f766572223a342c226e65745f737263223a22736572766572222c22726573746f7265223a22636f6c64222c2263617073223a5b22636f6465733a6d31222c226b65793a31222c226e65743a31225d7d"
+    },
+    {
+      "id": "gate-heartbeat-request-v3-telemetry",
+      "note": "the gate's telemetry, after the v3 fields and before caps: `diag` is the reset reason (esp_reset_reason() as a word), exception cause and epc1 (0 on an ESP32), free heap now and lowest since boot, largest free block, the loop task's stack high-water mark in bytes, the inactive app slot's size and the real flash size in MB; `drift` (absent here) names what the board could not read in the last answer. Every number a JSON integer.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/heartbeat",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226669726d776172655f76657273696f6e223a22322e302e30222c22757074696d655f6d73223a38363430303030302c226b696e64223a2267617465222c226e65745f766572223a342c226e65745f737263223a22736572766572222c2264696167223a7b227265736574223a227461736b5f776474222c22657863223a302c2265706331223a302c2268656170223a3135313535322c22686561705f6d696e223a3133393236342c22626c6f636b223a3131303539322c22737461636b5f6d696e223a343431362c22736b657463685f66726565223a313331303732302c22666c6173685f6d62223a347d2c2263617073223a5b22636f6465733a6d31222c226b65793a31222c226e65743a31225d7d"
     }
   ],
   "responses": [
@@ -257,6 +289,61 @@
         "opened": false,
         "reason": "not_a_gate",
         "unlock_seconds": 0
+      }
+    },
+    {
+      "id": "gate-heartbeat-response-v3",
+      "kind": "heartbeat",
+      "note": "the gate's v3 settings, inside `gate` after unlock_seconds: power_restore_trust_minutes (tenant device_power_restore_trust_minutes, 0-120), net_fallback_minutes (device_net_fallback_minutes, 3-60), then device_fault_reporting and device_fault_max_per_hour (the tenant settings of the same names, 1-120), which every gate firmware reads and no server sent before v3 (FC-8). Sent only to a gate whose caps include key:1 or net:1.",
+      "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a2266726f6e742d646f6f72222c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a31352c22706f7765725f726573746f72655f74727573745f6d696e75746573223a32302c226e65745f66616c6c6261636b5f6d696e75746573223a31302c226465766963655f6661756c745f7265706f7274696e67223a747275652c226465766963655f6661756c745f6d61785f7065725f686f7572223a36307d2c22726f73746572223a5b2237513346394b4d32585a38427c307c313830307c35343030225d7d",
+      "expect": {
+        "kind": "gate",
+        "gate": {
+          "unlock_seconds": 15,
+          "power_restore_trust_minutes": 20,
+          "net_fallback_minutes": 10,
+          "device_fault_reporting": true,
+          "device_fault_max_per_hour": 60
+        },
+        "roster": [
+          "7Q3F9KM2XZ8B|0|1800|5400"
+        ]
+      }
+    },
+    {
+      "id": "gate-heartbeat-response-v3-key-next",
+      "kind": "heartbeat",
+      "note": "a key rotation in its grace window; the same object, and the same rules, as the court box's.",
+      "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a2266726f6e742d646f6f72222c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a31352c22706f7765725f726573746f72655f74727573745f6d696e75746573223a32302c226e65745f66616c6c6261636b5f6d696e75746573223a31302c226465766963655f6661756c745f7265706f7274696e67223a747275652c226465766963655f6661756c745f6d61785f7065725f686f7572223a36307d2c22726f73746572223a5b2237513346394b4d32585a38427c307c313830307c35343030225d2c226b65795f6e657874223a7b226964223a226b32222c226b6579223a225a7137486e325662355274385779314c70344d6b365863394473334667304a685f612d5165556f49694572227d7d",
+      "expect": {
+        "kind": "gate",
+        "key_next": {
+          "id": "k2",
+          "key": "Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr"
+        },
+        "roster": [
+          "7Q3F9KM2XZ8B|0|1800|5400"
+        ]
+      }
+    },
+    {
+      "id": "gate-heartbeat-response-v3-net",
+      "kind": "heartbeat",
+      "note": "a network change; the same object, and the same all-or-nothing adoption, as the court box's.",
+      "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a2266726f6e742d646f6f72222c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a31352c22706f7765725f726573746f72655f74727573745f6d696e75746573223a32302c226e65745f66616c6c6261636b5f6d696e75746573223a31302c226465766963655f6661756c745f7265706f7274696e67223a747275652c226465766963655f6661756c745f6d61785f7065725f686f7572223a36307d2c22726f73746572223a5b2237513346394b4d32585a38427c307c313830307c35343030225d2c226e6574223a7b22766572223a342c2262617365223a22687474703a2f2f3139322e3136382e312e32303a38303838222c2277696669305f73736964223a22435255534144455253222c2277696669305f70736b223a227371756173682d636f7572742d34222c2277696669315f73736964223a224352555341444552532d4e4557222c2277696669315f70736b223a226e65772d726f757465722d70617373227d7d",
+      "expect": {
+        "kind": "gate",
+        "net": {
+          "ver": 4,
+          "base": "http://192.168.1.20:8088",
+          "wifi0_ssid": "CRUSADERS",
+          "wifi0_psk": "squash-court-4",
+          "wifi1_ssid": "CRUSADERS-NEW",
+          "wifi1_psk": "new-router-pass"
+        },
+        "roster": [
+          "7Q3F9KM2XZ8B|0|1800|5400"
+        ]
       }
     }
   ]

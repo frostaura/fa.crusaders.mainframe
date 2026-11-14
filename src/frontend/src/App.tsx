@@ -1,8 +1,9 @@
-import { Suspense, lazy as reactLazy, type ComponentType, type ReactNode } from "react";
+import { Suspense, lazy as reactLazy, useEffect, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider } from "./lib/auth";
 import AppShell from "./components/shell/AppShell";
 import { ToastProvider } from "./components/Toast";
+import { loadClubIdentity } from "./lib/clubIdentity";
 import { BalanceProvider } from "./lib/balance";
 import { ProfileProvider } from "./lib/profile";
 import { ClubUiProvider } from "./lib/ClubUiProvider";
@@ -112,6 +113,7 @@ const MemberNightTab = named(() => import("./pages/admin/member"), "MemberNightT
 const MemberAccess = named(() => import("./pages/admin/member"), "MemberAccess");
 const AdminGroupsPage = named(() => import("./pages/AdminGroups"), "AdminGroupsPage");
 const AdminResultsPage = lazy(() => import("./pages/admin/AdminResults"));
+const AdminBookingsPage = lazy(() => import("./pages/admin/AdminBookings"));
 const AdminLedgerPage = lazy(() => import("./pages/AdminLedger"));
 const ControlBoardPage = named(() => import("./pages/monitoring/ControlBoard"), "ControlBoardPage");
 const AdminDoorsLogPage = named(() => import("./pages/AdminDoorsLog"), "AdminDoorsLogPage");
@@ -143,7 +145,15 @@ function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<RouteSkeleton />}>{children}</Suspense>;
 }
 
+/** Toasts that leave with the page they were raised on (BM-14); see `TOAST_KEEP_ACROSS_NAV_MS`. */
+function RoutedToasts({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  return <ToastProvider routeKey={pathname}>{children}</ToastProvider>;
+}
+
 export default function App() {
+  // FM-8 — which club this address serves: the crest, the sign-in band, the pass and the tab title.
+  useEffect(() => { void loadClubIdentity(); }, []);
   return (
     <BrowserRouter>
       {/*
@@ -159,11 +169,11 @@ export default function App() {
             outside everything that formats money. */}
         <ClubUiProvider>
         <BalanceProvider>
-        <ToastProvider>
+        <RoutedToasts>
           <FirstRunGate />
           <NavPrefetch />
           <AppRoutes />
-        </ToastProvider>
+        </RoutedToasts>
         </BalanceProvider>
         </ClubUiProvider>
         </ProfileProvider>
@@ -254,6 +264,8 @@ export function AppRoutes() {
           {/* P12 — disputed results, and removing a wrong one. */}
           <Route path="/admin/results" element={<Lazy><AdminResultsPage /></Lazy>} />
           <Route path="/admin/transactions" element={<Lazy><AdminLedgerPage /></Lazy>} />
+          {/* BM-11 — the bookings the booking.unsettled notice links to. */}
+          <Route path="/admin/bookings" element={<Lazy><AdminBookingsPage /></Lazy>} />
           <Route path="/admin/reports" element={<Lazy><AdminReportsPage /></Lazy>} />
           <Route path="/admin/monitoring" element={<Lazy><ControlBoardPage /></Lazy>} />
           <Route path="/admin/monitoring/doors" element={<AdminDoorsPage />} />

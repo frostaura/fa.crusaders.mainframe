@@ -128,7 +128,10 @@ private:
   bool parseLegacyUplink(const char* line, size_t n);
 
   static DecodeError splitBody(const char* body, size_t n, Arg* fields, uint8_t& count);
-  static DecodeError buildFrame(Arg* fields, uint8_t count, Frame& out);
+  static DecodeError buildFrame(Link link, Arg* fields, uint8_t count, Frame& out);
+  /// The v2-grammar tail of buildFrame: the court and duration, validated and
+  /// clamped, then the frame (ON through its own constructor).
+  static DecodeError buildV2Frame(Verb v, const VerbSpec& spec, Arg* args, uint8_t argc, Frame& out);
 
   bool push(const Result& r);
   bool pushFrame(const Frame& f);

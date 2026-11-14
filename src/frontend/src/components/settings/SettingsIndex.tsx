@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { sectionAtTop } from "@/lib/settingsSpy";
 import { cn } from "@/lib/utils";
 import { SETTINGS_COPY } from "@/lib/settingsCopy";
 import type { SettingsSectionDef, SettingsSectionId } from "@/lib/settingsSchema";
@@ -60,25 +61,32 @@ export function SettingsIndex({ sections, dirty, onGo }: SettingsIndexProps) {
   );
 }
 
-/** The section whose top is nearest under the top of the scroller — a scroll-spy by IntersectionObserver. */
+/** The section the admin is reading — see `lib/settingsSpy` (BA-18). */
 function useCurrentSection(sections: readonly SettingsSectionDef[]): SettingsSectionId | null {
   const [current, setCurrent] = useState<SettingsSectionId | null>(null);
   useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return undefined;
-    const seen = new Map<string, number>();
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const id = entry.target.id.replace(/^settings-/, "");
-        if (entry.isIntersecting) seen.set(id, entry.boundingClientRect.top); else seen.delete(id);
-      }
-      const first = [...seen.entries()].sort((a, b) => a[1] - b[1])[0];
-      if (first) setCurrent(first[0] as SettingsSectionId);
-    }, { rootMargin: "0px 0px -60% 0px" });
-    for (const section of sections) {
-      const el = document.getElementById(`settings-${section.id}`);
-      if (el) observer.observe(el);
-    }
-    return () => observer.disconnect();
+    const scroller = document.getElementById("main-content");
+    const target: HTMLElement | Window = scroller ?? window;
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const scrollerTop = scroller ? scroller.getBoundingClientRect().top : 0;
+      const tops = sections.flatMap((section) => {
+        const el = document.getElementById(`settings-${section.id}`);
+        return el ? [{ id: section.id, top: el.getBoundingClientRect().top }] : [];
+      });
+      const id = sectionAtTop(tops, scrollerTop);
+      if (id) setCurrent(id as SettingsSectionId);
+    };
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    measure();
+    target.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      target.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [sections]);
   return current;
 }

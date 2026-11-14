@@ -1,5 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
+import { describeFailure } from "../../lib/errors";
+import { fetchCsv, saveFile } from "../../lib/memberDetailApi";
+import { useToast } from "../toastContext";
 import { FILTER_BAR_INSET, FILTER_TRIGGER_INSET } from "../ui/layout";
 import { keepFiguresWhole } from "../ui/figure-text";
 import { Button } from "../ui/button";
@@ -18,24 +21,53 @@ import { DownloadSimple, X } from "../ui/icons";
  */
 
 /**
- * "Download CSV" — a file is fetched by a URL, so this is an ANCHOR, never a button with an
- * `onClick` that assigns `location`. It looks like an outline button because it is the one
- * standalone call to action in a filter row; that is the `<Button asChild><a/></Button>` idiom
- * the design system reserves for navigation CTAs, and a download is a GET like any other link.
+ * "Download CSV" — fetched WITH the session's bearer token, then handed to the browser's save
+ * (FA-1).
+ *
+ * <p>
+ * <b>Never a bare link.</b> This was an `<a href>` styled as a button, and a link navigation
+ * carries no Authorization header: the API cannot resolve a tenant and answers
+ * `400 tenant_unresolved` as JSON, so the download cancels itself and the page looks the same
+ * before and after. That defect shipped on the wallet CSV, the door log and the night before it
+ * shipped here on Faults and the change record; `csv-links.test.ts` now fails on any `href` to an
+ * `/api/` path in the source. A failure is said twice: in a toast, and beside the button.
+ * </p>
  */
-export function DownloadCsvLink({ href, label = "Download CSV", className }: {
-  href: string;
+export function DownloadCsvButton({ path, fallbackName, label = "Download CSV", className }: {
+  /** The CSV's API path with its query: the same filters as the list on screen. */
+  path: string;
+  fallbackName: string;
   label?: string;
   className?: string;
 }) {
+  const toast = useToast();
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  async function download() {
+    if (pending) return;
+    setPending(true);
+    setFailed(null);
+    try {
+      saveFile(await fetchCsv(path, fallbackName));
+    } catch (e) {
+      const said = `${describeFailure(e, { action: "download the CSV" })} Nothing was downloaded.`;
+      setFailed(said);
+      toast.push({ tone: "danger", text: said, durationMs: 8000 });
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
-    // R5 X5-11: at 320px with 200 % text a nowrap label is wider than the bar; it may wrap.
-    <Button asChild variant="outline" className={cn("max-w-full whitespace-normal", className)}>
-      <a href={href}>
+    <div className={cn("flex max-w-full flex-col gap-1", className)}>
+      {/* R5 X5-11: at 320px with 200 % text a nowrap label is wider than the bar; it may wrap. */}
+      <Button variant="outline" className="max-w-full whitespace-normal" pending={pending} onClick={() => void download()}>
         <DownloadSimple size={16} aria-hidden="true" />
         {label}
-      </a>
-    </Button>
+      </Button>
+      {failed && <p role="alert" className="text-sm text-danger-strong">{failed}</p>}
+    </div>
   );
 }
 

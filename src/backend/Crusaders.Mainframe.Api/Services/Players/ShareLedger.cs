@@ -26,6 +26,14 @@ public sealed record ReconcileOptions(Guid ActorUserId, Guid? OverdraftSeatId = 
     /// settle-outside's — so both receipts carry it as a collect's and a removal's already do.
     /// </summary>
     public string? ClubReason { get; init; }
+
+    /// <summary>
+    /// Pay what you can: this collection is a PART of the partner's share (browser lane BM-21). The
+    /// organiser's receipt stays on the inbox only — the <c>players.shortfall</c> mail staged in the
+    /// same save says what was paid and what is left, and a second mail titled "paid their share"
+    /// contradicted it.
+    /// </summary>
+    public bool PartOfShare { get; init; }
 }
 
 /// <summary>The club removed <paramref name="SeatId"/>'s member, for <paramref name="Reason"/>.</summary>
@@ -453,11 +461,11 @@ public sealed class ShareLedger
     /// which must commit the seat's new state and its first payment as one decision).
     /// </summary>
     public async Task<IReadOnlyList<LedgerPosting>> StageCollectionAsync(
-        Booking booking, BookingParticipant seat, int delta, Guid actorUserId, CancellationToken ct)
+        Booking booking, BookingParticipant seat, int delta, Guid actorUserId, CancellationToken ct, bool partOfShare = false)
     {
         var partner = seat.UserId ?? throw new InvalidOperationException("a seat with no member pays nothing");
         var move = new ShareMove(seat.Id, partner, PayerOf(booking), delta, await NextSeqAsync(seat.Id, partner, ct));
-        var why = await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct);
+        var why = await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId) { PartOfShare = partOfShare }, ct);
         return Pair(booking, move, actorUserId, why);
     }
 
@@ -634,7 +642,7 @@ public sealed class ShareLedger
             Joined = why.Joined,
         },
             move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, why with { Scan = partnerScan }), settings,
-            Own(move.PartnerUserId));
+            new Told(Own(move.PartnerUserId)));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended,
                 ClubRefund: refund, KeptMinutes: kept, Withdrew: seat.Withdrew)
@@ -646,7 +654,7 @@ public sealed class ShareLedger
             Joined = why.Joined,
         },
             move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, why with { Scan = organiserScan }), settings,
-            Own(move.OrganiserUserId));
+            new Told(Own(move.OrganiserUserId), Mail: !who.PartOfShare));
         return new ShareWhy(cause, kept, f.Scanner)
         {
             ActorUserId = actor,
@@ -816,12 +824,16 @@ public sealed class ShareLedger
     /// somebody else made on their money (the partner's payment to the organiser, the club's
     /// collect) is news and arrives unread.
     /// </param>
-    private void Stage(SharePayload payload, Guid userId, string key, string headline, TenantSettingsView settings, bool ownAction)
+    /// <summary>How one receipt reaches its reader: born read for their own act, and whether it is mailed (BM-21).</summary>
+    private readonly record struct Told(bool OwnAction, bool Mail = true);
+
+    private void Stage(SharePayload payload, Guid userId, string key, string headline, TenantSettingsView settings, Told told)
     {
         MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
             userId, MemberEventCatalogue.ShareMoved, key, payload, headline, BookingPath(payload.BookingId, payload.OffGameSeatId), payload.BookingId)
         {
-            BornRead = ownAction,
+            BornRead = told.OwnAction,
+            Email = told.Mail,
         }, settings);
     }
 

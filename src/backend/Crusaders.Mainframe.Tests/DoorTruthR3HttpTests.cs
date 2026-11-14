@@ -919,17 +919,8 @@ public sealed class DoorTruthR3HttpTests : IClassFixture<PostgresFixture>
 
         // The boundary is accepted, or the bound is one out and every long-named member is
         // locked out of the club they belong to.
-        var exact = await AnonymousClient(factory, club).PostAsync(
-            "/api/v1/auth/register",
-            new StringContent(
-                JsonSerializer.Serialize(new
-                {
-                    email = "exact@test.local",
-                    password = "AdminPass!",
-                    fullName = new string('n', PersonNames.MaxFullNameLength),
-                    membershipNumber = "MEM-R3-2",
-                }),
-                Encoding.UTF8, "application/json"));
+        var exact = await TestPhotos.RegisterAsync(
+            AnonymousClient(factory, club), "exact@test.local", "MEM-R3-2", new string('n', PersonNames.MaxFullNameLength), "AdminPass!");
         Assert.Equal(HttpStatusCode.OK, exact.StatusCode);
     }
 }

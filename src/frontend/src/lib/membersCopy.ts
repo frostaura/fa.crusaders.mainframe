@@ -211,6 +211,8 @@ export function lastSeenTitle(iso: string | null | undefined): string {
 
 export const ROW_ACTIONS = {
   approve: "Approve",
+  /** BA-02: what the armed Approve says before it lets anybody in. */
+  approveConfirm: (name: string) => `Approve ${name}? They are emailed a welcome and can book courts and open doors at once.`,
   reject: "Reject",
   /** P13 §3.7: the desk takes money by selling a package off the member's own shelf. */
   sell: "Sell package",
@@ -241,11 +243,19 @@ export const OUTCOMES = {
   approvedUnnotified: (name: string) =>
     `${name} is approved, but the welcome email couldn't be queued. Their membership is active — tell them directly.`,
   approveFailed: "Approval failed.",
+  // BP-02: the API approves only a confirmed address; the record has the resend.
+  approveUnverified: (name: string) => `${name} has not confirmed their email address yet, so they were not approved.`
+    + " Open their record to resend the verification email.",
   /** F3-3: the reply was lost, the member was read again, and they are Active. */
   approvedAfterLostReply: (name: string) =>
     `${name} is approved — the reply got lost, so the club was asked, and their membership is active. Check with them that the welcome email arrived.`,
   approveUnknown: (name: string) =>
     `It isn't known yet whether ${name} was approved: the reply got lost and the club couldn't be asked. Look at their status in the list before pressing Approve again.`,
+  /** FA-11: a lost reply on reject / suspend / reactivate, read back from the member's status. */
+  transitionAfterLostReply: (name: string, did: string) =>
+    `${name} is ${did} — the reply got lost, so the club was asked, and that is their status now. Check with them that the email arrived.`,
+  transitionUnknown: (name: string, verb: string) =>
+    `It isn't known yet whether ${name} was ${verb}: the reply got lost and the club couldn't be asked. Look at their status in the list before trying again.`,
   rejected: "Application rejected.",
   rejectedUnnotified: (name: string) =>
     `${name}'s application is rejected, but the email couldn't be queued. Tell them directly — they'll be refused at sign-in until someone does.`,
@@ -368,3 +378,19 @@ export const RELATED_BOOKING = {
     "Only for a movement that genuinely compensates this member for that booking. It does not stand in for the automatic reversal: when the court box reports the member did attend, the refund and the penalty are reversed on their own, and what you post here is netted against that reversal one leg at a time — a positive adjustment reduces the penalty the reversal gives back, a negative one reduces the refund it takes away. Netting stops at zero per leg, so anything beyond what a leg is worth stands as posted and is not clawed back.",
   notAGuid: "That booking ID is not one — it should look like 8-4-4-4-12 hex characters. Pick one from the list or leave it blank.",
 } as const;
+
+/**
+ * BA-08: the status the members FILE is cut to — a membership status as the API binds it, or none
+ * (every membership) for "All" and for "Admins", which is not a membership status.
+ */
+export function exportStatus(filter: StatusFilter): string | null {
+  return filter === "all" || filter === "admins" ? null : filter;
+}
+
+/** The export button's words: which members the file holds, so "Admins" never reads as an admins-only file. */
+export function membersExportLabel(filter: StatusFilter): string {
+  const status = exportStatus(filter);
+  if (status === null) return "Export all members (CSV)";
+  const word = STATUS_FILTERS.find((f) => f.value === filter)?.label.toLowerCase() ?? status;
+  return `Export ${word} members (CSV)`;
+}

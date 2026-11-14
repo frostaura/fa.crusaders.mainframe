@@ -75,6 +75,9 @@ export const DOOR_REFUSAL_REASONS: Record<string, string> = {
   /** R11 D11-2: an offline door refused a code the server later proved genuine (replayed, too
    *  early or late, a stale saved list) — the member is named; nothing was opened. */
   refused_offline: "The board refused the code while it was offline",
+  /** MCV1-10: the door refused a code it had already seen (a second scan, or a copy) while it was
+   *  ONLINE — a replay, said as one, never as "refused offline". */
+  replayed: "The door had already seen that code — a second scan of it, or a copy",
 };
 
 /**
@@ -112,6 +115,8 @@ export const DOOR_OUTCOME_CHIPS: Record<string, string> = {
   code_used: "Code already used",
   // R11 D11-2: the server's DoorWords and the Night say it this way.
   refused_offline: "Refused offline",
+  // MCV1-10: the server's word for a door's own replay refusal.
+  replayed: "Replayed code",
 };
 
 /**
@@ -169,6 +174,12 @@ export const DOOR_EVENT_WORDS: Record<string, string> = {
   "device.deleted": "This door was deleted",
   "device.boot": "Board started up",
   "device.api_key_regenerated": "The club's device key was replaced",
+  // v3 (device-api.md §6, §8): the key and network changes that reach every board over the air.
+  "device.api_key_rotated": "The club started handing its boards a new device key",
+  "device.api_key_retired": "The club's old device key stopped working",
+  "device.api_key_restored": "A device key the boards already hold was put back",
+  "device.network_updated": "The club's WiFi or server address for its boards was changed",
+  "device.network_pushed": "The club's network settings were sent to this board",
   "device.event_time_clamped": "The board's clock was out and was corrected",
   "doors.shut_all": "Every door was shut together",
   "doors.reopened_all": "The doors shut together were reopened",
@@ -187,6 +198,8 @@ export const DOOR_EVENT_WORDS: Record<string, string> = {
   "device.relay_restore_served": "Board restarted; the club told it which courts were lit",
   "device.relay_restore_confirmed": "The board put the lit courts back on after restarting",
   "device.relay_restore_failed": "The board did not put the lit courts back on after restarting",
+  /** v3 (§4): the box re-lit a court the club's record says is paid for, after its controller restarted. */
+  "device.relay_relit": "The board switched a paid court's lights back on",
   /** A court box's own rows. A gate never writes these; the dictionary is shared. */
   "device.activation": "Court activated",
   /** R11 D11-2: a court box's offline refusal of a code, uploaded later — named when genuine. */
@@ -464,6 +477,9 @@ export function describeActivityReason(entry: DeviceActivityEntry): string | nul
   // R11 D11-2: the server proved the code genuine and named the member — the saved-list
   // sentence would be false. Checked before the action rule, which answers for the rest.
   if (entry.reason === "refused_offline") return DOOR_REFUSAL_REASONS.refused_offline;
+  // MCV1-10: a replay the door refused while online is uploaded as `replayed` — never the
+  // offline sentence, even on a row the server still files under the unknown-scan action.
+  if (entry.reason === "replayed") return DOOR_REFUSAL_REASONS.replayed;
   if (entry.action === "device.unknown_scan") return OFFLINE_REFUSED;
   if (entry.reason === null || entry.reason.trim() === "") return null;
   if (entry.reason === "ok" && entry.action === "gate.opened") return null;

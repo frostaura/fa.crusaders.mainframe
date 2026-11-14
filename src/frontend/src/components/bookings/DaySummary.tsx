@@ -49,7 +49,8 @@ function OwnSummary({ className, moreToday }: { className?: string; moreToday: n
       <div>
         <p className={typography({ variant: "overline" })}>{BOOKINGS_COPY.summarySpendable}</p>
         <SpendableFigure spendable={spendable} zero={level === "zero"} />
-        {moreToday !== null ? <p data-more-today="" className="mt-1 text-sm text-text-secondary">{BOOKINGS_COPY.summaryMoreToday(moreToday)}</p> : null}
+        {/* Go-live BM-18b — with nothing to spend, "you can book 3 more today" beside "no minutes left" contradicted it. */}
+        {moreToday !== null && spendable > 0 ? <p data-more-today="" className="mt-1 text-sm text-text-secondary">{BOOKINGS_COPY.summaryMoreToday(moreToday)}</p> : null}
       </div>
       <Button asChild variant={level === "zero" ? "primary" : "secondary"} size="sm" className="self-start">
         <Link to={BUY_MINUTES_PATH}>{BOOKINGS_COPY.summaryBuy(level === "zero")}</Link>

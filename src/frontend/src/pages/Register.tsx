@@ -1,8 +1,10 @@
 import { useRef, useState, type FormEvent, type Ref, type RefObject } from "react";
 import { Link } from "react-router-dom";
 import { endpoints, errorCode, uploadPhoto } from "../lib/api";
-import { describeFailure, isDeploymentFault } from "../lib/errors";
+import { describeFailure, isConfigurationFault } from "../lib/errors";
 import { useAsyncAction } from "../lib/useAsyncAction";
+import { outcomeUnknown } from "../lib/bookingOutcome";
+import { answerReasonOf } from "../lib/lostReply";
 import { checkFields } from "../lib/authCopy";
 import { AuthMark, AuthShell } from "../components/AuthShell";
 import { Alert } from "../components/Alert";
@@ -16,7 +18,7 @@ import { Envelope } from "../components/ui/icons";
 import { PendingInviteNote } from "../components/players/invites/PendingInviteNote";
 import {
   INBOX_HEADING, INBOX_PATIENCE, INBOX_STEPS, PHOTO_PREPARING, PHOTO_REQUIRED, REGISTER, REGISTER_FIELD,
-  REGISTER_MESSAGES, VERIFY_BACK_TO_SIGN_IN,
+  REGISTER_MESSAGES, REGISTER_UNSURE, VERIFY_BACK_TO_SIGN_IN,
 } from "../lib/registrationCopy";
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -30,9 +32,11 @@ const ORDER: Key[] = ["fullName", "email", "membershipNumber", "password", "phot
 
 /** Which field an API refusal is about. Anything not listed is about the application as a whole. */
 const FIELD_OF_CODE: Record<string, Key> = {
-  email_in_use: "email",
-  membership_number_in_use: "membershipNumber",
   password_too_short: "password",
+  photo_required: "photo",
+  photo_url_invalid: "photo",
+  photo_missing: "photo",
+  uploads_paused: "photo",
   unsupported_content_type: "photo",
   file_too_large: "photo",
   file_missing: "photo",
@@ -135,6 +139,37 @@ function useRegisterForm(refs: () => FieldRefs) {
   return { values, photo, setPhoto, preparing, setPreparing, errors, setErrors, refuse, set };
 }
 
+/**
+ * FM-4 — registration is two requests (the photo, then the application), and the second one's reply
+ * can go missing after it landed. Nothing unauthenticated can read an application back (that would
+ * say whether an address is registered), so the screen remembers instead: the photo uploaded once is
+ * reused by every retry of the same file (no orphan per press), and a register request that went
+ * unanswered (`answerReasonOf` "silent": a timeout, a torn connection, a 502/503/504) is said to have
+ * maybe arrived. Sending it again is safe: the API answers every well-formed application alike
+ * (BP-14) and tells the mailbox what really happened, so a second try can never be "that email is
+ * taken".
+ */
+function useLostRegistration() {
+  const uploaded = useRef<{ file: File; url: string } | null>(null);
+  const stage = useRef<"photo" | "register">("photo");
+  return {
+    photoUrlFor: async (photo: File): Promise<string> => {
+      stage.current = "photo";
+      const kept = uploaded.current;
+      if (kept && kept.file === photo) return kept.url;
+      const { url } = await uploadPhoto(photo);
+      uploaded.current = { file: photo, url };
+      return url;
+    },
+    sending: () => { stage.current = "register"; },
+    /** True when this failure may hide an application that arrived. */
+    failed: (err: unknown): boolean =>
+      stage.current === "register" && outcomeUnknown(err) && answerReasonOf(err) === "silent",
+    /** The API refused the photo it was handed (BP-06): the next try uploads it afresh. */
+    forgetPhoto: () => { uploaded.current = null; },
+  };
+}
+
 export default function RegisterPage() {
   // Separate refs, read only inside the handler that focuses one (react-hooks/refs).
   const fullNameRef = useRef<HTMLInputElement>(null);
@@ -149,20 +184,26 @@ export default function RegisterPage() {
   const [submitted, setSubmitted] = useState(false);
   /** The application as a whole was refused — what the club's system said, not what the form noticed. */
   const [failure, setFailure] = useState<string | null>(null);
-  /** The failure is the club's to fix (a missing tenant, a 5xx), so resubmitting cannot cure it. */
+  /** The club's address resolves to no club, so resubmitting cannot cure it. A 5xx is transient (FM-1). */
   const [blocked, setBlocked] = useState(false);
 
+  const lost = useLostRegistration();
   const send = useAsyncAction(async (photo: File) => {
-    const upload = await uploadPhoto(photo);
-    await endpoints.register({ ...values, photoUrl: upload.url });
+    const photoUrl = await lost.photoUrlFor(photo);
+    lost.sending();
+    await endpoints.register({ ...values, photoUrl });
   }, {
     success: () => setSubmitted(true),
     failure: (err) => {
-      const field = FIELD_OF_CODE[errorCode(err) ?? ""];
+      const code = errorCode(err) ?? "";
+      // A refused photo is forgotten, so the next submit uploads it again rather than naming the
+      // same refused file (BP-06: only a photo this club issued, still on file, is accepted).
+      if (FIELD_OF_CODE[code] === "photo") lost.forgetPhoto();
+      const field = FIELD_OF_CODE[code];
       const message = describeFailure(err, { codes: REGISTER_MESSAGES, action: "submit your application" });
       if (field) form.refuse({ [field]: message });
-      else setFailure(message);
-      setBlocked(isDeploymentFault(err));
+      else setFailure(lost.failed(err) ? `${message} ${REGISTER_UNSURE.mayHaveArrived}` : message);
+      setBlocked(isConfigurationFault(err));
     },
   });
 

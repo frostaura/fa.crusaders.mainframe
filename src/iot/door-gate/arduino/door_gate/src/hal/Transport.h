@@ -48,7 +48,7 @@ public:
 
   /// True while the link is usable. On the Mega side this is effectively always
   /// true (a UART has no carrier), but on the ESP side the peer can be absent,
-  /// resetting or mid-OTA, and the simulator's TCP transport really does drop.
+  /// or resetting, and the simulator's TCP transport really does drop.
   virtual bool connected() = 0;
 
   /// Bytes write() will accept right now. Zero when disconnected.
@@ -65,6 +65,10 @@ public:
 
   /// Pop one received byte. False when nothing is waiting; never blocks.
   virtual bool read(uint8_t& out) = 0;
+
+  /// Times the receive ring was found full since boot — bytes the peer sent
+  /// that this side may have lost (Mega 3.0.0 `!DIAG`). 0 where unknowable.
+  virtual uint16_t rxOverruns() const { return 0U; }
 };
 
 /// Write `text` plus the '\n' terminator, all of it or none of it.

@@ -105,14 +105,22 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
         db.LedgerEntries.AddRange(
             new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = member.Id, ActorUserId = admin.Id,
-                Type = LedgerEntryType.AdminAdjustment, AmountMinutes = FloatMinutes, Reason = "Seed float",
+                TenantId = tenant.Id,
+                UserId = member.Id,
+                ActorUserId = admin.Id,
+                Type = LedgerEntryType.AdminAdjustment,
+                AmountMinutes = FloatMinutes,
+                Reason = "Seed float",
             },
             new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = member.Id, ActorUserId = member.Id,
-                Type = LedgerEntryType.BookingCharge, AmountMinutes = -SlicePriceCredits,
-                RelatedBookingId = booking.Id, Reason = "Booking charge",
+                TenantId = tenant.Id,
+                UserId = member.Id,
+                ActorUserId = member.Id,
+                Type = LedgerEntryType.BookingCharge,
+                AmountMinutes = -SlicePriceCredits,
+                RelatedBookingId = booking.Id,
+                Reason = "Booking charge",
             });
 
         await db.SaveChangesAsync();

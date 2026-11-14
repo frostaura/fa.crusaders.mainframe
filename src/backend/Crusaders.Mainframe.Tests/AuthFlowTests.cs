@@ -35,7 +35,7 @@ public class AuthFlowTests
             // We stored the hash; for a black-box test we'd need the plaintext from the email body — for now
             // assert that the verify side rejects unknown tokens, and that approving the user lets them log in.
             var verifiedWithGarbage = await scope.ServiceProvider.GetRequiredService<AuthService>().VerifyEmailAsync("garbage", default);
-            Assert.False(verifiedWithGarbage);
+            Assert.Null(verifiedWithGarbage);
             // Manually mark verified to continue the flow without parsing the email.
             (await db.Users.FirstAsync(u => u.Id == newUserId)).EmailVerified = true;
             await db.SaveChangesAsync();

@@ -1,3 +1,4 @@
+import { CLUB } from "./fixtures";
 import { execFileSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -153,6 +154,9 @@ test.beforeAll(async () => {
         res.end(JSON.stringify(body));
       };
       const bearer = Boolean(req.headers.authorization);
+      // FM-8 — the anonymous read of which club this is answers whenever the API is up, as the
+      // club's own does; the cold starts below name the club from what the phone kept.
+      if (url.pathname === "/api/v1/auth/club") return json(200, CLUB);
       if (url.pathname === "/api/v1/whoami" && bearer && mode.api === "signed-in") return json(200, MEMBER);
       if (url.pathname === "/api/v1/whoami" && bearer && mode.api === "lapsed") return json(401, { error: "unauthorized" });
       if (url.pathname === "/api/v1/auth/refresh" && mode.api === "lapsed") return json(401, { error: "session_ended" });

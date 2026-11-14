@@ -150,7 +150,8 @@ describe("search and share metadata", () => {
   it("the JSON-LD parses and uses only the club page's own facts", () => {
     const ld = JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html)![1]);
     expect(ld["@type"]).toBe("SportsActivityLocation");
-    const home = text("src", "pages", "Home.tsx");
+    // The static shell is the first club's (FM-8), so its JSON-LD holds to that club's own page.
+    const home = text("src", "clubs", "crusaders", "CrusadersLanding.tsx");
     expect(home).toContain(ld.address.streetAddress);
     expect(home).toContain(ld.address.postalCode);
     expect(home).toContain(ld.hasMap);

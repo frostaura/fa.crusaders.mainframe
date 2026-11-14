@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { AdminDoorsLogPage } from "./AdminDoorsLog";
 import {
   SETTINGS_FIXTURE, doorFixture, doorLogFixture, doorsServer, renderPage, signIn, signOut,
@@ -924,6 +924,8 @@ describe("the club door log", () => {
 
     expect(document.activeElement).not.toBe(document.body);
     expect(screen.getByRole("button", { name: /Refresh|Reading/ })).toHaveFocus();
+    // FM-7: and the re-read it started lands inside the test, focus still there.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toHaveFocus());
   });
 
   it("keeps focus on Download CSV while it is preparing", async () => {
@@ -947,7 +949,11 @@ describe("the club door log", () => {
     fireEvent.click(older);
 
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
-    expect(document.activeElement).not.toBe(document.body);
+    // FM-9: the focus move follows the render that unmounted the button (a frame later), so under
+    // full-suite load it was read before it happened. Await it, and say where it landed.
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(document.activeElement?.closest("main, [role='dialog'], body > div")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Load older scans" })).toBeNull();
   });
 
   // --- staleness ------------------------------------------------------------------
@@ -956,10 +962,11 @@ describe("the club door log", () => {
   it("says when it was read and does not re-read on its own", async () => {
     vi.useFakeTimers();
     const { stub } = open([doorLogFixture()]);
-    await vi.advanceTimersByTimeAsync(0);
+    // FM-7: the clock is moved inside act, so the page's own renders on the way are in it too.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
     const before = stub.calls.filter((c) => c.path.includes("/doors/activity")).length;
-    await vi.advanceTimersByTimeAsync(60_000);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(stub.calls.filter((c) => c.path.includes("/doors/activity")).length).toBe(before);
     vi.useRealTimers();
   });

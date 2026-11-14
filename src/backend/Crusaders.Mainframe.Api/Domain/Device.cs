@@ -481,6 +481,108 @@ public sealed class Device : ITenantScoped
     /// </summary>
     public DateTimeOffset? RestoreServedBootAt { get; set; }
 
+    // ---- Device contract v3 (docs/specs/device-api.md) — what a v3 board reports, and the
+    //      per-board overrides an admin sets. Every column is nullable or defaulted, so a 2.x
+    //      board's row is untouched and a v3 board on its first beat fills them in. ----
+
+    /// <summary>The network configuration version the board has applied (§8). 0 = compiled defaults or the setup portal's.</summary>
+    public long? NetVer { get; set; }
+
+    /// <summary>Where that configuration came from: <c>server</c>, <c>local</c> (the setup portal) or <c>compiled</c>.</summary>
+    public string? NetSrc { get; set; }
+
+    /// <summary>
+    /// An admin asked for the club's network to be pushed to this board although its
+    /// configuration is <c>local</c> (§8: "never overwritten … until an admin explicitly pushes").
+    /// Cleared once the board reports the club's version from the server.
+    /// </summary>
+    public bool NetPushRequested { get; set; }
+
+    /// <summary>The layout the Mega last ACKNOWLEDGED, as the bridge echoes it (§5): <c>compact</c> or <c>expanded</c>.</summary>
+    public string? LcdLayoutAcknowledged { get; set; }
+
+    /// <summary>When <see cref="LcdLayoutAcknowledged"/> last changed — "showing expanded since 18:05".</summary>
+    public DateTimeOffset? LcdLayoutAcknowledgedAt { get; set; }
+
+    /// <summary>
+    /// This board's own layout, overriding the club's <c>lcd_layout</c>; null = the club's. Three-
+    /// valued on the admin PATCH exactly like <see cref="ButtonMapJson"/>.
+    /// </summary>
+    public string? LcdLayoutOverride { get; set; }
+
+    /// <summary>This board's own marquee switch, overriding <c>lcd_marquee_enabled</c>; null = the club's.</summary>
+    public bool? LcdMarqueeOverride { get; set; }
+
+    /// <summary>The <c>restore</c> report of the board's latest first-of-boot beat: <c>warm</c>, <c>cold</c>, <c>none</c> or <c>unknown</c>.</summary>
+    public string? RestoreReport { get; set; }
+
+    /// <summary>When <see cref="RestoreReport"/> was received.</summary>
+    public DateTimeOffset? RestoreReportedAt { get; set; }
+
+    /// <summary>
+    /// The id number of the club key this board last authenticated with (§6: k1, k2, … as 1, 2, …).
+    /// How the console says "on the new key" or "still on the old key", and how the server knows a
+    /// board no longer needs <c>key_next</c>.
+    /// </summary>
+    public int? LastKeyId { get; set; }
+
+    /// <summary>When <see cref="LastKeyId"/> was last confirmed.</summary>
+    public DateTimeOffset? LastKeyAt { get; set; }
+
+    // ---- §12: the hardware facts, per board. Null = the club's tenant setting. Three-valued on
+    //      the admin PATCH (absent = unchanged, null = the club's, a value = the board's). ----
+
+    /// <summary>This board's relay drive level (<c>high</c>/<c>low</c>), overriding <c>hw_relay_active_level</c>.</summary>
+    public string? HwRelayActiveLevel { get; set; }
+
+    /// <summary>This board's LCD backpack address (0 = probe), overriding <c>hw_lcd_i2c_address</c>.</summary>
+    public int? HwLcdI2cAddress { get; set; }
+
+    /// <summary>This board's scanner rate (0 = auto), overriding <c>hw_scanner_baud</c>.</summary>
+    public int? HwScannerBaud { get; set; }
+
+    /// <summary>This board's scan line end (<c>auto</c>/<c>crlf</c>), overriding <c>hw_scanner_line_end</c>.</summary>
+    public string? HwScannerLineEnd { get; set; }
+
+    /// <summary>This board's scan idle gap in ms, overriding <c>hw_scanner_gap_ms</c>.</summary>
+    public int? HwScannerGapMs { get; set; }
+
+    // ---- §13: what the board reports about itself, latest beat only. Stored as the JSON the
+    //      board sent, re-serialised from the server's own reading (unknown keys dropped). ----
+
+    /// <summary>The court box's <c>mega</c> object (<c>reset</c>, <c>lcd</c>, <c>relay</c>, <c>scan_baud</c>, <c>scan_end</c>, <c>keys</c>, <c>diag</c>), as JSON; null until heard.</summary>
+    public string? MegaJson { get; set; }
+
+    /// <summary>The board's <c>diag</c> object (reset reason, heap, block, stack low-water mark, …), as JSON; null until reported.</summary>
+    public string? DiagJson { get; set; }
+
+    /// <summary>The <c>drift</c> list of the latest beat: keys of the previous answer the board could not read. Empty when none.</summary>
+    public List<string> Drift { get; set; } = [];
+
+    /// <summary>When <see cref="MegaJson"/>, <see cref="DiagJson"/> or <see cref="Drift"/> was last written.</summary>
+    public DateTimeOffset? TelemetryAt { get; set; }
+
+    // ---- §11.3/§11.4, member-code.md §5.4: the server's own shedding, counted per board. ----
+
+    /// <summary>How many <c>code_keys</c> the latest answer carried.</summary>
+    public int? CodeKeysSent { get; set; }
+
+    /// <summary>How many keys the latest answer left out (the ring's cap and the body budget together).</summary>
+    public int? CodeKeysTrimmed { get; set; }
+
+    /// <summary>When the latest answer carrying <c>code_keys</c> to this board was produced.</summary>
+    public DateTimeOffset? CodeKeysAt { get; set; }
+
+    /// <summary>When the first trim was raised as a device notice; null until one happened.</summary>
+    public DateTimeOffset? CodeKeysTrimNoticedAt { get; set; }
+
+    /// <summary>
+    /// Per relay, how many consecutive beats of this <c>hb:3</c> board the snapshot has said the
+    /// court is lit while <c>relay_state</c> said it is dark (§4). Two files
+    /// <c>restore_not_confirmed</c> for that court; a confirming or dark beat resets it.
+    /// </summary>
+    public List<int> RelayDarkStreak { get; set; } = [];
+
     /// <summary>
     /// This box's own button map, as the eight-entry wire array (<c>ButtonMap.ToWire()</c>)
     /// serialised to JSON — or null to use the club's map from <c>tenant_settings</c>.

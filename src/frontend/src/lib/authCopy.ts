@@ -22,18 +22,13 @@ export const AUTH_SUBLINE = {
 } as const;
 
 /**
- * R4 form factor (SPEC 3.17) — the brand panel beside the sign-in card from `lg`. Three facts the
- * public page already makes and sources (Home), so the panel says nothing the club has not.
+ * R4 form factor (SPEC 3.17) — the brand panel beside the sign-in card from `lg`. The club's name,
+ * place and facts are tenant data since go-live FM-8 (`lib/clubIdentity`, `lib/clubProfiles`).
  */
 export const AUTH_BRAND = {
-  club: "Crusaders Squash Club",
-  place: "Northwood Crusaders · Durban North",
   factsLabel: "The club at a glance",
-  facts: [
-    "Four glass-back courts",
-    "Thirteen league teams across ten divisions",
-    "Book a court and light it from your phone",
-  ],
+  /** The panel's name while the club's own is unknown (FM-8: never another club's). */
+  unnamed: "Your club",
 } as const;
 
 /** A form that refused to send, summarised just above its button, where the member is looking. The detail is on each field. */

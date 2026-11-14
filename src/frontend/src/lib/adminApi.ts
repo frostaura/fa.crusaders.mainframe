@@ -871,6 +871,61 @@ export type AdminSellResult = AdminAdjustResult & {
 };
 
 // ---------------------------------------------------------------------------------------
+// BM-6 — rand given back for a purchase (`WalletEndpoints.Reversal.cs`)
+// ---------------------------------------------------------------------------------------
+
+/** One booking past the no-show sweep's reach that nobody settled (`GET /admin/bookings/unsettled`). */
+export type UnsettledBooking = {
+  booking_id: string;
+  court_id: string;
+  court_name: string | null;
+  starts_at: string;
+  ends_at: string;
+  charged_minutes: number;
+  member: { user_id: string; name: string | null; photo_url: string | null } | null;
+  /** Only when somebody else paid for the court at the box: the refund is theirs. */
+  payer: { user_id: string; name: string | null; photo_url: string | null } | null;
+};
+
+export type UnsettledBookingsPage = {
+  total: number;
+  lookback_days: number;
+  timezone: string;
+  items: UnsettledBooking[];
+  next_cursor: string | null;
+};
+
+export const REVERSAL_KINDS = ["refund", "chargeback"] as const;
+export type ReversalKind = typeof REVERSAL_KINDS[number];
+
+/** One funding row that took rand, with what is still reversible on it. */
+export type ReversibleEntry = {
+  entry_id: string;
+  type: string;
+  created_at: string;
+  reason: string | null;
+  zar_paid: number;
+  amount_minutes: number;
+  zar_reversed: number;
+  minutes_taken_back: number;
+  zar_left: number;
+  minutes_left: number;
+};
+
+export type ReversalResult = {
+  entry_id: string;
+  type: "PaymentReversal";
+  kind: ReversalKind;
+  amount_minutes: number;
+  zar_reversed: number;
+  reverses_entry_id: string;
+  zar_left: number | null;
+  minutes_left: number | null;
+  balance_before_minutes: number;
+  balance_after_minutes: number;
+};
+
+// ---------------------------------------------------------------------------------------
 // P13 — minutes packages, the admin side (contract §3.5)
 // ---------------------------------------------------------------------------------------
 
@@ -914,7 +969,35 @@ export type AdminPackageUpdate = {
 // The calls
 // ---------------------------------------------------------------------------------------
 
+/**
+ * `GET /api/v1/admin/payments/payfast` — the club's PayFast account as stored (BM-4). The passphrase is
+ * write-only: the API says only whether one is set. `problems` are PayFastCredentialRules' codes, and
+ * `configured` is false while any remains — members are then told payments are not set up.
+ */
+export type PayFastSettings = {
+  configured: boolean;
+  problems: string[];
+  merchant_id: string | null;
+  merchant_key: string | null;
+  passphrase_set: boolean;
+  passphrase_required: boolean;
+  environment: string | null;
+  notify_url: string;
+};
+
+/** A save: an omitted field keeps the stored value; the passphrase is never read back. */
+export type PayFastSettingsSave = {
+  merchant_id?: string;
+  merchant_key?: string;
+  passphrase?: string;
+  environment?: "test" | "live";
+};
+
 export const adminEndpoints = {
+  // --- Payments (BM-4) -------------------------------------------------------------------
+  payFastSettings: () => api.get<PayFastSettings>("/api/v1/admin/payments/payfast"),
+  payFastSettingsSave: (req: PayFastSettingsSave) => api.put<PayFastSettings>("/api/v1/admin/payments/payfast", req),
+
   // --- Control board (item 10) -----------------------------------------------------------
   controlBoard: () => api.get<ControlBoardView>("/api/v1/admin/control-board"),
   /**
@@ -964,8 +1047,8 @@ export const adminEndpoints = {
    */
   memberTrace: (userId: string, range: AdminRange & { cursor?: string; limit?: number } = {}) =>
     api.get<TraceView>(`/api/v1/admin/members/${userId}/trace${qs({ ...range })}`),
-  memberTraceCsvUrl: (userId: string, range: AdminRange = {}) =>
-    `/api/v1/admin/members/${userId}/trace.csv${qs({ ...range })}`,
+  // The night's CSV is fetched with the token (memberDetailEndpoints.traceCsv); no bare URL is
+  // exported for it, because a URL here is how a bare <a href> gets written (FA-1).
 
   // --- The change record (item 14) -------------------------------------------------------
   adminChanges: (filters: AdminChangeFilters = {}) =>
@@ -1127,6 +1210,36 @@ export const adminEndpoints = {
     quotedPriceZar: body.quotedPriceZar,
     ...(body.zarReceived !== undefined ? { zarReceived: body.zarReceived } : {}),
     ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
+  }),
+
+  // --- BA-08: the members and no-shows files (fetched WITH the token, never an href — FA-1) ---
+  /** The members file's path, for one membership status or every one. */
+  membersCsvPath: (status?: string | null) => `/api/v1/admin/exports/members.csv${qs({ status: status ?? undefined })}`,
+  /** The no-shows file's path, for a range of club days (yyyy-mm-dd). */
+  noShowsCsvPath: (from: string, to: string) => `/api/v1/admin/exports/no-shows.csv${qs({ from, to })}`,
+
+  // --- BM-11: the bookings behind the booking.unsettled notice ------------------------------
+  unsettledBookings: (cursor?: string | null) =>
+    api.get<UnsettledBookingsPage>(`/api/v1/admin/bookings/unsettled${qs({ cursor: cursor ?? undefined })}`),
+
+  // --- BM-6: rand given back (a refund or a recorded chargeback) ---------------------------
+  /** The member's purchases that took rand, newest first, each with the rand and minutes still reversible. */
+  reversible: (userId: string) =>
+    api.get<{ entries: ReversibleEntry[] }>(`/api/v1/admin/minutes/${userId}/reversible`),
+  /**
+   * Gives rand back against ONE purchase: a `PaymentReversal` naming it, negative rand and the
+   * minutes taken back (0 when the member keeps them). Snake_case on the wire, keyed like a sale.
+   */
+  reversePayment: (
+    userId: string,
+    body: { entryId: string; kind: ReversalKind; zarReversed: number; minutesTakenBack: number; reason: string; idempotencyKey: string },
+  ) => api.post<ReversalResult>(`/api/v1/admin/minutes/${userId}/reverse-payment`, {
+    entry_id: body.entryId,
+    kind: body.kind,
+    zar_reversed: body.zarReversed,
+    minutes_taken_back: body.minutesTakenBack,
+    reason: body.reason,
+    idempotency_key: body.idempotencyKey,
   }),
 
   // --- P13: the club's packages (§3.5) ---------------------------------------------------

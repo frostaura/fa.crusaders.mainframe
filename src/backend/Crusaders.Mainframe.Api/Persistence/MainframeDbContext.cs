@@ -8,7 +8,7 @@ namespace Crusaders.Mainframe.Api.Persistence;
 /// <summary>
 /// EF Core context. Every <see cref="ITenantScoped"/> entity is filtered to the current
 /// tenant via global query filter; bypass requires <c>IgnoreQueryFilters()</c> and is reserved
-/// for platform-admin operations + onboarding.
+/// for work above any one club — workers sweeping every club, startup, and the operator CLI.
 /// </summary>
 public partial class MainframeDbContext : DbContext
 {
@@ -111,10 +111,9 @@ public partial class MainframeDbContext : DbContext
     /// </para>
     ///
     /// <para>
-    /// Nothing needed the escape: no platform admin is seeded, and the <c>/api/v1/platform/</c>
-    /// endpoints it existed for are not mapped. When they are, they belong on a
-    /// filter-bypassing repository of their own rather than on a hole punched through every
-    /// tenant's user list.
+    /// Nothing needed the escape, and the flag itself is gone (BP-13, 2026-11-13): cross-club
+    /// operations are the operator CLI's (<c>Persistence/TenantCli.cs</c>), which opens its own
+    /// scope above tenancy rather than punching a hole through every tenant's user list.
     /// </para>
     /// </remarks>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -129,6 +128,7 @@ public partial class MainframeDbContext : DbContext
             e.Property(t => t.Slug).HasMaxLength(64).IsRequired();
             e.Property(t => t.DisplayName).HasMaxLength(255).IsRequired();
             e.Property(t => t.Status).HasMaxLength(32).IsRequired();
+            e.Property(t => t.PublicBaseUrl).HasMaxLength(512);
             // One demo club per real club: the switch finds it by this, and a race between two
             // admins entering at once loses on the index rather than making two.
             e.HasIndex(t => t.DemoOfTenantId).IsUnique().HasFilter("\"DemoOfTenantId\" IS NOT NULL");
@@ -182,6 +182,7 @@ public partial class MainframeDbContext : DbContext
         });
 
         ConfigureDevices(modelBuilder);
+        ConfigureDeviceV3(modelBuilder);
         ConfigureMemberGroups(modelBuilder);
         ConfigureMinutePackages(modelBuilder);
         ConfigureAccessCodes(modelBuilder);
@@ -563,6 +564,18 @@ public partial class MainframeDbContext : DbContext
             e.Property(d => d.LastIpAddress).HasMaxLength(64);
             e.Property(d => d.RunningVersion).HasMaxLength(32);
             e.Property(d => d.MegaVersion).HasMaxLength(32);
+            // Device contract v3 (device-api.md §2, §5, §8). Short closed vocabularies, sized
+            // with room: an unknown net_src is stored as "unknown" rather than as given.
+            e.Property(d => d.NetSrc).HasMaxLength(16);
+            e.Property(d => d.LcdLayoutAcknowledged).HasMaxLength(16);
+            e.Property(d => d.LcdLayoutOverride).HasMaxLength(16);
+            e.Property(d => d.RestoreReport).HasMaxLength(16);
+            e.Property(d => d.RelayDarkStreak).IsRequired().HasDefaultValueSql("'{}'::integer[]");
+            e.Property(d => d.HwRelayActiveLevel).HasMaxLength(8);
+            e.Property(d => d.HwScannerLineEnd).HasMaxLength(8);
+            e.Property(d => d.MegaJson).HasColumnType("jsonb");
+            e.Property(d => d.DiagJson).HasColumnType("jsonb");
+            e.Property(d => d.Drift).HasColumnType("text[]").IsRequired().HasDefaultValueSql("'{}'::text[]");
             // Latest heartbeat's `caps` (member-code rollout). An empty array, never null, for a
             // board that named nothing — see Device.Capabilities.
             e.Property(d => d.Capabilities).HasColumnType("text[]").IsRequired().HasDefaultValueSql("'{}'::text[]");
@@ -604,6 +617,7 @@ public partial class MainframeDbContext : DbContext
             e.HasKey(r => r.Id);
             e.Property(r => r.Kind).HasMaxLength(32).IsRequired();
             e.Property(r => r.Outcome).HasMaxLength(64);
+            e.Property(r => r.Cause).HasMaxLength(DeviceEventReceipt.CauseMaxLength);
             e.HasQueryFilter(r => r.TenantId == _tenant.TenantId);
 
             // The whole reason this table exists. A box retrying an upload it never saw the
@@ -726,6 +740,10 @@ public partial class MainframeDbContext : DbContext
             e.HasIndex(l => new { l.TenantId, l.ActorUserId, l.CreatedAt });
 
             e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
+            // One credit per PayFast checkout (money lane BM-2): see LedgerEntry.PurchaseId.
+            e.HasIndex(l => new { l.TenantId, l.PurchaseId }).IsUnique().HasFilter("\"PurchaseId\" IS NOT NULL");
+            // BM-6: the reversals of one funding row, summed under the payer lock before another is posted.
+            e.HasIndex(l => new { l.TenantId, l.ReversesEntryId }).HasFilter("\"ReversesEntryId\" IS NOT NULL");
             e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
             e.Property(l => l.Type).HasConversion<int>();
 

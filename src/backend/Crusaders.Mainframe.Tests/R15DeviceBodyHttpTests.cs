@@ -295,6 +295,24 @@ public sealed class R15DeviceBodyHttpTests(PostgresFixture pg) : IClassFixture<P
 
     // ------------------------------------------------------------------ D15-1: the bridge 2.2.5 corpus
 
+    /// <summary>
+    /// The vector's path and body — or, for pay-for, the same escaped body INLINE. D10 pay-for left
+    /// the court box's image in v3, so its vector left the <c>http/</c> family the firmware reads
+    /// (<c>membercode/payfor.json</c> holds the server's bodies); the server still answers the route,
+    /// and its escape coverage is kept here byte for byte as the removed vector had it.
+    /// </summary>
+    private static (string Path, string Body) EscapedScan(string id)
+    {
+        if (id == "payfor-request-escaped-scan")
+        {
+            return ("/api/v1/device/pay-for",
+                """{"mac":"5ccf7f0a1b2c","method":"qr","token":"Q\"\\X\u00e9\u00ff","court":2,"nonce":"9f2a4c6e8b0d1f3a","confirm":false}""");
+        }
+        var vector = CourtBoxRequest(id);
+        return (vector.GetProperty("path_and_query").GetString()!,
+            Encoding.UTF8.GetString(Convert.FromHexString(vector.GetProperty("body_hex").GetString()!)));
+    }
+
     private static JsonElement CourtBoxRequest(string id)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -323,11 +341,10 @@ public sealed class R15DeviceBodyHttpTests(PostgresFixture pg) : IClassFixture<P
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         var r = await RigAsync($"r15v{id[..4]}");
         await using var _ = r.App;
-        var vector = CourtBoxRequest(id);
-        var body = Encoding.UTF8.GetString(Convert.FromHexString(vector.GetProperty("body_hex").GetString()!))
-            .Replace("5ccf7f0a1b2c", r.Club.BoxMac, StringComparison.Ordinal);
+        var (path, raw) = EscapedScan(id);
+        var body = raw.Replace("5ccf7f0a1b2c", r.Club.BoxMac, StringComparison.Ordinal);
 
-        var (status, text) = await SendAsync(r, Raw(r, vector.GetProperty("path_and_query").GetString()!, Encoding.UTF8.GetBytes(body)));
+        var (status, text) = await SendAsync(r, Raw(r, path, Encoding.UTF8.GetBytes(body)));
 
         Assert.True((int)status < 500, $"{id}: {(int)status} {text}");
         Assert.NotEqual(DeviceErrorCodes.MalformedBody, ErrorOf(text));

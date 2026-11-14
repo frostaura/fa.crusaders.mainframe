@@ -26,16 +26,26 @@ public sealed class PlaySettingsTests
     {
         var low = View() with
         {
-            ResultAutoConfirmHours = 1, ResultRecordDays = 0, StreakRestEveryWeeks = 1, StreakRestCap = -3,
-            StreakPauseWeeksPerYear = -1, PlayEarlyBirdBeforeMinute = -5, PlayNightOwlFromMinute = 60,
+            ResultAutoConfirmHours = 1,
+            ResultRecordDays = 0,
+            StreakRestEveryWeeks = 1,
+            StreakRestCap = -3,
+            StreakPauseWeeksPerYear = -1,
+            PlayEarlyBirdBeforeMinute = -5,
+            PlayNightOwlFromMinute = 60,
         };
         Assert.Equal((12, 1, 2, 0, 0, 0, 720), (PlaySettings.AutoConfirmHours(low), PlaySettings.RecordDays(low), PlaySettings.RestEveryWeeks(low),
             PlaySettings.RestCap(low), PlaySettings.PauseWeeksPerYear(low), PlaySettings.EarlyBirdBeforeMinute(low), PlaySettings.NightOwlFromMinute(low)));
 
         var high = View() with
         {
-            ResultAutoConfirmHours = 1000, ResultRecordDays = 99, StreakRestEveryWeeks = 50, StreakRestCap = 9,
-            StreakPauseWeeksPerYear = 60, PlayEarlyBirdBeforeMinute = 2000, PlayNightOwlFromMinute = 5000,
+            ResultAutoConfirmHours = 1000,
+            ResultRecordDays = 99,
+            StreakRestEveryWeeks = 50,
+            StreakRestCap = 9,
+            StreakPauseWeeksPerYear = 60,
+            PlayEarlyBirdBeforeMinute = 2000,
+            PlayNightOwlFromMinute = 5000,
         };
         Assert.Equal((168, 30, 12, 4, 26, 720, 1439), (PlaySettings.AutoConfirmHours(high), PlaySettings.RecordDays(high), PlaySettings.RestEveryWeeks(high),
             PlaySettings.RestCap(high), PlaySettings.PauseWeeksPerYear(high), PlaySettings.EarlyBirdBeforeMinute(high), PlaySettings.NightOwlFromMinute(high)));

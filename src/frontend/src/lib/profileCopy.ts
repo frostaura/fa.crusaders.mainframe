@@ -61,6 +61,8 @@ export const PASSKEY_NAME_HINT = "So you can tell your devices apart later.";
 export const PASSKEY_NAME_MISSING = "Give the passkey a name so you can tell your devices apart.";
 export const PASSKEY_ADD = "Add passkey";
 export const PASSKEY_ADDED = "Passkey added.";
+/** FM-2 — the browser said this device already holds a passkey for this account. */
+export const PASSKEY_ALREADY_HERE = "This device already has a passkey for your account — you can sign in with it now.";
 export const PASSKEY_REMOVE = "Remove";
 export const PASSKEY_REMOVED = "Passkey removed.";
 

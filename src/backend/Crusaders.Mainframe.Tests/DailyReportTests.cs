@@ -406,20 +406,34 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
         db.LedgerEntries.AddRange(
             new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.TopUp,
-                AmountMinutes = 300, ZarPaid = 187.50m,
-                ActorUserId = member.Id, Reason = "top-up just after midnight", CreatedAt = lateNight,
+                TenantId = tenant.Id,
+                UserId = member.Id,
+                Type = LedgerEntryType.TopUp,
+                AmountMinutes = 300,
+                ZarPaid = 187.50m,
+                ActorUserId = member.Id,
+                Reason = "top-up just after midnight",
+                CreatedAt = lateNight,
             },
             new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.BookingCharge,
-                AmountMinutes = -50, RelatedBookingId = booking.Id,
-                ActorUserId = member.Id, Reason = "court paid for two days ahead", CreatedAt = evening,
+                TenantId = tenant.Id,
+                UserId = member.Id,
+                Type = LedgerEntryType.BookingCharge,
+                AmountMinutes = -50,
+                RelatedBookingId = booking.Id,
+                ActorUserId = member.Id,
+                Reason = "court paid for two days ahead",
+                CreatedAt = evening,
             },
             new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.AdminAdjustment,
-                AmountMinutes = 125, ActorUserId = admin.Id, Reason = "goodwill",
+                TenantId = tenant.Id,
+                UserId = member.Id,
+                Type = LedgerEntryType.AdminAdjustment,
+                AmountMinutes = 125,
+                ActorUserId = admin.Id,
+                Reason = "goodwill",
                 CreatedAt = new DateTimeOffset(2026, 3, 3, 10, 0, 0, TimeSpan.Zero),
             });
 

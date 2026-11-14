@@ -8,8 +8,8 @@ namespace Crusaders.Mainframe.Api.Services;
 /// Like <see cref="RelayHardCap"/> this is a property of the firmware rather than a policy.
 /// <c>bridgelogic::Cadence</c> adopts <c>heartbeat_seconds</c> from the heartbeat response
 /// and CLAMPS it into [15 s, 300 s] — below the floor a fleet hammers the API and its own
-/// UART with four-second blocking calls, above the ceiling the roster ages and an OTA offer
-/// takes minutes to reach a box. The API used to accept 10–3600 and the Settings page said
+/// UART with four-second blocking calls, above the ceiling the roster ages and a new key or
+/// network takes minutes to reach a box. The API used to accept 10–3600 and the Settings page said
 /// so, so an admin could set 600, see 600 on the page, and have every box in the club run
 /// at 300 with nothing anywhere saying otherwise (round-3 finding 22, escalated from lead
 /// L9). Accepting only what the boxes will honour is the only version of this that cannot

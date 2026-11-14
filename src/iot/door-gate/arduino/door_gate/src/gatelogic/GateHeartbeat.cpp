@@ -3,6 +3,7 @@
 #include "../gatelogic/GateHeartbeat.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "../devapi/Json.h"
 #include "../devlink/Cadence.h"
@@ -84,6 +85,144 @@ size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const cha
     return 0U;
   }
   return static_cast<size_t>(written);
+}
+
+namespace {
+
+/// Appends to a bounded buffer; any overflow makes the whole render fail.
+class Writer {
+public:
+  Writer(char* out, size_t cap) : out_(out), cap_(cap) {}
+
+  void text(const char* s) {
+    if (failed_) {
+      return;
+    }
+    const size_t n = strlen(s);
+    if (len_ + n + 1U > cap_) {
+      failed_ = true;
+      return;
+    }
+    memcpy(out_ + len_, s, n + 1U);
+    len_ += n;
+  }
+
+  void field(const char* key, const char* value) {
+    text(",\"");
+    text(key);
+    text("\":\"");
+    text(value);
+    text("\"");
+  }
+
+  void number(const char* key, uint32_t value) {
+    char digits[16] = {};
+    const int n = snprintf(digits, sizeof(digits), "%lu", static_cast<unsigned long>(value));
+    if (n < 0) {
+      failed_ = true;
+      return;
+    }
+    text(",\"");
+    text(key);
+    text("\":");
+    text(digits);
+  }
+
+  size_t finish() {
+    if (failed_) {
+      out_[0] = '\0';
+      return 0U;
+    }
+    return len_;
+  }
+
+private:
+  char* out_;
+  size_t cap_;
+  size_t len_ = 0U;
+  bool failed_ = false;
+};
+
+} // namespace
+
+namespace {
+
+/// The network facts, and what this boot ran on until its first accepted beat.
+void writeNetwork(Writer& w, const GateReport& report) {
+  w.number("net_ver", report.netVer);
+  w.field("net_src", report.netSrc);
+  if (report.restore != nullptr) {
+    w.field("restore", report.restore);
+  }
+}
+
+/// `diag`: the board's own health (device-api.md §13).
+void writeDiag(Writer& w, const GateDiag& d) {
+  w.text(",\"diag\":{\"reset\":\"");
+  w.text(d.reset == nullptr ? "unknown" : d.reset);
+  w.text("\"");
+  w.number("exc", d.exc);
+  w.number("epc1", d.epc1);
+  w.number("heap", d.heap);
+  w.number("heap_min", d.heapMin);
+  w.number("block", d.block);
+  w.number("stack_min", d.stackMin);
+  w.number("sketch_free", d.sketchFree);
+  w.number("flash_mb", d.flashMb);
+  w.text("}");
+}
+
+/// `drift`: the keys of the previous answer this board could not read (§11.2).
+void writeDrift(Writer& w, const Drift& drift) {
+  w.text(",\"drift\":[");
+  for (uint8_t i = 0U; i < drift.count; ++i) {
+    w.text(i == 0U ? "\"" : ",\"");
+    w.text(drift.names[i]);
+    w.text("\"");
+  }
+  w.text("]");
+}
+
+} // namespace
+
+size_t renderGateHeartbeatV3(char* out, size_t cap, const GateBeat& beat) {
+  if (out == nullptr || cap == 0U) {
+    return 0U;
+  }
+  out[0] = '\0';
+  const GateReport& report = beat.report;
+  if (beat.mac == nullptr || beat.mac[0] == '\0' || beat.firmwareVersion == nullptr ||
+      report.netSrc == nullptr) {
+    return 0U;
+  }
+  char uptime[21] = {};
+  if (tb::formatU64(beat.uptimeMs, uptime, sizeof(uptime)) == 0U) {
+    return 0U;
+  }
+  Writer w(out, cap);
+  w.text("{\"mac\":\"");
+  w.text(beat.mac);
+  w.text("\",\"firmware_version\":\"");
+  w.text(beat.firmwareVersion);
+  w.text("\",\"uptime_ms\":");
+  w.text(uptime);
+  w.text(",\"kind\":\"gate\"");
+  if (beat.counters.noPush != 0U) {
+    w.number("no_push", saturate(beat.counters.noPush));
+  }
+  if (beat.counters.eventsLost != 0U) {
+    w.number("events_lost", saturate(beat.counters.eventsLost));
+  }
+  writeNetwork(w, report);
+  if (report.diag != nullptr) {
+    writeDiag(w, *report.diag);
+  }
+  if (report.drift != nullptr && report.drift->count > 0U) {
+    writeDrift(w, *report.drift);
+  }
+  w.text(kGateCapsV3);
+  w.text("}");
+  return w.finish();
 }
 
 bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs) {

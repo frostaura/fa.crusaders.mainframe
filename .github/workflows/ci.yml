@@ -10,6 +10,14 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer push cancels its older run — nobody reads the result of a superseded PR
+# run, and each costs ~130 runner-minutes. A push to main is keyed by its own run id, so main runs
+# are never cancelled or queued behind each other here; what must not overlap on main is moving
+# `:latest`, and `promote-latest` carries its own group for that.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # ============================================================================
   # Backend — lint, build, test (.NET 10)
@@ -353,6 +361,7 @@ jobs:
           for l in $lists; do cmp -s "$first" "$l" || { echo "class lists differ: $first vs $l"; exit 1; }; done
           trx=$(find shards -name "integration-*.trx" | sort)
           [ "$(echo "$trx" | wc -l)" -eq "$BACKEND_SHARDS" ] || { echo "expected $BACKEND_SHARDS trx files, found:"; echo "$trx"; exit 1; }
+          # shellcheck disable=SC2086 # one argument per trx file, split on purpose
           python3 tools/test_shards.py verify --classes "$first" --shards "$BACKEND_SHARDS" $trx
 
       # THE COVERAGE GATE LIVES HERE, on the merged report of every shard, because this is the
@@ -374,6 +383,7 @@ jobs:
             echo "A missing report used to pass this gate; it fails it now."
             exit 1
           fi
+          # shellcheck disable=SC2086 # one argument per report, split on purpose
           coverage=$(python3 tools/merge_coverage.py $reports)
           echo "Line coverage (merged over $BACKEND_SHARDS shards): ${coverage}% (threshold: ${THRESHOLD}%)"
           if [ "$(awk "BEGIN {print ($coverage < $THRESHOLD)}")" -eq 1 ]; then
@@ -386,6 +396,66 @@ jobs:
         run: |
           echo "backend-integration-shard finished '${{ needs.backend-integration-shard.result }}' — see the failed shard's 'Show failed tests' step."
           exit 1
+
+  # ============================================================================
+  # The server's REAL device replies through the frozen firmware's REAL parsers
+  # (docs/specs/device-api.md section 11.5, FC-9). The corpus pins bytes somebody
+  # wrote down; this pins the bytes the server actually serialises today, for
+  # every heartbeat, activate, walk-up, extend, events and gate reply the
+  # emitter's scenario matrix produces. A server change a box in the field could
+  # not read goes red HERE, before it reaches a club whose Mega can never be
+  # reflashed. A release waits for it like every other gate.
+  # ============================================================================
+  device-replay:
+    name: Device replay (server replies through firmware parsers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crusaders
+          POSTGRES_PASSWORD: crusaders_test_pw
+          POSTGRES_DB: crusaders_mainframe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crusaders"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/iot/requirements.txt
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('src/iot/*/platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install pinned toolchain
+        run: pip install -r src/iot/requirements.txt
+
+      - name: Replay the server's replies through the bridge and the gate
+        env:
+          API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
+          REQUIRE_BOUNDARY_TESTS: "true"
+        run: make device-replay-check PIO=pio TEST_DOTNET=dotnet
 
   # ============================================================================
   # IoT firmware — host-compiled unit tests, no hardware required.
@@ -425,6 +495,7 @@ jobs:
           # because they hold machine-rewritten copies of these same files plus two
           # vendored libraries, and the originals are already in this list.
           clang-format --version
+          # shellcheck disable=SC2046 # one argument per source file, split on purpose
           clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h' ':(exclude)src/iot/*/arduino/**')
 
       # Covers EVERY project under src/iot, not just the one it lives in: the
@@ -571,6 +642,9 @@ jobs:
       # credentials a change to the other's. The court box has no such guard and
       # is unaffected by the values; it gets the same file because one loop is
       # easier to keep true than two.
+      #
+      # Bridge 3.1.0 and gate 2.0.0 also need the setup portal's password, and
+      # refuse secrets.h.example's placeholder for it at compile time.
       - name: Write a throwaway secrets.h for each board project
         run: |
           set -euo pipefail
@@ -581,6 +655,7 @@ jobs:
           #define WIFI_PASSWORD "ci-build-only"
           #define API_BASE_URL "http://192.0.2.10:8088"
           #define DEVICE_API_KEY "ci-build-only-not-a-real-key"
+          #define SETUP_AP_PASSWORD "ci-build-only"
           SECRETS
           done
 
@@ -593,6 +668,21 @@ jobs:
       # every project's platformio.ini, so a pin change is what re-downloads it.
       - name: Build door_gate and the door simulator
         run: pio run -d src/iot/door-gate -e door_gate -e simulator
+
+      # The bridge runs loop() on a 4 KB cont stack whose worst static path was measured at
+      # 3,776-3,968 B before an interrupt adds >= 256 B on top (ESPR-1), and nothing gated it:
+      # one more 320 B local inlined into loop() would close the margin before the last cable
+      # flash. Rebuilt with GCC's own stack reports and held to src/iot/tools/stack_budget.json,
+      # a ratchet that only shrinks. The ESP32's GCC 8 has no -fcallgraph-info, so the gate is
+      # held on frames only. These rebuilds are of the two ESP environments alone; the steps
+      # below use the simulator builds and the Arduino toolchain, never these images.
+      - name: Stack budget (ESP8266 bridge and ESP32 gate)
+        run: |
+          set -euo pipefail
+          PLATFORMIO_BUILD_FLAGS="-fstack-usage -fcallgraph-info=su" pio run -d src/iot/court-box -e court_bridge
+          python3 src/iot/tools/stack_budget.py --build src/iot/court-box/.pio/build/court_bridge --target court_bridge
+          PLATFORMIO_BUILD_FLAGS="-fstack-usage" pio run -d src/iot/door-gate -e door_gate
+          python3 src/iot/tools/stack_budget.py --build src/iot/door-gate/.pio/build/door_gate --target door_gate
 
       # The Arduino IDE is the DEPLOYMENT route for EVERY board here and both
       # arduino/ trees are generated, so a source or platformio.ini change that was
@@ -619,8 +709,12 @@ jobs:
           # The installer REFUSES to create its own BINDIR — "folder not found. Please create
           # it before continuing." — and exits 1 without installing anything.
           mkdir -p "$RUNNER_TEMP/bin"
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
-            | BINDIR="$RUNNER_TEMP/bin" sh
+          # PINNED: the installer comes from the release's own tag and installs that release.
+          # It used to be master's installer fetching whatever was newest, so the compiler that
+          # gates every sketch changed between two pushes with nothing in the diff.
+          ARDUINO_CLI_VERSION=v1.5.1
+          curl -fsSL "https://raw.githubusercontent.com/arduino/arduino-cli/$ARDUINO_CLI_VERSION/install.sh" \
+            | BINDIR="$RUNNER_TEMP/bin" sh -s "$ARDUINO_CLI_VERSION"
           export PATH="$RUNNER_TEMP/bin:$PATH"
           # Every core is PINNED to match the PlatformIO platform beside it:
           # framework-arduino-avr 5.2.0 is core 1.8.6, framework-arduinoespressif8266
@@ -881,13 +975,68 @@ jobs:
           "
 
   # ============================================================================
-  # Docker Build & Push — only on push to main, after CI passes
+  # Release & operations — the compose files, the backup and restore, the pre-deploy
+  # migration check and this workflow itself
+  #
+  # Everything between a green build and a club that can be recovered: the production stack's
+  # configuration (pinned images, log rotation, one release tag), the backup service run for
+  # real against a throwaway Postgres and restored after a simulated total loss, the pending-
+  # migrations check against a real database, and the publish/promote rules of this file. Docker
+  # is on the runner, so the backup tier REQUIRES it here rather than skipping.
+  # ============================================================================
+  infra:
+    name: Release & operations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the test dependency
+        run: pip install pyyaml==6.0.2
+
+      - name: Lint this workflow (actionlint, pinned)
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+
+      - name: Release and operations tests
+        env:
+          INFRA_REQUIRE_DOCKER: "1"
+        run: make test-infra
+
+  # ============================================================================
+  # Docker Build & Push — only on push to main, after every gate passes
+  #
+  # WHAT IS PUBLISHED, AND WHEN. Each image is built per architecture and pushed ONLY under an
+  # immutable `sha-<commit>-<arch>` tag. `publish-release` runs once all six builds have passed
+  # and joins them into `sha-<commit>` multi-arch manifests for all three images; only then does
+  # `promote-latest` move `:latest`, for all three together, and only FORWARD. Before 2026-11-13
+  # each image wrote its own `latest-<arch>` and `:latest` the moment its own two builds passed:
+  # one failed build left a new backend behind an old gateway under `:latest`, and an older run
+  # finishing after a newer one put old code back under `:latest`. Nothing tagged a release, so
+  # what the club ran could not be named and the previous release could not be pulled back.
+  #
+  # Every image carries org.opencontainers.image.revision = the commit, and BUILD_SHA in its
+  # environment. Redeploy and rollback pin `CRUSADERS_IMAGE_TAG=sha-<commit>` in the stack:
+  # docs/runbooks/redeploy-and-rollback.md.
+  #
+  # THIS WORKFLOW PUBLISHES AND STOPS. There is no redeploy job: the Portainer one was removed
+  # 2026-09-19 by decision, along with the four PORTAINER_* secrets it was the only reader of.
+  #
+  # The gateway is an image rather than stock nginx with nginx/nginx.conf bind-mounted: a
+  # redeploy moves images and nothing else, so a bind-mounted config was a file the release
+  # could not deliver (round-3 finding 18). Whoever redeploys still checks by hand that the
+  # stack NAMES the gateway image and bind-mounts no nginx.conf — docs/go-live-checklist.md §2.
   # ============================================================================
   build-backend-amd64:
     name: Build Backend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -909,13 +1058,19 @@ jobs:
           file: ./src/backend/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:sha-${{ github.sha }}-amd64
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=sha-${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
 
   build-backend-arm64:
     name: Build Backend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -937,34 +1092,19 @@ jobs:
           file: ./src/backend/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-arm64
-
-  merge-backend-manifests:
-    name: Create Backend Multi-arch Manifest
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [build-backend-amd64, build-backend-arm64]
-    steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Create and push manifest
-        run: |
-          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest \
-            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-amd64 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:sha-${{ github.sha }}-arm64
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=sha-${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
 
   build-frontend-amd64:
     name: Build Frontend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -986,7 +1126,11 @@ jobs:
           file: ./src/frontend/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:sha-${{ github.sha }}-amd64
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=sha-${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           build-args: |
             BUILD_SHA=${{ github.sha }}
 
@@ -994,7 +1138,7 @@ jobs:
     name: Build Frontend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -1016,55 +1160,19 @@ jobs:
           file: ./src/frontend/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:sha-${{ github.sha }}-arm64
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=sha-${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           build-args: |
             BUILD_SHA=${{ github.sha }}
 
-  merge-frontend-manifests:
-    name: Create Frontend Multi-arch Manifest
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [build-frontend-amd64, build-frontend-arm64]
-    steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Create and push manifest
-        run: |
-          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest \
-            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-amd64 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-arm64
-
-  # ============================================================================
-  # Gateway — the nginx reverse proxy, as an image rather than a bind mount.
-  #
-  # nginx/nginx.conf carries the X-Forwarded-Host that gives every member their own
-  # rate-limit bucket rather than one bucket for the club.
-  # It used to be mounted into stock nginx:alpine from a checkout on the
-  # host, and a redeploy moves images and nothing else — so a club merging a
-  # gateway fix got a new backend behind the OLD config, with nothing anywhere
-  # saying so (round-3 finding 18). Built and pushed like the other two now, so the
-  # trap cannot recur on the next nginx.conf edit either.
-  #
-  # THIS WORKFLOW PUBLISHES AND STOPS. There is no redeploy job: the Portainer one
-  # was removed 2026-09-19 by decision, along with the four PORTAINER_* secrets it
-  # was the only reader of. Pulling these images onto the club machine is a MANUAL
-  # step, and the two checks that job used to make before deploying — that the
-  # stack names the gateway image, and that it no longer bind-mounts
-  # nginx/nginx.conf — are now made by hand, every time. Neither mistake is
-  # visible any other way; see docs/go-live-checklist.md §2.
-  # ============================================================================
   build-gateway-amd64:
     name: Build Gateway (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -1086,13 +1194,19 @@ jobs:
           file: ./nginx/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:sha-${{ github.sha }}-amd64
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=sha-${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
 
   build-gateway-arm64:
     name: Build Gateway (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, device-replay, iot, iot-build, security, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -1114,13 +1228,21 @@ jobs:
           file: ./nginx/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:sha-${{ github.sha }}-arm64
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=sha-${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
 
-  merge-gateway-manifests:
-    name: Create Gateway Multi-arch Manifest
+  # One job joins all three images, so a release exists for all three or for none. The sha
+  # tags are immutable: re-running this job for the same commit rewrites the same manifests.
+  publish-release:
+    name: Publish sha-<commit> manifests
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [build-gateway-amd64, build-gateway-arm64]
+    needs: [build-backend-amd64, build-backend-arm64, build-frontend-amd64, build-frontend-arm64, build-gateway-amd64, build-gateway-arm64]
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -1131,8 +1253,88 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Create and push manifest
+      - name: Create the sha-<commit> manifests
+        env:
+          REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest \
-            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-amd64 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-arm64
+          set -euo pipefail
+          for image in backend frontend gateway; do
+            repo="$REGISTRY_USER/crusaders-mainframe-$image"
+            docker buildx imagetools create -t "$repo:sha-$GITHUB_SHA" \
+              "$repo:sha-$GITHUB_SHA-amd64" "$repo:sha-$GITHUB_SHA-arm64"
+          done
+          echo "Published sha-$GITHUB_SHA for backend, frontend and gateway." >> "$GITHUB_STEP_SUMMARY"
+
+  # `:latest` moves FORWARD only, and for all three images or none. Runs never overlap here
+  # (one group, never cancelled), and each one first reads the commit `:latest` is at now (the
+  # revision label) and moves it only to a descendant of that commit — so a run that finishes
+  # after a newer one has already promoted leaves `:latest` alone. A commit that is not promoted
+  # is still deployable by its sha tag.
+  promote-latest:
+    name: Promote :latest (forward only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [publish-release]
+    concurrency:
+      group: promote-latest
+      cancel-in-progress: false
+    steps:
+      - name: Checkout code (full history, for the ancestry check)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Move :latest forward
+        env:
+          REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          set -euo pipefail
+          # The revision label of a published tag; nothing when the tag does not exist or carries no
+          # label. Any OTHER inspect failure fails the job: guessing "no label" on a registry error
+          # is how :latest would move backwards.
+          revision_of() {
+            local out
+            if ! out="$(docker buildx imagetools inspect "$1" --format '{{ json .Image }}' 2> "$RUNNER_TEMP/inspect.err")"; then
+              if grep -qi 'not found' "$RUNNER_TEMP/inspect.err"; then return 0; fi
+              cat "$RUNNER_TEMP/inspect.err" >&2
+              return 1
+            fi
+            printf '%s' "$out" | python3 -c 'import json, sys
+          data = json.load(sys.stdin)
+          images = [data] if "config" in data else [v for v in data.values() if isinstance(v, dict)]
+          print(next((i["config"].get("Labels", {}).get("org.opencontainers.image.revision", "")
+                      for i in images if i.get("config")), ""))'
+          }
+          promote=yes
+          for image in backend frontend gateway; do
+            repo="$REGISTRY_USER/crusaders-mainframe-$image"
+            current="$(revision_of "$repo:latest")"
+            if [ -z "$current" ]; then
+              echo "$image: :latest carries no revision label; it predates release tagging"
+            elif [ "$current" = "$GITHUB_SHA" ]; then
+              echo "$image: :latest is already $GITHUB_SHA"
+            elif git merge-base --is-ancestor "$current" "$GITHUB_SHA" 2>/dev/null; then
+              echo "$image: :latest is at $current, an ancestor of $GITHUB_SHA"
+            else
+              echo "::notice::$image :latest is at $current, which is not an ancestor of $GITHUB_SHA - leaving :latest alone for all three images"
+              promote=no
+            fi
+          done
+          if [ "$promote" != yes ]; then
+            echo "Not promoted: :latest is newer than this commit. Deploy it by sha-$GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          for image in backend frontend gateway; do
+            repo="$REGISTRY_USER/crusaders-mainframe-$image"
+            docker buildx imagetools create -t "$repo:latest" "$repo:sha-$GITHUB_SHA"
+          done
+          echo ":latest is sha-$GITHUB_SHA for backend, frontend and gateway." >> "$GITHUB_STEP_SUMMARY"

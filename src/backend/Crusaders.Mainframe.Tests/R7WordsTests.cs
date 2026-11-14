@@ -56,8 +56,14 @@ public sealed class R7WordsTests
 
     private static LedgerEntry Penalty(int minutes, Guid? booking) => new()
     {
-        Id = Guid.NewGuid(), TenantId = Guid.NewGuid(), UserId = Guid.NewGuid(), Type = LedgerEntryType.NoShowPenalty,
-        AmountMinutes = minutes, RelatedBookingId = booking, Reason = "test", CreatedAt = DateTimeOffset.UtcNow,
+        Id = Guid.NewGuid(),
+        TenantId = Guid.NewGuid(),
+        UserId = Guid.NewGuid(),
+        Type = LedgerEntryType.NoShowPenalty,
+        AmountMinutes = minutes,
+        RelatedBookingId = booking,
+        Reason = "test",
+        CreatedAt = DateTimeOffset.UtcNow,
     };
 
     /// <summary>E7-7: "Penalty count 1" beside "Penalties 0 min" after the club gave the penalty back.</summary>

@@ -322,8 +322,12 @@ organiser receives as shares are **held**:
 - **Pay what you can.** A partner short of their share may accept paying part of it: the accept
   body's optional `payMinutes` (whole minutes) is the share the seat will stand at. It must be more
   than 0, less than the share, and not below what the seat has already paid, else
-  `400 pay_minutes_invalid {share_minutes, paid_minutes}`; what it costs is checked against
-  spendable minutes like any accept (`402 insufficient_balance`). Under the accept's own lock and in
+  `400 pay_minutes_invalid {share_minutes, paid_minutes}`. **Only a partner who is short may**
+  (money lane BM-5): when what the seat has paid plus the partner's spendable minutes covers the
+  share, it is `409 share_affordable {share_minutes, paid_minutes, spendable_minutes}` — read under
+  the accept's payer lock — because any partner could otherwise drop their share to one minute and
+  leave the organiser carrying it. What it costs is checked against spendable minutes like any
+  accept (`402 insufficient_balance`). Under the accept's own lock and in
   its one save (`PlayersService.PayWhatYouCanAsync`): the booking becomes an `amount` split — every
   other live partner keeps the share they had (weights 0), this seat's share and consent become
   `payMinutes`, and the organiser's seat is the remainder `P − Σ live partners`, so it rises by
@@ -332,7 +336,10 @@ organiser receives as shares are **held**:
   seat is accepted, and `payMinutes` is collected as an ordinary accept's pair. The accept's audit row
   carries `shortfall_minutes`, and the organiser is told (inbox and mail, `players.shortfall`): "Sam
   could pay 6 minutes of their 10 minutes share for Court 1, … — 4 minutes are left to cover. You're
-  covering it for now; you can split it with the other players." A second tap answers the same 200
+  covering it for now; you can split it with the other players." That mail ("Sam paid 6 minutes of
+  their 10 minutes share — Court 1") is the organiser's one mail about it: the part payment's own
+  `players.share_moved` receipt stays on their inbox only (browser lane BM-21 — two subjects for one
+  act, one saying "paid their share", contradicted each other). A second tap answers the same 200
   (the seat is accepted and paid at its new share); a lost race is answered as any accept's.
   **The others decide**: the booking detail shows each seat's `shortfall_minutes` and
   `money.left_to_cover_minutes`, and the organiser's page offers "Split what's left" — the short
@@ -473,9 +480,18 @@ reads its subject as the booking's organiser since R18 E18-4, §6),
 | `players.lapsed` | the partner and the organiser | yes | no |
 | `players.game_cancelled` | every live partner; and the organiser when the CLUB cancels their game before anybody checked in (R18 J18-9) | accepted partners only; an unanswered invitee gets the inbox line (M4-5); the organiser's line is inbox only | yes |
 | `players.game_changed` | a removed partner, or one whose share moved; both players when the club records a share as paid by hand (R16 J16-6) | yes — except the organiser's settled-by-hand line, inbox only | no |
-| `players.response` | the organiser (accepted / declined / withdrew; the club accepted for a partner — R16 E16-1) | inbox only | — |
+| `players.response` | the organiser (accepted / declined / withdrew; the club accepted for a partner — R16 E16-1) | a decline or a withdrawal is mailed ("Sam can't make it" / "Sam has pulled out", browser lane BM-20 — an organiser who did not open the app turned up expecting an opponent); dropped at release when the game is off or the partner is back on it. An accept stays inbox only — its payment receipt is the mail | no |
 | `players.return_waiting` | the partner and the organiser, once, when a return starts waiting (§3) | yes | no |
 | `players.shortfall` | the organiser, when a partner pays only part of their share (pay what you can, §4); the mail is dropped at release once the organiser has re-split (`shortfall_split`) or the seat or game is gone | yes | no |
+
+**A member whose address is not confirmed is not mailed yet, and not forgotten** (browser lane
+BM-01): a club may approve a member before they click the verify link, and their notices used to
+finish "sent" to nobody. A member row now waits (`Pending`, `last_error: awaiting_verified_address`,
+looked at again every 6 hours), is released in the same save that confirms the address (the verify
+link or the welcome link), and the release judgement above still drops whatever is no longer true;
+it is suppressed as `recipient_unverified` only after 14 days. A suspended or deleted recipient's
+row is suppressed as `recipient_inactive`. The organiser's own mails close with "you organised this
+court booking", a partner's with "a member of the club added you to a court booking" (BM-21).
 
 Since review round 13:
 - **`players.game_cancelled` names who cancelled.** It says the club cancelled it, with the admin's
@@ -587,7 +603,7 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `POST /api/v1/bookings/{id}/players/{pid}/nudge` | organiser → `{participant_id, nudges_left}`; `429 nudge_limit {limit, retry_after}`; `409 nothing_to_nudge` |
 | `POST /api/v1/bookings/{id}/players/{pid}/link` | organiser → `{participant_id, invite_token, invite_path}` (rotates) |
 | `PUT /api/v1/bookings/{id}/split` | organiser: `{mode, seats: [{participantId, weight?, amount?}]}` → `{booking_id, split_mode, shares: [{participant_id, seat, share_minutes, weight, needs_consent}]}`; `409 conflict_retry` when a different split won the race — an identical twin answers the same `200` (R19 J19-6). A successful split clears every seat's `ShortfallMinutes` (pay what you can, §4) |
-| `POST /api/v1/bookings/{id}/players/{pid}/accept` | partner: `{expectedShareMinutes, payMinutes?}` (`payMinutes`: pay what you can, §4 — `400 pay_minutes_invalid {share_minutes, paid_minutes}` unless `paid ≤ payMinutes < share` and `> 0`) → `{participant_id, booking_id, status, share_minutes, consented_minutes, paid_minutes, balance_minutes, spendable_minutes, held_minutes}`; `400 expected_share_required`, `409 share_changed {share_minutes}` (also after a lost race when the share moved, R19 J19-1), `409 conflict_retry` (a lost race, share unmoved), `402 insufficient_balance`, `409 partner_cap_exceeded {cap: slots\|minutes, …}`, `409 booking_not_open {booking_id}` on a cancelled game (R18 J18-5), `409 invite_closed`, `409 already_in_booking`, `409 player_previously_removed`, `403 membership_inactive`; `404 invite_not_found` for an unclaimed link seat (claim it by its link) |
+| `POST /api/v1/bookings/{id}/players/{pid}/accept` | partner: `{expectedShareMinutes, payMinutes?}` (`payMinutes`: pay what you can, §4 — `400 pay_minutes_invalid {share_minutes, paid_minutes}` unless `paid ≤ payMinutes < share` and `> 0`) → `{participant_id, booking_id, status, share_minutes, consented_minutes, paid_minutes, balance_minutes, spendable_minutes, held_minutes}`; `400 expected_share_required`, `409 share_changed {share_minutes}` (also after a lost race when the share moved, R19 J19-1), `409 conflict_retry` (a lost race, share unmoved), `402 insufficient_balance`, `409 share_affordable {share_minutes, paid_minutes, spendable_minutes}` (a `payMinutes` from a partner who could pay the whole share — BM-5), `409 partner_cap_exceeded {cap: slots\|minutes, …}`, `409 booking_not_open {booking_id}` on a cancelled game (R18 J18-5), `409 invite_closed`, `409 already_in_booking`, `409 player_previously_removed`, `403 membership_inactive`; `404 invite_not_found` for an unclaimed link seat (claim it by its link) |
 | `POST …/{pid}/decline` · `POST …/{pid}/withdraw` | partner → `{participant_id, status}`; withdraw `409 withdraw_window_closed {closed_at}`. A second decline or withdraw — or its twin landing first — answers the same 200 and writes nothing (R18, §6) |
 | `GET /api/v1/me/invites` | → `{items: [invite], count, timezone}` — the Invites tab and badge; each `invite` also carries `timezone` |
 | `GET /api/v1/me/invites/{participantId}` | → the caller's OWN seat in any status: `{participant_id, booking_id, status, needs_consent, share_changed_by, share_changed_by_name, lapsed, settled_outside, booking_status, court_name, starts_at, ends_at, organiser_name, share_minutes, timezone}`; 404 for anybody else's seat (review round 1, for F2's deep links) |

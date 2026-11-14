@@ -29,9 +29,9 @@
 //
 // WHAT IS DELIBERATELY NOT HERE
 // -----------------------------
-// No booking logic, no member roster, no credit balance, no HTTP. The Mega does
-// not know what a member is and must not learn: it is the half that cannot be
-// updated over the air, so anything that will change belongs on the ESP.
+// No booking logic, no member roster, no minute balance, no HTTP. The Mega does
+// not know what a member is and must not learn: it is the half that is never
+// reflashed, so anything that will change belongs on the ESP.
 //
 // No Arduino headers, no heap, no String/std::string/std::vector. This links
 // into 8 KB of SRAM, so the encode buffer is a member rather than a local —
@@ -52,8 +52,10 @@
 
 #include "../courtlogic/AuthWindow.h"
 #include "../courtlogic/ButtonPanel.h"
+#include "../courtlogic/MegaSettings.h"
 #include "../courtlogic/RelayGuard.h"
 #include "../courtlogic/ScanAssembler.h"
+#include "../courtlogic/ScannerBaud.h"
 #include "../courtlogic/ScreenBuffer.h"
 #include "../protocol/Codec.h"
 #include "../protocol/Protocol.h"
@@ -66,22 +68,28 @@ namespace courtlogic {
 /// having to ask.
 inline constexpr uint32_t kStateIntervalMs = 10000UL;
 
-/// Bytes drained from each input port per pass.
-///
-/// A bound, not a buffer size. Without it a peer that streams continuously
-/// keeps drainBridge() in its loop indefinitely and the relay tick never runs —
-/// which would make a flooded link a way to hold a court's lights on. 64
-/// matches the AVR HardwareSerial ring, so a normal pass drains it completely
-/// and the bound only bites when something is wrong.
+/// Bytes drained from the bridge link per drain. The Mega drains twice a pass
+/// (before and after the budgeted paint), so at 9600 baud fewer than ten bytes
+/// ever wait and the 64-byte ring cannot overflow (v3 "The paced sender, and
+/// the Mega's pass budget").
 inline constexpr uint16_t kBytesPerPass = 64U;
 
-// The landing screen, the scan acknowledgement and every deadline that takes a
-// screen away now live in courtlogic::ScreenBuffer, included above.
-//
-// The two lines that composed into the stuck-screen bug are DELETED here rather
-// than patched: `scanFeedback_`, which any `!LCD` disarmed, and the `showIdle()`
-// that the authorisation lapse painted straight over a live grant screen. A
-// screen's deadline is now the screen's own, and nothing else can cancel it.
+/// Before the bridge has sent any `!LIVE`, it is dead after this much silence:
+/// longer than the widest heartbeat cadence, because a 2.3.0 bridge pings once
+/// per heartbeat and sends nothing else on a quiet link.
+inline constexpr uint32_t kLegacyLivenessMs = 330000UL;
+
+/// The setup gesture's window and the hold that reports it (`!HELD`).
+inline constexpr uint32_t kHeldBootWindowMs = 60000UL;
+inline constexpr uint32_t kHeldReportSeconds = 5UL;
+
+/// A repeated tag inside this window is a retry whose first copy arrived.
+inline constexpr uint32_t kDuplicateWindowMs = 5000UL;
+
+/// The uplink queue. A burst — an `!ACK`, a `!STATE` and an `!EVT` after one
+/// `!WANT`, then `!PONG`, `!DIAG` and `!HW` — is larger than the 64-byte UART
+/// ring, so frames are queued whole and drained as the ring has room.
+inline constexpr uint16_t kTxQueueBytes = 256U;
 
 /// Every port the Mega has, gathered into one argument.
 ///
@@ -110,12 +118,19 @@ public:
   /// simulator and a bench pairing with the original bridge opt in explicitly.
   explicit CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy = proto::LegacyDialect::Refuse);
 
-  /// Relays open, authorisation disarmed, decoder cleared, idle screen. This is
-  /// both the power-on state and what `!RST` means, deliberately the same
-  /// function: a reset that left anything behind would be a reset that behaves
-  /// differently from a power cycle, which is the failure an operator reaches
-  /// for `!RST` to rule out.
+  /// Relays open, authorisation disarmed, decoder cleared, landing screen —
+  /// what `!RST` means. Settings are NOT reset: they reset only at a Mega
+  /// restart, and the bridge re-sends them then.
   void begin();
+
+  /// The Mega's first act after a reset (v3, FWM-01/FWM-12): settings to their
+  /// boot defaults, `begin()`, then `!BOOT,<version>,<cause>,<held>` and
+  /// `!STATE` queued BEFORE the caller initialises the LCD (whose driver
+  /// spends a hundred milliseconds in delays), so the bridge can re-apply its
+  /// snapshot within seconds of a Mega-only reset. `resetCause` is MCUSR as
+  /// saved before the core cleared it. `!HW` follows on the first poll(),
+  /// i.e. once the LCD has been initialised.
+  void boot(uint8_t resetCause);
 
   /// One pass of the main loop. Never blocks, never delays, samples the clock
   /// once. Safe to call as fast as the CPU allows.
@@ -126,31 +141,28 @@ public:
   // Counters rather than logs: an 8-bit part has nowhere to keep a log, and the
   // bridge is the thing that might be missing when they matter most.
 
-  /// Frames that could not be put on the wire — a full TX ring, or a peer that
-  /// went away mid-frame. Each one is a `!BTN`, `!SCAN` or `!EVT` the bridge
-  /// will never see.
+  /// Frames that could not be queued for the wire (the uplink queue full).
   uint16_t droppedTxFrames() const { return txDropped_; }
 
-  /// Lines from the bridge that did not decode: bad checksum, unknown verb,
-  /// over-long line. A rising count is a failing cable, not a failing peer.
+  /// Lines from the bridge that did not decode.
   uint16_t rxErrors() const { return rxErrors_; }
 
-  /// Debounced DURATION presses discarded because the authorisation window was
-  /// shut (court presses are forwarded either way since Mega 2.1.0). The count
-  /// that tells "nobody is using this court" apart from "the bridge stopped
-  /// sending `!AUTH` and every press is being thrown away".
+  /// Debounced presses discarded because the window was shut and the key's
+  /// `KEYS` bit is clear (HW-7).
   uint16_t unauthorisedPresses() const { return unauthorised_; }
 
-  /// Scanner lines thrown away as too long — a reader configured for a
-  /// different symbology, or one appending a suffix.
   uint16_t oversizeScans() const { return oversizeScans_; }
 
-  /// Scanner lines thrown away as corrupt: a byte outside the payload set on a
-  /// 9600 baud line. A cable, a connector or interference — and the count that
-  /// explains a member whose code "sometimes does not work".
   uint16_t corruptScans() const { return corruptScans_; }
 
   const ScreenBuffer& screens() const { return screens_; }
+
+  const MegaSettings& settings() const { return settings_; }
+
+  const ScannerBaud& scannerBaud() const { return baud_; }
+
+  /// The Mega's verdict on the bridge (v3 liveness).
+  bool bridgeAlive() const { return bridgeAlive_; }
 
   uint32_t uptimeSeconds() const { return static_cast<uint32_t>(uptime_.value() / 1000ULL); }
 
@@ -158,74 +170,110 @@ public:
 
   const AuthWindow& auth() const { return auth_; }
 
+  /// Bytes waiting in the uplink queue.
+  uint16_t txQueued() const { return txCount_; }
+
 private:
   // --- one pass ------------------------------------------------------------
   void drainBridge(uint32_t nowMs);
   void drainScanner(uint32_t nowMs);
+  void completeScan(uint32_t nowMs);
+  void expireScanLine(uint32_t nowMs);
   void pollButtons(uint32_t nowMs);
-  void pollButtonsUnarmed(uint8_t pressed, uint32_t nowMs);
   void releaseExpired(uint32_t nowMs);
+  void watchBridge(uint32_t nowMs);
+  void watchHeld(uint32_t nowMs);
   void noteAuthLapse(uint32_t nowMs);
-  void flushOverrun();
+  void reportHardware();
   void publishState(uint32_t nowMs);
+  void flushTx();
 
   // --- inbound -------------------------------------------------------------
   void handleResult(const proto::Decoder::Result& result, uint32_t nowMs);
   void handleFrame(const proto::Frame& frame, uint32_t nowMs);
+  void handleV3Frame(const proto::Frame& frame, uint32_t nowMs);
   void reportDecodeError(proto::DecodeError error);
   void applyOn(const proto::Frame& frame, uint32_t nowMs);
-  void applyOff(const proto::Frame& frame);
+  void applyOff(const proto::Frame& frame, uint32_t nowMs);
   void applyExt(const proto::Frame& frame, uint32_t nowMs);
+  void applyAuth(const proto::Frame& frame, uint32_t nowMs);
   void applyScreen(const proto::Frame& frame, uint32_t nowMs);
+  void applyV3Screen(const proto::Frame& frame, uint32_t nowMs);
+  void applyWant(const proto::Frame& frame, uint32_t nowMs);
+  void applyCfg(const proto::Frame& frame);
+  void applySideEffects(Cfg key);
+  void answerPing();
+  /// A tagged frame for `slot` (relay 0-3, or kAuthSlot): true when it is a
+  /// repeat of the tag last applied there, already answered `!ACK,<tag>,1`.
+  bool duplicate(uint8_t slot, uint8_t tag, uint32_t nowMs);
+  void remember(uint8_t slot, uint8_t tag, uint32_t nowMs);
+  void ack(uint8_t tag, proto::AckCode code);
+  bool courtOf(const proto::Frame& frame, uint8_t& channel);
 
   // --- outbound ------------------------------------------------------------
 
-  /// All of the frame or none of it. False means nothing reached the wire; half
-  /// a frame would fail the peer's checksum AND be read as the head of the next
-  /// one, so one overrun would corrupt two messages.
+  /// The whole encoded frame into the uplink queue, or nothing (counted).
   bool sendFrame(const proto::Frame& frame);
-
-  void sendCourtEvent(const char* name, proto::Court court);
+  void sendCourtEvent(const char* name, uint8_t channel);
   void reportScanRejects();
   void sendScanReject(const char* name, uint16_t count);
 
   hal::IScannerPort& scanner_;
+  hal::IButtonPort& buttons_;
   hal::ITransport& bridge_;
   hal::IClock& clock_;
+  hal::IRelayPort& relayPort_;
+  hal::IDisplayPort& display_;
 
+  MegaSettings settings_;
   RelayGuard relays_;
   ScreenBuffer screens_;
   ButtonPanel panel_;
   ScanAssembler scan_;
+  ScannerBaud baud_;
   AuthWindow auth_;
   proto::Decoder rx_;
   tb::Uptime64 uptime_;
   tb::Deadline stateDue_;
 
-  /// The mask `!STATE` last reported, so a change can be detected without
-  /// re-deriving it from four deadlines.
   uint8_t lastMask_;
+  bool stateNow_;
 
-  /// A frame was dropped and the peer has not been told yet. Set on any send
-  /// failure and cleared once `!EVT,OVERRUN` gets out. A flag rather than an
-  /// immediate send, because the send that would report the overrun is the one
-  /// that just failed — reporting it inline is either a recursion or a lie.
-  bool overrunPending_;
-
-  /// The encode scratch buffer, held rather than stacked. 192 bytes is 2.3% of
-  /// the ATmega's SRAM; as a local it would sit under every call in the send
-  /// path at once, and stack exhaustion on this part is silent.
+  /// The encode scratch buffer, held rather than stacked: 192 bytes is 2.3% of
+  /// the ATmega's SRAM and stack exhaustion on this part is silent.
   char txBuf_[proto::kMaxFrameLen];
+  uint8_t txQueue_[kTxQueueBytes];
+  uint16_t txHead_;
+  uint16_t txCount_;
 
   uint16_t txDropped_;
   uint16_t rxErrors_;
   uint16_t unauthorised_;
   uint16_t oversizeScans_;
   uint16_t corruptScans_;
-
-  /// ScanAssembler's own reject count as of the last pass, so an INCREASE is
-  /// what produces an event. The assembler counts; this is what notices.
   uint16_t lastScanRejects_;
+  uint32_t lastScanByteMs_;
+
+  // Bridge liveness (v3).
+  uint32_t lastRxMs_;
+  uint8_t livePeriodS_;
+  bool liveSeen_;
+  bool bridgeAlive_;
+
+  // Duplicate detection: the last tag applied per relay and for `!AUTH`.
+  static constexpr uint8_t kAuthSlot = 4U;
+  uint8_t lastTag_[5];
+  uint32_t lastTagAtMs_[5];
+
+  // The setup gesture: a chord held from inside the boot window.
+  uint32_t bootMs_;
+  uint32_t heldSinceMs_;
+  uint8_t heldMask_;
+  bool heldSent_;
+
+  // What `!HW` last said, so a change re-sends it.
+  uint8_t hwSent_[5];
+  bool hwDue_;
 };
 
 } // namespace courtlogic

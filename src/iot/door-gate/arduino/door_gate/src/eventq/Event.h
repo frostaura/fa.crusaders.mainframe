@@ -129,6 +129,14 @@ inline constexpr size_t kMaxSubjectLen = 32U;
 /// byte-for-byte copy and read back the same way. A member that needed
 /// construction would need a parser, and a parser is a thing that can disagree
 /// with the writer after a firmware update.
+/// Why a court's lights went out (v3 release `cause`, device-api.md §9). None
+/// renders nothing — the server reads an absent cause as `member`, which is
+/// what every 2.x box's releases were.
+enum class Cause : uint8_t { None = 0U, Member, AutoOff, Cap, MegaReset, Reconcile };
+
+/// The wire word for a cause, "" for None.
+const char* causeName(Cause cause);
+
 struct Event {
   /// Device-local, monotonic, never reused. Zero means "unset" and is not a
   /// legal queued value — see EventQueue::push.
@@ -154,6 +162,9 @@ struct Event {
   /// `subjectLen` bytes. Padded with zeroes so two equal events have equal
   /// bytes, which is what lets the checksum be over the whole record.
   char subject[kMaxSubjectLen] = {};
+
+  /// A release's cause (v3). Last, so the fields before it keep their offsets.
+  Cause cause = Cause::None;
 
   static constexpr uint8_t kNoCourt = 0xFFU;
 

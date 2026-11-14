@@ -127,7 +127,11 @@ function useLazyItems(count: number) {
 
 function ChoiceControl({ def, value: raw, update, describedBy, options }: ControlProps & { options: readonly Option[] }) {
   // A value this build cannot render shows the placeholder — never a blank that saves as itself.
-  const value = typeof raw === "string" && options.some((option) => option.value === raw) ? raw : "";
+  // A numeric enumeration (`numericChoice`: the LCD address, the scanner speed) is held as a
+  // number and offered as the strings a select holds; it is turned back into a number on change,
+  // so the PUT carries 39, never "39".
+  const held = def.numericChoice && typeof raw === "number" ? String(raw) : raw;
+  const value = typeof held === "string" && options.some((option) => option.value === held) ? held : "";
   // The same element objects every render, so React skips the list: Radix renders a closed
   // Select's items off-screen, and a timezone list is ~400 of them.
   const items = useMemo(() => options.map((option) => (
@@ -136,7 +140,7 @@ function ChoiceControl({ def, value: raw, update, describedBy, options }: Contro
   const lazy = useLazyItems(options.length);
   const label = options.find((option) => option.value === value)?.label;
   return (
-    <Select value={value} onValueChange={(next) => update(patch(def.key, next))} {...lazy.select}>
+    <Select value={value} onValueChange={(next) => update(patch(def.key, def.numericChoice ? Number(next) : next))} {...lazy.select}>
       <SelectTrigger aria-describedby={describedBy}>
         <SelectValue placeholder="Choose one">{lazy.enabled ? label : undefined}</SelectValue>
       </SelectTrigger>

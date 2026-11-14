@@ -557,8 +557,9 @@ def d1_plug_in(d: Door) -> None:
         and not row.get("gate_key"), f"row={row}")
     bad_mac = d.gate.call("/api/v1/device/heartbeat", {"firmware_version": "1.0.0", "kind": "gate"},
                           mac="not-a-mac")
-    chk("D1", "a mac that is not twelve hex is 400 mac_required, never a 404 reading as 'unknown board'",
-        bad_mac.status == 400 and bad_mac.get("error") == "mac_required", bad_mac.text[:120])
+    # BD-13: present but malformed is `mac_invalid`; `mac_required` is for an absent or blank one.
+    chk("D1", "a mac that is not twelve hex is 400 mac_invalid, never a 404 reading as 'unknown board'",
+        bad_mac.status == 400 and bad_mac.get("error") == "mac_invalid", bad_mac.text[:120])
 
 
 def d2_name_the_door(d: Door) -> None:

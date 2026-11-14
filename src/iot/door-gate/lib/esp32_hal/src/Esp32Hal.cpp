@@ -3,9 +3,12 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <esp32/rtc.h>
 
 #include <HTTPClient.h>
 #include <Preferences.h>
+#include <WebServer.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <string.h>
 
@@ -222,7 +225,9 @@ gatelogic::HttpOutcome Esp32HttpPort::post(const char* path, const char* body, c
   // Sized from the grammar main.cpp static_asserts API_BASE_URL against, so
   // "the base URL fits" is a compile-time fact rather than a runtime 0 that
   // reads at the door as an outage.
-  char url[gatelogic::kUrlBufSize];
+  // A base URL from the server (devnet: up to 96 characters, a DNS name
+  // allowed) is longer than the compiled one may be.
+  char url[devnet::kBaseUrlMax + gatelogic::kMaxPathLen + 1U];
   const int written = snprintf(url, sizeof(url), "%s%s", baseUrl_, path);
   if (written < 0 || static_cast<size_t>(written) >= sizeof(url)) {
     return gatelogic::noCall();
@@ -364,7 +369,23 @@ bool Esp32Watchdog::begin(uint8_t seconds) {
 #else
     const esp_err_t configured = esp_task_wdt_init(static_cast<uint32_t>(seconds), true);
 #endif
-    const esp_err_t subscribed = esp_task_wdt_add(nullptr);
+    esp_err_t subscribed = esp_task_wdt_add(nullptr);
+    // DG-7: ALREADY SUBSCRIBED IS SUBSCRIBED. A retry after a first attempt
+    // whose init failed but whose add took gets ESP_ERR_INVALID_ARG for ever,
+    // and 1.x reported "not armed" for a loop that was in fact watched.
+    if (subscribed == ESP_ERR_INVALID_ARG) {
+      subscribed = ESP_OK;
+    }
+    if (subscribed != ESP_OK) {
+      // And a failed subscription falls back to the loop task BY HANDLE: on this
+      // core the loop task is not watched by default (loopTaskWDTEnabled is
+      // false), so a board that could not subscribe would otherwise run with
+      // no watchdog over the lock at all.
+      subscribed = esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+      if (subscribed == ESP_ERR_INVALID_ARG) {
+        subscribed = ESP_OK;
+      }
+    }
     if (configured == ESP_OK && subscribed == ESP_OK) {
       return true;
     }
@@ -374,6 +395,221 @@ bool Esp32Watchdog::begin(uint8_t seconds) {
 
 void Esp32Watchdog::kick() {
   esp_task_wdt_reset();
+}
+
+// --- gate 2.0.0 ---------------------------------------------------------------
+
+namespace {
+
+constexpr char kBlobNamespace[] = "crusaders2";
+Preferences gBlobs;
+
+} // namespace
+
+bool Esp32NvsBlobs::begin() {
+  ready_ = gBlobs.begin(kBlobNamespace, false);
+  return ready_;
+}
+
+bool Esp32NvsBlobs::put(const char* key, const void* data, size_t len) {
+  if (!ready_ || key == nullptr || data == nullptr) {
+    return false;
+  }
+  return gBlobs.putBytes(key, data, len) == len;
+}
+
+size_t Esp32NvsBlobs::get(const char* key, void* out, size_t cap) {
+  if (!ready_ || key == nullptr || out == nullptr) {
+    return 0U;
+  }
+  const size_t stored = gBlobs.getBytesLength(key);
+  if (stored == 0U || stored > cap) {
+    return 0U;
+  }
+  return gBlobs.getBytes(key, out, stored) == stored ? stored : 0U;
+}
+
+void Esp32NvsBlobs::erase(const char* key) {
+  if (ready_ && key != nullptr) {
+    static_cast<void>(gBlobs.remove(key));
+  }
+}
+
+uint64_t Esp32RtcClock::nowUs() {
+  return esp_rtc_get_time_us();
+}
+
+void Esp32Radio::join(const char* ssid, const char* psk) {
+  // Disconnect without erasing anything (persistent(false) at boot), then
+  // begin on the new profile. WiFi.begin returns at once; association runs on
+  // the core's own task, so this never holds the loop.
+  static_cast<void>(WiFi.disconnect(false, false));
+  static_cast<void>(WiFi.begin(ssid, psk));
+}
+
+void Esp32System::restart() {
+  esp_restart();
+}
+
+namespace {
+
+const char* resetWord(esp_reset_reason_t reason) {
+  switch (reason) {
+  case ESP_RST_POWERON:
+    return "power_on";
+  case ESP_RST_EXT:
+    return "external";
+  case ESP_RST_SW:
+    return "software";
+  case ESP_RST_PANIC:
+    return "panic";
+  case ESP_RST_INT_WDT:
+    return "int_wdt";
+  case ESP_RST_TASK_WDT:
+  case ESP_RST_WDT:
+    return "task_wdt";
+  case ESP_RST_DEEPSLEEP:
+    return "deep_sleep";
+  case ESP_RST_BROWNOUT:
+    return "brownout";
+  default:
+    return "unknown";
+  }
+}
+
+} // namespace
+
+void Esp32Diag::read(gatelogic::GateDiag& out) {
+  out.reset = resetWord(esp_reset_reason());
+  out.exc = 0U;
+  out.epc1 = 0U;
+  out.heap = ESP.getFreeHeap();
+  out.heapMin = ESP.getMinFreeHeap();
+  out.block = ESP.getMaxAllocHeap();
+  // On this core a stack is counted in bytes (StackType_t is uint8_t).
+  out.stackMin = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+  out.sketchFree = ESP.getFreeSketchSpace();
+  out.flashMb = ESP.getFlashChipSize() / (1024U * 1024U);
+}
+
+void Esp32BootButton::begin() {
+  pinMode(0, INPUT_PULLUP);
+}
+
+bool Esp32BootButton::pressed() {
+  return digitalRead(0) == LOW;
+}
+
+namespace {
+
+WebServer gPortalServer(80);
+bool gSubmitted = false;
+char gReason[32] = {};
+bool gAccepted = false;
+
+char gSsid[devnet::kSsidMax + 1U];
+char gPsk[devnet::kPskMax + 1U];
+char gSsid2[devnet::kSsidMax + 1U];
+char gPsk2[devnet::kPskMax + 1U];
+char gBase[devnet::kBaseUrlMax + 1U];
+char gKeyId[devnet::kKeyIdCap];
+char gKey[devnet::kKeyLen + 1U];
+
+void copyArg(const char* name, char* out, size_t cap) {
+  const String value = gPortalServer.arg(name);
+  if (value.length() + 1U > cap) {
+    out[0] = '\0';
+    return;
+  }
+  memcpy(out, value.c_str(), value.length() + 1U);
+}
+
+void sendPage() {
+  String page = F("<!doctype html><meta name=viewport content='width=device-width'>"
+                  "<title>Crusaders door setup</title><h1>Door setup</h1>");
+  if (gAccepted) {
+    page += F("<p>Saved. The door restarts now and joins the network you entered.</p>");
+  } else {
+    if (gReason[0] != '\0') {
+      page += F("<p><b>Not saved:</b> ");
+      page += gReason;
+      page += F("</p>");
+    }
+    page +=
+        F("<form method=post action=/save>"
+          "<p>WiFi name<br><input name=ssid maxlength=32 required></p>"
+          "<p>WiFi password<br><input name=psk type=password maxlength=63></p>"
+          "<p>Second WiFi name (optional)<br><input name=ssid2 maxlength=32></p>"
+          "<p>Second WiFi password<br><input name=psk2 type=password maxlength=63></p>"
+          "<p>Server address, e.g. http://192.168.1.10:8088<br><input name=base maxlength=96 required></p>"
+          "<p>Device key id and key (optional)<br><input name=key_id maxlength=7>"
+          "<input name=key maxlength=43></p><p><button>Save</button></p></form>");
+  }
+  gPortalServer.send(200, "text/html", page);
+}
+
+} // namespace
+
+void Esp32Portal::open(const char* apName) {
+  WiFi.mode(WIFI_AP_STA);
+  static_cast<void>(WiFi.softAP(apName, password_));
+  gSubmitted = false;
+  gAccepted = false;
+  gReason[0] = '\0';
+  gPortalServer.on("/", HTTP_GET, []() { sendPage(); });
+  gPortalServer.on("/save", HTTP_POST, []() {
+    copyArg("ssid", gSsid, sizeof(gSsid));
+    copyArg("psk", gPsk, sizeof(gPsk));
+    copyArg("ssid2", gSsid2, sizeof(gSsid2));
+    copyArg("psk2", gPsk2, sizeof(gPsk2));
+    copyArg("base", gBase, sizeof(gBase));
+    copyArg("key_id", gKeyId, sizeof(gKeyId));
+    copyArg("key", gKey, sizeof(gKey));
+    gSubmitted = true;
+    gReason[0] = '\0';
+    sendPage();
+  });
+  gPortalServer.begin();
+  open_ = true;
+}
+
+bool Esp32Portal::service(gatelogic::PortalForm& form) {
+  if (!open_) {
+    return false;
+  }
+  gPortalServer.handleClient();
+  if (!gSubmitted) {
+    return false;
+  }
+  gSubmitted = false;
+  form.ssid = gSsid;
+  form.psk = gPsk;
+  form.ssid2 = gSsid2;
+  form.psk2 = gPsk2;
+  form.base = gBase;
+  form.keyId = gKeyId;
+  form.key = gKey;
+  return true;
+}
+
+void Esp32Portal::refuse(const char* reason) {
+  snprintf(gReason, sizeof(gReason), "%s", reason);
+}
+
+void Esp32Portal::accept() {
+  gAccepted = true;
+  // The page that says so, before the restart takes the access point away.
+  for (int i = 0; i < 50; ++i) {
+    gPortalServer.handleClient();
+    delay(10);
+  }
+}
+
+void Esp32Portal::close() {
+  gPortalServer.stop();
+  static_cast<void>(WiFi.softAPdisconnect(true));
+  WiFi.mode(WIFI_STA);
+  open_ = false;
 }
 
 } // namespace esp32_hal

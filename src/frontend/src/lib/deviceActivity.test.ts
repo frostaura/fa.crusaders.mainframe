@@ -108,8 +108,18 @@ describe("describeActivityReason", () => {
     // `member_not_active` — a different fact, and a different fix.
     expect(Object.keys(DOOR_REFUSAL_REASONS).sort()).toEqual([
       "code_used", "member_not_active", "method_not_supported", "no_booking", "no_membership",
-      "not_a_gate", "not_recognised", "ok", "refused_offline", "too_early",
+      "not_a_gate", "not_recognised", "ok", "refused_offline", "replayed", "too_early",
     ]);
+  });
+
+  /** MCV1-10: a door's own replay refusal made ONLINE reads as a replay, never as offline. */
+  it("says a door's online replay refusal as a replay, whatever action it is filed under", () => {
+    for (const action of ["gate.denied", "device.unknown_scan"]) {
+      const said = describeActivityReason(entry({ action, reason: "replayed", offline: false }));
+      expect(said, action).toBe("The door had already seen that code — a second scan of it, or a copy");
+      expect(said).not.toMatch(/offline|saved list/);
+    }
+    expect(DOOR_OUTCOME_CHIPS.replayed).toBe("Replayed code");
   });
 
   /**

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth, type SessionEnding } from "../lib/useAuth";
 import { ApiError, endpoints, errorCode } from "../lib/api";
-import { isPasskeySupported } from "../lib/webauthn";
+import { isPasskeyCancel, isPasskeySupported } from "../lib/webauthn";
 import { useAsyncAction } from "../lib/useAsyncAction";
 import { AuthDivider, AuthShell } from "../components/AuthShell";
 import { Alert } from "../components/Alert";
@@ -210,7 +210,7 @@ function refusalOf(err: unknown): Refusal {
 }
 
 function passkeyRefusal(err: unknown): Refusal | null {
-  if (err instanceof Error && err.message === "passkey_cancelled") return null; // the member dismissed it
+  if (isPasskeyCancel(err)) return null; // the member dismissed the sheet (FM-2: NotAllowedError too)
   const message = err instanceof ApiError && err.status === 401 ? LOGIN_REFUSAL.passkeyUnknown : LOGIN_REFUSAL.passkeyFailed;
   return { message, contact: null, offerResend: false };
 }

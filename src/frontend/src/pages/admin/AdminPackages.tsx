@@ -1,6 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ActionsMenu } from "../../components/admin/ActionsMenu";
 import { pageHeading } from "../../lib/focusAfterAction";
+import { unsureSentence, writeOrReadBack } from "../../lib/lostReply";
+import { LOST_REPLY, unsureWords } from "../../lib/lostReplyCopy";
 import { ConfirmDialog } from "../../components/admin/ConfirmDialog";
 import { Minutes } from "../../components/Minutes";
 import { useToast } from "../../components/toastContext";
@@ -413,10 +415,17 @@ function RetireDialog({ pkg, open, onClose, onRetired }: {
       cancelLabel={COPY.cancel}
       action={COPY.retireAction}
       codes={COPY.errorCodes}
+      // FA-11: a lost reply is read back from the club's packages (Retire is idempotent on the
+      // API), so a retire that landed is said as landed rather than as a failure.
+      describe={(e) => unsureSentence(e, unsureWords(`${pkg.name} is still on sale`, `${pkg.name} was retired`, "Packages"))}
       onConfirm={async () => {
-        const retired = await adminEndpoints.packageArchive(pkg.id);
+        const { value: retired, proven, answered } = await writeOrReadBack(
+          () => adminEndpoints.packageArchive(pkg.id),
+          async () => (await adminEndpoints.packages("all")).packages.find((p) => p.id === pkg.id && p.status === "archived") ?? null,
+        );
         onRetired(retired);
-        toast.push({ tone: "success", text: COPY.retired(pkg.name) });
+        const done = COPY.retired(pkg.name);
+        toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(done, answered) : done });
       }}
     />
   );

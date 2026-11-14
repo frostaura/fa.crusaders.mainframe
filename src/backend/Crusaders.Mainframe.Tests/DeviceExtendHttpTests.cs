@@ -41,7 +41,11 @@ public sealed class DeviceExtendHttpTests(PostgresFixture pg) : IClassFixture<Po
     {
         var body = new JsonObject
         {
-            ["mac"] = mac ?? c.BoxMac, ["method"] = method, ["token"] = token, ["court"] = court, ["minutes"] = minutes,
+            ["mac"] = mac ?? c.BoxMac,
+            ["method"] = method,
+            ["token"] = token,
+            ["court"] = court,
+            ["minutes"] = minutes,
         };
         if (nonce is not null) body["nonce"] = nonce;
         return c.Device(ExtendPath, body);
@@ -69,9 +73,18 @@ public sealed class DeviceExtendHttpTests(PostgresFixture pg) : IClassFixture<Po
     {
         var booking = new Booking
         {
-            TenantId = c.TenantId, CourtId = c.Courts[courtIndex], UserId = user, BookedByUserId = user, PaidByUserId = user,
-            ActorUserId = user, StartsAt = startsAt, EndsAt = startsAt.AddMinutes(minutes), SliceMinutes = 15,
-            SliceCount = Math.Max(1, minutes / 15), AmountChargedMinutes = minutes, Status = BookingStatus.Booked,
+            TenantId = c.TenantId,
+            CourtId = c.Courts[courtIndex],
+            UserId = user,
+            BookedByUserId = user,
+            PaidByUserId = user,
+            ActorUserId = user,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(minutes),
+            SliceMinutes = 15,
+            SliceCount = Math.Max(1, minutes / 15),
+            AmountChargedMinutes = minutes,
+            Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };
         await c.WriteAsync(app, db =>
@@ -224,8 +237,12 @@ public sealed class DeviceExtendHttpTests(PostgresFixture pg) : IClassFixture<Po
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = c.TenantId, UserId = c.Pam, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = -190,
-                ActorUserId = c.AdminId, Reason = "test: spend down",
+                TenantId = c.TenantId,
+                UserId = c.Pam,
+                Type = LedgerEntryType.AdminAdjustment,
+                AmountMinutes = -190,
+                ActorUserId = c.AdminId,
+                Reason = "test: spend down",
             });
             return Task.CompletedTask;
         });
@@ -491,8 +508,14 @@ public sealed class DeviceExtendHttpTests(PostgresFixture pg) : IClassFixture<Po
         {
             db.CourtLightStates.Add(new CourtLightState
             {
-                TenantId = c.TenantId, CourtId = c.Courts[0], State = LightState.On, OnSince = onSince, OnUntil = playing.EndsAt,
-                BookingId = playing.Id, Cause = LightCause.Member, CausedByUserId = c.Olga,
+                TenantId = c.TenantId,
+                CourtId = c.Courts[0],
+                State = LightState.On,
+                OnSince = onSince,
+                OnUntil = playing.EndsAt,
+                BookingId = playing.Id,
+                Cause = LightCause.Member,
+                CausedByUserId = c.Olga,
             });
             return Task.CompletedTask;
         });

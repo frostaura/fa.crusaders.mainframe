@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { describeFailure } from "@/lib/errors";
-import { errorCode } from "@/lib/api";
+import { describeFailure, isConfigurationFault } from "@/lib/errors";
 import { Alert } from "../Alert";
 import { Button } from "./button";
 import { WarningCircle, type Icon } from "./icons";
@@ -56,22 +55,6 @@ export type StateBlockProps = {
   className?: string;
   children?: ReactNode;
 };
-
-/**
- * F4.4 — the only failures a retry can never fix: the club's address resolves to no club.
- *
- * <p>
- * This used to be `isDeploymentFault`, which also counted every status ≥ 500. A 500, 502, 503 or
- * 504 is transient — a restart, a blip — and its own sentence says "Try again shortly", so
- * dropping the button left the member told to do something the screen would not let them do.
- * </p>
- */
-const CONFIGURATION_CODES = new Set(["tenant_not_found", "tenant_unresolved"]);
-
-function isConfigurationFault(err: unknown): boolean {
-  const code = errorCode(err);
-  return code !== null && CONFIGURATION_CODES.has(code);
-}
 
 type Failed = Pick<StateBlockProps, "error" | "action" | "codes" | "failedCaveat" | "onRetry" | "retryLabel" | "className">;
 

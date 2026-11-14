@@ -1,0 +1,15 @@
+{
+  "description": "Base URL grammar, network and key adoption from the heartbeat, and the WiFi link supervisor.",
+  "authority": "docs/specs/device-api.md sections 5, 6 and 8; gen_cases.py beside this file is the reference implementation.",
+  "generator": "src/contracts/device-protocol/provision/gen_cases.py",
+  "read_by": [
+    "fw-shared",
+    "csharp"
+  ],
+  "case_count": {
+    "base_urls": 18,
+    "nets": 13,
+    "keys": 8,
+    "supervisor": 7
+  }
+}

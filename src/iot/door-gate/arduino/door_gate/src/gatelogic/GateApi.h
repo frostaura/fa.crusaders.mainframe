@@ -71,6 +71,30 @@ public:
   HttpOutcome heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs,
                         const GateDiagnostics& diagnostics, char* out, size_t outCap);
 
+  /// The 2.0.0 heartbeat, with the v3 fields and telemetry (device-api.md §2),
+  /// rendered into a static kGateHeartbeatRequestCap buffer: 1.5 KB is too
+  /// much to put on the loop task's stack under a blocking call.
+  HttpOutcome heartbeatV3(const GateBeat& beat, char* out, size_t outCap);
+
+  /// Called between a 401 and its retry with the other key: the caller kicks
+  /// the watchdog and re-checks the lock, exactly as around any blocking call.
+  class IBetweenCalls {
+  public:
+    virtual ~IBetweenCalls() = default;
+    virtual void betweenCalls() = 0;
+  };
+
+  /// The device keys (§6). With them, a 401 is retried once with the other key
+  /// the board holds. Without them (a host test that does not care), a 401 is
+  /// just a 401.
+  void useKeys(class GateKeys* keys, IBetweenCalls* between) {
+    keys_ = keys;
+    between_ = between;
+  }
+
+  /// Retries made with the other key since boot. For the host suite.
+  uint32_t keyRetries() const { return keyRetries_; }
+
   /// One already-rendered event-upload body. Rendered by the caller because
   /// devlink owns that shape and every firmware renders it identically.
   uint16_t uploadEvent(const char* body, char* out, size_t outCap);
@@ -97,6 +121,9 @@ private:
   /// if that carve-out ever moves; the test pins the carve-out itself.
   void recordHttpFault(const HttpOutcome& outcome, uint32_t nowMs);
 
+  class GateKeys* keys_ = nullptr;
+  IBetweenCalls* between_ = nullptr;
+  uint32_t keyRetries_ = 0U;
   IHttpPort& http_;
   devlink::ApiBreaker& breaker_;
   hal::IClock& clock_;

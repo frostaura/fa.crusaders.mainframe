@@ -39,6 +39,9 @@ namespace Crusaders.Mainframe.Api.Services;
 /// </summary>
 public sealed class AdminNotificationDispatcher
 {
+    /// <summary>The cause a demo club's notice is suppressed with: a demo club mails nobody (BA-12 reads it).</summary>
+    public const string DemoModeCause = "demo_mode";
+
     /// <summary>Rows claimed per pass. Small: each costs one SMTP round trip per admin.</summary>
     public const int BatchSize = 20;
 
@@ -208,7 +211,7 @@ public sealed class AdminNotificationDispatcher
         var tenant = await db.Tenants.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(t => t.Id == row.TenantId, ct);
         if (tenant is null) return await FinishAsync(db, row, AdminNotificationState.Failed, now, "tenant_missing", ct);
         // Demo mode: a demo club mails nobody — its notices stay on its feed, finished as suppressed.
-        if (tenant.IsDemo) return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, "demo_mode", ct);
+        if (tenant.IsDemo) return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, DemoModeCause, ct);
         scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenant.Id, tenant.Slug);
 
         var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(ct);
@@ -235,7 +238,8 @@ public sealed class AdminNotificationDispatcher
         var delivery = new Delivery(db, row, kind, settings, ClubIdentityResolver.For(tenant, settings))
         {
             Email = scope.ServiceProvider.GetRequiredService<IEmailTransport>(),
-            BaseUrl = scope.ServiceProvider.GetRequiredService<IConfiguration>()["App:PublicBaseUrl"] ?? "http://localhost:8088",
+            // The club's own address (BP-03), so a second club's admins are linked to their club.
+            BaseUrl = await TenantLinks.ForTenantAsync(db, scope.ServiceProvider.GetRequiredService<IConfiguration>(), row.TenantId, ct),
         };
         var error = await SendAllAsync(delivery, ct);
         if (error is null) return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
@@ -281,15 +285,22 @@ public sealed class AdminNotificationDispatcher
         if (verdict.Dropped) return await DropAsync(db, row, now, verdict.DropReason!, ct);
         row.PayloadJson = verdict.PayloadJson!;
 
-        var to = await db.Users.AsNoTracking()
-            .Where(u => u.Id == row.RecipientUserId && u.Status == "active" && u.EmailVerified)
-            .Select(u => u.Email)
+        // Browser lane BM-01: an approved member whose address is not confirmed yet used to have the
+        // row finished "sent" to nobody — a game invite lost for good, even after they verified a
+        // minute later. The row now WAITS for the address (MemberNoticeHold) and is released the
+        // moment it is confirmed; an account that is no longer active is suppressed, said so.
+        var recipient = await db.Users.AsNoTracking()
+            .Where(u => u.Id == row.RecipientUserId)
+            .Select(u => new { u.Email, u.Status, u.EmailVerified })
             .FirstOrDefaultAsync(ct);
-        if (to is null) return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
+        if (recipient is null || recipient.Status != "active")
+            return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, MemberNoticeHold.RecipientInactive, ct);
+        if (!recipient.EmailVerified) return await HoldForAddressAsync(db, row, now, ct);
+        var to = recipient.Email;
 
         try
         {
-            var baseUrl = d.Services.GetRequiredService<IConfiguration>()["App:PublicBaseUrl"] ?? "http://localhost:8088";
+            var baseUrl = await TenantLinks.ForTenantAsync(db, d.Services.GetRequiredService<IConfiguration>(), row.TenantId, ct);
             var message = MemberEventCatalogue.Compose(
                 new MemberMailContext(ClubIdentityResolver.For(d.Tenant, d.Settings), to, row, baseUrl, d.Settings));
             await d.Services.GetRequiredService<IEmailTransport>().SendAsync(message, ct);
@@ -303,6 +314,24 @@ public sealed class AdminNotificationDispatcher
         row.DeliveredToJson = JsonSerializer.Serialize(new[] { row.RecipientUserId });
         row.RecipientCount = 1;
         return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
+    }
+
+    /// <summary>
+    /// A member notice whose recipient has not confirmed their address yet (BM-01): left Pending and
+    /// looked at again after <see cref="MemberNoticeHold.Recheck"/> — or at once when they verify, which
+    /// pulls its due time forward — and suppressed with its reason once it has waited
+    /// <see cref="MemberNoticeHold.MaxHold"/>, when whatever it said is long past. Not an attempt.
+    /// </summary>
+    private static async Task<bool> HoldForAddressAsync(MainframeDbContext db, AdminNotification row, DateTimeOffset now, CancellationToken ct)
+    {
+        if (now - row.CreatedAt > MemberNoticeHold.MaxHold)
+            return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, MemberNoticeHold.RecipientUnverified, ct);
+        row.DueAt = now.Add(MemberNoticeHold.Recheck).Storable();
+        row.LockedUntil = null;
+        row.Attempts = Math.Max(0, row.Attempts - 1);
+        row.LastError = MemberNoticeHold.AwaitingAddress;
+        await db.SaveChangesAsync(ct);
+        return false;
     }
 
     /// <summary>

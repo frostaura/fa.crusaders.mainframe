@@ -68,7 +68,13 @@ public sealed record MemberDeletedPayload(
 /// <summary>A mail the outbox gave up on: who it was for, what it was, and why the server kept refusing it.</summary>
 public sealed record EmailUndeliverablePayload(string To, string Subject, string Reason);
 
+/// <summary>Money lane BM-11: booked court-times the no-show sweep can no longer reach, still charged and never settled.</summary>
+public sealed record BookingsUnsettledPayload(int Count, string OldestLocal, int LookbackDays);
+
 public sealed record ForgeryPayload(string DeviceCode, string? MemberName, string Detail);
+
+/// <summary>MCV1-09: the club's member-code rollout moved on by itself — from, to, and (on the cut-over) when old codes stop.</summary>
+public sealed record CodesPhaseMovedPayload(string From, string To, string? CutoffDueLocal, int CutoffDays);
 
 public sealed record CodesCapabilityLostPayload(Guid DeviceId, string DeviceName, string DeviceCode, string? FirmwareVersion, string Phase);
 
@@ -120,8 +126,10 @@ public static class AdminEventCatalogue
     public const string AdminRoleChanged = "admin.role_changed";
     public const string CodeForgerySuspected = "code.forgery_suspected";
     public const string CodesCapabilityLost = "device.codes_capability_lost";
+    public const string CodesPhaseMoved = "member_code.phase_moved";
     public const string MemberDeleted = "member.deleted";
     public const string EmailUndeliverable = "email.undeliverable";
+    public const string BookingsUnsettled = "booking.unsettled";
 
     /// <summary>How the payloads are written and read. Snake_case, invariant, no indentation.</summary>
     public static readonly JsonSerializerOptions Json = new()
@@ -161,10 +169,14 @@ public static class AdminEventCatalogue
             Security: true),
         new(CodesCapabilityLost, "A board stopped reading member codes",
             "After the club switched to member codes, a board reported firmware that does not check them offline."),
+        new(CodesPhaseMoved, "Member codes moved on by themselves",
+            "The club's switch to members' rotating codes moved to its next step on its own: every board was ready, or the cut-off date arrived."),
         new(MemberDeleted, "Deleted members",
             "Another administrator deleted a member's account."),
         new(EmailUndeliverable, "An email could not be delivered",
             "The mail server kept refusing a message and the club's system has stopped trying."),
+        new(BookingsUnsettled, "Past bookings never settled",
+            "A daily reminder while a booking older than the no-show sweep's reach was never checked in or settled, so its full charge still stands."),
     ];
 
     private static readonly Dictionary<string, AdminEventKind> ByKind =
@@ -209,8 +221,10 @@ public static class AdminEventCatalogue
         [AdminRoleChanged] = ComposeAdminRole,
         [CodeForgerySuspected] = ComposeForgery,
         [CodesCapabilityLost] = ComposeCodesCapabilityLost,
+        [CodesPhaseMoved] = ComposeCodesPhaseMoved,
         [MemberDeleted] = ComposeMemberDeleted,
         [EmailUndeliverable] = ComposeEmailUndeliverable,
+        [BookingsUnsettled] = ComposeBookingsUnsettled,
     };
 
     /// <summary>The baseline wording, unchanged: this is the registration notice that used to be sent directly.</summary>
@@ -327,6 +341,12 @@ public static class AdminEventCatalogue
         });
     }
 
+    private static EmailMessage ComposeBookingsUnsettled(AdminMailContext c)
+    {
+        var p = c.Payload<BookingsUnsettledPayload>();
+        return EmailTemplates.AdminBookingsUnsettled(c.Club, c.To, new UnsettledBookings(p.Count, p.OldestLocal, p.LookbackDays, c.ConsoleUrl));
+    }
+
     private static EmailMessage ComposeEmailUndeliverable(AdminMailContext c)
     {
         var p = c.Payload<EmailUndeliverablePayload>();
@@ -337,6 +357,12 @@ public static class AdminEventCatalogue
     {
         var p = c.Payload<ForgeryPayload>();
         return EmailTemplates.AdminCodeForgerySuspected(c.Club, c.To, new ForgeryNotice(p.DeviceCode, p.MemberName, p.Detail, c.ConsoleUrl));
+    }
+
+    private static EmailMessage ComposeCodesPhaseMoved(AdminMailContext c)
+    {
+        var p = c.Payload<CodesPhaseMovedPayload>();
+        return EmailTemplates.AdminCodesPhaseMoved(c.Club, c.To, new CodesPhaseMoved(p.From, p.To, p.CutoffDueLocal, p.CutoffDays, c.ConsoleUrl));
     }
 
     private static EmailMessage ComposeCodesCapabilityLost(AdminMailContext c)

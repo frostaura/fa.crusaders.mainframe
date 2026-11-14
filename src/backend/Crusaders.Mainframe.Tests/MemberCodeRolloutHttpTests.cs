@@ -46,7 +46,9 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         var step = m1.GetProperty("code_step").GetInt64();
         Assert.InRange(step, MemberCodeMath.StepOf(DateTimeOffset.UtcNow) - 1, MemberCodeMath.StepOf(DateTimeOffset.UtcNow));
         Assert.InRange(m1.GetProperty("code_step_ms").GetInt32(), 0, 29_999);
-        Assert.Empty(m1.GetProperty("code_days").EnumerateArray());
+        // MCV1-04 (member-code §5.2, 2026-11-13): an ACKNOWLEDGED codes:m1 box is entitled to keys
+        // in every phase, legacy included — today's day slot, and no keys because nobody is booked.
+        Assert.Single(m1.GetProperty("code_days").EnumerateArray());
         Assert.Empty(m1.GetProperty("code_keys").EnumerateArray());
         Assert.Equal(
             ["roster", "code_step", "code_step_ms", "code_days", "code_keys"],
@@ -98,15 +100,23 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         Assert.StartsWith($"m{refText}|1|", Assert.Single(box.GetProperty("roster").EnumerateArray()).GetString());
         Assert.Single(box.GetProperty("code_keys").EnumerateArray());
 
-        // Before the cut-over the box's legacy roster minted the booking a code; a booking arriving
-        // after it gets none, and is named by its player instead.
-        Assert.Equal(1, await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters().CountAsync(c => c.BookingId == booking.Id)));
+        // MCV1-04: an acknowledged codes:m1 box was sent v1 elements and keys from its first beat,
+        // in the legacy phase too, so no roster ever minted the booking a legacy code; a booking
+        // arriving after the cut-over gets none either, and is named by its player.
+        Assert.Equal(0, await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters().CountAsync(c => c.BookingId == booking.Id)));
         var later = await club.BookAsync(app, club.Pam, courtIndex: 2, startsInMinutes: 30);
         var after = await BeatAsync(device, club, club.BoxMac, m1: true);
         Assert.Equal(2, after.GetProperty("roster").GetArrayLength());
         Assert.Equal(0, await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters().CountAsync(c => c.BookingId == later.Id)));
         Assert.Single(await club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
             .Where(a => a.TenantId == club.TenantId && a.Action == MemberCodeRollout.PhaseChangedAction).ToListAsync()));
+        // MCV1-09: the club is told of the automatic cut-over, once, with the date old codes stop.
+        var moved = Assert.Single(await club.ReadAsync(app, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == club.TenantId && n.Kind == AdminEventCatalogue.CodesPhaseMoved).ToListAsync()));
+        var payload = JsonSerializer.Deserialize<CodesPhaseMovedPayload>(moved.PayloadJson, AdminEventCatalogue.Json)!;
+        Assert.Equal(("legacy", "v1"), (payload.From, payload.To));
+        Assert.NotNull(payload.CutoffDueLocal);
+        Assert.StartsWith("The club moved to new member codes; old codes stop on ", moved.Headline);
     }
 
     [SkippableFact]
@@ -179,9 +189,18 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         await BeatAsync(device, club, club.BoxMac, m1: true);
         Assert.Equal("v1", await PhaseAsync(club, app));
 
+        // Not moved yet, so nobody has been told anything.
+        Assert.Empty(await club.ReadAsync(app, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == club.TenantId && n.Kind == AdminEventCatalogue.CodesPhaseMoved).ToListAsync()));
+
         await club.SetPhaseAsync(app, MemberCodeSettings.V1, DateTimeOffset.UtcNow.AddDays(-14).AddMinutes(-1));
         await BeatAsync(device, club, club.BoxMac, m1: true);
         Assert.Equal("v1_only", await PhaseAsync(club, app));
+        // MCV1-09: the automatic cut-off is said the day it happens, and a second beat says it no twice.
+        await BeatAsync(device, club, club.BoxMac, m1: true);
+        var cutoff = Assert.Single(await club.ReadAsync(app, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == club.TenantId && n.Kind == AdminEventCatalogue.CodesPhaseMoved).ToListAsync()));
+        Assert.Equal("Old member codes stopped working: the club is on new codes only", cutoff.Headline);
 
         // A board still on legacy firmware in v1_only is sent no legacy roster at all.
         await club.BookAsync(app, club.Olga, courtIndex: 0, startsInMinutes: -5);
@@ -206,8 +225,14 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         {
             var body = JsonSerializer.SerializeToNode(new
             {
-                sliceMinutes = 15, slicePriceCredits = 8, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
-                penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15,
+                sliceMinutes = 15,
+                slicePriceCredits = 8,
+                advanceBookingDays = 14,
+                dayStartMinute = 0,
+                dayEndMinute = 1440,
+                penaltyPct = 30,
+                graceWindowMinutes = 5,
+                penaltyWindowMinutes = 15,
             })!.AsObject();
             foreach (var p in JsonSerializer.SerializeToNode(extra)!.AsObject().ToList()) body[p.Key] = p.Value?.DeepClone();
             return (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode;
@@ -288,8 +313,13 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         {
             db.Devices.Add(new Device
             {
-                TenantId = club.TenantId, DeviceCode = "gate-2", Name = "Side door", Kind = DeviceKind.Gate,
-                Hardware = DeviceHardware.Esp32, MacAddress = secondDoor, GateKey = "side",
+                TenantId = club.TenantId,
+                DeviceCode = "gate-2",
+                Name = "Side door",
+                Kind = DeviceKind.Gate,
+                Hardware = DeviceHardware.Esp32,
+                MacAddress = secondDoor,
+                GateKey = "side",
             });
             return Task.CompletedTask;
         });

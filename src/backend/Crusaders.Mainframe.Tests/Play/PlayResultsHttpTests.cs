@@ -262,17 +262,35 @@ public sealed class PlayResultsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         var live = (await ResultRowAsync(f, booking))!;
         var second = new MatchResult
         {
-            TenantId = club.TenantId, BookingId = booking, Status = MatchResultStatus.Disputed, GamesJson = "[]", GamesWonA = 3, GamesWonB = 0,
-            SubmittedByUserId = club.Sam, RecordedByUserId = club.Sam, IdempotencyKey = "direct", SubmittedAt = DateTimeOffset.UtcNow,
-            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            TenantId = club.TenantId,
+            BookingId = booking,
+            Status = MatchResultStatus.Disputed,
+            GamesJson = "[]",
+            GamesWonA = 3,
+            GamesWonB = 0,
+            SubmittedByUserId = club.Sam,
+            RecordedByUserId = club.Sam,
+            IdempotencyKey = "direct",
+            SubmittedAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
         };
         await Assert.ThrowsAsync<DbUpdateException>(() => club.WriteAsync(f, db => db.MatchResults.Add(second)));
         await club.WriteAsync(f, db => db.MatchResults.IgnoreQueryFilters().First(r => r.Id == live.Id).Status = MatchResultStatus.Voided);
         await club.WriteAsync(f, db => db.MatchResults.Add(new MatchResult
         {
-            TenantId = club.TenantId, BookingId = booking, Status = MatchResultStatus.Disputed, GamesJson = "[]", GamesWonA = 3, GamesWonB = 0,
-            SubmittedByUserId = club.Sam, RecordedByUserId = club.Sam, IdempotencyKey = "direct-2", SubmittedAt = DateTimeOffset.UtcNow,
-            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            TenantId = club.TenantId,
+            BookingId = booking,
+            Status = MatchResultStatus.Disputed,
+            GamesJson = "[]",
+            GamesWonA = 3,
+            GamesWonB = 0,
+            SubmittedByUserId = club.Sam,
+            RecordedByUserId = club.Sam,
+            IdempotencyKey = "direct-2",
+            SubmittedAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
         }));
     }
 
@@ -296,7 +314,11 @@ public sealed class PlayResultsHttpTests(PostgresFixture pg) : IClassFixture<Pos
 
         var fractional = await organiser.PostAsJsonAsync($"/api/v1/bookings/{booking}/result", new
         {
-            idempotencyKey = "frac", format = "best_of_3", sideA = a, sideB = b, games = new object[] { new { a = 11, b = 7 }, new { a = 11.5, b = 9 } },
+            idempotencyKey = "frac",
+            format = "best_of_3",
+            sideA = a,
+            sideB = b,
+            games = new object[] { new { a = 11, b = 7 }, new { a = 11.5, b = 9 } },
         });
         var frac = await fractional.JsonAsync();
         Assert.Equal(("score_invalid", 1, "negative"), (frac.GetProperty("error").GetString(), frac.GetProperty("game_index").GetInt32(), frac.GetProperty("reason").GetString()));

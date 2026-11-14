@@ -32,6 +32,7 @@ export function ShareAskDialog({ detail, pick, onCancel, onAsk }: Props) {
   const [tried, setTried] = useState(false);
   const ratio = detail.split_mode === "ratio";
   const who = whoOf(pick);
+  const openSeat = pick.kind === "link";
   const figure = askedFigure(detail, text);
   const error = tried && !figure.ok ? figure.error : null;
   const submit = () => {
@@ -42,12 +43,12 @@ export function ShareAskDialog({ detail, pick, onCancel, onAsk }: Props) {
     <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
       <DialogContent data-dialog="share-ask">
         <DialogHeader>
-          <DialogTitle>{SHARE_ASK.title(who)}</DialogTitle>
+          <DialogTitle>{SHARE_ASK.title(who, openSeat)}</DialogTitle>
           <DialogDescription>{ratio ? SHARE_ASK.ratioBody : SHARE_ASK.amountBody(minutesSpoken(organiserShare(detail)))}</DialogDescription>
         </DialogHeader>
         <DialogBody className="pb-4">
           <Field invalid={Boolean(error)}>
-            <FieldLabel>{ratio ? SHARE_ASK.weightLabel(who) : SHARE_ASK.amountLabel(who)}</FieldLabel>
+            <FieldLabel>{ratio ? SHARE_ASK.weightLabel(who, openSeat) : SHARE_ASK.amountLabel(who, openSeat)}</FieldLabel>
             <Input
               value={text}
               inputMode="numeric"
@@ -62,7 +63,7 @@ export function ShareAskDialog({ detail, pick, onCancel, onAsk }: Props) {
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>{SHARE_ASK.cancel}</Button>
-          <Button onClick={submit}>{SHARE_ASK.confirm(who)}</Button>
+          <Button onClick={submit}>{SHARE_ASK.confirm(who, openSeat)}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

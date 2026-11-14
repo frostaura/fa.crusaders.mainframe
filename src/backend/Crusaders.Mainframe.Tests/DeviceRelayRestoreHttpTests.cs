@@ -224,26 +224,64 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
         using var factory = CreateFactory();
         var box = await SeedAsync(factory, 1, 2);
-        await LitBookingAsync(factory, box, courtNumber: 1, minutesRemaining: 40);
+        var booking = await LitBookingAsync(factory, box, courtNumber: 1, minutesRemaining: 40);
 
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            db.DeviceEventReceipts.Add(new DeviceEventReceipt
-            {
-                TenantId = box.TenantId,
-                DeviceId = box.DeviceId,
-                BootId = 0,
-                Seq = 7,
-                Kind = "release",
-                Court = 0,
-                OccurredAt = TestHost.UtcNowStorable().AddMinutes(-2),
-            });
-            await db.SaveChangesAsync();
-        }
+        // Device contract v3 §3: the member's release PAIRED with the session (its booking named,
+        // the receipt's outcome not `unpaired`), with no cause — every 2.x box's — or `member`.
+        await ReleaseAsync(factory, box, booking, seq: 7, cause: null);
 
         using var client = factory.CreateClient();
         Assert.Empty(RelaysOf(await BeatAsync(client, box)));
+    }
+
+    /// <summary>
+    /// BD-2 (FSF-03, BR-03): a release the box synthesised when a Mega watchdog reset opened every
+    /// relay — cause <c>mega_reset</c> — is not the member leaving, and neither is an UNPAIRED
+    /// release (one the server could not match to the session) nor an implausible one. v2 dropped
+    /// the booking after ANY release on the relay, so a Mega-only reset darkened a paid court for
+    /// good. Each fixture changes one field of the member's release above.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("mega_reset", "ok", true)]
+    [InlineData("reconcile", "ok", true)]
+    [InlineData("autooff", "ok", true)]
+    [InlineData(null, "unpaired", true)]
+    [InlineData(null, "implausible", true)]
+    [InlineData("member", "ok", false)]
+    public async Task Only_a_paired_member_release_takes_a_court_out_of_the_restore(string? cause, string outcome, bool stillLit)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        using var factory = CreateFactory();
+        var box = await SeedAsync(factory, 1, 2);
+        var booking = await LitBookingAsync(factory, box, courtNumber: 1, minutesRemaining: 40);
+        await ReleaseAsync(factory, box, booking, seq: 7, cause, outcome);
+
+        using var client = factory.CreateClient();
+        var relays = RelaysOf(await BeatAsync(client, box));
+        if (stillLit) Assert.StartsWith("0|", Assert.Single(relays));
+        else Assert.Empty(relays);
+    }
+
+    /// <summary>A receipted release of <paramref name="booking"/> on relay 0, two minutes ago.</summary>
+    private static async Task ReleaseAsync(
+        TestWebAppFactory factory, Box box, Guid booking, long seq, string? cause, string outcome = "ok")
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        db.DeviceEventReceipts.Add(new DeviceEventReceipt
+        {
+            TenantId = box.TenantId,
+            DeviceId = box.DeviceId,
+            BootId = 0,
+            Seq = seq,
+            Kind = "release",
+            Court = 0,
+            BookingId = outcome == "implausible" ? null : booking,
+            Outcome = outcome,
+            Cause = cause,
+            OccurredAt = TestHost.UtcNowStorable().AddMinutes(-2),
+        });
+        await db.SaveChangesAsync();
     }
 
     /// <summary>

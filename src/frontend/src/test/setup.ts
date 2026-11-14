@@ -177,3 +177,15 @@ afterAll(async () => {
   vi.useRealTimers();
   await new Promise((resolve) => setTimeout(resolve, 20));
 });
+
+// Go-live FM-8 — the club's name is tenant data (`lib/clubIdentity`), read from
+// `/api/v1/auth/club` at boot. Every test starts at the seeded first club, as a phone that has
+// read it before would; a test about the name itself puts another club in place.
+import { setClubIdentityForTests } from "../lib/clubIdentity";
+beforeEach(() => { setClubIdentityForTests({ slug: "crusaders", name: "Crusaders Squash Club" }); });
+
+// FM-7 — jsdom has no canvas: `getContext` answers null AND prints "Not implemented" to the
+// console (114 lines a full run, from charts measuring text and the photo re-encoder). The answer
+// is kept — null is what the code under test must handle — and only the noise goes. A test that
+// needs a context still installs its own with vi.spyOn.
+HTMLCanvasElement.prototype.getContext = function getContext() { return null; } as typeof HTMLCanvasElement.prototype.getContext;

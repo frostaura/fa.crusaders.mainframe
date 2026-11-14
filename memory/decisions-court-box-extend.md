@@ -28,9 +28,11 @@ Founder-directed, shipped to `main` in `4ac90a67`, `be903b60`, `0d92f5f4`, `6f62
   retry a second purchase.
 - **Relays are active-high (`RELAY_ACTIVE_LOW=0`)** because the club moved to normally-open
   solid-state relays. Polarity lives in the shared HAL (`RelayPolarity`, `relayLevelFor`); boot
-  still writes the off level before `pinMode(OUTPUT)`. Flash the **Mega first**, then the bridge —
-  a mismatched pair lights courts when they should be dark. This does not answer
-  `safety-relays.md`.
+  still writes the off level before `pinMode(OUTPUT)`. Flash the **Mega first**: polarity lives
+  only in the Mega image, so a Mega still on 2.0.0 lights every court it means to switch off on
+  these SSRs whatever the bridge runs (corrected 2026-11-13, HW-9 — it was written as "a mismatched
+  pair"). Mega 3.0.0 supersedes the constant: `decisions-device-v3-hardware.md`. This does not
+  answer `safety-relays.md`.
 - **The member code works on plain http.** `crypto.subtle` exists only on https or localhost, so
   the club LAN (`http://<server IP>`) showed no code. Without WebCrypto the key is a `SoftHmacKey`
   signed by `sha256.ts`, pinned to WebCrypto by vectors and an equality sweep. The bytes are then

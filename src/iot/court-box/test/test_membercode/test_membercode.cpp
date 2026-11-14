@@ -1016,8 +1016,40 @@ void test_the_v1_token_fits_every_buffer_it_passes_through(void) {
   TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"method\":\"qr\",\"token\":\"7Q3F9KM2XZ8B\"}", out);
 }
 
+// MCV1-07: a v3 court box holds the 64 member-code keys the server sends a
+// hb:3 box (device-api.md §11.4). 3.0.0's ring held 24, and the server's
+// priority order meant the 40 it shed were booked members refused offline.
+void test_a_v3_box_holds_all_sixty_four_member_code_keys() {
+  static char body[4096];
+  size_t at = static_cast<size_t>(snprintf(body, sizeof(body),
+                                           "{\"code_step\":59672640,\"code_step_ms\":17000,"
+                                           "\"code_days\":[\"59670480|59673360\"],\"code_keys\":["));
+  static const char kAlphabet[] = "123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  for (uint8_t i = 0U; i < 64U; ++i) {
+    at += static_cast<size_t>(snprintf(body + at, sizeof(body) - at, "%s\"1%c%c%c0HkE5WHvWQ0Oe9Rdl\"",
+                                       i == 0U ? "" : ",", kAlphabet[i % 31U], kAlphabet[(i / 31U) + 1U],
+                                       kAlphabet[(i * 7U) % 31U]));
+  }
+  at += static_cast<size_t>(snprintf(body + at, sizeof(body) - at, "]}"));
+  memcode::StepClock clock(21600000UL);
+  static Keys ring;
+  const devlink::CodeSyncResult r = devlink::applyCodeSync(body, at, clock, ring, 1000U);
+  TEST_ASSERT_TRUE(r.keysReplaced);
+  TEST_ASSERT_EQUAL_UINT8(0U, r.rejected);
+  TEST_ASSERT_EQUAL_UINT8(0U, r.dropped);
+  TEST_ASSERT_EQUAL_UINT8(64U, ring.size());
+  // A sixty-fifth is counted as dropped, never silently lost.
+  body[at - 2U] = ',';
+  at -= 1U;
+  at += static_cast<size_t>(snprintf(body + at, sizeof(body) - at, "\"1ZZZ0HkE5WHvWQ0Oe9Rdl\"]}"));
+  const devlink::CodeSyncResult over = devlink::applyCodeSync(body, at, clock, ring, 2000U);
+  TEST_ASSERT_EQUAL_UINT8(64U, ring.size());
+  TEST_ASSERT_EQUAL_UINT8(1U, over.dropped);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_a_v3_box_holds_all_sixty_four_member_code_keys);
   RUN_TEST(test_every_request_renders_byte_for_byte);
   RUN_TEST(test_every_response_reads_as_the_contract_says);
   RUN_TEST(test_every_declared_court_box_case_was_executed);
