@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -9,14 +8,13 @@ using Crusaders.Mainframe.Api.Services;
 namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
-/// Device contract v3 against the corpus (<c>src/contracts/device-protocol</c>): every <c>ota/</c>
-/// and <c>provision/</c> vector executed by the server's own copy of the rules (executed ==
-/// declared), the <c>compat/</c> budgets naming <c>csharp</c> held equal to the server's constants,
+/// Device contract v3 against the corpus (<c>src/contracts/device-protocol</c>): every
+/// <c>provision/</c> vector executed by the server's own copy of the rules (executed == declared), the <c>compat/</c> budgets naming <c>csharp</c> held equal to the server's constants,
 /// and every v3 heartbeat response vector re-serialised from the REAL views, byte for byte.
 ///
 /// <para>
-/// Why the server runs the board's rules at all: an image no board would boot, a network no board
-/// would adopt and a key no board would accept are refused at the console with the board's own
+/// Why the server runs the board's rules at all: a network no board would adopt and a key no board
+/// would accept are refused at the console with the board's own
 /// reason, rather than saved and then silently ignored by every board in the club.
 /// </para>
 /// </summary>
@@ -40,144 +38,10 @@ public sealed class DeviceV3CorpusTests
     private static int Declared(string family, string section) =>
         Load(family, "manifest.json").GetProperty("case_count").GetProperty(section).GetInt32();
 
-    private static readonly JsonElement Ota = Load("ota");
     private static readonly JsonElement Provision = Load("provision");
     private static readonly JsonElement Compat = Load("compat");
     private static readonly JsonElement Http = Load("http");
     private static readonly JsonElement Gate = Load("gate");
-
-    private static byte[] Modulus(string key) => Convert.FromHexString(Ota.GetProperty(key).GetProperty("n_hex").GetString()!);
-
-    // ---- ota/ ------------------------------------------------------------------------------------
-
-    [Fact]
-    public void The_ota_constants_are_the_servers()
-    {
-        var c = Ota.GetProperty("constants");
-        Assert.Equal(DeviceOta.ManifestMagic, c.GetProperty("manifest_magic").GetString());
-        Assert.Equal(DeviceOta.PathPrefix, c.GetProperty("path_prefix").GetString());
-        Assert.Equal(DeviceOta.SigB64Length, c.GetProperty("sig_b64_len").GetInt32());
-        foreach (var t in c.GetProperty("target_max_bytes").EnumerateObject())
-        {
-            Assert.Equal(t.Value.GetInt32(), DeviceOta.TargetMaxBytes[t.Name]);
-        }
-        Assert.Equal(c.GetProperty("target_max_bytes").EnumerateObject().Count(), DeviceOta.TargetMaxBytes.Count);
-    }
-
-    [Fact]
-    public void Every_manifest_vector_is_the_text_the_server_builds_and_its_digest()
-    {
-        var executed = 0;
-        foreach (var m in Ota.GetProperty("manifests").EnumerateArray())
-        {
-            var f = m.GetProperty("fields");
-            var text = DeviceOta.ManifestText(
-                f.GetProperty("target").GetString()!, f.GetProperty("version").GetString()!,
-                f.GetProperty("size").GetInt64(), f.GetProperty("sha256").GetString()!);
-            Assert.Equal(m.GetProperty("text_hex").GetString(), Convert.ToHexStringLower(Encoding.ASCII.GetBytes(text)));
-            Assert.Equal(m.GetProperty("digest_hex").GetString(), Convert.ToHexStringLower(SHA256.HashData(Encoding.ASCII.GetBytes(text))));
-            executed++;
-        }
-        Assert.Equal(Declared("ota", "manifests"), executed);
-    }
-
-    /// <summary>Every signature vector through <see cref="System.Security.Cryptography.RSA"/>, PKCS#1 v1.5, SHA-256 — the reason, not only valid/invalid.</summary>
-    [Fact]
-    public void Every_signature_vector_verifies_or_is_refused_with_the_boards_reason()
-    {
-        var executed = 0;
-        foreach (var v in Ota.GetProperty("signatures").EnumerateArray())
-        {
-            var f = v.GetProperty("fields");
-            var text = DeviceOta.ManifestText(
-                f.GetProperty("target").GetString()!, f.GetProperty("version").GetString()!,
-                f.GetProperty("size").GetInt64(), f.GetProperty("sha256").GetString()!);
-            var reason = DeviceOta.Verify(text, v.GetProperty("sig").GetString()!, Modulus(v.GetProperty("key").GetString()!));
-            Assert.True(v.GetProperty("reason").GetString() == reason, $"{v.GetProperty("id")}: expected {v.GetProperty("reason")}, got {reason}");
-            Assert.Equal(v.GetProperty("valid").GetBoolean(), reason == "ok");
-            executed++;
-        }
-        Assert.Equal(Declared("ota", "signatures"), executed);
-    }
-
-    [Fact]
-    public void Every_version_vector_is_the_servers_version_gate()
-    {
-        var executed = 0;
-        foreach (var v in Ota.GetProperty("versions").EnumerateArray())
-        {
-            var failed = v.GetProperty("failed").EnumerateArray().Select(e => e.GetString()!).ToList();
-            var reason = DeviceOta.AcceptVersion(v.GetProperty("running").GetString(), v.GetProperty("offered").GetString(), failed);
-            Assert.True(v.GetProperty("reason").GetString() == reason, $"{v.GetProperty("id")}: expected {v.GetProperty("reason")}, got {reason}");
-            Assert.Equal(v.GetProperty("accept").GetBoolean(), reason == "ok");
-            executed++;
-        }
-        Assert.Equal(Declared("ota", "versions"), executed);
-    }
-
-    /// <summary>
-    /// Every offer vector through the board's grammar — and every ACCEPTED shape is one the server
-    /// renders byte for byte (its six fields in the wire's order; an extra field is the board's to
-    /// ignore and never the server's to send).
-    /// </summary>
-    [Fact]
-    public void Every_offer_vector_is_the_grammar_and_every_accepted_one_is_what_the_server_renders()
-    {
-        var executed = 0;
-        foreach (var v in Ota.GetProperty("offers").EnumerateArray())
-        {
-            var ota = v.GetProperty("ota");
-            var reason = DeviceOta.ParseOffer(ota, v.GetProperty("own_target").GetString()!);
-            Assert.True(v.GetProperty("reason").GetString() == reason, $"{v.GetProperty("id")}: expected {v.GetProperty("reason")}, got {reason}");
-            Assert.Equal(v.GetProperty("accept").GetBoolean(), reason == "ok");
-            if (reason == "ok")
-            {
-                var rendered = FirmwareService.OfferObject(
-                    ota.GetProperty("target").GetString()!, ota.GetProperty("version").GetString()!, ota.GetProperty("size").GetInt64(),
-                    ota.GetProperty("sha256").GetString()!, ota.GetProperty("sig").GetString()!, ota.GetProperty("path").GetString()!);
-                var known = new JsonObject();
-                foreach (var key in (string[])["target", "version", "size", "sha256", "sig", "path"]) known[key] = JsonNode.Parse(ota.GetProperty(key).GetRawText());
-                Assert.Equal(known.ToJsonString(), rendered.ToJsonString());
-            }
-            executed++;
-        }
-        Assert.Equal(Declared("ota", "offers"), executed);
-    }
-
-    /// <summary>The image vectors: an upload of these bytes with this manifest is accepted under the corpus key — and a single flipped byte is not.</summary>
-    [Fact]
-    public void Every_image_vector_hashes_to_its_offer_and_verifies_under_the_corpus_key()
-    {
-        var executed = 0;
-        foreach (var v in Ota.GetProperty("images").EnumerateArray())
-        {
-            var image = Convert.FromHexString(v.GetProperty("image_hex").GetString()!);
-            var offer = v.GetProperty("offer");
-            Assert.Equal(v.GetProperty("size").GetInt32(), image.Length);
-            var sha = Convert.ToHexStringLower(SHA256.HashData(image));
-            Assert.Equal(v.GetProperty("sha256").GetString(), sha);
-            Assert.Equal(offer.GetProperty("sha256").GetString(), sha);
-            var text = DeviceOta.ManifestText(offer.GetProperty("target").GetString()!, offer.GetProperty("version").GetString()!, image.Length, sha);
-            Assert.Equal("ok", DeviceOta.Verify(text, offer.GetProperty("sig").GetString()!, Modulus("public_key")));
-
-            image[0] ^= 0x01;
-            var tampered = DeviceOta.ManifestText(offer.GetProperty("target").GetString()!, offer.GetProperty("version").GetString()!,
-                image.Length, Convert.ToHexStringLower(SHA256.HashData(image)));
-            Assert.Equal("sig", DeviceOta.Verify(tampered, offer.GetProperty("sig").GetString()!, Modulus("public_key")));
-            executed++;
-        }
-        Assert.Equal(Declared("ota", "images"), executed);
-    }
-
-    /// <summary>Both corpus TEST moduli are recognised, so a deployment configured with either is refused outside Development.</summary>
-    [Fact]
-    public void The_corpus_test_keys_are_recognised_as_test_keys()
-    {
-        Assert.True(DeviceOta.IsCorpusTestKey(Modulus("public_key")));
-        Assert.True(DeviceOta.IsCorpusTestKey(Modulus("other_public_key")));
-        using var rsa = RSA.Create(2048);
-        Assert.False(DeviceOta.IsCorpusTestKey(rsa.ExportParameters(false).Modulus!));
-    }
 
     // ---- provision/ -------------------------------------------------------------------------------
 
@@ -364,7 +228,7 @@ public sealed class DeviceV3CorpusTests
         Name = "Court box",
         MacAddress = "5ccf7f0a1b2c",
         CourtNumbers = root.TryGetProperty("court_numbers", out var n) ? [.. n.EnumerateArray().Select(e => e.GetInt32())] : [1, 2, 3, 4],
-        Capabilities = ["codes:m1", "hb:3", "ota:1", "key:1", "net:1", "lcd:2"],
+        Capabilities = ["codes:m1", "hb:3", "key:1", "net:1", "lcd:2"],
     };
 
     /// <summary>The server's body for a vector, with the vector's own clock string (its formatting is not v3's subject).</summary>
@@ -381,7 +245,7 @@ public sealed class DeviceV3CorpusTests
             { Wanted = keys.Count };
         }
 
-        var lifeline = new DeviceLifeline(Obj(root, "ota"), Obj(root, "key_next"), Obj(root, "net"));
+        var lifeline = new DeviceLifeline(Obj(root, "key_next"), Obj(root, "net"));
         var body = DeviceHeartbeatBudget.Fit(
             codes => DeviceEndpoints.CourtBoxView(device, root.GetProperty("tenant_slug").GetString()!, s,
                 new CourtBoxLists(Strings(root, "roster")!, Strings(root, "relays"), codes) { Courts = Strings(root, "courts"), Lifeline = lifeline },
@@ -396,7 +260,6 @@ public sealed class DeviceV3CorpusTests
     [InlineData("v3-heartbeat-response-snapshot")]
     [InlineData("v3-heartbeat-response-unacknowledged")]
     [InlineData("v3-heartbeat-response-display-expanded")]
-    [InlineData("v3-heartbeat-response-ota-offer")]
     [InlineData("v3-heartbeat-response-key-next")]
     [InlineData("v3-heartbeat-response-net")]
     public void A_v3_heartbeat_vector_is_what_the_server_serialises(string id)
@@ -445,29 +308,31 @@ public sealed class DeviceV3CorpusTests
             "\"lcd_layout\":\"compact\",\"lcd_marquee_enabled\":true,\"lcd_marquee_step_ms\":250,\"lcd_landing_page_seconds\":15," +
             "\"lcd_screen_ceiling_seconds\":120,\"lcd_landing_dwell_seconds\":10,\"lcd_after_lights_on_seconds\":5,\"lcd_reinit_seconds\":30," +
             "\"relay_authorisation_cap_minutes\":90,\"relay_reconcile_min_seconds\":30,\"device_power_restore_trust_minutes\":120," +
-            "\"device_net_fallback_minutes\":3,\"device_ota_probation_minutes\":3,\"hw_relay_active_level\":\"high\",\"hw_lcd_i2c_address\":0," +
+            "\"device_net_fallback_minutes\":3,\"hw_relay_active_level\":\"high\",\"hw_lcd_i2c_address\":0," +
             "\"hw_scanner_baud\":0,\"hw_scanner_line_end\":\"auto\",\"hw_scanner_gap_ms\":50,\"button_map\"", body);
         Assert.NotEqual(Text(c), body);
     }
 
     /// <summary>
-    /// The widest v3 body (4086 of 4096): the server, offered the vector's 42 keys plus 22 of lower
-    /// priority, sheds exactly the 22 and writes the vector's bytes — every value one the server can
-    /// really send. The vector once wrote <c>device_fault_max_per_hour</c> as 1000, a value the
-    /// server's 1–120 bound (BoxSettings) never emits; it is now the bound itself.
+    /// The widest v3 body (inside 4096): the server, offered the vector's keys plus enough of lower
+    /// priority to fill the 64-key ring, sheds exactly those (none, once every key fits) and writes
+    /// the vector's bytes — every value one the server can really send. The vector once wrote <c>device_fault_max_per_hour</c>
+    /// as 1000, a value the server's 1–120 bound (BoxSettings) never emits; it is now the bound itself.
     /// </summary>
     [Fact]
     public void The_widest_v3_vector_is_the_servers_fit_at_4096()
     {
         var c = V3Responses("heartbeat").Single(v => v.GetProperty("id").GetString() == "v3-heartbeat-response-widest");
         var text = Text(c);
-        Assert.Equal(4086, Encoding.UTF8.GetByteCount(text));
         Assert.True(Encoding.UTF8.GetByteCount(text) <= DeviceHeartbeatBudget.CourtBoxV3);
         using var doc = JsonDocument.Parse(text);
-        Assert.Equal(42, doc.RootElement.GetProperty("code_keys").GetArrayLength());
+        Assert.False(doc.RootElement.TryGetProperty("ota", out _));
+        var fitted = doc.RootElement.GetProperty("code_keys").GetArrayLength();
+        Assert.InRange(fitted, 1, DeviceHeartbeatBudget.CourtBoxV3KeyCap);
         Assert.Equal(BoxSettings.MaxDeviceFaultMaxPerHour,
             doc.RootElement.GetProperty("config").GetProperty("device_fault_max_per_hour").GetInt32());
-        Assert.Equal(text, Serialise(BoxOf(doc.RootElement), doc.RootElement, ViewOf(doc.RootElement), extraKeys: 22));
+        Assert.Equal(text, Serialise(BoxOf(doc.RootElement), doc.RootElement, ViewOf(doc.RootElement),
+            extraKeys: DeviceHeartbeatBudget.CourtBoxV3KeyCap - fitted));
     }
 
     /// <summary>The lifeline-only body (§11.1) is the server's, byte for byte — and Fit sends it only on the lifeline's turn of an over-budget body.</summary>
@@ -478,7 +343,8 @@ public sealed class DeviceV3CorpusTests
         using var doc = JsonDocument.Parse(Text(c));
         var root = doc.RootElement;
         var device = BoxOf(root);
-        var lifeline = new DeviceLifeline(Obj(root, "ota"), null, null);
+        var lifeline = new DeviceLifeline(Obj(root, "key_next"), Obj(root, "net"));
+        Assert.True(lifeline.Any);
         var only = DeviceHeartbeatBudget.LifelineOnly(root.GetProperty("server_time").GetDateTimeOffset(), root.GetProperty("tenant_slug").GetString()!,
             device, root.GetProperty("heartbeat_seconds").GetInt32(), lifeline);
         Assert.Equal(Text(c), JsonSerializer.Serialize(only));
@@ -506,7 +372,7 @@ public sealed class DeviceV3CorpusTests
         var bound = new[]
         {
             "v3-heartbeat-response-snapshot", "v3-heartbeat-response-unacknowledged", "v3-heartbeat-response-display-expanded",
-            "v3-heartbeat-response-display-out-of-range", "v3-heartbeat-response-ota-offer", "v3-heartbeat-response-key-next",
+            "v3-heartbeat-response-display-out-of-range", "v3-heartbeat-response-key-next",
             "v3-heartbeat-response-net", "v3-heartbeat-response-widest", "v3-activate-response-play-remaining",
             "v3-heartbeat-response-hardware", "v3-heartbeat-response-lifeline-only",
         };
@@ -537,12 +403,12 @@ public sealed class DeviceV3CorpusTests
             if (req.Diag.ValueKind == JsonValueKind.Object) Assert.NotEmpty(DeviceTelemetry.ReadDiag(req.Diag));
             executed++;
         }
-        Assert.True(executed >= 10, $"only {executed} v3 request vectors bound");
+        Assert.True(executed >= 9, $"only {executed} v3 request vectors bound");
     }
 
     /// <summary>
     /// The widest v3 door body the server can write — <c>membercode/gate.json</c>'s full body plus
-    /// every v3 object at its bound and the two fault settings — stays inside 6144 (measured 5085).
+    /// every v3 object at its bound and the two fault settings — stays inside 6144.
     /// </summary>
     [Fact]
     public void The_widest_v3_door_body_the_server_can_write_fits_6144()
@@ -554,7 +420,7 @@ public sealed class DeviceV3CorpusTests
             MacAddress = "5ccf7f0a1b2c",
             Kind = DeviceKind.Gate,
             GateKey = new string('g', 64),
-            Capabilities = ["codes:m1", "ota:1", "key:1", "net:1"],
+            Capabilities = ["codes:m1", "key:1", "net:1"],
         };
         var roster = Enumerable.Range(0, 48)
             .Select(i => $"m{MemberCodeMath.RefText(0x40000 + (i * 4))}{MemberCodeMath.RefText(0x40001 + (i * 4))}{MemberCodeMath.RefText(0x40002 + (i * 4))}{MemberCodeMath.RefText(0x40003 + (i * 4))}|0|-864000|999999")
@@ -563,8 +429,8 @@ public sealed class DeviceV3CorpusTests
         var sync = new MemberCodeSync(4_294_967_295L / 2, 29_999, ["4294960000|4294963120", "4294963120|4294966240"], keys) { Wanted = keys.Count };
         var widest = Load("http").GetProperty("responses").EnumerateArray().Single(c => c.GetProperty("id").GetString() == "v3-heartbeat-response-widest");
         using var doc = JsonDocument.Parse(Text(widest));
-        var lifeline = new DeviceLifeline(Obj(doc.RootElement, "ota"), Obj(doc.RootElement, "key_next"), Obj(doc.RootElement, "net"));
-        var parts = new GateV3Parts(new GateV3Settings(120, 60, 60, false, 1000), lifeline);
+        var lifeline = new DeviceLifeline(Obj(doc.RootElement, "key_next"), Obj(doc.RootElement, "net"));
+        var parts = new GateV3Parts(new GateV3Settings(120, 60, false, 1000), lifeline);
 
         var body = DeviceHeartbeatBudget.Fit(
             codes => GateHeartbeatView.WithCodes(device, new string('w', 64), new GateTiming(300, 30), roster, DateTimeOffset.UtcNow, new GateTail(codes, parts)),

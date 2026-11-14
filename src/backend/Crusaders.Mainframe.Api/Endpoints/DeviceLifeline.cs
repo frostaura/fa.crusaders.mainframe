@@ -6,20 +6,20 @@ using Crusaders.Mainframe.Api.Services;
 namespace Crusaders.Mainframe.Api.Endpoints;
 
 /// <summary>
-/// The lifeline objects of a v3 heartbeat answer (device-api.md §11.1): the <c>ota</c> offer, the
-/// next key and the network — the three things that repair a board with no cable. Each is null
-/// when the board is owed nothing, and each is keyed on THIS beat's capabilities.
+/// The lifeline objects of a v3 heartbeat answer (device-api.md §11.1): the next key and the
+/// network — the two things that keep a board reachable with no cable. Each is null when the board
+/// is owed nothing, and each is keyed on THIS beat's capabilities. There is no firmware offer: the
+/// boards have no remote update (§7), so the answer never carries <c>ota</c>.
 /// </summary>
-public sealed record DeviceLifeline(JsonObject? Ota, JsonObject? KeyNext, JsonObject? Net)
+public sealed record DeviceLifeline(JsonObject? KeyNext, JsonObject? Net)
 {
-    public static readonly DeviceLifeline None = new(null, null, null);
+    public static readonly DeviceLifeline None = new(null, null);
 
-    public bool Any => Ota is not null || KeyNext is not null || Net is not null;
+    public bool Any => KeyNext is not null || Net is not null;
 
-    /// <summary>Appends the objects present, in the wire's order: <c>ota</c>, <c>key_next</c>, <c>net</c> (§3).</summary>
+    /// <summary>Appends the objects present, in the wire's order: <c>key_next</c>, <c>net</c> (§3).</summary>
     public void WriteTo(IDictionary<string, object?> body)
     {
-        if (Ota is not null) body["ota"] = Ota;
         if (KeyNext is not null) body["key_next"] = KeyNext;
         if (Net is not null) body["net"] = Net;
     }

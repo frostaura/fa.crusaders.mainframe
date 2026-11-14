@@ -6,10 +6,13 @@ undone, breaks the club in a specific way that is written next to it. Finding id
 (`IO-…`, `FC-…`) are the 2026-11-13 pre-go-live analysis; the older ones decode against
 [`reviews/adversarial-e2e-review.md`](reviews/adversarial-e2e-review.md).
 
-**The flash in §5 is the last one a cable delivers.** Device contract v3 (Mega 3.0.0, bridge 3.1.0,
-door gate 2.0.0 — `specs/device-api.md`) makes every later change — WiFi, the server's address,
-the device key, ESP firmware — a server-side action. So §2b and §2c are **preconditions of that
-flash**, not tidy-ups after it: anything they leave undone has no second chance at the wall.
+**Every firmware change is a cable flash.** The boards have no remote update
+(`specs/device-api.md` §7): a new image for the Mega, the bridge or a door gate means opening the
+box with a USB cable. Device contract v3 (Mega 3.0.0, bridge 3.1.0, door gate 2.0.0) makes every
+other later change — WiFi, the server's address, the device key, the screen and the hardware
+facts — a server-side action, so the flash in §5 is the last *planned* visit. §2b and §2c are
+**preconditions of that flash**, not tidy-ups after it: anything they leave undone costs a visit
+to every box.
 
 Ordered by what stops go-live first.
 
@@ -154,8 +157,7 @@ card without this is every balance gone and every board locked out.
       against a throwaway stack: 18 s from empty to a healthy restored backend.)
 - [ ] In the password manager, **off the club's machine**: the database password, `Jwt__Secret`,
       `MemberCodes__MasterKey`, the cloudflared tunnel token, the bootstrap admin password, the
-      **device API key**, the backup encryption passphrase, the firmware **signing key pair**
-      (§2c) and `SETUP_AP_PASSWORD`. Today the first four exist only in the Portainer stack file
+      **device API key**, the backup encryption passphrase and `SETUP_AP_PASSWORD` (§2c). Today the first four exist only in the Portainer stack file
       on the same host as the database.
 
 **If skipped:** one dead SD card ends the club's money records, and a rebuilt database mints a
@@ -163,7 +165,7 @@ device key no board holds.
 
 ---
 
-## 2c. Before the last cable flash
+## 2c. Before the cable flash
 
 Everything a board compiles in is only its **first-boot** default after v3, so none of this forces
 a reflash any more — but a box that cannot reach its server on its first boot has nothing to be
@@ -177,24 +179,18 @@ told by. Settle these before §5.
 - [ ] **The device API key** read off the Devices page and stored in the password manager before
       it is compiled into any board. Never press anything that replaces it without the v3
       rotation (§6).
-- [ ] **The OTA signing key pair** generated with `src/iot/tools/ota_sign.py` on the founder's
-      machine; the private key stays there and in the password manager, never in the repository
-      or a CI secret. Its public modulus goes into every board's `secrets.h` as
-      `OTA_PUBLIC_KEY_N` and into the stack as `DeviceOta__PublicKeyModulus` — the two must
-      match, or no ESP will ever accept an update.
 - [ ] **`SETUP_AP_PASSWORD`** chosen, compiled in, and printed on a label inside each enclosure.
-- [ ] **The bridge image is 3.1.0** — the first bridge that can be updated over the air (signed
-      OTA, key rotation, runtime network, setup portal, link supervisor, flash persistence;
-      `fix/bridge-ota`). Never flash a 3.0.0 bridge into a box that is to be sealed: 3.0.0
-      cannot take an update without a cable.
+- [ ] **The bridge image is 3.1.0** — key rotation, runtime network, setup portal, link
+      supervisor and flash persistence. Never seal a box with a 3.0.0 bridge: it has none of
+      them, so a key or network change would mean a visit to it.
 - [ ] **`MemberCodes__MasterKey` set once, before members enrol** (MCV1-09): a key changed later
       rotates every member's code. Then, from the Devices page, every board's running version and
       capabilities recorded, the court boxes acknowledged, and `member_code_manual_hold` set until
       the flashed boards are verified — so the automatic cut-over cannot fire on a half-flashed
       fleet.
 
-**If skipped:** boards that join nothing, or a fleet that cannot be updated because the key it
-trusts was never kept.
+**If skipped:** boards that join nothing, or a fleet that needs a visit for a change the
+heartbeat could have carried.
 
 ---
 
@@ -242,35 +238,25 @@ press Upload. `src/iot/court-box/arduino/README.md` is the page, and it needs no
 `make` and nothing from the Library Manager. The `make flash-*` targets do the same two
 uploads from PlatformIO and are the developer alternative.
 
-**What is and is not the last cable flash, as of `fix/bridge-ota`:**
+**No firmware is updated over the air — every change below is a cable flash, now and later.**
 
-- **The Mega 3.0.0 flash is its last.** It is complete against the v3 serial protocol: a generic
-  renderer and relay guard whose behaviour the bridge steers within the Mega's own bounds, with
-  every timeout bounded on the Mega itself. Flash it with confidence.
-- **Gate 2.0.0 is updatable over the air** (signed OTA, key rotation, runtime network, setup
-  portal). Its flash is its last cable flash.
-- **Bridge 3.1.0 is updatable over the air** (caps `codes:m1 hb:3 lcd:2 ota:1 key:1 net:1`). Every
-  decision of the lifeline is host-tested (`test_lifeline`), and the whole update — discover,
-  verify before fetching, copy the running image, download, stage, verify the staged bytes,
-  switch, probation, commit, and the fourth-boot rollback — passes end to end against the real
-  API (`test/e2e-device/ota_e2e.py`, 19/19). What only the chip can prove is the ESP8266's own
-  half: the core's Updater writing the 4m2m staging area and eboot copying it. **So the
-  enclosure-sealing block is lifted for bridge 3.1.0 on one condition, the bench round trip
-  below: do not seal a box until it has taken and committed a signed release over the air.**
-- [ ] **The bench OTA round trip, per box, before sealing.** On the Boards page the box reports
-      `ota:1 key:1 net:1` and bridge 3.1.0. Sign a release one patch newer than what runs (the
-      same source, a higher version: `ota_sign.py sign --target court_bridge --version 3.1.1`),
-      upload it on Firmware, roll it out to this box only, and watch it go `downloading` →
-      (restart) → `probation` → `committed` with running version 3.1.1, the courts that were lit
-      staying lit throughout (the Mega holds them). Then hold court A and court D together for
-      five seconds within a minute of a power cycle and confirm `SETUP AP <last four of the MAC>`
-      on the glass and the `CRUSADERS-SETUP-…` access point, and leave it to close by itself.
+- **The Mega 3.0.0** is complete against the v3 serial protocol: a generic renderer and relay
+  guard whose behaviour the bridge steers within the Mega's own bounds, with every timeout bounded
+  on the Mega itself. Flash it with confidence; a later bridge flash changes what it is told, not
+  what it is.
+- **Bridge 3.1.0 and gate 2.0.0** take keys, the network, the screen and the hardware facts from
+  the server (caps `codes:m1 hb:3 lcd:2 key:1 net:1` on the box, `codes:m1 key:1 net:1` on a
+  door), so nothing an operator does needs a cable. A new bridge or gate image does.
+- [ ] **The bench check, per box, before sealing.** On the Boards page the box reports
+      `key:1 net:1` and bridge 3.1.0. Then hold court A and court D together for five seconds
+      within a minute of a power cycle and confirm `SETUP AP <last four of the MAC>` on the glass
+      and the `CRUSADERS-SETUP-…` access point, and leave it to close by itself.
 
 **`secrets.h` holds the first-boot values.** It is gitignored and lives on the flashing
-machine only; the build `#error`s on a missing value and refuses a placeholder or the test
-signing key, so there is no way to produce an image with a blank in it. There is nothing to
-claim, nothing to discover and nothing to provision: a flashed box joins, heartbeats, and
-appears on the admin Devices screen by itself.
+machine only; the build `#error`s on a missing value and refuses a placeholder, so there is no
+way to produce an image with a blank in it. There is nothing to claim, nothing to discover and
+nothing to provision: a flashed box joins, heartbeats, and appears on the admin Devices screen by
+itself.
 
 - [ ] Arduino IDE 2 installed, with `https://arduino.esp8266.com/stable/package_esp8266com_index.json`
       added under *Preferences → Additional boards manager URLs*, and both cores installed
@@ -280,15 +266,15 @@ appears on the admin Devices screen by itself.
       on the flashing machine and fill in every value (§2c), then do not commit it:
       `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL` (the server's **reserved LAN** address and
       port, `http://`, no trailing slash), `DEVICE_API_KEY` (from the Devices page),
-      `OTA_PUBLIC_KEY_N` and `SETUP_AP_PASSWORD`.
+      and `SETUP_AP_PASSWORD`.
 - [ ] **Mega first.** Open `src/iot/court-box/arduino/court_mega/court_mega.ino`, board
       **Arduino Mega or Mega 2560**, processor **ATmega2560**, pick the port, **Upload** — with
       DIP **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
 - [ ] **Then the bridge.** Open `src/iot/court-box/arduino/court_bridge/court_bridge.ino`, board
-      **Generic ESP8266 Module**, flash size **4MB (FS:2MB OTA:~1019KB)** — the layout OTA
-      stages into, so a different one breaks every later update — CPU **80 MHz**, upload speed
-      **115200**, **Erase Flash: Only Sketch**, pick the port, **Upload** — with DIP **1–4 OFF,
-      5 ON, 6 ON, 7 ON**, 8 OFF. In the upload log, read esptool's **`Auto-detected Flash size`**
+      **Generic ESP8266 Module**, flash size **4MB (FS:2MB OTA:~1019KB)** — the layout whose 2 MB
+      filesystem holds the box's saved snapshot, roster and events, so a different one loses them
+      — CPU **80 MHz**, upload speed **115200**, **Erase Flash: Only Sketch**, pick the port,
+      **Upload** — with DIP **1–4 OFF, 5 ON, 6 ON, 7 ON**, 8 OFF. In the upload log, read esptool's **`Auto-detected Flash size`**
       line: it must say 4MB (HW-10). Then move DIP 7 OFF and open the **Serial Monitor at 9600**
       — watch the monitor, not the glass: in that DIP position the ESP's UART is on the USB
       socket and the Mega is not on the other end of it.
@@ -706,8 +692,8 @@ certified as one, and no combination of the build flags turns it into one.
       exist and neither is read by the other route: `src/iot/door-gate/src/common/secrets.h`
       is the developer's, for `pio run`. Copy `secrets.h.example` from whichever folder is
       being built and fill in all four values. Both are gitignored.
-- [ ] **Gate 2.0.0** (v3): besides the four values below, `secrets.h` carries `OTA_PUBLIC_KEY_N`
-      and `SETUP_AP_PASSWORD` (§2c), and all of them are first-boot defaults — WiFi, the
+- [ ] **Gate 2.0.0** (v3): besides the four values below, `secrets.h` carries
+      `SETUP_AP_PASSWORD` (§2c), and all of them are first-boot defaults — WiFi, the
       server's address and the key change later over the heartbeat, and the setup portal is the
       BOOT button held 5 s within 60 s of power-on (never *during* power-on). The roster now
       survives a reset, so the "nobody gets in until the server answers" window is gone; check

@@ -3,10 +3,10 @@
 **Link:** Mega `Serial3` (TX 14 / RX 15) ↔ ESP8266 `Serial`, 9600 8N1, line-terminated.
 The DIP block routes them; **the wiring cannot change**.
 
-> **This document specifies v3: court_mega 3.0.0 with court_bridge 3.0.0.** The 3.0.0 Mega image is
-> the **last one ever flashed** — the ESP8266 is updated over the air from then on, the Mega never
-> again — so everything the bridge may one day need the Mega to do is in this chapter or it does not
-> exist. The v2 sections below stay normative wherever [v3](#v3--court_mega-300-and-court_bridge-300)
+> **This document specifies v3: court_mega 3.0.0 with court_bridge 3.0.0.** No board has a remote
+> firmware update ([`device-api.md`](device-api.md) §7), and the Mega is the half of the box that is
+> hardest to reach — so the 3.0.0 Mega image is meant to be its **last**, and everything the bridge
+> may one day need the Mega to do is in this chapter or it does not exist. The v2 sections below stay normative wherever [v3](#v3--court_mega-300-and-court_bridge-300)
 > does not override them, and every v2 frame is still accepted by a v3 Mega, because the two chips are
 > flashed one after the other and a 2.3.0 bridge talks to a 3.0.0 Mega in between. Where a v2 sentence
 > below is no longer true it says so in place. The fixtures are `serial/` (frames) and `display/`
@@ -83,7 +83,7 @@ see *Safety rule 3*, which is what makes the two ranges separate fields in
 | `!BTN,<key>` | A debounced press. `key` ∈ `A`–`D`, `1`–`4`. **Court keys `A`–`D` are sent whether or not the window is armed** (Mega 2.1.0) — the bridge answers an unscanned court press with the court's minutes left (`SCAN TO EXTEND`) or `SCAN YOUR CODE`. **Duration keys `1`–`4` are sent only while armed**; outside the window they are dropped, counted (`unauthorised`) and answered on the Mega's own glass. |
 | `!SCAN,<code>` | A complete line from the QR scanner on Serial2. |
 | `!STATE,<mask>,<remA>,<remB>,<remC>,<remD>` | Relay bitmask and per-relay seconds remaining. Sent on change and every 10s. **The Mega is the authority on the relay deadline and the bridge consumes both fields:** the mask reconciles held state (`bridgelogic::reconcile`), and the per-court seconds correct the deadline `bridgelogic::Relight` only *believes* it moved when it sent an `!EXT` — so an extension lost on the wire is detected within one `!STATE` and re-sent, instead of the court going dark half an hour later. |
-| `!PONG,<version>,<uptime_s>` · `!PONG,<version>,<uptime_s>,<tx_dropped>,<rx_errors>,<unauthorised>` | Answer to `!PING`. **Two arguments or five**, and the three counters are additive: a bridge flashed ahead of the Mega it is wired to must still read the answer, and the Mega is the half that cannot be reflashed over the air, so the two-argument form still decodes. The counters are the Mega's own since-boot totals (`courtlogic::CourtBox`), which existed already and which nothing off the board could read — so a climbing "presses thrown away because the window was shut", from a stuck button or a bridge that stopped sending `!AUTH`, was invisible from the office. The contract on the bridge side is a **per-heartbeat diff reported as a fault**, which is what `bridgelogic::FaultLog::noteMany` is for: a diff of zero notes nothing at all, so a quiet link never opens a window. |
+| `!PONG,<version>,<uptime_s>` · `!PONG,<version>,<uptime_s>,<tx_dropped>,<rx_errors>,<unauthorised>` | Answer to `!PING`. **Two arguments or five**, and the three counters are additive: a bridge flashed ahead of the Mega it is wired to must still read the answer, and the Mega is the half that is hardest to reflash, so the two-argument form still decodes. The counters are the Mega's own since-boot totals (`courtlogic::CourtBox`), which existed already and which nothing off the board could read — so a climbing "presses thrown away because the window was shut", from a stuck button or a bridge that stopped sending `!AUTH`, was invisible from the office. The contract on the bridge side is a **per-heartbeat diff reported as a fault**, which is what `bridgelogic::FaultLog::noteMany` is for: a diff of zero notes nothing at all, so a quiet link never opens a window. |
 | `!EVT,<name>,<detail>` | `AUTOOFF,<court>` (the Mega's own timer opened the relay), `OFF,<court>` (a commanded `!OFF` opened it — emitted on **every** commanded release, so an early release is accounted for as the time actually used rather than the time booked), `AUTHEXPIRED`, `BADFRAME,RX` (also raised for any non-`!` line on the production Mega), `OVERRUN,TX`. |
 | `!ERR,<code>` | `BADCRC`, `BADVERB`, `BADARG`, `NOCOURT`. `BADCRC` — and the `!EVT` reports `OVERRUN,RX` and `BADFRAME,RX` — all mean "your last line did not decode", and the bridge re-sends the last relay-affecting frame (`!ON` or `!EXT`) once if one is inside its 1.5 s window. **`BADFRAME,RX` is the commonest of the three**, not the rarest: the production Mega refuses the legacy dialect and classifies a line by its first byte, so a glitch byte landing on an idle line ahead of an `!ON` produces `BADFRAME`, not `BADCRC`. |
 
@@ -266,7 +266,7 @@ them off the glass and the spec is where their meaning is pinned:
 **The D10 pay-for screens are gone from the image** (bridge 3.0.0, founder 2026-11-13): the flow
 had been unreachable from the panel since 2.3.0, and dead code in an image is debt. The server
 still serves `/api/v1/device/pay-for` ([`member-code.md`](member-code.md) §9) and v3 needs nothing
-new from the Mega to bring it back, so D10 can return by a bridge OTA alone. **Member codes add no
+new from the Mega to bring it back, so D10 can return by a bridge flash alone. **Member codes add no
 verb, no frame and no argument to this protocol**: a v1 code is 19 characters and travels in the
 `!SCAN` argument the Mega already bounds at 24.
 
@@ -343,9 +343,10 @@ walk-up (DL-02, FSF-02); a Mega-only reset darkens every lit court and nothing r
 FSF-07); and repeated frames or a chattering button keep the glass off landing indefinitely
 (FWM-02, FWM-03, DL-08).
 
-**3.0.0 is the last Mega image.** The bridge becomes updatable over the air
-([`device-api.md`](device-api.md) §7) and the Mega never can be — its ESP sits on Serial3,
-not the bootloader port, and no GPIO reaches RESET. So v3 turns the Mega into a **generic
+**3.0.0 is meant to be the last Mega image.** Neither chip is updated over the air
+([`device-api.md`](device-api.md) §7), and the Mega never could be — its ESP sits on Serial3,
+not the bootloader port, and no GPIO reaches RESET — so a Mega change is always the full DIP
+procedure at the box, while a bridge change is one upload. So v3 turns the Mega into a **generic
 renderer and relay guard whose behaviour the bridge steers, with every timeout bounded on the
 Mega itself**: anything a future bridge might want from it is a frame defined here, every
 setting is a bounded `!CFG` key, and no frame from any bridge, present or future, can stop the
@@ -381,7 +382,7 @@ past `kMaxArgs` (5) or `kMaxArgLen` (24), so `Frame` keeps its size on an 8 KB c
 | `!CFG,<tag>,<key>,<value>` | Set one Mega setting — table below. `key` is 1–6 uppercase letters, `value` 0–65535; the decoder takes any key, and the Mega answers `!ACK,<tag>,0` with the value **clamped** into the key's bounds and applied, or `!ACK,<tag>,2` for a key it does not know or a value outside an enumerated key's set, changing nothing. |
 | `!LAND,<a>,<b>,<c>,<d>` | Per relay, the seconds of **paid** light left as the server's snapshot has it — chained extensions included, so it can exceed the 90-minute relay cap — or `-` for no figure. 0–86400, clamped. The Mega counts each figure down from receipt and shows the **larger** of it and its own deadline while the relay is closed; an open relay reads `OFF` whatever this says. Discarded when the bridge is declared dead. |
 | `!NOTE,<ttl>,<text>` | A landing note: `text` (≤ 24) replaces the landing's status item for `ttl` seconds (0–3600, clamped; 0 clears). For the setup portal's name, an update in progress, or anything a future bridge wants a passer-by to read. Cleared when the bridge is declared dead and at Mega boot. |
-| `!LIVE,<period>` | Bridge liveness: the next downlink frame will arrive within `period` seconds (1–120, clamped). A 3.0.0 bridge sends `!LIVE,5` every five seconds and, before anything that blocks it, `!LIVE` with the longer period it needs (an OTA download sends `!LIVE,120` and repeats it). |
+| `!LIVE,<period>` | Bridge liveness: the next downlink frame will arrive within `period` seconds (1–120, clamped). A 3.0.0 bridge sends `!LIVE,5` every five seconds and, before anything that blocks it, `!LIVE` with the longer period it needs, up to `!LIVE,120`. |
 | `!RST` · `!PING` · `!LCD` · `!ROW` · `!SHOW` · `!IDLE` · `!MAP` | Unchanged from v2. `!IDLE` stays the status source; a 3.0.0 bridge sends it on **every** accepted heartbeat and every 30 s rather than only on change, and records it as sent only when it was queued (DL-13, FSF-10). |
 
 **Uplink — Mega → bridge**

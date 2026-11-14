@@ -62,23 +62,22 @@ Then, **only on a push to `main`**: `build-backend-{amd64,arm64}`, `build-fronte
 | `DOCKERHUB_USERNAME` | Docker Hub account |
 | `DOCKERHUB_TOKEN` | Docker Hub access token |
 
-**Two, not six.** The four `PORTAINER_*` secrets were read only by the deploy job, which is gone; a repository that still has them set should delete them. The same goes for `OTA_PRIVATE_KEY`, which held the PEM of a firmware signing key back when over-the-air updates existed. A secret nothing reads is a credential nobody is watching.
+**Two, not six.** The four `PORTAINER_*` secrets were read only by the deploy job, which is gone; a repository that still has them set should delete them. The same goes for `OTA_PRIVATE_KEY`, which held the PEM of a firmware signing key back when over-the-air updates existed; the boards have none now. A secret nothing reads is a credential nobody is watching.
 
 ## The boards' own configuration
 
-Device contract v3 (`docs/specs/device-api.md`; Mega 3.0.0, bridge 3.0.0, door gate 2.0.0) is the last firmware a cable delivers, so **nothing an operator does afterwards may need one**. What `secrets.h` carries is therefore only what a board needs to reach the server the first time; everything else is held by the server and delivered in the heartbeat.
+Device contract v3 (`docs/specs/device-api.md`) has **no remote firmware update**: every firmware change, to any chip, is a cable flash at the board (`device-api.md` §7). So **nothing an operator does may need one**. What `secrets.h` carries is therefore only what a board needs to reach the server the first time; everything else is held by the server and delivered in the heartbeat.
 
 | Compiled into `secrets.h` | What it is afterwards |
 | --- | --- |
 | `WIFI_SSID`, `WIFI_PASSWORD` | the first-boot network. Afterwards the club's device network (two WiFi profiles and the base URL, Devices → network) is sent to every board in the heartbeat and kept in its flash, with the previous set as the fallback; a board the server cannot reach is re-pointed through its **setup portal** (court box: hold courts A and D together for 5 s within 60 s of power-on; gate: the BOOT button). §8 |
 | `API_BASE_URL` | the first-boot server, `http://<server's LAN address>:8088` — **`http`, never `https`**: the boards have no TLS. Changeable the same way. |
 | `DEVICE_API_KEY` | the club's key when the board was flashed. Afterwards keys **rotate** with an overlap window (`device_key_grace_hours`) delivered over the heartbeat, and a known key can be **restored** after a database loss. *Regenerate*, which killed the old key on the next request, is gone. §6 |
-| `OTA_PUBLIC_KEY_N` | the RSA-2048 modulus every ESP image verifies a firmware update against before it boots it. The private key is the founder's alone, never in the repository or a CI secret; the server holds the same modulus as `DeviceOta__PublicKeyModulus`. §7 |
 | `SETUP_AP_PASSWORD` | the setup portal's WPA2 password, printed on a label inside the enclosure. |
 
-**Firmware updates for both ESP chips are signed HTTP OTA** pulled from the configured server only, offered in the heartbeat, version-gated, verified before boot and rolled back if the new image does not prove itself (`device-api.md` §7). The Mega cannot be updated over WiFi; it is a generic renderer and relay guard the bridge steers. Getting a box onto a court is the flash order in `docs/go-live-checklist.md` §5 (**Mega 3.0.0 first, then bridge 3.0.0**; door gates 2.0.0). **It appears on the Devices page by itself** on its first heartbeat, named `box-<last six hex of its MAC>`, badged as unchecked until an admin confirms the court numbers. There is no discovery listener, no claim code and no per-device key.
+**A firmware update is a USB flash, for every chip.** Nothing is offered in the heartbeat, nothing is downloaded and the server holds no image or signing key (`device-api.md` §7). The Mega is a generic renderer and relay guard the bridge steers, so most changes need only the bridge flashed. Getting a box onto a court is the flash order in `docs/go-live-checklist.md` §5 (**Mega 3.0.0 first, then bridge 3.0.0**; door gates 2.0.0). **It appears on the Devices page by itself** on its first heartbeat, named `box-<last six hex of its MAC>`, badged as unchecked until an admin confirms the court numbers. There is no discovery listener, no claim code and no per-device key.
 
-**What 2026-08 removed, and v3 deliberately did not bring back:** a UDP discovery listener, claim codes, per-device keys derived from a master KEK, and an RSA image trailer signed by a key held in a repository secret (`OTA_PRIVATE_KEY`) by an `iot-sign` CI job. v3's OTA signs with a key CI never sees, which is why there is still no signing job and no signing secret.
+**What 2026-08 removed, and v3 deliberately did not bring back:** a UDP discovery listener, claim codes, per-device keys derived from a master KEK, and an RSA image trailer signed by a key held in a repository secret (`OTA_PRIVATE_KEY`) by an `iot-sign` CI job. v3 briefly carried a signed OTA of its own, removed on 2026-11-14; there is no signing job, no signing secret and no signing key anywhere.
 
 ## Trusted proxies and the forwarded host
 

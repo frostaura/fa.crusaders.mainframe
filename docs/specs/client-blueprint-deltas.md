@@ -170,6 +170,10 @@ court box are all indifferent to which end the debit is taken from.
 
 ### D-2 — firmware is signed with RSA-2048, not Ed25519
 
+> **Moot since device contract v2, and again since 2026-11-14:** the boards have no remote
+> firmware update at all ([`device-api.md`](device-api.md) §7), so nothing is signed. Kept as
+> the record of why the blueprint's Ed25519 line was never built.
+
 **Planned:** Ed25519 signatures on OTA images.
 **Built:** RSA-2048/SHA-256, via the ESP8266 Arduino core's supported signed-update path.
 **Decided by:** implementation constraint, 2026-08-23. **Not a product decision** — recorded

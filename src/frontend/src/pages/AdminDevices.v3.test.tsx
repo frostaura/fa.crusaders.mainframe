@@ -8,21 +8,21 @@ import {
 import { RELAY_LEVEL_CONFIRM } from "../lib/deviceHardware";
 
 /**
- * Boards, device contract v3 (device-api §6–§8, §10, §12, §13; member-code §8). The panels that
- * replace a cable: the club network, signed firmware, the member-code rollout, and per board its
- * hardware facts and health. Each panel is tested in its three states — still reading, a failed
+ * Boards, device contract v3 (device-api §6, §8, §10, §12, §13; member-code §8). The panels that
+ * replace a cable: the club network, the member-code rollout, and per board its hardware facts and
+ * health. Firmware is not among them: the boards have no remote update (device-api §7). Each panel is tested in its three states — still reading, a failed
  * read, the answer — and every consequential write behind its confirm, with what went over the wire.
  */
 
 const BOX_ID = "11111111-1111-1111-1111-111111111111";
 
 const v3Box = (extra: Record<string, unknown> = {}) => deviceFixture({
-  court_numbers: [1, 2], capabilities: "codes:m1 hb:3 lcd:2 ota:1 key:1 net:1",
+  court_numbers: [1, 2], capabilities: "codes:m1 hb:3 lcd:2 key:1 net:1",
   lcd_layout: null, lcd_marquee_enabled: null, lcd_layout_acknowledged: "compact", lcd_layout_acknowledged_at: "2026-11-13T18:05:00Z",
-  fw_state: "committed", running_version: "3.0.0", mega_version: "3.0.0", net_ver: 2, net_src: "server", key_id: "k1",
+  running_version: "3.0.0", mega_version: "3.0.0", net_ver: 2, net_src: "server", key_id: "k1",
   hw_relay_active_level: null, hw_lcd_i2c_address: null, hw_scanner_baud: null, hw_scanner_line_end: null, hw_scanner_gap_ms: null,
   mega: { reset: "01", lcd: "27", relay: "high", scan_baud: 9600, scan_end: "auto", keys: "0F", diag: [0, 3, 0, 0, 0] },
-  diag: { reset: "power_on", heap: 21000, heap_min: 18000, block: 9000, stack_min: 900, sketch_free: 1_000_000, flash_mb: 4 },
+  diag: { reset: "power_on", heap: 21000, heap_min: 18000, block: 9000, stack_min: 900, flash_mb: 4 },
   drift: null,
   ...extra,
 });
@@ -47,11 +47,6 @@ const NETWORK = {
   updated_at: "2026-11-13T16:00:00Z", updated_by: "Dean",
 };
 
-const RELEASE = {
-  id: "rel-1", target: "court_bridge", version: "3.0.1", size: 372144, sha256: "a".repeat(64),
-  uploaded_at: "2026-11-13T17:00:00Z", rollout: "off", rollout_device_id: null, paused: false, boards: {},
-};
-
 const ROLLOUT = {
   phase: "legacy", cutover_at: null, cutoff_at: null, cutoff_days: 14, cutoff_due_at: null,
   enabled_boards: 1, ready_boards: 0,
@@ -61,13 +56,12 @@ const ROLLOUT = {
   keys: [{ id: BOX_ID, name: "Court 1 box", keys_sent: 64, keys_trimmed: 5, keys_sent_at: null }],
 };
 
-function routes(over: { device?: Record<string, unknown>; network?: Partial<StubRoute>; firmware?: Partial<StubRoute>; rollout?: Partial<StubRoute> } = {}) {
+function routes(over: { device?: Record<string, unknown>; network?: Partial<StubRoute>; rollout?: Partial<StubRoute> } = {}) {
   const server = deviceServer(over.device ?? v3Box({ auto_registered: true }));
   const list: StubRoute[] = [
     { path: "/api/v1/admin/devices/api-key", body: { ...DEVICE_API_KEY_FIXTURE, key_id: "k1", rotation: null } },
     ...server.routes,
     { path: "/api/v1/admin/devices/network", body: NETWORK, ...over.network },
-    { path: "/api/v1/admin/devices/firmware", body: [RELEASE], ...over.firmware },
     { path: "/api/v1/admin/devices/member-codes", body: ROLLOUT, ...over.rollout },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
     { path: "/api/v1/admin/courts/", body: COURTS_FIXTURE },
@@ -106,7 +100,7 @@ describe("Boards › Club network (device-api §8)", () => {
     stubFetch(routes({ network: { status: 404, body: { error: "not_found" } } }).list);
     renderPage(<AdminDevicesPage />);
     await screen.findByText("Court 1 box");
-    await waitFor(() => expect(panel("firmware")).not.toBeNull());
+    await waitFor(() => expect(panel("member-codes")).not.toBeNull());
     expect(panel("club-network")).toBeNull();
   });
 
@@ -137,29 +131,26 @@ describe("Boards › Club network (device-api §8)", () => {
   });
 });
 
-describe("Boards › Firmware (device-api §7)", () => {
-  it("shows the release and offers it to every board behind a confirm", async () => {
-    const { list } = routes();
-    const stub = stubFetch([...list, { method: "PATCH", path: "/api/v1/admin/devices/firmware/rel-1", body: { ...RELEASE, rollout: "all" } }]);
+describe("Boards › no remote firmware update (device-api §7)", () => {
+  it("offers no firmware panel and reads nothing under firmware — a firmware change is a cable flash", async () => {
+    const stub = stubFetch(routes().list);
     renderPage(<AdminDevicesPage />);
-    expect(await screen.findByText(/^3\.0\.1, uploaded .+ — offered to nobody\.$/)).toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("combobox", { name: "Offer it to" }), { button: 0, ctrlKey: false, pointerType: "mouse" });
-    fireEvent.click(await screen.findByRole("option", { name: "Every board of this kind" }));
-    await confirmIn("Apply", "Offer the update");
-    await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH" && c.path.includes("firmware"))?.body)
-      .toEqual({ rollout: "all", device_id: null }));
+    await waitFor(() => expect(panel("member-codes")).not.toBeNull());
+    expect(panel("firmware")).toBeNull();
+    expect(screen.queryByText(/Upload a signed release/)).not.toBeInTheDocument();
+    expect(stub.calls.some((c) => c.path.includes("firmware"))).toBe(false);
   });
 
-  it("says a failed read is a failure", async () => {
-    stubFetch(routes({ firmware: { status: 503, body: { error: "down" } } }).list);
-    renderPage(<AdminDevicesPage />);
-    await waitFor(() => expect(panel("firmware")).toHaveTextContent(/Couldn.t read the firmware releases/));
-  });
-
-  it("names the board's progress against the latest release", async () => {
+  it("names the firmware each board runs, and nothing about an update", async () => {
     stubFetch(routes().list);
     renderPage(<AdminDevicesPage />);
-    await waitFor(() => expect(panel("firmware")).toHaveTextContent(/Court 1 box: Firmware 3\.0\.0 · 3\.0\.1 is available/));
+    const status = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-board-status]");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(status).toHaveTextContent(/Firmware 3\.0\.0/);
+    expect(document.body).not.toHaveTextContent(/is available|on trial|Room for an update|refused an update/);
   });
 });
 

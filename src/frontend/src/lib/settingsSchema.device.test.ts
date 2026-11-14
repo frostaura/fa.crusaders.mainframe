@@ -20,11 +20,11 @@ const BOX_KEYS = [
   // the seven the heartbeat already delivered and no screen showed (FA-4), plus the revert and hint
   "lcd_revert_seconds", "lcd_hint_seconds", "lcd_choice_seconds", "lcd_card_seconds", "scan_memory_seconds",
   "clock_trust_minutes", "relay_restore_enabled", "device_fault_reporting", "device_fault_max_per_hour",
-  // the thirteen v3 keys (§5) and the key grace (§6)
+  // the twelve v3 keys (§5) and the key grace (§6)
   "lcd_layout", "lcd_marquee_enabled", "lcd_marquee_step_ms", "lcd_landing_page_seconds", "lcd_screen_ceiling_seconds",
   "lcd_landing_dwell_seconds", "lcd_after_lights_on_seconds", "lcd_reinit_seconds", "relay_authorisation_cap_minutes",
   "relay_reconcile_min_seconds", "device_power_restore_trust_minutes", "device_net_fallback_minutes",
-  "device_ota_probation_minutes", "device_key_grace_hours",
+  "device_key_grace_hours",
   // the five hardware facts (§12; HW-1, HW-2, HW-5)
   "hw_relay_active_level", "hw_lcd_i2c_address", "hw_scanner_baud", "hw_scanner_line_end", "hw_scanner_gap_ms",
 ] as const;

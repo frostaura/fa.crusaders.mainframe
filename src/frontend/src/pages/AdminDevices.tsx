@@ -137,7 +137,7 @@ function identityLine(device: AdminDevice, statusLines: boolean): string {
   if (device.last_ip_address) parts.push(device.last_ip_address);
   // With anything v3 to say, firmware and the Mega are their own lines (BoardStatusLines, FA-12):
   // a muted run of versions told nobody which board missed the last flash. Without it — a 2.x
-  // board on an API with no releases — the versions stay here, and a phone keeps its dense card.
+  // board that reports nothing v3 — the versions stay here, and a phone keeps its dense card.
   if (!statusLines && device.running_version) parts.push(`firmware ${device.running_version}`);
   if (!statusLines && device.mega_version) parts.push(`Mega ${device.mega_version}`);
   return parts.join(" · ");
@@ -398,7 +398,7 @@ function DeviceRowHeader({ device, online, now, context }: {
           two version strings. The row used to push the page wider than the phone on a long
           device NAME alone (R2 I-F6); an unbreakable 64-character token is the same defect
           with a larger token. */}
-      <div className="mt-1 break-words text-xs text-text-muted">{identityLine(device, servesStatusLines(device, context))}</div>
+      <div className="mt-1 break-words text-xs text-text-muted">{identityLine(device, servesStatusLines(device))}</div>
       <BoardStatusLines device={device} context={context} />
     </>
   );
@@ -1307,7 +1307,7 @@ export function AdminDevicesPage() {
         loading={loading} walkUpCap={walkUpCap}
       />
 
-      {/* v3 (device-api §7, §8; member-code §8): what reaches the boards without a cable. */}
+      {/* v3 (device-api §8; member-code §8): what reaches the boards without a cable. */}
       <RemoteFixes devices={devices} settings={settings} outOfServiceWords={(id) => outOfServiceWordsFor(id, devices, tenantHeartbeat, now)}
         onChanged={() => { boardsContext.reload(); void load().catch(() => undefined); }} />
     </PageShell>

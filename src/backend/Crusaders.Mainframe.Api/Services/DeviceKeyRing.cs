@@ -298,12 +298,11 @@ public static class DeviceCaps
 {
     public const string Hb3 = "hb:3";
     public const string Lcd2 = "lcd:2";
-    public const string Ota1 = "ota:1";
     public const string Key1 = "key:1";
     public const string Net1 = "net:1";
 
     public static bool Has(Device device, string cap) => device.Capabilities.Contains(cap);
 
-    /// <summary>A gate is answered the v3 <c>gate</c> settings when it names any of the three ESP capabilities (door-gate.md §14).</summary>
-    public static bool GateV3(Device device) => Has(device, Ota1) || Has(device, Key1) || Has(device, Net1);
+    /// <summary>A gate is answered the v3 <c>gate</c> settings when it names either ESP capability, <c>key:1</c> or <c>net:1</c> (door-gate.md §14).</summary>
+    public static bool GateV3(Device device) => Has(device, Key1) || Has(device, Net1);
 }

@@ -7,8 +7,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Crusaders.Mainframe.Api.Endpoints;
 
 /// <summary>
-/// The admin surface device contract v3 adds (device-api.md §6–§8, §10): key rotation in place of
-/// v2's Regenerate, the club's device network, and signed firmware releases with their rollout.
+/// The admin surface device contract v3 adds (device-api.md §6, §8, §10): key rotation in place of
+/// v2's Regenerate, and the club's device network. The boards have no remote firmware update: a
+/// firmware change is a cable flash.
 ///
 /// <para>
 /// <b>Why Regenerate is gone.</b> It killed the old key on the next request and every board then
@@ -30,17 +31,6 @@ public static class AdminDeviceV3Endpoints
 
         g.MapGet("/network", NetworkAsync);
         g.MapPut("/network", SaveNetworkAsync);
-
-        g.MapGet("/firmware", FirmwareAsync);
-        g.MapPost("/firmware", UploadAsync).DisableAntiforgery();
-        g.MapPatch("/firmware/{id:guid}", RolloutAsync);
-        return g;
-    }
-
-    /// <summary><c>GET /api/v1/device/firmware/{id}</c>: the image, to an authenticated board of the same club.</summary>
-    public static RouteGroupBuilder MapDeviceFirmwareDownload(this RouteGroupBuilder g)
-    {
-        g.MapGet("/firmware/{id}", DownloadAsync);
         return g;
     }
 
@@ -108,54 +98,6 @@ public static class AdminDeviceV3Endpoints
         var error = await network.SaveAsync(req, ctx.User.Id() ?? Guid.Empty, ct);
         if (error is not null) return Results.BadRequest(new { error });
         return Results.Ok(await network.ViewAsync(ct));
-    }
-
-    // ---- §7 firmware ----
-
-    private static async Task<IResult> FirmwareAsync(FirmwareService firmware, CancellationToken ct) =>
-        Results.Ok(await firmware.ListAsync(ct));
-
-    /// <summary>
-    /// <c>POST …/firmware</c>, multipart: <c>image</c> (the bytes) and <c>manifest</c> (the JSON
-    /// <c>ota_sign.py</c> writes). Refused unless a board would boot it.
-    /// </summary>
-    private static async Task<IResult> UploadAsync(FirmwareService firmware, HttpContext ctx, CancellationToken ct)
-    {
-        if (!ctx.Request.HasFormContentType) return Results.BadRequest(new { error = FirmwareService.ImageRequired });
-        var form = await ctx.Request.ReadFormAsync(ct);
-        byte[]? image = null;
-        if (form.Files.GetFile("image") is { } file)
-        {
-            using var buffer = new MemoryStream();
-            await file.CopyToAsync(buffer, ct);
-            image = buffer.ToArray();
-        }
-
-        var manifest = FirmwareService.ParseManifest(form["manifest"].ToString());
-        var (release, error) = await firmware.UploadAsync(image, manifest, ctx.User.Id() ?? Guid.Empty, ct);
-        if (error is not null) return Results.BadRequest(new { error });
-        return Results.Ok(new { id = release!.Id, target = release.Target, version = release.Version, size = release.Size, sha256 = release.Sha256 });
-    }
-
-    private static async Task<IResult> RolloutAsync(
-        Guid id, FirmwareRolloutRequest req, FirmwareService firmware, HttpContext ctx, CancellationToken ct)
-    {
-        var (found, error) = await firmware.SetRolloutAsync(id, req, ctx.User.Id() ?? Guid.Empty, ct);
-        if (!found) return Results.NotFound();
-        if (error is not null) return Results.BadRequest(new { error });
-        return Results.Ok(await firmware.ListAsync(ct));
-    }
-
-    /// <summary>
-    /// The bytes, with <c>Content-Length</c> equal to the size and
-    /// <c>application/octet-stream</c>, never chunked (§7). Another club's id is a 404: the
-    /// tenant's query filter is what scopes it, and "not found" says nothing about other clubs.
-    /// </summary>
-    private static async Task<IResult> DownloadAsync(string id, FirmwareService firmware, CancellationToken ct)
-    {
-        var image = await firmware.ImageAsync(id, ct);
-        if (image is null) return Results.NotFound(new { error = "firmware_not_found" });
-        return Results.Bytes(image, "application/octet-stream");
     }
 }
 

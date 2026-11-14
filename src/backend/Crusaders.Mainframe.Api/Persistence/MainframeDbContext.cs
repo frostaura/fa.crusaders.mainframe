@@ -564,12 +564,8 @@ public partial class MainframeDbContext : DbContext
             e.Property(d => d.LastIpAddress).HasMaxLength(64);
             e.Property(d => d.RunningVersion).HasMaxLength(32);
             e.Property(d => d.MegaVersion).HasMaxLength(32);
-            // Device contract v3 (device-api.md §2, §5, §7, §8). Short closed vocabularies, sized
-            // with room: an unknown fw_state is stored as "unknown" rather than as given.
-            e.Property(d => d.FwState).HasMaxLength(16);
-            e.Property(d => d.FwFailed).HasMaxLength(32);
-            e.Property(d => d.FwError).HasMaxLength(16);
-            e.Property(d => d.FwFailedVersions).HasColumnType("text[]").IsRequired().HasDefaultValueSql("'{}'::text[]");
+            // Device contract v3 (device-api.md §2, §5, §8). Short closed vocabularies, sized
+            // with room: an unknown net_src is stored as "unknown" rather than as given.
             e.Property(d => d.NetSrc).HasMaxLength(16);
             e.Property(d => d.LcdLayoutAcknowledged).HasMaxLength(16);
             e.Property(d => d.LcdLayoutOverride).HasMaxLength(16);

@@ -1,19 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { adminEndpoints, type ControlBoardView } from "../../lib/adminApi";
-import { endpoints, type AdminDevice, type AdminSettings, type DeviceApiKey, type FirmwareRelease } from "../../lib/api";
+import { endpoints, type AdminDevice, type AdminSettings, type DeviceApiKey } from "../../lib/api";
 import type { BoardsContext } from "../../lib/boardScreen";
 import { landingCourtsFor } from "../../lib/landingPreview";
-import { isReleases } from "../../lib/deviceV3Copy";
 import { diagRises, megaDiag, type MegaDiagName } from "../../lib/deviceHealth";
 
 /**
- * What the Boards page reads beside the board list for the v3 lines (device-api §10): the latest
- * firmware releases, the club network's version, the key ids, and the courts' lights for each
+ * What the Boards page reads beside the board list for the v3 lines (device-api §10): the club
+ * network's version, the key ids, and the courts' lights for each
  * board's start-screen preview.
  *
  * <p>
  * <b>Each read is its own.</b> A failed or absent one costs only the line it feeds — a board whose
- * firmware cannot be compared still shows its version, a page without the control board shows no
+ * network version cannot be compared still shows its own, a page without the control board shows no
  * preview — and none of them can take the board list down with it. An API before v3 answers 404
  * for the new routes, which is the same as "not served" here.
  * </p>
@@ -21,14 +20,12 @@ import { diagRises, megaDiag, type MegaDiagName } from "../../lib/deviceHealth";
 export function useBoardsContext(
   settings: AdminSettings | null, devices: readonly AdminDevice[], now: number,
 ): BoardsContext & { reload: () => void } {
-  const [releases, setReleases] = useState<FirmwareRelease[] | null>(null);
   const [networkVer, setNetworkVer] = useState<number | null>(null);
   const [key, setKey] = useState<DeviceApiKey | null>(null);
   const [board, setBoard] = useState<ControlBoardView | null>(null);
 
   const reload = useCallback(() => {
     // Each answer is checked for its shape: a reply that is not what the route serves feeds no line.
-    void endpoints.adminFirmwareList().then((r) => setReleases(isReleases(r) ? r : null), () => setReleases(null));
     void endpoints.adminDeviceNetwork().then(
       (n) => setNetworkVer(typeof n?.ver === "number" ? n.ver : null), () => setNetworkVer(null));
     void endpoints.adminDeviceApiKey().then((k) => setKey(typeof k === "object" && k !== null ? k : null), () => setKey(null));
@@ -53,7 +50,6 @@ export function useBoardsContext(
   ), [board, now]);
 
   return {
-    releases,
     networkVer,
     keyId: key?.key_id ?? null,
     nextKeyId: key?.rotation?.next_id ?? null,

@@ -588,14 +588,6 @@ const BOX_V3: SettingDef[] = [
     defaultValue: 10,
   },
   {
-    ...BOX_NUMBER, key: "device_ota_probation_minutes", section: "boxes", label: "New firmware must prove itself within (minutes)",
-    unit: "min", advanced: true,
-    description: "A board on new firmware that does not reach the club within this long goes back to the old firmware.",
-    help: "After a firmware update, the board keeps the new image only once it has reached the club within this long."
-      + ` Otherwise it puts the previous firmware back by itself and reports it. ${ONE_HEARTBEAT}`,
-    defaultValue: 10,
-  },
-  {
     ...BOX_NUMBER, key: "device_key_grace_hours", section: "boxes", label: "Old device key keeps working for (hours)", unit: "h",
     advanced: true,
     description: "After a key rotation, the old key is retired this long after every board has the new one.",

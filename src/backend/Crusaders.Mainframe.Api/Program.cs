@@ -223,7 +223,7 @@ builder.Services.AddAuthorization();
 // remote peer of every browser request and the gateway's port-less `Host` header. Until
 // the forwarded headers were honoured, two things followed from that: the rate limiter
 // put the whole club in one bucket (closing re-review #7), and every URL composed from
-// the request — the OTA image, provisioning's api_base_url — pointed at port 80, where
+// the request — provisioning's api_base_url — pointed at port 80, where
 // nothing listens (#8, #18). The middleware below rewrites RemoteIpAddress, Scheme and
 // Host from X-Forwarded-For / -Proto / -Host, and ONLY when the request arrived from a
 // proxy this deployment trusts — anything else could otherwise forge its own client
@@ -453,15 +453,12 @@ builder.Services.AddScoped<IBookingPlayers, ParticipantBookingPlayers>();
 builder.Services.AddScoped<IdentificationResolver>();
 builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddScoped<DeviceKeyResolver>();
-// Device contract v3 (docs/specs/device-api.md §6–§8): key rotation, the club's device network
-// (passwords encrypted under a key derived from the member-code master key), and signed OTA. The
-// OTA verification key is resolved at start, so a malformed modulus or the corpus TEST key outside
-// Development refuses to boot rather than accepting images signed by a key in the repository.
+// Device contract v3 (docs/specs/device-api.md §6, §8): key rotation and the club's device
+// network (passwords encrypted under a key derived from the member-code master key). There is no
+// remote firmware update (§7): a firmware change is a cable flash.
 builder.Services.AddScoped<DeviceKeyRing>();
 builder.Services.AddSingleton<DeviceNetworkCipher>();
 builder.Services.AddScoped<DeviceNetworkService>();
-builder.Services.AddSingleton(DeviceOtaKey.Resolve(builder.Configuration, builder.Environment));
-builder.Services.AddScoped<FirmwareService>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
 // The ITN's two checks beyond its signature (payments-payfast.md, Receiving an ITN): the source

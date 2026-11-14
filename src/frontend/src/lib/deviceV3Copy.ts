@@ -1,11 +1,11 @@
-import { ApiError, deviceCaps, type AdminDevice, type DeviceKeyBoard, type FirmwareRelease, type FirmwareReleaseBoards } from "./api";
+import { ApiError, deviceCaps, type AdminDevice, type DeviceKeyBoard } from "./api";
 import { RELAYS } from "./buttonMap";
 import { clubDayAndClock } from "./clubClock";
 import { mcusrWords } from "./deviceHealth";
 
 /**
- * The words the Boards page says about the device contract v3 (device-api §6–§8, §10): key
- * rotation, the club network, firmware, each board's screen. One module, so a sentence a test
+ * The words the Boards page says about the device contract v3 (device-api §6, §8, §10): key
+ * rotation, the club network, each board's screen and versions. One module, so a sentence a test
  * pins is written once and the panels only lay it out.
  */
 
@@ -114,7 +114,7 @@ export function boardKeyLine(device: AdminDevice, currentId: string | null | und
 }
 
 // ---------------------------------------------------------------------------------------
-// Each board: screen, firmware, network (§2, §5, §7, §8)
+// Each board: screen, versions, network (§2, §5, §8)
 // ---------------------------------------------------------------------------------------
 
 export const LAYOUT_WORD: Readonly<Record<string, string>> = { compact: "compact 16×2", expanded: "expanded 20×4" };
@@ -134,53 +134,12 @@ export function screenLine(device: AdminDevice, asked: string): string {
     + " It changes the next time it calls in.";
 }
 
-const FW_STATE_WORDS: Readonly<Record<string, string>> = {
-  committed: "running",
-  probation: "on trial — it must reach the club to keep the new firmware",
-  downloading: "downloading an update",
-  rolled_back: "put its previous firmware back",
-  failed: "refused an update",
-};
-
-const FW_ERROR_WORDS: Readonly<Record<string, string>> = {
-  probation: "it did not reach the club in time after the update",
-  sig: "the signature did not verify",
-  sha256: "the image did not match its fingerprint",
-  size: "the image was the wrong size",
-  http: "the download failed",
-  space: "there was not enough room",
-  flash: "writing it failed",
-  target: "it was for another kind of board",
-  version: "it was not newer",
-  busy: "the box was busy",
-};
-
-/** A refused or rolled-back version, and why, in words. */
-function refusedPart(device: AdminDevice): string | null {
-  if (!device.fw_failed) return null;
-  const why = device.fw_error ? FW_ERROR_WORDS[device.fw_error] ?? device.fw_error : null;
-  const reason = why ? " — " + why : "";
-  return `${device.fw_failed} was refused${reason}, and will not be tried again`;
-}
-
-/** Against the latest release of its target: newer available, or up to date. */
-function releasePart(running: string | null | undefined, latest: FirmwareRelease | null): string | null {
-  if (!latest || !running) return null;
-  return compareVersions(latest.version, running) > 0 ? `${latest.version} is available` : "up to date";
-}
-
-/** The board's own `fw_state`, unless it is simply running what it has. */
-function statePart(state: string | null | undefined): string | null {
-  if (!state || state === "committed") return null;
-  return FW_STATE_WORDS[state] ?? `reports “${state}”`;
-}
-
-/** The firmware line: running version, what state it is in, and whether a newer release exists. */
-export function firmwareLine(device: AdminDevice, latest: FirmwareRelease | null): string | null {
-  const running = device.running_version;
-  if (!running && !device.fw_state) return null;
-  const parts = [running ? `Firmware ${running}` : "Firmware", statePart(device.fw_state), refusedPart(device), releasePart(running, latest)];
-  return parts.filter((part): part is string => part !== null).join(" · ");
+/**
+ * The firmware line: the version the board last reported running. The boards have no remote
+ * update (device-api §7): a firmware change is a cable flash.
+ */
+export function firmwareLine(device: AdminDevice): string | null {
+  return device.running_version ? `Firmware ${device.running_version}` : null;
 }
 
 /** The Mega's version and its last reset cause (`mega.reset`, the `MCUSR` it sent in `!BOOT`). */
@@ -211,35 +170,6 @@ export function networkLine(device: AdminDevice, clubVer: number | null): string
   const from = src ? " (" + src + ")" : "";
   const behind = networkBehind(device, clubVer) ? `, the club's is ${clubVer} — it updates the next time it calls in` : "";
   return ver + from + behind;
-}
-
-/** Numeric `a.b.c` compare: positive when `a` is newer. A malformed part counts as 0. */
-export function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
-  const pb = b.split(".").map((n) => Number.parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (d !== 0) return d;
-  }
-  return 0;
-}
-
-/** Whether an answer is a list of releases — not, say, a list of boards from a route that is not this one. */
-export function isReleases(data: unknown): data is FirmwareRelease[] {
-  return Array.isArray(data) && data.every((r) => typeof r === "object" && r !== null
-    && typeof (r as FirmwareRelease).id === "string" && typeof (r as FirmwareRelease).target === "string"
-    && typeof (r as FirmwareRelease).version === "string");
-}
-
-/** The newest release of a target, or null. */
-export function latestRelease(releases: readonly FirmwareRelease[], target: string): FirmwareRelease | null {
-  return releases.filter((r) => r.target === target).reduce<FirmwareRelease | null>(
-    (best, r) => (best === null || compareVersions(r.version, best.version) > 0 ? r : best), null);
-}
-
-/** The firmware target a board runs. The Mega is never a target: it cannot be updated over WiFi. */
-export function targetOf(device: Pick<AdminDevice, "kind">): "court_bridge" | "door_gate" {
-  return device.kind === "Gate" ? "door_gate" : "court_bridge";
 }
 
 // ---------------------------------------------------------------------------------------
@@ -293,74 +223,6 @@ export function networkProgress(devices: readonly AdminDevice[], clubVer: number
 }
 
 // ---------------------------------------------------------------------------------------
-// Firmware (§7)
-// ---------------------------------------------------------------------------------------
-
-export const FIRMWARE_COPY = {
-  lede: "Signed updates for the two WiFi chips — the court box's bridge and each door — pulled by the boards themselves."
-    + " A board checks the signature before it starts the new image and puts the old one back if the new one cannot"
-    + " reach the club. The court box's Mega cannot be updated over WiFi.",
-  targetTitle: { court_bridge: "Court boxes (bridge)", door_gate: "Door gates" } as Record<string, string>,
-  noReleases: "No release uploaded yet.",
-  older: (versions: string[]) => `Earlier releases: ${versions.join(", ")}.`,
-  offerLabel: "Offer it to",
-  whichBoard: "Which board",
-  rollout: { off: "Nobody", one: "One board", all: "Every board of this kind" } as Record<FirmwareRolloutWord, string>,
-  confirmTitle: (version: string) => `Change who is offered ${version}?`,
-  confirm: (rollout: FirmwareRolloutWord, board: string | null) => {
-    if (rollout === "off") return "No board is offered it. A board already part-way through finishes, or puts its old firmware back by itself.";
-    if (rollout === "one") return `${board ?? "That board"} is offered it the next time it calls in, and takes it when nobody is using`
-      + " it. Lit courts stay lit. Try one board first; offer it to all once that board shows it running.";
-    return "Every acknowledged board of this kind is offered it the next time it calls in, and each takes it when nobody is"
-      + " using it. Lit courts stay lit. A board whose new firmware cannot reach the club puts the old one back by itself.";
-  },
-  confirmLabel: (rollout: FirmwareRolloutWord) => (rollout === "off" ? "Offer it to nobody" : "Offer the update"),
-  applied: (rollout: FirmwareRolloutWord, version: string) => (rollout === "off"
-    ? `${version} is offered to nobody.` : `${version} is offered. Boards take it the next time they call in.`),
-  pauseTitle: "Pause this update?",
-  pause: "No further board starts it. Boards already running it keep it.",
-  resumeTitle: "Resume this update?",
-  resume: "Boards it is offered to start taking it again the next time they call in.",
-  paused: "The update is paused.",
-  resumed: "The update is resumed.",
-  uploadTitle: "Upload a signed release",
-  imageLabel: "Firmware image (.bin)",
-  manifestLabel: "Its manifest (.json)",
-  manifestHint: "The two files the signing tool wrote, together. The club's system refuses an image whose signature does not verify.",
-  uploadConfirmTitle: "Upload this release?",
-  uploadConfirm: "The club's system checks the signature against the club's firmware key and stores it. Nothing is offered to any"
-    + " board until you choose who gets it.",
-  uploadNotReady: "Choose both the image and its manifest.",
-  uploaded: (target: string, version: string) => `${FIRMWARE_TARGET_WORD[target] ?? target} ${version} uploaded. Choose who is offered it.`,
-};
-
-type FirmwareRolloutWord = "off" | "one" | "all";
-
-const FIRMWARE_TARGET_WORD: Readonly<Record<string, string>> = { court_bridge: "Court box bridge", door_gate: "Door gate" };
-
-/** One release, in a line: version, when, and who is offered it. */
-export function releaseLine(release: FirmwareRelease): string {
-  const who = release.rollout === "off" ? "offered to nobody"
-    : release.rollout === "one" ? "offered to one board" : "offered to every board of this kind";
-  const boards = release.boards ?? {};
-  const counts = RELEASE_COUNT_WORDS.filter(([key]) => typeof boards[key] === "number" && boards[key]! > 0)
-    .map(([key, words]) => `${boards[key]} ${words}`);
-  return `${release.version}, uploaded ${at(release.uploaded_at)} — ${who}${release.paused ? ", paused" : ""}`
-    + `${counts.length > 0 ? ` (${counts.join(", ")})` : ""}.`;
-}
-
-/** The counts a release line words, in the order it says them; `of_target` and `included` frame the rest and are not said. */
-const RELEASE_COUNT_WORDS: readonly (readonly [keyof FirmwareReleaseBoards, string])[] = [
-  ["running", "running it"], ["probation", "on trial"], ["downloading", "downloading"], ["failed", "refused it"],
-  ["cannot_update", "cannot take updates"],
-];
-
-/** Each board of a target against the latest release: what its own heartbeat says. */
-export function boardFirmwareProgress(devices: readonly AdminDevice[], latest: FirmwareRelease | null): { device: AdminDevice; words: string }[] {
-  return devices.filter((d) => d.enabled).map((device) => ({ device, words: firmwareLine(device, latest) ?? "has not reported its firmware" }));
-}
-
-// ---------------------------------------------------------------------------------------
 // Refusals
 // ---------------------------------------------------------------------------------------
 
@@ -371,14 +233,6 @@ export const DEVICE_V3_CODES: Readonly<Record<string, string>> = {
   owner_only: KEY_COPY.ownerOnly,
   key_invalid: KEY_COPY.restoreKeyInvalid,
   confirm_mismatch: "The confirmation did not match. Nothing changed.",
-  sig_invalid: "The signature did not verify against the club's firmware key. Nothing was uploaded — sign the image "
-    + "again with the club's private key.",
-  size_mismatch: "The image is not the size its manifest says. Upload the two files the signing tool wrote together.",
-  sha256_mismatch: "The image does not match its manifest's fingerprint. Upload the two files the signing tool wrote together.",
-  target_unknown: "The manifest names a kind of board the club does not have.",
-  version_not_newer: "A release of this firmware at this version or newer is already uploaded. Publish a higher version.",
-  manifest_invalid: "The manifest is not the file the signing tool wrote.",
-  image_too_large: "The image is larger than this kind of board can take.",
   network_changed: "Somebody saved the club network since you opened it. Nothing was saved — the page now shows theirs.",
   not_local: "This board already takes the club's network; there is nothing to push.",
 };

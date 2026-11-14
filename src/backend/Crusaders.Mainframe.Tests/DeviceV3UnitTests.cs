@@ -1,57 +1,12 @@
-using System.Security.Cryptography;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Services;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.FileProviders;
 
 namespace Crusaders.Mainframe.Tests;
 
-/// <summary>The device contract v3 rules that need no database: key priority, the OTA key's start rule, the v1 shape, the walk-up cap on buttons.</summary>
+/// <summary>The device contract v3 rules that need no database: key priority, the v1 shape, the walk-up cap on buttons.</summary>
 public sealed class DeviceV3UnitTests
 {
-    private sealed class Env(string name) : IHostEnvironment
-    {
-        public string EnvironmentName { get; set; } = name;
-        public string ApplicationName { get; set; } = "test";
-        public string ContentRootPath { get; set; } = "/";
-        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
-    }
-
-    private static IConfiguration Config(string? modulus) =>
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [DeviceOtaKey.ConfigKey] = modulus }).Build();
-
-    private static readonly string CorpusModulus = DeviceOta.CorpusTestModulusPrefixes[0];
-
-    /// <summary>
-    /// The corpus TEST key's private half is in the repository: a deployment configured with it
-    /// outside Development would accept an image anyone can sign, so it refuses to start.
-    /// </summary>
-    [Fact]
-    public void The_corpus_test_key_refuses_to_start_outside_development()
-    {
-        var corpus = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(
-            CorpusRoot(), "ota", "cases.json"))).RootElement.GetProperty("public_key").GetProperty("n_hex").GetString()!;
-        Assert.StartsWith(CorpusModulus, corpus);
-
-        Assert.Throws<InvalidOperationException>(() => DeviceOtaKey.Resolve(Config(corpus), new Env("Production")));
-        Assert.Throws<InvalidOperationException>(() => DeviceOtaKey.Resolve(Config(corpus), new Env("Testing")));
-        Assert.NotNull(DeviceOtaKey.Resolve(Config(corpus), new Env("Development")).Modulus);
-
-        using var rsa = RSA.Create(2048);
-        Assert.NotNull(DeviceOtaKey.Resolve(Config(Convert.ToHexString(rsa.ExportParameters(false).Modulus!)), new Env("Production")).Modulus);
-        Assert.Null(DeviceOtaKey.Resolve(Config(null), new Env("Production")).Modulus);
-        Assert.Throws<InvalidOperationException>(() => DeviceOtaKey.Resolve(Config("CHANGE-ME"), new Env("Production")));
-    }
-
-    private static string CorpusRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "contracts", "device-protocol"))) dir = dir.Parent;
-        return Path.Combine(dir!.FullName, "src", "contracts", "device-protocol");
-    }
-
     /// <summary>MCV1-11: 19 characters AND a leading 1 — the firmware's rule; length alone disagreed.</summary>
     [Theory]
     [InlineData("118Y956008441714835", true)]
@@ -115,7 +70,11 @@ public sealed class DeviceV3UnitTests
         {
             Assert.True(bounds.ContainsKey(key), $"{key} has no served values");
         }
-        Assert.Equal(13 + 5, DeviceSettings.HeartbeatConfig(new Device { DeviceCode = "x", Name = "x", MacAddress = "x" }, DefaultView()).Count());
+        var config = DeviceSettings.HeartbeatConfig(new Device { DeviceCode = "x", Name = "x", MacAddress = "x" }, DefaultView()).ToList();
+        Assert.Equal(12 + 5, config.Count);
+        // No remote firmware update (device-api.md §7): no probation window is a setting, served or sent.
+        Assert.DoesNotContain(config, kv => kv.Key.Contains("_ota_", StringComparison.Ordinal));
+        Assert.DoesNotContain(bounds.Keys, k => k.Contains("_ota_", StringComparison.Ordinal));
     }
 
     private static TenantSettingsView DefaultView() => new(15, 0, 5, 0, 14, "UTC", 0, "16:00-19:00", 0, 7, 0, 1440, 7, ButtonMap.Default());

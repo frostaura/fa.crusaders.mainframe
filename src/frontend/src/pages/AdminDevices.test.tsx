@@ -17,7 +17,7 @@ import {
 import { clubInstant } from "../lib/clubClock";
 import { rateLimitedSentence } from "../lib/errors";
 
-const V3_ABSENT: StubRoute[] = ["network", "firmware", "member-codes"].map((path) => ({
+const V3_ABSENT: StubRoute[] = ["network", "member-codes"].map((path) => ({
   path: `/api/v1/admin/devices/${path}`, status: 404, body: { error: "not_found" },
 }));
 
@@ -338,15 +338,15 @@ describe("AdminDevices", () => {
     for (const gone of [/Connect this board/i, /Claim/i, /Register/i, /Rotate/i, /Revoke/i, /Re-claim/i]) {
       expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
     }
-    // The OTA channel picker went with the firmware endpoints it drove.
+    // No firmware update of any kind (device-api §7): no channel picker, no release upload.
     expect(screen.queryByLabelText(/update channel/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Firmware image/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Code on the box/i)).not.toBeInTheDocument();
     for (const gone of ["discovered", "discovery-status", "claim", "rotate-key", "revoke", "regenerate"]) {
       expect(stub.calls.some((c) => c.path.includes(gone))).toBe(false);
     }
-    // v3's signed releases (device-api §7) are read, and nothing else under firmware is called.
-    expect(stub.calls.filter((c) => c.path.includes("firmware")).every((c) => c.method === "GET"
-      && c.path === "/api/v1/admin/devices/firmware")).toBe(true);
+    // The boards have no remote update (device-api §7): nothing under firmware is called at all.
+    expect(stub.calls.some((c) => c.path.includes("firmware"))).toBe(false);
   });
 
   // --- the fleet ------------------------------------------------------------------

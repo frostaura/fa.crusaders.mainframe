@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -20,7 +19,8 @@ namespace Crusaders.Mainframe.Tests;
 /// <summary>
 /// Device contract v3 over real HTTP (docs/specs/device-api.md): the snapshot and what the server
 /// records from the box's reconcile, release causes, the display and hardware settings, key
-/// rotation, the club network, signed firmware and the member-code cut-over fixes. Each test
+/// rotation, the club network, the absence of any firmware update, and the member-code cut-over
+/// fixes. Each test
 /// changes the one fixture field its finding is about.
 /// </summary>
 public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
@@ -28,19 +28,13 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
     private const string Hb = "/api/v1/device/heartbeat";
     private const string OwnerEmail = "owner-v3@device.review.test";
 
-    /// <summary>The test deployment's OTA key pair. Generated per run, so nothing signed here is ever offered to a board.</summary>
-    private static readonly RSA Signer = RSA.Create(2048);
-
-    private static string ModulusHex => Convert.ToHexStringLower(Signer.ExportParameters(false).Modulus!);
-
     private WebApplicationFactory<Program> App() =>
         MemberCodeClub.Wired(pg.SharedHost, new StubEmailService()).WithWebHostBuilder(b =>
         {
-            b.UseSetting("DeviceOta:PublicKeyModulus", ModulusHex);
             b.UseSetting("Admins:Emails:0", OwnerEmail);
         });
 
-    private static readonly string[] V3Caps = ["codes:m1", "hb:3", "ota:1", "key:1", "net:1", "lcd:2"];
+    private static readonly string[] V3Caps = ["codes:m1", "hb:3", "key:1", "net:1", "lcd:2"];
 
     /// <summary>A v3 box's heartbeat body; <paramref name="extra"/> adds or replaces fields, <c>caps</c> always last.</summary>
     private static JsonObject Beat(string mac, object? extra = null, string[]? caps = null)
@@ -337,23 +331,18 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
 
         await BeatAsync(device, club, Beat(club.BoxMac, new
         {
-            fw_state = "rolled_back",
-            fw_failed = "3.0.1",
-            fw_error = "probation",
             net_ver = 4,
             net_src = "server",
             lcd_layout = "expanded",
             restore = "cold",
             mega_version = "3.0.0",
             mega = new { reset = "08", lcd = "00", relay = "high", scan_baud = 9600, scan_end = "auto", keys = "0F", diag = new[] { 1, 2, 3, 4, 5 }, future = new { x = 1 } },
-            diag = new { reset = "exception", exc = 4294967295L, epc1 = 3, heap = 20000, heap_min = 9000, block = 3000, stack_min = 400, sketch_free = 1044464, flash_mb = 4, extra = "kept out" },
+            diag = new { reset = "exception", exc = 4294967295L, epc1 = 3, heap = 20000, heap_min = 9000, block = 3000, stack_min = 400, flash_mb = 4, extra = "kept out" },
             drift = new[] { "config.lcd_layout", "roster" },
-            fw_state_extra = "ignored",
+            future_field = "ignored",
         }));
 
         var row = await club.ReadAsync(app, db => db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == club.BoxMac));
-        Assert.Equal("rolled_back", row.FwState);
-        Assert.Equal(["3.0.1"], row.FwFailedVersions);
         Assert.Equal(4, row.NetVer);
         Assert.Equal("expanded", row.LcdLayoutAcknowledged);
         Assert.Equal("cold", row.RestoreReport);
@@ -373,10 +362,10 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
             Assert.NotEmpty(await ErrorsAsync(app, club, code));
         }
 
-        // An unknown fw_state is stored as `unknown`, never a 400 — a diagnostic must not cost a beat.
-        await BeatAsync(device, club, Beat(club.BoxMac, new { fw_state = "levitating" }));
+        // An unknown net_src is stored as `unknown`, never a 400 — a diagnostic must not cost a beat.
+        await BeatAsync(device, club, Beat(club.BoxMac, new { net_src = "levitating" }));
         Assert.Equal("unknown", await club.ReadAsync(app, db => db.Devices.IgnoreQueryFilters()
-            .Where(d => d.MacAddress == club.BoxMac).Select(d => d.FwState).SingleAsync()));
+            .Where(d => d.MacAddress == club.BoxMac).Select(d => d.NetSrc).SingleAsync()));
     }
 
     // ---- §5, §10, §12: settings and per-board overrides ----------------------------------------
@@ -675,108 +664,61 @@ public sealed class DeviceContractV3HttpTests(PostgresFixture pg) : IClassFixtur
         Assert.False((await BeatAsync(device, club, Beat(club.BoxMac, new { net_ver = 0 }, caps: ["codes:m1", "hb:3"]))).TryGetProperty("net", out _));
     }
 
-    // ---- §7 firmware -----------------------------------------------------------------------------
-
-    private static (byte[] Image, string Manifest) Signed(string target, string version, int size = 4096, Action<JsonObject>? tamper = null)
-    {
-        var image = RandomNumberGenerator.GetBytes(size);
-        var sha = Convert.ToHexStringLower(SHA256.HashData(image));
-        var sig = Signer.SignData(Encoding.ASCII.GetBytes(DeviceOta.ManifestText(target, version, size, sha)), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        var manifest = new JsonObject
-        {
-            ["target"] = target,
-            ["version"] = version,
-            ["size"] = size,
-            ["sha256"] = sha,
-            ["sig"] = Convert.ToBase64String(sig).TrimEnd('=').Replace('+', '-').Replace('/', '_'),
-        };
-        tamper?.Invoke(manifest);
-        return (image, manifest.ToJsonString());
-    }
-
-    private static MultipartFormDataContent Upload((byte[] Image, string Manifest) release) => new()
-    {
-        { new ByteArrayContent(release.Image), "image", "image.bin" },
-        { new StringContent(release.Manifest), "manifest" },
-    };
-
-    private static async Task<string?> UploadErrorAsync(HttpClient admin, (byte[] Image, string Manifest) release)
-    {
-        var response = await admin.PostAsync("/api/v1/admin/devices/firmware", Upload(release));
-        if (response.StatusCode == HttpStatusCode.OK) return null;
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString();
-    }
-
-    [SkippableFact]
-    public async Task An_upload_is_refused_unless_a_board_would_boot_it()
-    {
-        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var app = App();
-        var club = await MemberCodeClub.SeedAsync(app, "v3fwbad");
-        var admin = club.Member(app, club.AdminId, "admin");
-
-        Assert.Equal(FirmwareService.SigInvalid, await UploadErrorAsync(admin, Signed("court_bridge", "3.0.1", tamper: m => m["version"] = "3.0.2")));
-        Assert.Equal(FirmwareService.SigInvalid, await UploadErrorAsync(admin, Signed("court_bridge", "3.0.1", tamper: m => m["target"] = "door_gate")));
-        Assert.Equal(FirmwareService.Sha256Mismatch, await UploadErrorAsync(admin, Signed("court_bridge", "3.0.1", tamper: m => m["sha256"] = new string('0', 64))));
-        Assert.Equal(FirmwareService.SizeMismatch, await UploadErrorAsync(admin, Signed("court_bridge", "3.0.1", tamper: m => m["size"] = 4097)));
-        Assert.Equal(FirmwareService.TargetUnknown, await UploadErrorAsync(admin, Signed("court_mega", "3.0.1")));
-        Assert.Null(await UploadErrorAsync(admin, Signed("court_bridge", "3.0.1")));
-        Assert.Equal(FirmwareService.VersionNotNewer, await UploadErrorAsync(admin, Signed("court_bridge", "3.0.1")));
-        Assert.Equal(FirmwareService.VersionNotNewer, await UploadErrorAsync(admin, Signed("court_bridge", "3.0.0")));
-    }
+    // ---- §7 no remote firmware update ------------------------------------------------------------
 
     /// <summary>
-    /// A rollout to ONE board offers only that board — an ota:1, acknowledged board of the target,
-    /// running an older version, that has not failed it — and the download is the bytes, with
-    /// Content-Length, to this club only (cross-tenant 404).
+    /// The boards have no remote firmware update (device-api.md §7): a firmware change is a cable
+    /// flash. Whatever a board says about itself — an <c>ota:1</c> capability or a firmware state
+    /// from an image built before the decision — the heartbeat answer never carries <c>ota</c>, the
+    /// door's <c>gate</c> object carries no probation window, and neither the download nor the
+    /// console's release routes exist.
     /// </summary>
     [SkippableFact]
-    public async Task A_rollout_offers_only_the_chosen_board_and_the_download_is_tenant_scoped()
+    public async Task The_heartbeat_answer_never_carries_ota_and_no_firmware_route_exists()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var app = App();
-        var club = await MemberCodeClub.SeedAsync(app, "v3fw");
-        var other = await MemberCodeClub.SeedAsync(app, "v3fwx");
+        var club = await MemberCodeClub.SeedAsync(app, "v3noota");
         var admin = club.Member(app, club.AdminId, "admin");
         var device = app.CreateClient();
+        string[] claimsOta = ["codes:m1", "hb:3", "ota:1", "key:1", "net:1", "lcd:2"];
+        var report = new { fw_state = "rolled_back", fw_failed = "3.0.1", fw_error = "probation" };
 
-        var release = Signed("court_bridge", "3.0.1");
-        var uploaded = await OkAsync(await admin.PostAsync("/api/v1/admin/devices/firmware", Upload(release)));
-        var id = uploaded.GetProperty("id").GetGuid();
-        Assert.False((await BeatAsync(device, club, Beat(club.BoxMac))).TryGetProperty("ota", out _));
+        // A court box, before and after acknowledgement, with a key rotation and a network both owed:
+        // every lifeline object it is owed arrives, and still no `ota`.
+        Assert.False((await BeatAsync(device, club, Beat(club.BoxMac, report, claimsOta))).TryGetProperty("ota", out _));
+        await OkAsync(await admin.PostAsync("/api/v1/admin/devices/api-key/rotate", null));
+        var box = await BeatAsync(device, club, Beat(club.BoxMac, report, claimsOta));
+        Assert.True(box.TryGetProperty("key_next", out _));
+        Assert.False(box.TryGetProperty("ota", out _));
+        Assert.DoesNotContain(box.GetProperty("config").EnumerateObject(), p => p.Name.Contains("_ota_", StringComparison.Ordinal));
 
-        var second = Guid.NewGuid().ToString("N")[..12];
-        await club.WriteAsync(app, db =>
-        {
-            db.Devices.Add(new Device { TenantId = club.TenantId, DeviceCode = $"box-{second[^6..]}", Name = "Annex", MacAddress = second, CourtNumbers = [1] });
-            return Task.CompletedTask;
-        });
-        var boxId = await club.ReadAsync(app, db => db.Devices.IgnoreQueryFilters().Where(d => d.MacAddress == club.BoxMac).Select(d => d.Id).SingleAsync());
-        await OkAsync(await admin.PatchAsync($"/api/v1/admin/devices/firmware/{id}", JsonContent.Create(new { rollout = "one", device_id = boxId })));
+        // A v3 door: the same, and its `gate` object holds the two v3 settings and the fault pair only.
+        var door = await BeatAsync(device, club, Beat(club.DoorMac, new { kind = "gate" }, ["codes:m1", "ota:1", "key:1", "net:1"]));
+        Assert.False(door.TryGetProperty("ota", out _));
+        Assert.Equal(
+            ["unlock_seconds", "power_restore_trust_minutes", "net_fallback_minutes", "device_fault_reporting", "device_fault_max_per_hour"],
+            door.GetProperty("gate").EnumerateObject().Select(p => p.Name));
 
-        var offered = (await BeatAsync(device, club, Beat(club.BoxMac))).GetProperty("ota");
-        Assert.Equal("ok", DeviceOta.ParseOffer(offered, "court_bridge"));
-        Assert.Equal("3.0.1", offered.GetProperty("version").GetString());
-        Assert.False((await BeatAsync(device, club, Beat(second))).TryGetProperty("ota", out _));
-        // Already running it, or reported it as failed: no offer.
-        Assert.False((await BeatAsync(device, club, Beat(club.BoxMac, new { firmware_version = "3.0.1" }))).TryGetProperty("ota", out _));
-        await BeatAsync(device, club, Beat(club.BoxMac, new { firmware_version = "3.0.0", fw_state = "rolled_back", fw_failed = "3.0.1", fw_error = "probation" }));
-        Assert.False((await BeatAsync(device, club, Beat(club.BoxMac))).TryGetProperty("ota", out _));
+        // A door naming only `ota:1` is a 1.x door to this server: the capability unlocks nothing.
+        var legacy = await BeatAsync(device, club, Beat(club.DoorMac, new { kind = "gate" }, ["codes:m1", "ota:1"]));
+        Assert.Equal(["unlock_seconds"], legacy.GetProperty("gate").EnumerateObject().Select(p => p.Name));
 
-        var path = offered.GetProperty("path").GetString()!;
-        var get = new HttpRequestMessage(HttpMethod.Get, path);
+        // No download for a board, and no release routes for the console.
+        var get = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/device/firmware/{Guid.NewGuid():N}");
         get.Headers.Authorization = new AuthenticationHeaderValue("Bearer", club.DeviceKey);
-        var download = await device.SendAsync(get);
-        Assert.Equal(HttpStatusCode.OK, download.StatusCode);
-        Assert.Equal("application/octet-stream", download.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(release.Image.Length, download.Content.Headers.ContentLength);
-        Assert.Equal(release.Image, await download.Content.ReadAsByteArrayAsync());
+        Assert.Equal(HttpStatusCode.NotFound, (await device.SendAsync(get)).StatusCode);
+        Assert.DoesNotContain(
+            app.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>().Endpoints
+                .OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>().Select(e => e.RoutePattern.RawText ?? ""),
+            route => route.Contains("firmware", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEqual(HttpStatusCode.OK, (await admin.GetAsync("/api/v1/admin/devices/firmware")).StatusCode);
 
-        var foreign = new HttpRequestMessage(HttpMethod.Get, path);
-        foreign.Headers.Authorization = new AuthenticationHeaderValue("Bearer", other.DeviceKey);
-        Assert.Equal(HttpStatusCode.NotFound, (await device.SendAsync(foreign)).StatusCode);
-        Assert.Empty(JsonDocument.Parse(await other.Member(app, other.AdminId, "admin").GetStringAsync("/api/v1/admin/devices/firmware")).RootElement.EnumerateArray());
+        // And nothing a board reported about an update is kept or served.
+        var row = await club.ReadAsync(app, db => db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == club.BoxMac));
+        var view = JsonDocument.Parse(await admin.GetStringAsync("/api/v1/admin/devices/")).RootElement
+            .EnumerateArray().Single(d => d.GetProperty("id").GetGuid() == row.Id);
+        Assert.DoesNotContain(view.EnumerateObject(), p => p.Name.StartsWith("fw_", StringComparison.Ordinal));
     }
 
     // ---- Member codes (member-code.md §5, §8, §13) ------------------------------------------------

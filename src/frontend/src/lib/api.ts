@@ -1158,7 +1158,6 @@ export type AdminSettings = {
   relay_reconcile_min_seconds?: number;
   device_power_restore_trust_minutes?: number;
   device_net_fallback_minutes?: number;
-  device_ota_probation_minutes?: number;
   /** v3 §6: hours the old key keeps working after every board has the new one. */
   device_key_grace_hours?: number;
   /** The member-code rollout (member-code §8): `legacy` · `v1` · `v1_only`. */
@@ -1336,8 +1335,8 @@ export type AdminDevice = {
    */
   offline_after_seconds?: number;
 
-  // ---- device contract v3 (device-api §2, §5–§8, §10). All optional: an older API serves none. ----
-  /** What the board can do, as its last heartbeat named it (`codes:m1 hb:3 lcd:2 ota:1 key:1 net:1`). */
+  // ---- device contract v3 (device-api §2, §5, §6, §8, §10). All optional: an older API serves none. ----
+  /** What the board can do, as its last heartbeat named it (`codes:m1 hb:3 lcd:2 key:1 net:1`). */
   capabilities?: string | string[] | null;
   /** This board's own layout, or null for the club's. Three-valued on the PATCH, like `button_map`. */
   lcd_layout?: string | null;
@@ -1346,11 +1345,6 @@ export type AdminDevice = {
   /** The layout the Mega ACKNOWLEDGED, as the box echoed it, and since when. */
   lcd_layout_acknowledged?: string | null;
   lcd_layout_acknowledged_at?: string | null;
-  /** `committed` · `probation` · `downloading` · `rolled_back` · `failed` (anything else is `unknown`). */
-  fw_state?: string | null;
-  /** With `rolled_back` / `failed`: the version, and why. */
-  fw_failed?: string | null;
-  fw_error?: string | null;
   /** The network configuration version applied, and where it came from: `server` · `local` · `compiled`. */
   net_ver?: number | null;
   net_src?: string | null;
@@ -1412,7 +1406,6 @@ export type DeviceDiag = {
   heap_min?: number | null;
   block?: number | null;
   stack_min?: number | null;
-  sketch_free?: number | null;
   flash_mb?: number | null;
 };
 
@@ -1703,44 +1696,6 @@ export type DeviceNetworkSave = {
   base: string;
   wifi: { ssid: string; psk: string | null }[];
 };
-
-/** A firmware target: the court box's bridge and the door gate. The Mega is never updated over WiFi. */
-export const FIRMWARE_TARGETS = ["court_bridge", "door_gate"] as const;
-export type FirmwareTarget = (typeof FIRMWARE_TARGETS)[number];
-
-/** A firmware rollout: nobody, one chosen board, or every acknowledged board of the target. */
-export type FirmwareRollout = "off" | "one" | "all";
-
-/** One uploaded, signature-verified release (device-api §7). */
-export type FirmwareRelease = {
-  id: string;
-  target: string;
-  version: string;
-  size: number;
-  sha256: string;
-  uploaded_at: string;
-  uploaded_by?: string | null;
-  rollout: FirmwareRollout;
-  /** The one board a `one` rollout offers it to (the PATCH names it `device_id`). */
-  rollout_device_id?: string | null;
-  paused: boolean;
-  /** How many acknowledged boards of the target stand where, for this release (FirmwareService.ListAsync). */
-  boards?: FirmwareReleaseBoards;
-};
-
-/** The board counts a release carries: of its target, offered it, and where each stands. */
-export type FirmwareReleaseBoards = {
-  of_target?: number;
-  included?: number;
-  running?: number;
-  downloading?: number;
-  probation?: number;
-  failed?: number;
-  cannot_update?: number;
-};
-
-/** What a board says about its firmware in a v3 heartbeat (device-api §2). */
-export type FirmwareState = "committed" | "probation" | "downloading" | "rolled_back" | "failed" | "unknown";
 
 /** The member-code rollout (member-code §8), as `GET /admin/devices/member-codes` serves it. */
 export type MemberCodeRolloutBoard = {
@@ -2998,28 +2953,6 @@ export const endpoints = {
   /** v3 §8: the club's device network. */
   adminDeviceNetwork: () => api.get<DeviceNetwork>("/api/v1/admin/devices/network"),
   adminDeviceNetworkSave: (req: DeviceNetworkSave) => api.put<DeviceNetwork>("/api/v1/admin/devices/network", req),
-
-  /** v3 §7: the club's signed firmware releases. */
-  adminFirmwareList: () => api.get<FirmwareRelease[]>("/api/v1/admin/devices/firmware"),
-  /**
-   * Uploads an image and the manifest `ota_sign.py` wrote. Refused unless the signature verifies
-   * (`sig_invalid`), the bytes match the manifest, the target is known and the version is newer.
-   */
-  adminFirmwareUpload: async (image: File, manifest: string): Promise<FirmwareRelease> => {
-    const fd = new FormData();
-    fd.append("image", image);
-    fd.append("manifest", manifest);
-    const tok = tokenStore.get();
-    const res = await fetchWithTimeout("/api/v1/admin/devices/firmware", {
-      method: "POST",
-      headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
-      body: fd,
-    }, UPLOAD_TIMEOUT_MS);
-    if (!res.ok) throw await failureFrom(res);
-    return res.json();
-  },
-  adminFirmwareRollout: (id: string, req: { rollout?: FirmwareRollout; device_id?: string | null; paused?: boolean }) =>
-    api.patch<FirmwareRelease>(`/api/v1/admin/devices/firmware/${id}`, req),
 
   /** The member-code rollout (member-code §8): phase, dates, and the boards blocking the cut-over. */
   adminMemberCodeRollout: () => api.get<MemberCodeRollout>("/api/v1/admin/devices/member-codes"),

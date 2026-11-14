@@ -6,10 +6,9 @@ using Crusaders.Mainframe.Api.Services;
 namespace Crusaders.Mainframe.Api.Endpoints;
 
 /// <summary>
-/// What a v3 board says about itself on every heartbeat (device-api.md §2, §13): its firmware
-/// state, the network it applied, the layout its Mega acknowledged, its restore report, and the
-/// <c>mega</c>, <c>diag</c> and <c>drift</c> telemetry — onto the row, and the notices a club has
-/// to see raised.
+/// What a v3 board says about itself on every heartbeat (device-api.md §2, §13): the network it
+/// applied, the layout its Mega acknowledged, its restore report, and the <c>mega</c>, <c>diag</c>
+/// and <c>drift</c> telemetry — onto the row, and the notices a club has to see raised.
 ///
 /// <para>
 /// <b>Nothing here can cost a board its heartbeat.</b> Every field is optional, an unknown
@@ -21,12 +20,6 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </summary>
 public static class DeviceTelemetry
 {
-    /// <summary>The firmware states §7 names; anything else is stored as <c>unknown</c>.</summary>
-    public static readonly string[] FwStates = ["committed", "probation", "downloading", "rolled_back", "failed"];
-
-    /// <summary>The OTA failure reasons §2 names; anything else is stored as <c>unknown</c>.</summary>
-    public static readonly string[] FwErrors = ["probation", "sig", "sha256", "size", "http", "space", "flash", "target", "version", "busy"];
-
     public static readonly string[] NetSources = ["server", "local", "compiled"];
     public static readonly string[] RestoreReports = ["warm", "cold", "none"];
 
@@ -43,27 +36,12 @@ public static class DeviceTelemetry
 
     public const string Unknown = "unknown";
 
-    private static readonly string[] DiagKeys = ["exc", "epc1", "heap", "heap_min", "block", "stack_min", "sketch_free", "flash_mb"];
+    private static readonly string[] DiagKeys = ["exc", "epc1", "heap", "heap_min", "block", "stack_min", "flash_mb"];
     private static readonly string[] MegaTextKeys = ["reset", "lcd", "relay", "scan_end", "keys"];
 
     /// <summary>The v3 report fields onto the row. Called for every heartbeat; a 2.x board sends none of them and nothing changes.</summary>
     public static void NoteReport(Device device, HeartbeatRequest req, int? keyId, DateTimeOffset now)
     {
-        if (req.FwState is { } state)
-        {
-            var known = Known(state, FwStates);
-            if (known != device.FwState) device.FwStateChangedAt = now;
-            device.FwState = known;
-            var failedVersion = Cut(req.FwFailed, 32);
-            device.FwFailed = failedVersion;
-            device.FwError = req.FwError is { } error ? Known(error, FwErrors) : null;
-            if (known is "rolled_back" or "failed" && failedVersion is { Length: > 0 } v && !device.FwFailedVersions.Contains(v))
-            {
-                // Kept, so a board whose flash was wiped is never offered the image that broke it again.
-                device.FwFailedVersions = [.. device.FwFailedVersions.TakeLast(15), v];
-            }
-        }
-
         if (req.NetVer is { } ver && ver >= 0) device.NetVer = ver;
         if (req.NetSrc is { } src) device.NetSrc = Known(src, NetSources);
 
