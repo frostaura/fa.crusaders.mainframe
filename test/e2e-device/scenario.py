@@ -85,32 +85,31 @@ RELAY_HARD_CAP_SECONDS = 5400
 LCD_COLS = 20
 LCD_ROWS = 4
 
-#: courtlogic::kIdleLine1 / kIdleLine2 — the landing screen's top two rows (Mega
-#: 2.1.0). The call to action LEADS, because the club's fitted panel is a 16x2
-#: and rows 2-3 are off-glass there; row 1 is TO PLAY while every court is dark
-#: and the lit courts' minutes left (LANDING_SUMMARY) while any is lit.
-IDLE_ROW0 = "SCAN YOUR CODE"
-IDLE_ROW1 = "TO PLAY"
-#: Row 1 of the landing screen with courts lit: `COURT B 45 MIN` for one,
-#: four-column cells (`A45 C 5`) for several.
-LANDING_SUMMARY = re.compile(r"^(COURT [A-D] \d+ MIN|([A-D][ \d]\d ?)+)$")
-#: The one sentence the Mega itself can say about a press it had to drop — on
-#: the action row of the 20x4, and on row 1 (HINT_ROW1) for the 16x2.
-HINT_ROW = "SCAN YOUR CODE FIRST"
-HINT_ROW1 = "SCAN CODE FIRST"
+#: Mega 3.0.0 composes its own landing (display/ `landing`, imported as DISPLAY below) and boots
+#: in the COMPACT layout — rows 0-1, sixteen columns, whole on a 1602 and on a 2004 — with the
+#: marquee on (MegaSettings LAYOUT 0, MARQ 1), which is also what it falls back to on any doubt.
+#: The words below are the Mega's own, never staged by the bridge.
+#:
+#: courtlogic::kHintScanFirst / kHintOneMoment — the Mega's answer to a press, on the layout's
+#: last row (row 1 compact): a dropped duration press, and a forwarded press nobody answered.
+HINT_SCAN_FIRST = "SCAN CODE FIRST"
+HINT_ONE_MOMENT = "ONE MOMENT"
 #: courtlogic::kScanFeedbackLine1/2 — painted the instant a scan completes.
 SCAN_FEEDBACK_ROW0 = "CHECKING CODE"
 SCAN_FEEDBACK_ROW1 = "PLEASE WAIT"
-#: courtlogic::kHintFallbackMs — how long a court press forwarded with the window
-#: shut waits for the bridge's answer before the Mega paints HINT_ROW1 itself.
+#: courtlogic::kHintFallbackMs — how long a forwarded press waits for the bridge's answer
+#: before the Mega paints HINT_ONE_MOMENT itself.
 HINT_FALLBACK_SECONDS = 1.5
-#: courtlogic::kDefaultHoldMs — what `!LCD` and a scan's own feedback hold for.
+#: MegaSettings SCANH — what `!LCD` and a scan's own feedback hold for.
 DEFAULT_HOLD_SECONDS = 10
-#: courtlogic::kHintMs and kHintRateLimitMs.
+#: MegaSettings HINT and courtlogic::kHintRateLimitMs.
 HINT_SECONDS = 3
 HINT_RATE_LIMIT_SECONDS = 2
-#: proto::kShowHoldMaxSeconds — the ceiling the DECODER clamps every hold into.
-SHOW_HOLD_MAX_SECONDS = 120
+#: MegaSettings CEIL, DWELL and AFTON boot defaults: the screen ceiling, the landing hold after
+#: it, and the return to landing after a relay closes (device-serial-protocol.md v3).
+CEIL_SECONDS = 60
+DWELL_SECONDS = 3
+AFTON_SECONDS = 15
 #: courtlogic::kStateIntervalMs — the periodic `!STATE`, and the ONLY traffic a
 #: quiet box is allowed to put on the link.
 STATE_INTERVAL_SECONDS = 10
@@ -2286,7 +2285,7 @@ def screen_deadlines(sim: Simulator, label: str) -> None:
     # to drop, which is the other half of the same incident.
     press = sim.lcd_mark()
     sim.console("btn 1")
-    sim.expect_screen(lambda f: f.row(1) == lcd_pad(HINT_ROW1), 3,
+    sim.expect_screen(lambda f: f.row(1) == lcd_pad(HINT_SCAN_FIRST), 3,
                       "the dropped-press hint", press)
     REPORT.check("E-LCD-1", f"[{label}] ...and a press behind it is ANSWERED rather than swallowed",
                  True)
@@ -2330,128 +2329,217 @@ def screen_deadlines(sim: Simulator, label: str) -> None:
 
 
 def show_ceiling(sim: Simulator, label: str) -> None:
-    """E-LCD-2 — the two-minute ceiling, measured rather than derived.
+    """E-LCD-2 — the screen ceiling, measured rather than derived.
 
-    SLOW BY CONSTRUCTION: the assertion is that a screen asking for forever is
-    still there at 115 s and gone by 123 s, and there is no way to learn that in
-    less than two minutes. `--quick` skips it; nothing else does, because a
-    ceiling nobody ever waits out is a ceiling nobody has ever seen hold."""
-    step(f"E-LCD-2  [{label}] the two-minute ceiling: !SHOW,4294967295 is clamped by the DECODER")
+    Mega 3.0.0 counts the total time OFF landing from the moment the glass leaves it, and at
+    `CEIL` seconds (MegaSettings, default 60) paints landing, says `!EVT,CEIL,` and holds landing
+    for `DWELL` seconds, refusing any commit in that window (docs/specs/device-serial-protocol.md
+    "The screen ceiling", rule 1). That is the one rule here no future bridge can talk the Mega
+    out of, because 3.0.0 is the last Mega image.
+
+    SLOW BY CONSTRUCTION: the assertion is that a screen asking for forever is still there five
+    seconds before the ceiling and gone just after it, and there is no way to learn that in less
+    than the ceiling. `--quick` skips it; nothing else does."""
+    step(f"E-LCD-2  [{label}] the {CEIL_SECONDS}s screen ceiling: !SHOW,4294967295 is landing again by then")
     sim.send("RST")
+    sim.send("IDLE", "7", "1345")
     sim.expect_landing(6, sim.lcd_mark())
     mark = sim.lcd_mark()
+    events = sim.frame_mark()
     for row, text in enumerate(("FOREVER PLEASE", "ASKED FOR 2^32-1", "", "")):
         sim.send("ROW", str(row), text)
     armed = time.monotonic()
     sim.send("SHOW", "4294967295", "0")
     sim.expect_screen(lambda f: f.row(0) == lcd_pad("FOREVER PLEASE"), 4, "the unbounded overlay", mark)
-    print(f"  waiting out the {SHOW_HOLD_MAX_SECONDS}s ceiling (this is the slow step) ...", flush=True)
+    print(f"  waiting out the {CEIL_SECONDS}s ceiling (this is the slow step) ...", flush=True)
 
-    # JUST BEFORE. A screen clamped to something SHORTER than the ceiling would
-    # pass the "it went away" half on its own, so the ceiling is only proved by
-    # asserting it is still there five seconds before it.
-    time.sleep(max(0.0, (SHOW_HOLD_MAX_SECONDS - 5) - (time.monotonic() - armed)))
+    # JUST BEFORE. A screen cut SHORTER than the ceiling would pass the "it went away" half on
+    # its own, so the ceiling is only proved by asserting the screen is still there before it.
+    time.sleep(max(0.0, (CEIL_SECONDS - 5) - (time.monotonic() - armed)))
     still = sim.screen()
     REPORT.check("E-LCD-2", f"[{label}] a hold of 2^32-1 seconds is still on the glass at "
-                            f"{SHOW_HOLD_MAX_SECONDS - 5}s — clamped UP to the ceiling, not down to a default",
+                            f"{CEIL_SECONDS - 5}s — held to the ceiling, not cut to a default",
                  still.row(0) == lcd_pad("FOREVER PLEASE"),
                  f"t+{time.monotonic() - armed:.0f}s screen={still.text()}")
-    home = sim.expect_landing(SHOW_HOLD_MAX_SECONDS + 4 - (time.monotonic() - armed), mark)
+    home = sim.expect_landing(CEIL_SECONDS + 4 - (time.monotonic() - armed), mark)
     held = home.at - armed
-    REPORT.check("E-LCD-2", f"[{label}] ...and gone just after it: no screen a bridge paints can outlive "
-                            f"{SHOW_HOLD_MAX_SECONDS}s, whatever it asks for",
-                 SHOW_HOLD_MAX_SECONDS - 1 <= held <= SHOW_HOLD_MAX_SECONDS + 4, f"held={held:.1f}s")
+    REPORT.check("E-LCD-2", f"[{label}] ...and landing just after it: no screen a bridge paints can outlive "
+                            f"the Mega's {CEIL_SECONDS}s ceiling, whatever it asks for",
+                 CEIL_SECONDS - 1 <= held <= CEIL_SECONDS + 4, f"held={held:.1f}s")
+    ceil = sim.expect_frame(lambda f: f.verb == "EVT" and f.args[:1] == ["CEIL"], 3, "!EVT,CEIL,")
+    REPORT.check("E-LCD-2", f"[{label}] the ceiling says so on the link: !EVT,CEIL, (counted in !DIAG)",
+                 any(f is ceil for f in sim.frames_after(events)), str(ceil))
+
+    # THE DWELL. A bridge that answers the ceiling by repainting at once would put the stuck
+    # screen straight back; for DWELL seconds a commit nobody asked for paints nothing.
+    dwell = sim.lcd_mark()
+    sim.send("ROW", "0", "STRAIGHT BACK")
+    sim.send("SHOW", "10", "0")
+    REPORT.check("E-LCD-2", f"[{label}] a commit inside the {DWELL_SECONDS}s dwell that follows the ceiling "
+                            f"paints NOTHING: landing holds",
+                 sim.no_screen(lambda f: f.row(0) == lcd_pad("STRAIGHT BACK"), 1.0, dwell)
+                 and is_landing(sim.screen()), sim.screen().text())
+    time.sleep(max(0.0, DWELL_SECONDS + 0.5 - (time.monotonic() - home.at)))
+    after = sim.lcd_mark()
+    sim.send("ROW", "0", "AFTER THE DWELL")
+    sim.send("SHOW", "3", "0")
+    sim.expect_screen(lambda f: f.row(0) == lcd_pad("AFTER THE DWELL"), 4, "a commit after the dwell", after)
+    sim.expect_landing(5, after)
+    REPORT.check("E-LCD-2", f"[{label}] ...and once the dwell is over the bridge's screens paint again", True)
 
 
 def atomic_commit(sim: Simulator, label: str) -> None:
-    """E-LCD-3 — `!ROW` paints nothing and `!SHOW` commits all four rows at once.
+    """E-LCD-3 — staging paints nothing, and a commit paints the whole screen at once.
 
-    THE OBSERVED TEAR was `CRUSADERS COURTS` on row 0 beside `45 MIN` on row 1 —
-    the old screen's second line under the new screen's first — and it came from
-    `noteAuthLapse` painting the landing screen straight over a live grant
-    screen thirty seconds after a court was lit.
+    THE OBSERVED TEAR was the call to action on row 0 beside a grant's `45 MIN` on row 1 — the
+    old screen's line under the new screen's — and it came from the authorisation window's lapse
+    painting the landing straight over a live grant thirty seconds after a court was lit.
 
-    A settled screen is what a member could read; see `Simulator.settled_since`.
-    The console port repaints the whole panel on every `print()`, so one commit
-    reaches this transcript as four frames microseconds apart, and asserting on
-    the raw frames would be asserting about the transcript rather than the
-    glass."""
+    Mega 3.0.0 draws the COMPACT layout until told otherwise (rows 0-1, sixteen columns: whole
+    on a 1602 and on a 2004), so a four-row commit shows its first two rows and leaves rows 2-3
+    blank. A settled screen is what a member could read; see `Simulator.settled_since`."""
     step(f"E-LCD-3  [{label}] the commit is atomic, and a lapsing auth window repaints nothing")
     sim.send("RST")
-    sim.send("MAP", "1", "2", "3", "4")
-    sim.send("ON", "A", "2700")
     sim.send("IDLE", "7", "1345")
-    before = sim.expect_screen(lambda f: f.row(0) == lcd_pad(IDLE_ROW0) and f.row(2).startswith("A 45"),
-                               8, "the landing screen with court A lit", sim.lcd_mark())
+    sim.expect_landing(6, sim.lcd_mark())
 
     staged = ("HI NALEDI", "45 MIN", "COURT 3", "PRESS A")
     mark = sim.lcd_mark()
     for row, text in enumerate(staged):
         sim.send("ROW", str(row), text)
     time.sleep(0.6)
+    leaked = [f.text() for f in sim.lcd_since(mark) if not is_landing(f) or any(s in f.text() for s in staged)]
     REPORT.check("E-LCD-3", f"[{label}] four !ROW frames stage a whole new screen and paint NOTHING — "
                             f"which is what makes the commit atomic rather than a repaint the member "
                             f"watches happen",
-                 not sim.lcd_since(mark), f"frames={[f.text() for f in sim.lcd_since(mark)]}")
+                 not leaked, f"frames={leaked}")
 
     commit = sim.lcd_mark()
     sim.send("SHOW", "8", "0")
     got = sim.expect_screen(lambda f: f.row(0) == lcd_pad(staged[0]), 4, "the committed screen", commit)
-    REPORT.check("E-LCD-3", f"[{label}] !SHOW commits all four staged rows at once",
-                 [r.rstrip() for r in got.rows] == list(staged), got.text())
-    torn = [f for f in sim.settled_since(commit)
-            if f.row(0) == lcd_pad(staged[0]) and f.row(1) == before.row(1)]
-    REPORT.check("E-LCD-3", f"[{label}] no settled screen mixes the new screen's row 0 with the old "
-                            f"screen's row 1 — the observed tear, exactly",
+    REPORT.check("E-LCD-3", f"[{label}] !SHOW commits the staged screen at once, in the compact layout: "
+                            f"`{staged[0]}` / `{staged[1]}`, and rows 2-3 blank",
+                 got.row(1) == lcd_pad(staged[1]) and got.row(2).strip() == "" and got.row(3).strip() == "",
+                 got.text())
+    torn = [f for f in sim.settled_since(commit) if f.row(0) == lcd_pad(staged[0]) and f.row(1) != lcd_pad(staged[1])]
+    REPORT.check("E-LCD-3", f"[{label}] no settled screen puts the new screen's row 0 over any other row 1 — "
+                            f"the observed tear, exactly",
                  not torn, f"torn={[f.text() for f in torn]}")
 
-    # AND THE OTHER DIRECTION, which is where the tear was actually produced: the
-    # authorisation window closing is about the BUTTONS, and the screen has its
-    # own deadline that is nobody else's to take away.
+    # AND THE OTHER DIRECTION, which is where the tear was actually produced: the authorisation
+    # window closing is about the BUTTONS, and the screen has its own deadline that is nobody
+    # else's to take away.
     lapse = sim.lcd_mark()
     sim.send("AUTH", "1")
     sim.expect_frame(lambda f: f.verb == "EVT" and f.args[:1] == ["AUTHEXPIRED"], 5, "!EVT,AUTHEXPIRED")
     time.sleep(0.5)
-    mixed = [f for f in sim.settled_since(lapse)
-             if f.row(0) == lcd_pad(IDLE_ROW0) and f.row(1) == lcd_pad("45 MIN")]
-    REPORT.check("E-LCD-3", f"[{label}] the auth window lapsing repaints NOTHING: `{IDLE_ROW0}` "
-                            f"never appears above the grant screen's `45 MIN`",
+    mixed = [f for f in sim.settled_since(lapse) if is_landing(f) or f.row(1) != lcd_pad(staged[1])]
+    REPORT.check("E-LCD-3", f"[{label}] the auth window lapsing repaints NOTHING: the call to action never "
+                            f"appears over the grant screen's `{staged[1]}`",
                  not mixed and sim.screen().row(0) == lcd_pad(staged[0]),
                  f"mixed={[f.text() for f in mixed]} now={sim.screen().text()}")
+    sim.send("RST")
+
+
+def after_lights_on(sim: Simulator, label: str) -> None:
+    """E-LCD-5 — after the lights go on, landing within `AFTON` seconds.
+
+    Founder decision for the last flash: once a court is lit the box goes back to the landing
+    by itself, so the next member sees the call to action and every court's minutes rather than
+    the last member's grant. A relay going from open to closed caps whatever overlay is up to
+    end `AFTON` seconds later (rule 3; MegaSettings AFTON, default 15)."""
+    step(f"E-LCD-5  [{label}] lights on -> the landing is back within {AFTON_SECONDS}s, whatever the screen asked")
+    sim.send("RST")
+    sim.send("IDLE", "7", "1345")
+    sim.expect_landing(6, sim.lcd_mark())
+    mark = sim.lcd_mark()
+    sim.send("ROW", "0", "LONG GRANT")
+    sim.send("ROW", "1", "HOLD 60 SECONDS")
+    sim.send("SHOW", "60", "0")
+    sim.expect_screen(lambda f: f.row(0) == lcd_pad("LONG GRANT"), 4, "a sixty-second grant screen", mark)
+    lit = time.monotonic()
+    sim.send("ON", "A", "600")
+    sim.expect_frame(lambda f: f.verb == "STATE" and int(f.args[0]) & 0b0001, 5, "!STATE with A")
+    home = sim.expect_landing(AFTON_SECONDS + 3, mark)
+    took = home.at - lit
+    REPORT.check("E-LCD-5", f"[{label}] a 60 s grant screen is cut to end {AFTON_SECONDS}s after the relay "
+                            f"closed, and the landing is back unaided",
+                 AFTON_SECONDS - 1 <= took <= AFTON_SECONDS + 1.5, f"landing {took:.1f}s after !ON")
     sim.send("OFF", "A")
+    sim.expect_frame(lambda f: f.verb == "EVT" and f.args[:2] == ["OFF", "A"], 5, "!EVT,OFF,A")
+
+
+#: The compact landing's clock moves on by itself (`!IDLE` stamps it), so a step that waits a
+#: minute accepts the next two minutes as well.
+LANDING_CLOCKS = ("1345", "1346", "1347")
+
+
+def compact_marquee(courts: list[tuple[int, bool, int]], clock: str) -> str:
+    """Row 1 of the compact landing with the marquee on, as one loop of text (display/
+    `landing`): every mapped court in relay order, then the status item."""
+    return DISPLAY.GAP.join([DISPLAY.court_item(n, lit, s) for n, lit, s in courts]
+                            + [DISPLAY.status_item("ready", clock, None)])
+
+
+def shows_marquee(frame: LcdFrame, courts: list[tuple[int, bool, int]], whole: str = "") -> bool:
+    """`frame` is the compact landing scrolling `courts`, with `whole` wholly in view: a
+    sixteen-cell window that happens not to cover the court being asked about would otherwise
+    agree with any figure for it."""
+    return (is_landing(frame) and whole in frame.row(1)
+            and any(shows(frame.row(1), compact_marquee(courts, c)) for c in LANDING_CLOCKS))
+
+
+def marquee_loop_seconds(courts: list[tuple[int, bool, int]]) -> float:
+    """One whole loop of the compact marquee at MegaSettings STEP's boot default (400 ms)."""
+    return (len(compact_marquee(courts, "1345")) + len(DISPLAY.GAP)) * 0.4
 
 
 def lit_court_row(sim: Simulator, label: str) -> None:
-    """E-LCD-4 — a lit court is visible, and it costs the link nothing.
+    """E-LCD-4 — a lit court is visible on the landing, and it costs the link nothing.
 
-    The whole argument for rendering the countdown on the MEGA is that RelayGuard
-    already holds the truth and the ESP is the half that goes away. Pushing a
-    per-second countdown over 9600 baud would cost about 117 ms of every second;
-    rendering it here costs a row of I2C and no serial traffic at all. That is an
-    assertion, so it is asserted: between the two samples the ONLY frames on the
-    link are the periodic `!STATE`."""
-    step(f"E-LCD-4  [{label}] the court row counts down on the Mega, for free")
+    The whole argument for composing the landing on the MEGA is that RelayGuard already holds the
+    truth and the ESP is the half that goes away. Pushing a per-second countdown over 9600 baud
+    would cost about 117 ms of every second; rendering it here costs a row of I2C and no serial
+    traffic at all. That is an assertion, so it is asserted: between the two samples the ONLY
+    frames on the link are the periodic `!STATE`.
+
+    Mega 3.0.0's compact landing: the call to action centred on row 0, and on row 1 a software
+    marquee of every mapped court (`COURT 1 45 MIN`, `COURT 2 OFF`) and the status item, one
+    cell per STEP — row 0 never moves. `!CFG,LAYOUT,1` switches to the expanded 20x4 layout,
+    one court per row, and `!CFG,LAYOUT,0` reverts it: the layout is a setting, never a flash."""
+    step(f"E-LCD-4  [{label}] the landing names every court and its minutes, counted down on the Mega")
     sim.send("RST")
     sim.send("MAP", "1", "2", "3", "4")
     sim.send("IDLE", "7", "1345")
     sim.send("ON", "A", "2700")
-    lit = sim.expect_screen(lambda f: f.row(2).startswith("A 45"), 8, "court A lit for 45 minutes",
-                            sim.lcd_mark())
-    REPORT.check("E-LCD-4", f"[{label}] !MAP,1,2,3,4 then !ON,A,2700 -> row 2 reads "
-                            f"`A 45 B -- C -- D --`, with `--` for a mapped court that is dark",
-                 lit.row(2) == lcd_pad("A 45 B -- C -- D --"), repr(lit.row(2)))
-    REPORT.check("E-LCD-4", f"[{label}] ...and row 1 — the only row besides the scan prompt a 16x2 shows — "
-                            f"reads `COURT A 45 MIN` under `{IDLE_ROW0}` (Mega 2.1.0)",
-                 lit.row(0) == lcd_pad(IDLE_ROW0) and lit.row(1) == lcd_pad("COURT A 45 MIN"), lit.text())
+    at45 = [(1, True, 2700), (2, False, 0), (3, False, 0), (4, False, 0)]
+    lit = sim.expect_screen(lambda f: shows_marquee(f, at45, "COURT 1 45 MIN"), marquee_loop_seconds(at45) + 4,
+                            "court 1 lit for 45 minutes on the marquee", sim.lcd_mark())
+    REPORT.check("E-LCD-4", f"[{label}] !MAP,1,2,3,4 then !ON,A,2700 -> under the call to action the compact "
+                            f"landing's row 1 is the marquee `{compact_marquee(at45, '1345')}`",
+                 True, lit.text())
+
+    # SMOOTH: one cell per step, row 0 standing still — a software marquee, never HD44780 shift.
+    scroll = sim.lcd_mark()
+    time.sleep(2.5)
+    seen = [f for f in sim.settled_since(scroll) if is_landing(f)]
+    loop = compact_marquee(at45, "1345") + DISPLAY.GAP
+    windows = {DISPLAY.marquee_window(compact_marquee(at45, "1345"), 16, k): k for k in range(len(loop))}
+    offsets = [windows.get(f.row(1)[:16]) for f in seen]
+    steps = [(b - a) % len(loop) for a, b in zip(offsets, offsets[1:]) if a is not None and b is not None]
+    REPORT.check("E-LCD-4", f"[{label}] the marquee moves one cell at a time and the call to action never "
+                            f"moves or blanks with it",
+                 len(steps) >= 3 and all(s == 1 for s in steps)
+                 and all(f.row(0) == lit.row(0) for f in sim.settled_since(scroll)),
+                 f"offsets={offsets}")
 
     quiet_from = sim.frame_mark()
-    print("  waiting ~60s for the court row to tick down a minute, with the link silent ...", flush=True)
-    ticked = sim.expect_screen(lambda f: f.row(2).startswith("A 44"), 80, "the court row at 44 minutes",
-                               sim.lcd_mark())
-    REPORT.check("E-LCD-4", f"[{label}] ...and a minute later, with nobody asked, `A 44` — on row 2 and "
-                            f"on the 16x2's row 1",
-                 ticked.row(2) == lcd_pad("A 44 B -- C -- D --") and ticked.row(1) == lcd_pad("COURT A 44 MIN"),
-                 ticked.text())
+    print("  waiting ~60s for court 1 to tick down a minute, with the link silent ...", flush=True)
+    at44 = [(1, True, 2640), (2, False, 0), (3, False, 0), (4, False, 0)]
+    ticked = sim.expect_screen(lambda f: shows_marquee(f, at44, "COURT 1 44 MIN"), 64 + marquee_loop_seconds(at44),
+                               "court 1 at 44 minutes", sim.lcd_mark())
+    REPORT.check("E-LCD-4", f"[{label}] ...and a minute later, with nobody asked, `COURT 1 44 MIN`",
+                 True, ticked.text())
     between = sim.frames_after(quiet_from)
     REPORT.check("E-LCD-4", f"[{label}] and NOTHING crossed the link between the two but the periodic "
                             f"!STATE — the countdown is rendered from RelayGuard and costs the bridge "
@@ -2459,26 +2547,55 @@ def lit_court_row(sim: Simulator, label: str) -> None:
                  bool(between) and all(f.verb == "STATE" for f in between),
                  f"{len(between)} frame(s): {sorted({f.verb for f in between})}")
 
-    # A relay the heartbeat never mapped renders BLANK, not `--`: a dash claims
-    # the box drives a dark court, and it does not drive this one at all.
+    # A relay the heartbeat never mapped is never drawn, lit or not: the box does not drive a
+    # court it was not told about, so it does not claim one.
     mark = sim.lcd_mark()
     sim.send("MAP", "0", "2", "3", "4")
-    blanked = sim.expect_screen(lambda f: f.row(2).startswith("     "), 5, "relay 0 unmapped", mark)
-    REPORT.check("E-LCD-4", f"[{label}] a relay !MAP never mapped renders BLANK rather than `--`, because "
-                            f"a dash claims a dark court and the box does not drive this one",
-                 blanked.row(2) == lcd_pad("     B -- C -- D --"), repr(blanked.row(2)))
-    sim.send("OFF", "A")
+    unmapped = [(2, False, 0), (3, False, 0), (4, False, 0)]
+    mapped = [[(1, True, m * 60), (2, False, 0), (3, False, 0), (4, False, 0)] for m in range(42, 45)]
+    applied = sim.expect_screen(lambda f: shows_marquee(f, unmapped) and not any(shows_marquee(f, c) for c in mapped),
+                                marquee_loop_seconds(unmapped) + 4, "the marquee without relay A", mark)
+    loop = sim.lcd_mark()
+    time.sleep(marquee_loop_seconds(unmapped) + 1)
+    named = [f.text() for f in sim.settled_since(loop) if "COURT 1" in f.text()]
+    REPORT.check("E-LCD-4", f"[{label}] a relay !MAP leaves unmapped is never drawn, lit or not: one whole loop "
+                            f"of the marquee and `COURT 1` never scrolls past",
+                 not named and len(sim.settled_since(loop)) > 10, f"{applied.text()} named={named[:3]}")
+
+    # THE EXPANDED LAYOUT, chosen at run time and reverted remotely.
     sim.send("MAP", "1", "2", "3", "4")
+    mark = sim.lcd_mark()
+    sim.send("CFG", "7", "LAYOUT", "1")
+    ack = sim.expect_frame(lambda f: f.verb == "ACK" and f.args[:1] == ["7"], 3, "!ACK,7 for LAYOUT 1")
+    lit_now = [[(1, True, m * 60), (2, False, 0), (3, False, 0), (4, False, 0)] for m in range(41, 46)]
+    candidates = {tuple(lcd_pad(r) for r in DISPLAY.landing("expanded", True, "ready", c, None,
+                                                            [{"number": n, "lit": l, "seconds": s} for n, l, s in courts],
+                                                            page, 0))
+                  for courts in lit_now for c in LANDING_CLOCKS for page in (0, 1)}
+    expanded = sim.expect_screen(lambda f: tuple(f.rows) in candidates, 6, "the expanded 20x4 landing", mark)
+    REPORT.check("E-LCD-4", f"[{label}] !CFG,7,LAYOUT,1 is acknowledged and the landing becomes the expanded "
+                            f"20x4: `{DISPLAY.CTA['expanded']}` over one court per row",
+                 ack.args == ["7", "0"], f"{ack} {expanded.text()}")
+    mark = sim.lcd_mark()
+    sim.send("CFG", "8", "LAYOUT", "0")
+    ack = sim.expect_frame(lambda f: f.verb == "ACK" and f.args[:1] == ["8"], 3, "!ACK,8 for LAYOUT 0")
+    compact_title = lcd_pad(DISPLAY.center(DISPLAY.CTA["compact"], DISPLAY.WIDTH["compact"]))
+    back = sim.expect_screen(lambda f: f.row(0) == compact_title and f.row(2).strip() == "", 6,
+                             "the compact landing again", mark)
+    REPORT.check("E-LCD-4", f"[{label}] ...and !CFG,8,LAYOUT,0 reverts it to compact, rows 2-3 blank again",
+                 ack.args == ["8", "0"], f"{ack} {back.text()}")
+    sim.send("OFF", "A")
 
 
 def dropped_press(sim: Simulator, label: str) -> None:
     """E-BTN-1 — a press the box cannot act on says so, ONCE.
 
-    The DROP was always right: a press queued until the next window opens fires a
-    relay on the NEXT member's scan, which is the unexpiring-flag defect the
-    window exists to close. The SILENCE was the bug — six presses across all
-    eight channels produced no frame, no pixel and no sound, and the box was
-    indistinguishable from broken."""
+    The DROP was always right: a press queued until the next window opens fires a relay on the
+    NEXT member's scan, which is the unexpiring-flag defect the window exists to close. The
+    SILENCE was the bug — six presses across all eight channels produced no frame, no pixel and
+    no sound, and the box was indistinguishable from broken. Mega 3.0.0 paints its own hint,
+    `SCAN CODE FIRST`, on the layout's last row (row 1 compact), and a dropped press ENDS any
+    overlay rather than extending it (rule 2)."""
     step(f"E-BTN-1  [{label}] a dropped DURATION press is answered once, rate-limited, and never queued")
     sim.send("RST")
     sim.send("AUTH", "0")
@@ -2493,20 +2610,19 @@ def dropped_press(sim: Simulator, label: str) -> None:
     first = sim.lcd_mark()
     btn_from = sim.frame_mark()
     sim.console("btn 1")
-    hinted = sim.expect_screen(lambda f: f.row(3) == lcd_pad(HINT_ROW), 3, "the hint", first)
-    REPORT.check("E-BTN-1", f"[{label}] with the window shut, `btn 1` paints `{HINT_ROW}` in the action row "
-                            f"and `{HINT_ROW1}` on row 1, under `{IDLE_ROW0}` — the 16x2 shows rows 0-1 only",
-                 hinted.row(1) == lcd_pad(HINT_ROW1) and hinted.row(0) == lcd_pad(IDLE_ROW0), hinted.text())
+    hinted = sim.expect_screen(lambda f: f.row(1) == lcd_pad(HINT_SCAN_FIRST), 3, "the hint", first)
+    REPORT.check("E-BTN-1", f"[{label}] with the window shut, `btn 1` paints `{HINT_SCAN_FIRST}` on row 1 "
+                            f"under the call to action",
+                 is_landing(hinted), hinted.text())
 
-    # A SECOND PRESS INSIDE THE RATE LIMIT PAINTS NOTHING MORE — and the way to
-    # see that is that it does not extend the first hint either. A press that
-    # re-armed the hint would keep the sentence on the glass past its 3 s, and a
-    # stuck contact would strobe the panel at loop rate.
+    # A SECOND PRESS INSIDE THE RATE LIMIT PAINTS NOTHING MORE — and the way to see that is that
+    # it does not extend the first hint either. A press that re-armed the hint would keep the
+    # sentence on the glass past its 3 s, and a stuck contact would strobe the panel at loop rate.
     time.sleep(0.4)
     second = sim.lcd_mark()
     sim.console("btn 2")
-    reverted = sim.expect_screen(lambda f: f.row(3) != lcd_pad(HINT_ROW), HINT_SECONDS + 1.5,
-                                 "the action row coming back", second)
+    reverted = sim.expect_screen(lambda f: f.row(1) != lcd_pad(HINT_SCAN_FIRST), HINT_SECONDS + 1.5,
+                                 "row 1 coming back", second)
     REPORT.check("E-BTN-1", f"[{label}] a second press {HINT_RATE_LIMIT_SECONDS}s inside the limit paints "
                             f"nothing more AND does not extend the first hint: the row is back "
                             f"{HINT_SECONDS}s after the FIRST press, not after the second",
@@ -2515,9 +2631,9 @@ def dropped_press(sim: Simulator, label: str) -> None:
     # And after the limit one fires again — a rate limit, not a mute.
     third = sim.lcd_mark()
     sim.console("btn 3")
-    again = sim.expect_screen(lambda f: f.row(3) == lcd_pad(HINT_ROW), 3, "the hint firing again", third)
+    again = sim.expect_screen(lambda f: f.row(1) == lcd_pad(HINT_SCAN_FIRST), 3, "the hint firing again", third)
     REPORT.check("E-BTN-1", f"[{label}] once the limit has passed the next press is answered again — a "
-                            f"rate limit, not a mute", True, repr(again.row(3)))
+                            f"rate limit, not a mute", True, repr(again.row(1)))
 
     REPORT.check("E-BTN-1", f"[{label}] and the DROP is still a drop: no !BTN frame reached the bridge "
                             f"for any of the three presses",
@@ -2531,16 +2647,31 @@ def dropped_press(sim: Simulator, label: str) -> None:
                  f"{before.args[4] if len(before.args) == 5 else '?'} -> "
                  f"{after.args[4] if len(after.args) == 5 else '?'} (ping mark {ping})")
 
+    # A dropped press ENDS an overlay: landing, with the hint, at once.
+    time.sleep(HINT_SECONDS + 0.4)
+    mark = sim.lcd_mark()
+    sim.send("ROW", "0", "YOUR GRANT")
+    sim.send("SHOW", "30", "0")
+    sim.expect_screen(lambda f: f.row(0) == lcd_pad("YOUR GRANT"), 4, "a thirty-second overlay", mark)
+    pressed = sim.lcd_mark()
+    at = time.monotonic()
+    sim.console("btn 1")
+    ended = sim.expect_screen(lambda f: is_landing(f) and f.row(1) == lcd_pad(HINT_SCAN_FIRST), 2,
+                              "landing with the hint", pressed)
+    REPORT.check("E-BTN-1", f"[{label}] a duration press dropped over a 30 s overlay ENDS it — landing with "
+                            f"`{HINT_SCAN_FIRST}` at once — rather than extending it",
+                 ended.at - at <= 1.0, f"{ended.at - at:.2f}s: {ended.text()}")
+
 
 def unscanned_court_press(sim: Simulator, label: str) -> None:
     """E-BTN-2 — a COURT press with the window shut is the BRIDGE's to answer.
 
-    Mega 2.1.0 forwards court keys whatever the window says: an unscanned court
-    press asks a question ("how long is left on court B?") that only the bridge
-    can answer, and a court key on its own buys nothing. If the bridge does not
-    answer — dead, rebooting, mid-flash — the Mega paints its own hint after
-    kHintFallbackMs, so the press is never met with silence. Neither is an
-    unauthorised press: `!PONG`'s counter means "a press thrown away"."""
+    The Mega forwards court keys whatever the window says: an unscanned court press asks a
+    question ("how long is left on court B?") that only the bridge can answer, and a court key on
+    its own buys nothing. If the bridge does not answer within 1.5 s — dead, rebooting, mid-update
+    — the Mega paints `ONE MOMENT` itself (`NO CONNECTION` once it has declared the bridge dead;
+    rule 4), so the press is never met with silence. Neither is an unauthorised press: `!PONG`'s
+    counter means "a press thrown away"."""
     step(f"E-BTN-2  [{label}] an unscanned court press reaches the bridge, and the Mega covers for a silent one")
     sim.send("RST")
     sim.send("AUTH", "0")
@@ -2557,29 +2688,30 @@ def unscanned_court_press(sim: Simulator, label: str) -> None:
     fwd = sim.expect_frame(lambda f: f.verb == "BTN", 3, "!BTN,B with the window shut")
     REPORT.check("E-BTN-2", f"[{label}] with the window shut a court key is FORWARDED as !BTN,B",
                  fwd.args == ["B"], str(fwd))
-    hinted = sim.expect_screen(lambda f: f.row(1) == lcd_pad(HINT_ROW1), HINT_FALLBACK_SECONDS + 2.0,
+    hinted = sim.expect_screen(lambda f: f.row(1) == lcd_pad(HINT_ONE_MOMENT), HINT_FALLBACK_SECONDS + 2.0,
                                "the Mega's own hint for an unanswered court press", first)
     waited = hinted.at - pressed
-    REPORT.check("E-BTN-2", f"[{label}] the bridge stays silent: the Mega paints `{HINT_ROW1}` on row 1 "
-                            f"(and `{HINT_ROW}` on row 3) after its {HINT_FALLBACK_SECONDS}s grace — not at once",
-                 HINT_FALLBACK_SECONDS - 0.3 <= waited <= HINT_FALLBACK_SECONDS + 1.5
-                 and hinted.row(3) == lcd_pad(HINT_ROW), f"after {waited:.2f}s: {hinted.text()}")
+    REPORT.check("E-BTN-2", f"[{label}] the bridge stays silent: the Mega paints `{HINT_ONE_MOMENT}` on row 1 "
+                            f"after its {HINT_FALLBACK_SECONDS}s grace — not at once",
+                 HINT_FALLBACK_SECONDS - 0.3 <= waited <= HINT_FALLBACK_SECONDS + 1.5 and is_landing(hinted),
+                 f"after {waited:.2f}s: {hinted.text()}")
 
-    # (b) The bridge answers inside the grace, as bridge 2.3.0 does for a lit
-    # court with no scan behind it: MinutesLeft. Its words stay; no hint.
+    # (b) The bridge answers inside the grace, as a bridge does for a lit court with no scan
+    # behind it: the minutes left, with the hold counted down at the right of the last row.
     time.sleep(HINT_SECONDS + HINT_RATE_LIMIT_SECONDS + 0.4)
     second = sim.lcd_mark()
     sim.console("btn C")
     sim.expect_frame(lambda f: f.verb == "BTN" and f.args == ["C"], 3, "!BTN,C with the window shut")
-    for row, text in enumerate(("COURT C 45 MIN", "SCAN TO EXTEND", "Then press the court", "SCAN WHEN READY")):
+    for row, text in enumerate(("COURT C 45 MIN", "SCAN TO EXTEND", "", "")):
         sim.send("ROW", str(row), text)
     sim.send("SHOW", "10", "1")
-    answered = sim.expect_screen(lambda f: f.row(1) == lcd_pad("SCAN TO EXTEND"), 3, "the bridge's answer", second)
+    answered = sim.expect_screen(lambda f: f.row(0) == lcd_pad("COURT C 45 MIN"), 3, "the bridge's answer", second)
     time.sleep(HINT_FALLBACK_SECONDS + 1.0)
     REPORT.check("E-BTN-2", f"[{label}] the bridge answers inside the grace (`COURT C 45 MIN` / `SCAN TO "
-                            f"EXTEND`) and the Mega's fallback never paints over it",
-                 not any(f.row(1) == lcd_pad(HINT_ROW1) for f in sim.settled_since(second))
-                 and answered.row(0) == lcd_pad("COURT C 45 MIN"),
+                            f"EXTEN` and its countdown in the last three cells) and the Mega's fallback "
+                            f"never paints over it",
+                 not any(f.row(1) == lcd_pad(HINT_ONE_MOMENT) for f in sim.settled_since(second))
+                 and answered.row(1).startswith("SCAN TO EXTEN") and answered.row(1)[13:16].strip().isdigit(),
                  f"{[f.text() for f in sim.settled_since(second)]}")
 
     sim.send("PING")
@@ -2669,6 +2801,7 @@ def glass_steps(sim: Simulator, label: str, quick: bool) -> None:
     lcd_geometry(sim, label)
     screen_deadlines(sim, label)
     atomic_commit(sim, label)
+    after_lights_on(sim, label)
     lit_court_row(sim, label)
     dropped_press(sim, label)
     unscanned_court_press(sim, label)
@@ -2700,8 +2833,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--no-simulator", action="store_true", help="skip the Mega-half checks")
     parser.add_argument("--quick", action="store_true",
-                        help="skip E-LCD-2, the two-minute screen ceiling — the only step here that "
-                             "costs two minutes, and the only one that proves no screen a bridge "
+                        help="skip E-LCD-2, the one-minute screen ceiling — the only step here that "
+                             "costs a whole ceiling, and the only one that proves no screen a bridge "
                              "paints can become permanent")
     parser.add_argument("--no-money", action="store_true", help="skip the PayFast leg")
     args = parser.parse_args()
@@ -2758,7 +2891,7 @@ def main() -> int:
             # THE GLASS GOES LAST, and the ordering is load-bearing rather than
             # tidy. These steps spend real seconds waiting for real deadlines —
             # a ten-second hold, a five-second one, a three-second hint, and
-            # without --quick the two-minute ceiling — and every booking this
+            # without --quick the one-minute ceiling — and every booking this
             # run created is anchored to the wall clock. Run between the
             # bookings and the sweep, they push B7's grace window past the
             # point the sweep's arithmetic is written for, and the failure
