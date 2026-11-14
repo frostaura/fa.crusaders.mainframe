@@ -1,0 +1,396 @@
+// See include/bridgelogic/BridgeOta.h and docs/specs/device-api.md §7.
+
+#include "bridgelogic/BridgeOta.h"
+
+#include <string.h>
+
+#include "devcrypto/Sha256.h"
+#include "timebase/TimeBase.h"
+
+namespace bridgelogic {
+
+namespace {
+
+constexpr uint16_t kOtaLayout = 1U;
+
+void copyText(char* out, size_t cap, const char* in) {
+  const size_t n = in == nullptr ? 0U : strlen(in);
+  if (n + 1U > cap) {
+    out[0] = '\0';
+    return;
+  }
+  memcpy(out, in == nullptr ? "" : in, n + 1U);
+}
+
+/// Counts and writes every chunk into the staging area, never past `limit`.
+class StagingSink final : public IChunkSink {
+public:
+  StagingSink(IImageFlash& flash, BridgeOta::Hooks& hooks, uint32_t limit)
+      : flash_(flash), hooks_(hooks), limit_(limit) {}
+
+  bool chunk(const uint8_t* data, size_t len) override {
+    hooks_.during();
+    if (len == 0U) {
+      return true;
+    }
+    if (static_cast<uint64_t>(bytes_) + len > limit_) {
+      overrun_ = true;
+      return false;
+    }
+    if (!flash_.write(data, len)) {
+      writeFailed_ = true;
+      return false;
+    }
+    bytes_ += static_cast<uint32_t>(len);
+    return true;
+  }
+
+  uint32_t bytes() const { return bytes_; }
+
+  bool overrun() const { return overrun_; }
+
+  bool writeFailed() const { return writeFailed_; }
+
+private:
+  IImageFlash& flash_;
+  BridgeOta::Hooks& hooks_;
+  uint32_t limit_;
+  uint32_t bytes_ = 0U;
+  bool overrun_ = false;
+  bool writeFailed_ = false;
+};
+
+/// The offer's own check over the staged bytes: size, SHA-256, signature.
+class OfferCheck final : public IStagedCheck {
+public:
+  OfferCheck(const devota::Offer& offer, const uint8_t* modulus, dc::RsaWorkspace& work)
+      : offer_(offer), modulus_(modulus), work_(work) {}
+
+  bool accept(const uint8_t sha256[32], uint32_t bytes) override {
+    refusal_ = devota::verifyStaged(offer_, sha256, bytes, modulus_, work_);
+    asked_ = true;
+    return refusal_ == devota::Refusal::Ok;
+  }
+
+  bool asked() const { return asked_; }
+
+  devota::Refusal refusal() const { return refusal_; }
+
+private:
+  const devota::Offer& offer_;
+  const uint8_t* modulus_;
+  dc::RsaWorkspace& work_;
+  devota::Refusal refusal_ = devota::Refusal::Ok;
+  bool asked_ = false;
+};
+
+/// The previous image's check: exactly the bytes and the digest recorded when
+/// it was copied out.
+class PreviousCheck final : public IStagedCheck {
+public:
+  PreviousCheck(const uint8_t* sha, uint32_t size) : sha_(sha), size_(size) {}
+
+  bool accept(const uint8_t sha256[32], uint32_t bytes) override {
+    return bytes == size_ && memcmp(sha256, sha_, 32U) == 0;
+  }
+
+private:
+  const uint8_t* sha_;
+  uint32_t size_;
+};
+
+} // namespace
+
+const char* fwStateName(FwState state) {
+  switch (state) {
+  case FwState::Probation:
+    return "probation";
+  case FwState::Downloading:
+    return "downloading";
+  case FwState::RolledBack:
+    return "rolled_back";
+  case FwState::Failed:
+    return "failed";
+  case FwState::Committed:
+    break;
+  }
+  return "committed";
+}
+
+bool BridgeOta::persist() {
+  return files_ == nullptr || sealedPut(*files_, kFileOta, kOtaLayout, record_);
+}
+
+BridgeOta::Boot BridgeOta::begin(IFiles* files, const char* runningVersion) {
+  files_ = files;
+  copyText(running_, sizeof(running_), runningVersion);
+  if (files_ == nullptr || !sealedGet(*files_, kFileOta, kOtaLayout, record_)) {
+    record_ = OtaRecord();
+  }
+  verifyDue_ = false;
+  ready_ = false;
+  probationStarted_ = false;
+  retryArmed_ = false;
+  if (state() == FwState::RolledBack && strcmp(record_.failedVersion, running_) == 0) {
+    // A rollback was armed and the image that failed is still the one running:
+    // the copy never took. Kept (it boots), reported, never offered again.
+    copyText(record_.error, sizeof(record_.error), "flash");
+    record_.state = static_cast<uint8_t>(FwState::Failed);
+    static_cast<void>(persist());
+    return Boot::Normal;
+  }
+  if (state() == FwState::Downloading) {
+    // A download that a reset interrupted left nothing armed.
+    record_.state = static_cast<uint8_t>(FwState::Committed);
+  }
+  if (!inProbation()) {
+    return Boot::Normal;
+  }
+  if (strcmp(record_.version, running_) != 0) {
+    // The image on probation is not the one running: the eboot copy did not
+    // happen. That version is over for this board.
+    char version[devota::kVersionCap] = {};
+    copyText(version, sizeof(version), record_.version);
+    fail(version, "flash", true);
+    static_cast<void>(persist());
+    return Boot::Normal;
+  }
+  if (record_.boots < UINT8_MAX) {
+    ++record_.boots;
+  }
+  static_cast<void>(persist());
+  return devota::Probation::atBoot(record_.boots) == devota::Probation::Decision::RollBack ? Boot::RollBack
+                                                                                           : Boot::Normal;
+}
+
+void BridgeOta::fail(const char* version, const char* why, bool neverAgain) {
+  record_.state = static_cast<uint8_t>(FwState::Failed);
+  copyText(record_.failedVersion, sizeof(record_.failedVersion), version);
+  copyText(record_.error, sizeof(record_.error), why);
+  if (neverAgain && version != nullptr && version[0] != '\0') {
+    record_.failed.add(version);
+  }
+  record_.version[0] = '\0';
+  record_.boots = 0U;
+}
+
+const char* BridgeOta::failedVersion() const {
+  const FwState s = state();
+  return (s == FwState::RolledBack || s == FwState::Failed) && record_.failedVersion[0] != '\0'
+             ? record_.failedVersion
+             : nullptr;
+}
+
+const char* BridgeOta::error() const {
+  const FwState s = state();
+  return (s == FwState::RolledBack || s == FwState::Failed) && record_.error[0] != '\0' ? record_.error
+                                                                                        : nullptr;
+}
+
+void BridgeOta::offer(const char* object, size_t len, uint32_t nowMs) {
+  if (object == nullptr || inProbation() || verifyDue_ || ready_) {
+    return;
+  }
+  if (retryArmed_ && tb::since(nowMs, retryAfterMs_) < kOtaRetryMs) {
+    return;
+  }
+  retryArmed_ = false;
+  static devota::Offer parsed; // 560 bytes: static, never a frame (ESPR-1)
+  parsed = devota::Offer();
+  const devota::Refusal grammar = devota::parseOffer(object, len, devota::kTargetCourtBridge, parsed);
+  if (grammar != devota::Refusal::Ok) {
+    // Said once, so the server can stop offering it.
+    const char* why = devota::fwErrorFor(grammar);
+    if (state() != FwState::Failed || strcmp(record_.error, why) != 0) {
+      fail(parsed.version, why, false);
+      static_cast<void>(persist());
+    }
+    return;
+  }
+  if (devota::acceptVersion(running_, parsed.version, record_.failed) != devota::Refusal::Ok) {
+    // Not newer, or failed here before: not an offer for this board.
+    return;
+  }
+  offer_ = parsed;
+  verifyDue_ = true;
+}
+
+void BridgeOta::verifyOffer(const uint8_t modulus[dc::kRsa2048Bytes], dc::RsaWorkspace& work) {
+  if (!verifyDue_) {
+    return;
+  }
+  verifyDue_ = false;
+  char text[devota::kManifestCap] = {};
+  const size_t n = devota::manifestText(offer_, text, sizeof(text));
+  const devota::Refusal sig =
+      n == 0U ? devota::Refusal::Sig : devota::verifySignature(text, n, offer_.sig, modulus, work);
+  if (sig != devota::Refusal::Ok) {
+    fail(offer_.version, devota::fwErrorFor(sig), true);
+    static_cast<void>(persist());
+    return;
+  }
+  ready_ = true;
+  record_.state = static_cast<uint8_t>(FwState::Downloading);
+  record_.failedVersion[0] = '\0';
+  record_.error[0] = '\0';
+}
+
+bool BridgeOta::backUpRunning(IImageFlash& flash, uint8_t* buffer, size_t bufferCap, Hooks& hooks) {
+  if (record_.hasPrev != 0U && strcmp(record_.prevVersion, running_) == 0 && files_ != nullptr &&
+      files_->size(kFilePrevImage) == record_.prevSize) {
+    return true; // already holds this very image
+  }
+  const uint32_t size = flash.runningSize();
+  const size_t step = bufferCap & ~static_cast<size_t>(3U);
+  if (files_ == nullptr || size == 0U || step == 0U || !files_->begin(kFilePrevImage)) {
+    return false;
+  }
+  dc::Sha256 hash;
+  for (uint32_t at = 0U; at < size;) {
+    const uint32_t left = size - at;
+    const size_t take = left < step ? left : step;
+    const size_t aligned = (take + 3U) & ~static_cast<size_t>(3U);
+    if (aligned > bufferCap || !flash.readRunning(at, buffer, aligned) || !files_->append(buffer, take)) {
+      static_cast<void>(files_->end(false));
+      return false;
+    }
+    hash.update(buffer, take);
+    at += static_cast<uint32_t>(take);
+    hooks.during();
+  }
+  if (!files_->end(true)) {
+    return false;
+  }
+  hash.finish(record_.prevSha);
+  record_.prevSize = size;
+  copyText(record_.prevVersion, sizeof(record_.prevVersion), running_);
+  record_.hasPrev = 1U;
+  return persist();
+}
+
+bool BridgeOta::run(IDownload& download, IImageFlash& flash, const uint8_t modulus[dc::kRsa2048Bytes],
+                    dc::RsaWorkspace& work, uint8_t* buffer, size_t bufferCap, Hooks& hooks, uint32_t nowMs) {
+  if (!ready_) {
+    return false;
+  }
+  ready_ = false;
+  const auto retryLater = [&](const char* why) {
+    fail(offer_.version, why, false);
+    static_cast<void>(persist());
+    retryAfterMs_ = nowMs;
+    retryArmed_ = true;
+  };
+  if (offer_.size > flash.capacity()) {
+    retryLater("space");
+    return false;
+  }
+  if (!backUpRunning(flash, buffer, bufferCap, hooks)) {
+    // No copy of the running image is no way back: nothing is fetched.
+    retryLater("space");
+    return false;
+  }
+  if (!flash.begin(offer_.size)) {
+    retryLater("space");
+    return false;
+  }
+  StagingSink sink(flash, hooks, offer_.size);
+  const uint16_t status = download.get(offer_.path, offer_.size, sink);
+  if (sink.writeFailed()) {
+    flash.abort();
+    retryLater("flash");
+    return false;
+  }
+  if (sink.overrun()) {
+    // More bytes than the signed size: never a transient.
+    flash.abort();
+    fail(offer_.version, "size", true);
+    static_cast<void>(persist());
+    return false;
+  }
+  if (status != 200U || sink.bytes() < offer_.size) {
+    // Refused or cut in transit: the image is not at fault.
+    flash.abort();
+    retryLater("http");
+    return false;
+  }
+  OfferCheck check(offer_, modulus, work);
+  if (!flash.commit(check)) {
+    if (check.asked() && check.refusal() != devota::Refusal::Ok) {
+      // What this server serves for that version is not what was signed.
+      fail(offer_.version, devota::fwErrorFor(check.refusal()), true);
+      static_cast<void>(persist());
+    } else {
+      retryLater("flash");
+    }
+    return false;
+  }
+  record_.state = static_cast<uint8_t>(FwState::Probation);
+  copyText(record_.version, sizeof(record_.version), offer_.version);
+  record_.failedVersion[0] = '\0';
+  record_.error[0] = '\0';
+  record_.boots = 0U;
+  static_cast<void>(persist());
+  return true;
+}
+
+void BridgeOta::heartbeatAccepted(bool megaHeard) {
+  if (!inProbation() || !megaHeard) {
+    return;
+  }
+  record_.state = static_cast<uint8_t>(FwState::Committed);
+  record_.version[0] = '\0';
+  record_.boots = 0U;
+  static_cast<void>(persist());
+  probationStarted_ = false;
+}
+
+bool BridgeOta::tick(uint32_t nowMs, uint32_t windowMinutes) {
+  if (!inProbation()) {
+    return false;
+  }
+  if (!probationStarted_) {
+    probation_.begin(nowMs, windowMinutes * 60000UL);
+    probationStarted_ = true;
+  }
+  return probation_.tick(nowMs, false) == devota::Probation::Decision::RollBack;
+}
+
+bool BridgeOta::rollBack(IImageFlash& flash, uint8_t* buffer, size_t bufferCap, Hooks& hooks,
+                         const char* why) {
+  char bad[devota::kVersionCap] = {};
+  copyText(bad, sizeof(bad), record_.version[0] != '\0' ? record_.version : running_);
+  const bool sound = files_ != nullptr && record_.hasPrev != 0U && record_.prevSize > 0U &&
+                     files_->size(kFilePrevImage) == record_.prevSize &&
+                     strcmp(record_.prevVersion, bad) != 0;
+  if (!sound || !flash.begin(record_.prevSize)) {
+    // No sound copy to go back to: the new image boots, so it stays — said,
+    // and never offered again (it is what runs).
+    fail(bad, "flash", false);
+    static_cast<void>(persist());
+    return false;
+  }
+  for (uint32_t at = 0U; at < record_.prevSize;) {
+    const uint32_t left = record_.prevSize - at;
+    const size_t take = left < bufferCap ? left : bufferCap;
+    if (files_->read(kFilePrevImage, at, buffer, take) != take || !flash.write(buffer, take)) {
+      flash.abort();
+      fail(bad, "flash", false);
+      static_cast<void>(persist());
+      return false;
+    }
+    at += static_cast<uint32_t>(take);
+    hooks.during();
+  }
+  PreviousCheck check(record_.prevSha, record_.prevSize);
+  if (!flash.commit(check)) {
+    fail(bad, "flash", false);
+    static_cast<void>(persist());
+    return false;
+  }
+  fail(bad, why, true);
+  record_.state = static_cast<uint8_t>(FwState::RolledBack);
+  static_cast<void>(persist());
+  return true;
+}
+
+} // namespace bridgelogic
