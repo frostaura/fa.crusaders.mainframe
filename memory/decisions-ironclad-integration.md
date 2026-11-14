@@ -45,7 +45,7 @@ contract's reference verifier.
 out of service (door commits an empty roster). That is what suspending a club means, and it
 is declared the one other 403 source in `DeviceForbiddenMeansOutOfServiceTests`.
 
-**Still owed (blocks the court boxes' last flash): bridge phase B** — signed OTA, key_next,
+**Owed at integration, since built on `fix/bridge-ota` (bridge 3.1.0, `decisions-bridge-ota.md`): bridge phase B** — signed OTA, key_next,
 runtime network, setup portal, supervisor, stall watchdog and LittleFS persistence. Bridge
 3.0.0 announces `codes:m1 hb:3 lcd:2` only. The Mega 3.0.0 and gate 2.0.0 flashes are final;
 the bridge's is not (go-live checklist §2c, §5). Box halves of FC-11 (fractions report no

@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions-court-box-v3-firmware
-description: "Court box 3.0.0 as built (2026-11-13): what the last Mega image and bridge phase A implement, the soak's four invariants, and what the bridge still owes (OTA lifeline, flash records, pay-for code)."
+description: "Court box 3.0.0 as built (2026-11-13): what the last Mega image and bridge phase A implement, and the soak's four invariants; bridge 3.1.0 carries phase B."
 type: decision
-last_verified: 2026-11-13
+last_verified: 2026-11-14
 ---
 
 # Decisions — court box firmware 3.0.0, as built (2026-11-13)
@@ -33,13 +33,9 @@ Branch `fix/court-box`. Contract: `decisions-device-v3*.md`; this is what the co
   after the last input, I2 owed courts lit 5 s after a Mega reset, I3 no relay past end of play, I4
   every scan on the Mega's TX line in 200 ms. Mutation-checked. `SOAK_SEED`/`SOAK_TRACE` reproduce.
 
-## What the bridge still owes (not in this image)
+## What bridge 3.0.0 owed, and where it went
 
-- **Phase B — the lifeline**: signed OTA, `key_next`, `net`, the setup portal on `!HELD,09`, the
-  link supervisor, HW-8. *Why deferred:* the brief sequences it after the integrator merges the
-  door-gate lane's `devota`/`devnet`. **Until it ships, the bridge is not updatable over the air.**
-- **LittleFS records** for snapshot, roster, code sync and undelivered events (BR-06, BR-07,
-  FSF-09): a power cut with the server down restores nothing and loses queued attendance.
-- **D10 pay-for code** still compiled (BR-17): unreachable from the panel since 2.3.0.
-- `test_compat` (41 court_box + 19 scan cases), `test_server_replies`, `stack_budget.py`, the
-  `ota_sign.py` tool.
+Phase B — signed OTA, `key_next`, `net`, the setup portal on `!HELD,09`, the supervisor, HW-8,
+LittleFS records for the answer and every event, D10 out of the image, the 64-key ring,
+`stack_budget.py`, `ota_sign.py`, `test_server_replies` — landed in **bridge 3.1.0**
+(`decisions-bridge-ota.md`). `test_compat`'s executor is still owed.

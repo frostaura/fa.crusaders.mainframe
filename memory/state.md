@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "Ironclad pass integrated on fix/ironclad over a77a1d72, not pushed (2026-11-14). Mega 3.0.0 and gate 2.0.0 are final; bridge 3.0.0 is not OTA-capable yet. Production last seen down (1033)."
+description: "Ironclad pass on fix/ironclad over a77a1d72, not pushed (2026-11-14). Mega 3.0.0 and gate 2.0.0 final; OTA-capable bridge 3.1.0 on fix/bridge-ota, unmerged. Production last seen down (1033)."
 type: state
 last_verified: 2026-11-14
 ---
@@ -19,14 +19,15 @@ integration found and decided: [`decisions-ironclad-integration.md`](decisions-i
 The lanes' own decisions are in the `decisions-*-v3*`, `decisions-money-golive`,
 `decisions-platform-*`, `decisions-release-ops` and `decisions-*-golive` topics.
 
-**Firmware as integrated.** Mega **3.0.0** (complete, its last flash), bridge **3.0.0 phase A**
-(snapshot reconcile, v3 serial, layouts — but **no signed OTA, key rotation, runtime network,
-setup portal or flash persistence**: caps `codes:m1 hb:3 lcd:2`), door gate **2.0.0** (signed OTA,
-key ring, runtime network, portal, NVS persistence). **No flash is recorded anywhere yet.**
+**Firmware as integrated.** Mega **3.0.0** (complete, its last flash), door gate **2.0.0**
+(signed OTA, key ring, runtime network, portal, NVS persistence). The bridge on `fix/ironclad`
+is **3.0.0 phase A** (no OTA); OTA-capable **bridge 3.1.0** (phase B, caps `ota:1 key:1 net:1`)
+is on **`fix/bridge-ota`**, unmerged and **not pushed** ([`decisions-bridge-ota.md`](decisions-bridge-ota.md)).
+**No flash is recorded anywhere yet.**
 
 **What only Dean can do, in this order** (`docs/go-live-checklist.md` has every step):
-1. Decide whether the court boxes wait for **bridge phase B** before their last flash (the
-   checklist's §2c/§5 say do not seal an enclosure until the bridge reports `ota:1 key:1 net:1`).
+1. Flash the court boxes with **bridge 3.1.0** (never 3.0.0) once `fix/bridge-ota` is merged,
+   and seal a box only after its bench OTA round trip (checklist §5).
 2. Generate the release key with `src/iot/tools/ota_sign.py keygen`; keep the private half in the
    password manager; its modulus is `OTA_PUBLIC_KEY_N` and `DeviceOta__PublicKeyModulus`.
 3. Review and push `fix/ironclad`, then redeploy with the **new** `docker-compose.prod.yml`
@@ -40,10 +41,8 @@ key ring, runtime network, portal, NVS persistence). **No flash is recorded anyw
 - The device e2e harness lags the firmware: `scenario.py`'s landing/E-LCD steps assert the Mega
   2.1.0 screen, and `door_evening.py`'s DSIM offline legs scan a legacy booking code that a
   codes:m1 door's v1 roster (MCV1-04) no longer carries. Every other step passes.
-- The court-box soak at 20,000 sequences finds 6 "owed court dark 5 s after a Mega reset"
-  (seed 50511693); 1,000 sequences are clean. In the bridge, so a phase-B fix.
-- Bridge phase B (above), and the box halves of FC-11 (a fraction in a config value reports no
-  drift), MCV1-07 (the bridge's key ring is 24, the server sends up to 64) and `test_compat`.
+- On `fix/bridge-ota`: the 20,000-sequence soak is clean, FC-11 and MCV1-07 are fixed;
+  `test_compat`'s executor (41 court_box + 19 scan cases) is still owed.
 - BM-9 (one key case per reply) needs the frontend reads switched first.
 - Offsite backup cron, branch protection and repo visibility (Dean's, per the release-ops topic).
 - **Founder decision open** (play.md §14 Q4, [`questions.md`](questions.md)): partners who walk in
