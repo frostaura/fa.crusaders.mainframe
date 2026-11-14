@@ -64,7 +64,7 @@ v3 response field on the caps of **this** request:
   `key_next` or `net` means nothing changes. Absent is always "no opinion", never "off".
 - **Body budgets.** Court box: **2048** bytes for a 2.x box (unchanged; bridge 2.3.0 reads into
   2560), **4096** for a `hb:3` box (a 3.0.0 bridge reads into 5120; widest vector
-  `v3-heartbeat-response-widest`, 4087 bytes — every v3 key at its widest and as many of the 64
+  `v3-heartbeat-response-widest`, 4086 bytes — every v3 key at its widest and as many of the 64
   member-code keys as fit, 42). Gate: **4096** for a 1.x gate (unchanged), **6144** for a v3 gate
   (a 2.0.0 gate reads into 8192; the widest — `membercode/gate.json`'s
   `gate-heartbeat-response-codes-full` plus every v3 object at its bound, the gate object's two
