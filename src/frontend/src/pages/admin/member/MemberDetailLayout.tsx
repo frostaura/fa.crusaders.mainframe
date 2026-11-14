@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ScrollArea";
 import { EmailWithBreaks } from "@/components/members/EmailWithBreaks";
 import { GroupAssign } from "@/components/members/GroupAssign";
 import { RelatedBookingField } from "@/components/members/RelatedBookingField";
+import { ReversePaymentSheet } from "@/components/members/ReversePaymentSheet";
 import { SellPackageSheet } from "@/components/members/SellPackageSheet";
 import { TopUpSheet } from "@/components/members/TopUpSheet";
 import { KeptMinutes } from "@/components/members/KeptMinutes";
@@ -68,6 +69,8 @@ export default function MemberDetailLayout() {
   }, [split, userId, shownBalance]);
   const [selling, setSelling] = useState(false);
   const openSell = useCallback(() => setSelling(true), []);
+  const [reversing, setReversing] = useState(false);
+  const openReverse = useCallback(() => setReversing(true), []);
 
   const context = useMemo<MemberDetailContext | null>(
     () => (detail ? { ...state, detail, name: displayName(detail), openSell } : null),
@@ -78,7 +81,7 @@ export default function MemberDetailLayout() {
 
   return (
     <RecordFrame>
-      <MemberHeader state={state} detail={context.detail} name={context.name} onSell={openSell} onAdjust={topUp.show} />
+      <MemberHeader state={state} detail={context.detail} name={context.name} onSell={openSell} onAdjust={topUp.show} onReverse={openReverse} />
       <div className="flex min-w-0 flex-col gap-6">
         <MemberTabs userId={userId} />
         <Outlet context={context} />
@@ -106,6 +109,16 @@ export default function MemberDetailLayout() {
           onClose={() => setSelling(false)}
           returnFocus={headerMenu}
           onSold={onApplied}
+        />
+      ) : null}
+      {reversing ? (
+        <ReversePaymentSheet
+          userId={userId}
+          name={context.name}
+          balance={context.detail.balance_minutes}
+          onClose={() => setReversing(false)}
+          returnFocus={headerMenu}
+          onRecorded={onApplied}
         />
       ) : null}
     </RecordFrame>
@@ -185,10 +198,12 @@ function MemberSkeleton() {
 
 /* ─────────────────────────────── the header ─────────────────────────────── */
 
-type HeaderProps = { state: MemberDetailState; detail: MemberDetail; name: string; onSell: () => void; onAdjust: () => void };
+type HeaderProps = {
+  state: MemberDetailState; detail: MemberDetail; name: string; onSell: () => void; onAdjust: () => void; onReverse: () => void;
+};
 
 function MemberHeader(props: HeaderProps) {
-  const { state, detail, name, onSell, onAdjust } = props;
+  const { state, detail, name, onSell, onAdjust, onReverse } = props;
   const back = useBackTo();
   // An address may break after its "@" and before each "." (R4 V4-9: at 320 with 200% text the
   // one-word address ran 58px off the screen).
@@ -209,7 +224,9 @@ function MemberHeader(props: HeaderProps) {
         actions={(
           <>
             <RefreshButton label={MEMBER_COPY.refresh} onRefresh={() => void state.reload()} loading={state.loading} />
-            <MemberActions detail={detail} name={name} onChanged={state.reload} onRole={(r) => roleChanged(state, r)} onAdjust={onAdjust} />
+            <MemberActions
+              detail={detail} name={name} onChanged={state.reload} onRole={(r) => roleChanged(state, r)} onAdjust={onAdjust} onReverse={onReverse}
+            />
           </>
         )}
         freshness={<Freshness at={state.readAt} />}

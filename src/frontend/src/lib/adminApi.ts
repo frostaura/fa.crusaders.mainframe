@@ -871,6 +871,40 @@ export type AdminSellResult = AdminAdjustResult & {
 };
 
 // ---------------------------------------------------------------------------------------
+// BM-6 — rand given back for a purchase (`WalletEndpoints.Reversal.cs`)
+// ---------------------------------------------------------------------------------------
+
+export const REVERSAL_KINDS = ["refund", "chargeback"] as const;
+export type ReversalKind = typeof REVERSAL_KINDS[number];
+
+/** One funding row that took rand, with what is still reversible on it. */
+export type ReversibleEntry = {
+  entry_id: string;
+  type: string;
+  created_at: string;
+  reason: string | null;
+  zar_paid: number;
+  amount_minutes: number;
+  zar_reversed: number;
+  minutes_taken_back: number;
+  zar_left: number;
+  minutes_left: number;
+};
+
+export type ReversalResult = {
+  entry_id: string;
+  type: "PaymentReversal";
+  kind: ReversalKind;
+  amount_minutes: number;
+  zar_reversed: number;
+  reverses_entry_id: string;
+  zar_left: number | null;
+  minutes_left: number | null;
+  balance_before_minutes: number;
+  balance_after_minutes: number;
+};
+
+// ---------------------------------------------------------------------------------------
 // P13 — minutes packages, the admin side (contract §3.5)
 // ---------------------------------------------------------------------------------------
 
@@ -1155,6 +1189,26 @@ export const adminEndpoints = {
     quotedPriceZar: body.quotedPriceZar,
     ...(body.zarReceived !== undefined ? { zarReceived: body.zarReceived } : {}),
     ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
+  }),
+
+  // --- BM-6: rand given back (a refund or a recorded chargeback) ---------------------------
+  /** The member's purchases that took rand, newest first, each with the rand and minutes still reversible. */
+  reversible: (userId: string) =>
+    api.get<{ entries: ReversibleEntry[] }>(`/api/v1/admin/minutes/${userId}/reversible`),
+  /**
+   * Gives rand back against ONE purchase: a `PaymentReversal` naming it, negative rand and the
+   * minutes taken back (0 when the member keeps them). Snake_case on the wire, keyed like a sale.
+   */
+  reversePayment: (
+    userId: string,
+    body: { entryId: string; kind: ReversalKind; zarReversed: number; minutesTakenBack: number; reason: string; idempotencyKey: string },
+  ) => api.post<ReversalResult>(`/api/v1/admin/minutes/${userId}/reverse-payment`, {
+    entry_id: body.entryId,
+    kind: body.kind,
+    zar_reversed: body.zarReversed,
+    minutes_taken_back: body.minutesTakenBack,
+    reason: body.reason,
+    idempotency_key: body.idempotencyKey,
   }),
 
   // --- P13: the club's packages (§3.5) ---------------------------------------------------

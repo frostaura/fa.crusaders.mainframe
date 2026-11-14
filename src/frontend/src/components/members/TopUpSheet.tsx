@@ -24,6 +24,7 @@ import {
 } from "@/lib/deskMinutesCopy";
 import { cn } from "@/lib/utils";
 import { Minus, Plus } from "@/components/ui/icons";
+import { DESK_FOOTER_CLASS, DeskConfirmFooter } from "./DeskConfirmFooter";
 import { useMenuReturnFocus } from "./useMenuReturnFocus";
 import { useStepFocus } from "./useStepFocus";
 import { useTakeBackRoom } from "./useTakeBackRoom";
@@ -193,7 +194,7 @@ export function TopUpSheet(props: TopUpSheetProps) {
             sentence over two buttons — had a third of a narrow sheet and its label wrapped.
             Stacked, BOTH rows run the sheet's width (R3 V-3): the primary was left at its own
             width under a full-width Back. */}
-        <SheetFooter className={cn("sm:items-end", flow.step === 3 && !flow.done && "sm:flex-col sm:items-stretch")}>
+        <SheetFooter className={cn("sm:items-end", flow.step === 3 && !flow.done && DESK_FOOTER_CLASS)}>
           <SendingNote text={props.busy ? COPY.sending(name) : null} refused={guard.refused} />
           <StepFooter flow={flow} guard={guard} {...props} />
         </SheetFooter>
@@ -385,12 +386,8 @@ function ApplyControls({ flow, guard, name, balance, busy, onApply }: FooterProp
   const { valid, reasonCode, direction } = flow;
   if (valid === null || reasonCode === null) return null;
   return (
-    <>
-      {/* Back while the movement is on its way would drop the receipt it lands on (R5 I5-3). */}
-      <Button variant="outline" disabled={busy} onClick={() => flow.back(2)}>{COPY.back}</Button>
-      {/* Its own full-width row (F3.23, F3-14): armed, the confirm is a sentence over two buttons.
-          `w-full` on the idle button too (R3 V-3, A-15): at its own width the label wrapped. */}
-      <div className="min-w-0">
+    // BA-20: the one desk footer — Back on its own line, the confirm's full row beneath it.
+    <DeskConfirmFooter backLabel={COPY.back} onBack={() => flow.back(2)} busy={busy}>
         <ConfirmButton
           idleLabel={direction === "add" ? COPY.idleAdd(valid) : COPY.idleTakeBack(valid)}
           cancelLabel={COPY.cancel}
@@ -421,8 +418,7 @@ function ApplyControls({ flow, guard, name, balance, busy, onApply }: FooterProp
           }}
           className="min-h-touch w-full"
         />
-      </div>
-    </>
+    </DeskConfirmFooter>
   );
 }
 
