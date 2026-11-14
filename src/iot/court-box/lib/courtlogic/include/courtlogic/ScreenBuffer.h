@@ -61,7 +61,8 @@ inline constexpr uint32_t kHintFallbackMs = 1500UL;
 /// Hints are rate-limited so a stuck contact cannot strobe the glass. A hint
 /// asked for inside the limit is DEFERRED to its end, not dropped (FSF-11): a
 /// press whose fallback fell in the window was otherwise never answered, and
-/// the glass went back to landing with nothing said to the member.
+/// the glass went back to landing with nothing said to the member. The hint
+/// already showing is never deferred again: that would extend it (E-BTN-1).
 inline constexpr uint32_t kHintRateLimitMs = 2000UL;
 
 /// A chained screen's hold ends by waiting this long for the next commit.

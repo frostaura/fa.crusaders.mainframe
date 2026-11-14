@@ -451,6 +451,17 @@ void test_a_press_whose_hint_falls_in_the_rate_limit_is_still_answered(void) {
   TEST_ASSERT_EQUAL_UINT16(1U, b.box.screens().suppressedHints());
 }
 
+void test_the_same_hint_inside_the_rate_limit_is_not_extended(void) {
+  // E-BTN-1: a second dropped press inside the limit paints nothing more, so a
+  // stuck contact cannot hold SCAN CODE FIRST on the glass.
+  Box b(1000U);
+  b.press(4U);
+  TEST_ASSERT_TRUE(b.glass(1U, "SCAN CODE FIRST"));
+  b.press(5U);
+  b.run(3000U);
+  TEST_ASSERT_FALSE(b.glass(1U, "SCAN CODE FIRST"));
+}
+
 void test_a_deferred_hint_never_talks_over_the_bridges_answer(void) {
   Box b(1000U);
   b.press(4U);
@@ -814,6 +825,7 @@ int main(int, char**) {
   RUN_TEST(test_a_remapped_keys_mask_changes_which_unarmed_presses_are_forwarded);
   RUN_TEST(test_a_forwarded_press_the_bridge_does_not_answer_gets_the_megas_own_hint);
   RUN_TEST(test_a_press_whose_hint_falls_in_the_rate_limit_is_still_answered);
+  RUN_TEST(test_the_same_hint_inside_the_rate_limit_is_not_extended);
   RUN_TEST(test_a_deferred_hint_never_talks_over_the_bridges_answer);
   RUN_TEST(test_a_chained_screen_waits_for_its_outcome_instead_of_flashing_landing);
   RUN_TEST(test_a_lost_rw_paints_nothing_and_is_answered_incomplete);

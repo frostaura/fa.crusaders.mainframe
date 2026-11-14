@@ -373,7 +373,11 @@ void ScreenBuffer::showHint(Hint hint, uint32_t nowMs) {
     if (suppressedHints_ < UINT16_MAX) {
       ++suppressedHints_;
     }
-    pendingHint_ = hint;
+    // The same hint already on the glass is this press's answer; re-showing
+    // it would extend it, and a stuck contact would hold it up for ever.
+    if (hint != hint_) {
+      pendingHint_ = hint;
+    }
     return;
   }
   pendingHint_ = Hint::None;

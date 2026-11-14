@@ -500,7 +500,7 @@ reintroduce a stuck screen.
 4. **A forwarded press the bridge does not answer within 1.5 s gets the Mega's own hint**,
    whether or not the window was armed (FWM-15): `ONE MOMENT` while the bridge is alive,
    `NO CONNECTION` when it is dead. A hint asked for inside the 2 s rate limit is **deferred** to
-   the limit's end, never dropped, unless a bridge screen arrives first (FSF-11). The hint's
+   the limit's end, never dropped, unless a bridge screen arrives first or the same hint is already on the glass, which is never extended (FSF-11, E-BTN-1). The hint's
    rate-limit deadline is disarmed once it expires,
    so it cannot go silent for 24.8 days after a 2³¹ ms quiet spell (FWM-13).
 5. **The scan feedback** (`CHECKING CODE` / `PLEASE WAIT`) holds `SCANH` seconds, under the
