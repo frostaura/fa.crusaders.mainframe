@@ -126,6 +126,21 @@ describe("the row is the way into a member", () => {
     expect(screen.getAllByText(/Approve Grace Two\? They are emailed a welcome/).length).toBeGreaterThan(0);
   });
 
+  it("gives an armed Approve the whole row so its sentence never runs under Reject (V-1)", async () => {
+    const GRACE3 = memberFixture({ membership_id: "m9", user_id: "u9", full_name: "Grace Three", status: "PendingApproval" });
+    stubFetch([
+      { path: "/api/v1/admin/members/", body: [GRACE3] },
+      { path: "/api/v1/admin/biometric/enrollments", body: [] },
+    ]);
+    renderPage(<AdminMembersPage />, { initialEntries: ["/admin/members?status=PendingApproval"] });
+    const approve = (await screen.findAllByRole("button", { name: ROW_ACTIONS.approve }))[0];
+    const row = approve.closest<HTMLElement>("[data-row-actions]")!;
+    expect(row.className).toContain("flex-wrap");
+    expect(row.className).toContain("[&_[data-confirm-group]:has([data-confirm-pair])]:basis-full");
+    fireEvent.click(approve, { detail: 1 });
+    expect(row.querySelector("[data-confirm-group] [data-confirm-pair]")).not.toBeNull();
+  });
+
   it("offers a turned-down applicant's approval from the row ⋯ (F3.23)", async () => {
     const REJECTED = memberFixture({
       membership_id: "m9", user_id: "u9", full_name: "Rita Rejected", email: "rita@example.com",

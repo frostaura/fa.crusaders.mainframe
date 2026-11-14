@@ -69,7 +69,13 @@ const TABLE_ONLY = "[@container(max-width:47.99rem)]:hidden";
 
 export function RowActions({ row, handlers, compact = false }: { row: MemberRow; handlers: RowActionHandlers; compact?: boolean }) {
   return (
-    <div className="flex flex-row items-center justify-end gap-2">
+    // V-1: an armed Approve is a sentence above a pair of buttons. In a no-wrap row it was squeezed
+    // beside Reject and its text ran underneath it, so the armed group takes the whole row and the
+    // rest wraps below it.
+    <div data-row-actions="" className={cn(
+      "flex flex-row flex-wrap items-center justify-end gap-2",
+      "[&_[data-confirm-group]:has([data-confirm-pair])]:basis-full",
+    )}>
       {row.status === "PendingApproval" ? (
         <>
           {/* BA-02: armed, never one click. One click approved straight away and the next

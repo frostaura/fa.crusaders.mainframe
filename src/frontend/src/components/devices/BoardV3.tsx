@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { deviceCaps, type AdminDevice } from "../../lib/api";
 import {
   boardKeyLine, firmwareLine, latestRelease, megaLine, networkLine, screenLine, targetOf,
@@ -91,6 +91,7 @@ export function BoardScreenEditor({ device, club, onSave, onClose }: {
   const [marquee, setMarquee] = useState<MarqueeChoice>(
     device.lcd_marquee_enabled === true ? "on" : device.lcd_marquee_enabled === false ? "off" : "club");
   const [saving, setSaving] = useState(false);
+  const headId = useId();
   const clubLayout = asLayout(club.layout) === "expanded" ? "expanded" : "compact";
 
   async function save() {
@@ -105,14 +106,17 @@ export function BoardScreenEditor({ device, club, onSave, onClose }: {
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-2 @[16rem]/boardslot:p-4">
+      {/* V-2: each choice is named on screen, not only to a screen reader. */}
+      <h4 id={`${headId}-layout`} className="text-sm font-medium text-text-primary">Screen size</h4>
       <RadioGroup value={layout} onValueChange={(v) => setLayout(v as Choice)} disabled={saving}
-        aria-label={`${device.name} screen layout`} className="grid gap-2 sm:grid-cols-3">
+        aria-labelledby={`${headId}-layout`} className="-mt-2 grid gap-2 sm:grid-cols-3">
         <RadioCard value="club" title={`The club's (${clubLayout})`} />
         <RadioCard value="compact" title="Compact 16×2" />
         <RadioCard value="expanded" title="Expanded 20×4" description="Needs a 20×4 panel." />
       </RadioGroup>
+      <h4 id={`${headId}-marquee`} className="text-sm font-medium text-text-primary">Long lines</h4>
       <RadioGroup value={marquee} onValueChange={(v) => setMarquee(v as MarqueeChoice)} disabled={saving}
-        aria-label={`${device.name} scrolling`} className="grid gap-2 sm:grid-cols-3">
+        aria-labelledby={`${headId}-marquee`} className="-mt-2 grid gap-2 sm:grid-cols-3">
         <RadioCard value="club" title={`The club's (${club.marquee === false ? "off" : "on"})`} />
         <RadioCard value="on" title="Scroll long lines" />
         <RadioCard value="off" title="Cut long lines" />
