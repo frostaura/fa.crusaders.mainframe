@@ -1051,7 +1051,7 @@ size_t bodyOf(const char* vector, char* out, size_t cap) {
   // operator keys beside the button map and the roster, and a decode buffer
   // that is quietly too small reports "body_hex" and reads as a corpus fault.
   // Sized from the v3 contract: a hb:3 body is read into 5120 (the widest
-  // vector is 4087 bytes), plus the NUL.
+  // vector is 4086 bytes), plus the NUL.
   static uint8_t bytes[bridgelogic::kHeartbeatResponseCap + 1U] = {};
   size_t n = 0U;
   TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, "body_hex", bytes, sizeof(bytes), &n), "body_hex");

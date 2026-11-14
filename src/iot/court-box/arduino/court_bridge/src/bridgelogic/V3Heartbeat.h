@@ -41,7 +41,7 @@ namespace bridgelogic {
 inline constexpr uint8_t kSnapshotRelays = 4U;
 
 /// The heartbeat answer buffer of a 3.0.0 bridge (a `hb:3` body is at most
-/// 4096 bytes; the widest vector is 4087).
+/// 4096 bytes; the widest vector is 4086).
 inline constexpr size_t kHeartbeatResponseCap = 5120U;
 
 /// One `courts` element: `<relay>|<lit>|<seconds_left>|<kind>|<ref>`. Only
