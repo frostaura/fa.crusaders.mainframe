@@ -130,6 +130,9 @@ enum class Fault : uint8_t {
   RelightFailed,
   /// A screen dropped whole from the full Mega queue.
   ScreenDropped,
+  /// A base URL from the server's `net` never earned an accepted heartbeat
+  /// inside `device_net_fallback_minutes` and was abandoned (device-api.md §8).
+  NetFallback,
 
   /// More than kMaxFaultCodes distinct codes inside one window.
   FaultOverflow,

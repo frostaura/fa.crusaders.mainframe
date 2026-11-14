@@ -117,6 +117,17 @@ bool parseRelayDigit(const char* text, size_t len, uint8_t& out);
 /// over-long element must cost that element, not every element after it.
 bool nextStringSpan(const char* body, size_t len, size_t& at, size_t& start, size_t& n);
 
+/// The next element of the array being walked at `at`. A STRING yields its
+/// contents' span with `isString` true; ANY OTHER value — a number, `null`, an
+/// object, a nested array — is skipped whole with `isString` false, so it still
+/// occupies its position and nothing inside it is read as an element. False at
+/// the closing bracket, or when the array is cut short.
+///
+/// Stricter than detail::nextStringSpan, which hunts for the next quote: that
+/// walk would let `[null,"a|b"]` renumber the day slots and read a string
+/// nested in an object inside `code_keys` as a key.
+bool nextArrayElement(const char* body, size_t len, size_t& at, size_t& start, size_t& n, bool& isString);
+
 } // namespace detail
 
 /// Applies the `roster` array out of a heartbeat response to `target`.
@@ -155,10 +166,32 @@ SyncResult applyRoster(const char* body, size_t len, RosterT& target, uint32_t n
     return result;
   }
 
-  target.beginReplace(nowMs);
-
+  // FIRST PASS: is anything in it readable (device-api.md §11.2, FC-1)? A
+  // non-empty array of which NOTHING parses is a grammar this board does not
+  // know, never "no bookings": the previous roster stays, the elements are
+  // counted rejected and the caller reports drift. `[]` still commits empty.
   size_t start = 0U;
   size_t n = 0U;
+  uint8_t readable = 0U;
+  uint8_t unreadable = 0U;
+  {
+    size_t probe = at;
+    bool isString = false;
+    while (detail::nextArrayElement(body, len, probe, start, n, isString)) {
+      roster::Entry entry;
+      if (isString && parseRosterElement(body + start, n, entry)) {
+        readable = readable < UINT8_MAX ? static_cast<uint8_t>(readable + 1U) : UINT8_MAX;
+      } else {
+        unreadable = unreadable < UINT8_MAX ? static_cast<uint8_t>(unreadable + 1U) : UINT8_MAX;
+      }
+    }
+  }
+  if (readable == 0U && unreadable > 0U) {
+    result.rejected = unreadable;
+    return result;
+  }
+
+  target.beginReplace(nowMs);
   while (detail::nextStringSpan(body, len, at, start, n)) {
     roster::Entry entry;
     if (!parseRosterElement(body + start, n, entry)) {

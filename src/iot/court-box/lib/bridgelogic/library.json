@@ -5,6 +5,22 @@
   "keywords": "bridge, roster, activation, embedded",
   "frameworks": "*",
   "platforms": "*",
-  "dependencies": { "roster": "*", "protocol": "*", "court": "*", "devapi": "*", "devcrypto": "*", "devlink": "*", "eventq": "*", "memcode": "*", "timebase": "*" },
-  "build": { "flags": ["-I include"] }
+  "dependencies": {
+    "roster": "*",
+    "protocol": "*",
+    "court": "*",
+    "devapi": "*",
+    "devcrypto": "*",
+    "devlink": "*",
+    "eventq": "*",
+    "memcode": "*",
+    "timebase": "*",
+    "devota": "*",
+    "devnet": "*"
+  },
+  "build": {
+    "flags": [
+      "-I include"
+    ]
+  }
 }

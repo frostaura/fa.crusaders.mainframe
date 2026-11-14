@@ -10,18 +10,20 @@
 // WHY THIS HALF EXISTS
 // --------------------
 // It is the half that talks to the network, so everything volatile lives here
-// and the Mega stays near-static. Both halves are flashed over USB by DIP
-// switch: there is no over-the-air path, no signing key, no discovery, no claim
-// flow and no runtime credential store, because one club with one box needs
-// none of it and every one of those parts was a way for the box to break
-// itself. The four things the box needs — the WiFi SSID and password, the API
-// base URL and the device API key — are compiled in from src/common/secrets.h,
-// and changing any of them is a reflash. See src/iot/court-box/README.md's Flashing
+// and the Mega stays near-static. Bridge 3.1.0 is the LAST cable flash (founder,
+// 2026-11-13): every later fix arrives as a signed image over HTTP from the
+// club's own server (device-api.md §7), and nothing an operator does — a
+// rotated key, a new router, a moved server — needs a cable (§6, §8). The four
+// values compiled in from src/common/secrets.h (the WiFi SSID and password, the
+// API base URL and the device API key) are only the FIRST-BOOT DEFAULTS; what
+// the server or the setup portal sends since is kept in flash. There is still
+// no discovery and no claim flow. See src/iot/court-box/README.md's Flashing
 // section.
 //
 // HOW THE BOX AUTHENTICATES
 // -------------------------
-// `Authorization: Bearer <DEVICE_API_KEY>` on every call, and its own MAC in
+// `Authorization: Bearer <key>` on every call — the compiled DEVICE_API_KEY
+// (k0) until the server's `key_next` replaces it — and its own MAC in
 // every request body. The server resolves the key to a tenant and the MAC to a
 // device, registering the device itself the first time it sees a new one. There
 // is no signature, no timestamp and no clock: the box has no RTC, and the whole
@@ -84,19 +86,22 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "EspLifeline.h"
 #include "arduino_hal/ArduinoClock.h"
 #include "arduino_hal/LittleFsStore.h"
 #include "arduino_hal/SerialTransport.h"
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/BootId.h"
+#include "bridgelogic/BridgeOta.h"
 #include "bridgelogic/EventDrain.h"
 #include "bridgelogic/Extend.h"
 #include "bridgelogic/FaultLog.h"
+#include "bridgelogic/Lifeline.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/MegaTx.h"
 #include "bridgelogic/MemberScan.h"
 #include "bridgelogic/OnRetry.h"
-#include "bridgelogic/PayFor.h"
+#include "bridgelogic/Persist.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RestorePlan.h"
 #include "bridgelogic/ScanFlow.h"
@@ -112,12 +117,16 @@
 #include "devapi/DeviceClient.h"
 #include "devapi/Json.h"
 #include "devcrypto/Hex.h"
+#include "devcrypto/Rsa.h"
 #include "devlink/ApiBreaker.h"
 #include "devlink/Cadence.h"
 #include "devlink/CodeSync.h"
 #include "devlink/EventUpload.h"
 #include "devlink/LcdSettings.h"
 #include "devlink/RosterSync.h"
+#include "devnet/JsonMember.h"
+#include "devnet/Net.h"
+#include "devota/Ota.h"
 #include "eventq/EventQueue.h"
 #include "fwversion/Version.h"
 #include "memcode/GuessGuard.h"
@@ -130,11 +139,10 @@
 #include "roster/Roster.h"
 #include "timebase/TimeBase.h"
 
-// The four compiled-in values, all MANDATORY. There is no runtime store and no
-// provisioning line: one box, one club, and the person who flashes it is the
-// person who knows the WiFi password and holds the API key. Changing any of
-// them is `make flash-bridge`, which is a two-minute job and cannot leave a box
-// holding a credential nobody can see.
+// The six compiled-in values, all MANDATORY. The first four are first-boot
+// defaults (the runtime set in flash wins once there is one); the release
+// key's modulus and the setup portal's password are fixed for the life of the
+// image.
 //
 // The build fails rather than producing an image with a blank in it — an image
 // that joins an empty SSID, or posts to an empty base URL with an empty bearer
@@ -165,6 +173,59 @@ static_assert(sizeof(API_BASE_URL) > 1U,
               "API_BASE_URL in secrets.h is empty — e.g. \"http://192.168.1.10:8088\"");
 static_assert(sizeof(DEVICE_API_KEY) > 1U,
               "DEVICE_API_KEY in secrets.h is empty — copy it from the admin Devices page");
+#ifndef OTA_PUBLIC_KEY_N
+#error "secrets.h does not define OTA_PUBLIC_KEY_N — see src/iot/court-box/src/common/secrets.h.example"
+#endif
+#ifndef SETUP_AP_PASSWORD
+#error "secrets.h does not define SETUP_AP_PASSWORD — see src/iot/court-box/src/common/secrets.h.example"
+#endif
+
+namespace secrets_check {
+
+// C++11-valid constexpr (one return each): the Arduino IDE builds at gnu++11.
+constexpr bool isHex(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+/// [lo, hi) all hex, halving: 512 digits is nine levels deep, inside GCC's
+/// 512-level constexpr limit that a character-at-a-time walk is not.
+constexpr bool hexFrom(const char* s, unsigned lo, unsigned hi) {
+  return hi - lo <= 1U ? (lo >= hi || isHex(s[lo]))
+                       : (hexFrom(s, lo, lo + (hi - lo) / 2U) && hexFrom(s, lo + (hi - lo) / 2U, hi));
+}
+
+constexpr char lower(char c) {
+  return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+constexpr bool startsWith(const char* s, const char* p, unsigned i) {
+  return p[i] == '\0' ? true : (lower(s[i]) == p[i] && startsWith(s, p, i + 1U));
+}
+
+constexpr bool equals(const char* a, const char* b, unsigned i) {
+  return a[i] != b[i] ? false : (a[i] == '\0' ? true : equals(a, b, i + 1U));
+}
+
+} // namespace secrets_check
+
+// OTA_PUBLIC_KEY_N is the release key's RSA-2048 modulus, 512 hex characters,
+// from `src/iot/tools/ota_sign.py modulus` (device-api.md §7). Never the
+// contract corpus's TEST keys, whose private halves are in the repository: an
+// image signed with one would be accepted by every box.
+static_assert(sizeof(OTA_PUBLIC_KEY_N) == 513U && secrets_check::hexFrom(OTA_PUBLIC_KEY_N, 0U, 512U),
+              "OTA_PUBLIC_KEY_N must be the release key's RSA-2048 modulus as exactly 512 hex characters "
+              "(src/iot/tools/ota_sign.py modulus)");
+static_assert(!secrets_check::startsWith(OTA_PUBLIC_KEY_N, "d9ce9d8aeba6c19446077d6c0802c56f", 0U) &&
+                  !secrets_check::startsWith(OTA_PUBLIC_KEY_N, "a5105de8c0eeb5d3a8ddc78a4bc8a385", 0U),
+              "OTA_PUBLIC_KEY_N is one of the contract corpus's TEST keys — their private halves are in the "
+              "repository; generate the release key with src/iot/tools/ota_sign.py keygen");
+// SETUP_AP_PASSWORD is the setup portal's WPA2 password, printed on the label
+// inside the enclosure (device-api.md §8).
+static_assert(sizeof(SETUP_AP_PASSWORD) >= 9U && sizeof(SETUP_AP_PASSWORD) <= 64U,
+              "SETUP_AP_PASSWORD must be 8 to 63 characters (WPA2)");
+static_assert(!secrets_check::equals(SETUP_AP_PASSWORD, "REPLACE_ME_SETUP_AP_PASSWORD", 0U),
+              "SETUP_AP_PASSWORD is still secrets.h.example's placeholder — choose one and print it on the "
+              "label inside the enclosure");
 static_assert(sizeof(DEVICE_API_KEY) - 1U <= devapi::kMaxApiKeyLen,
               "DEVICE_API_KEY is longer than devapi::kMaxApiKeyLen — a truncated key is a 401 that "
               "reads exactly like the wrong key");
@@ -231,11 +292,6 @@ tb::Deadline gHeartbeat;
 /// tenant.
 char gMacHex[dc::hex::encodedSize(6U)];
 
-/// `Bearer <DEVICE_API_KEY>`, rendered once at boot. Held rather than rebuilt
-/// per call because it is the same string for the life of the image and the
-/// heap it would churn is shared with the network stack.
-char gAuthHeader[devapi::kAuthorizationBufSize] = {};
-
 /// THIS BOOT'S IDENTITY — the third field of the server's idempotency key.
 ///
 /// Drawn once in setup(), after WiFi.begin(), and read-only thereafter. The ESP
@@ -264,6 +320,12 @@ uint32_t gMegaUptime = 0U;
 /// which is half of why the identity screen was never painted (review 3,
 /// finding 9). The rule is bridgelogic::shouldRepaintIdentity's.
 bool gMegaSeen = false;
+
+/// The Mega's boot instant on this half's clock, and the `!PING` a lost line
+/// earns (bridgelogic/MegaLink.h): together they find a Mega-only reset whose
+/// `!BOOT` and `!STATE` the link garbled, within a second instead of ten.
+bridgelogic::MegaBootClock gMegaBootClock;
+bridgelogic::MegaProbe gMegaProbe;
 
 bool gWifiUp = false;
 
@@ -531,10 +593,6 @@ char gLastScan[proto::kMaxArgLen + 1] = {'\0'};
 /// AGAIN each armed it by a different rule, and the three disagreed.
 bridgelogic::ScanMemory gScan(kScanMemoryMs, devlink::kLcdChoiceDefaultMs);
 
-/// The state between a pay-for's two presses (D10): which court was quoted, at
-/// what price label, under which nonce.
-bridgelogic::PayForFlow gPayFor;
-
 /// The Mega's last `!STATE`, per court: the mask bit, the seconds it reported
 /// and when. What an unscanned court press (MinutesLeft) and an extension read
 /// a court's time left from (bridge 2.3.0). The Mega is the authority; this is
@@ -577,18 +635,108 @@ bridgelogic::AuthPolicy gAuth(kScanMemoryMs);
 /// API chooses to send that this build does not read — and
 /// loop() runs on the ESP8266's 4 KB continuation stack, where a 2.5 KB local
 /// under an HTTP call is a crash that looks like a random reset.
-char gHeartbeatBody[bridgelogic::kHeartbeatResponseCap] = {};
+/// ONE 5 KB buffer for four jobs that never overlap (bridge 3.1.0, the heap
+/// floor): the heartbeat ANSWER (from byte 0), the heartbeat REQUEST (its
+/// tail — sent before the answer is read over it), the RSA workspace of an
+/// OTA signature check (after the answer was adopted and written to flash),
+/// and the OTA's copy and download chunks. A union, so the workspace is a real
+/// RsaWorkspace object and never a cast.
+union BigBuffer {
+  char text[bridgelogic::kHeartbeatResponseCap];
+  dc::RsaWorkspace rsa;
+  uint32_t align;
+};
+
+static_assert(sizeof(dc::RsaWorkspace) <= bridgelogic::kHeartbeatResponseCap - devlink::kHeartbeatBodyCap,
+              "the RSA workspace must fit beside the request tail");
+BigBuffer gBig = {};
+char* const gHeartbeatBody = gBig.text;
+constexpr size_t kHeartbeatBodyCap = bridgelogic::kHeartbeatResponseCap;
 
 /// The heartbeat REQUEST, static for the same reason (ESPR-1, HW-6): the v3
 /// body carries the Mega's and this board's health and is up to 1023 bytes.
-char gHeartbeatRequest[devlink::kHeartbeatBodyCap] = {};
+char* const gHeartbeatRequest = gBig.text + (bridgelogic::kHeartbeatResponseCap - devlink::kHeartbeatBodyCap);
+constexpr size_t kHeartbeatRequestCap = devlink::kHeartbeatBodyCap;
+
+// --- bridge 3.1.0: the lifeline (device-api.md §4, §6-§8) --------------------------
+
+/// The flash: LittleFS records, the OTA staging area, the download.
+arduino_hal::LittleFsFiles gFiles;
+arduino_hal::EspImageFlash gImageFlash;
+const char* currentBaseUrl();
+const char* currentAuthHeader();
+arduino_hal::EspDownload gDownload(currentBaseUrl, currentAuthHeader, reinterpret_cast<uint8_t*>(gBig.text),
+                                   2048U);
+arduino_hal::RtcEpoch gEpoch;
+arduino_hal::SetupPortal gPortal;
+
+/// The device keys, the network set, the OTA state and the release key.
+bridgelogic::BridgeKeys gKeys;
+bridgelogic::BridgeNet gNet;
+bridgelogic::BridgeOta gOta;
+/// The release key, in FLASH (PROGMEM: .rodata is RAM on this chip), parsed
+/// into gBig's tail only when a signature is checked — beside the RSA
+/// workspace (bytes 0..1791), the download chunk (0..2047) and the copy chunk
+/// (2048..4095), none of which is in use while the modulus is read.
+const char kOtaKeyHex[] PROGMEM = OTA_PUBLIC_KEY_N;
+constexpr size_t kModulusAt = 4096U;
+constexpr size_t kModulusHexAt = kModulusAt + dc::kRsa2048Bytes;
+static_assert(kModulusHexAt + sizeof(kOtaKeyHex) <= bridgelogic::kHeartbeatResponseCap,
+              "the modulus and its hex must fit gBig's tail");
+
+/// The modulus, or nullptr when the compiled key does not parse.
+const uint8_t* loadOtaModulus() {
+  char* hex = gBig.text + kModulusHexAt;
+  memcpy_P(hex, kOtaKeyHex, sizeof(kOtaKeyHex));
+  uint8_t* n = reinterpret_cast<uint8_t*>(gBig.text + kModulusAt);
+  return devota::parseModulusHex(hex, n) ? n : nullptr;
+}
+
+/// The link supervisor (30 s grace, 30-300 s backoff, restart at 15 min down)
+/// and the stall watchdog (link up, nothing accepted for 6 h: HW-8).
+devnet::Supervisor gSupervisor;
+bridgelogic::StallWatch gStall;
+bool gRestartWanted = false;
+
+/// The setup chord (`!HELD,09,5` within 60 s of power-on) and the portal.
+bridgelogic::SetupChord gChord;
+tb::Deadline gPortalUntil;
+constexpr uint32_t kPortalMs = 10UL * 60000UL;
+
+/// The four lifeline settings from `config`.
+bridgelogic::LifelineSettings gLife;
+
+/// What a boot restored, said once on the first accepted beat.
+bridgelogic::BodyStore gBody;
+bridgelogic::CarriedEvents gCarried;
+bridgelogic::RestoreKind gRestoreKind = bridgelogic::RestoreKind::None;
+bool gRestoreReported = false;
+/// Relays a COLD restore lit on stale evidence; the first accepted snapshot
+/// confirms or switches each one off (device-api.md §4).
+uint8_t gProvisional = 0U;
+/// A cold restore's roster is trusted only this long without a beat.
+tb::Deadline gColdTrust;
+bool gColdTrustArmed = false;
+bool gEverAccepted = false;
+
+/// The live event queue, written out when it changes (BR-07).
+uint16_t gEventsSize = 0U;
+uint32_t gEventsLastSeq = 0U;
+uint32_t gEventsHeadSeq = 0U;
+
+/// The last member input (scan or press), for the OTA's idle rule.
+uint32_t gLastInputMs = 0U;
 
 /// The ONE reply buffer of the three member-facing calls — /activate,
 /// /walkup and /extend — which never run at the same time: 512 bytes (2.3.0:
 /// three of 384), the compat budget the server holds each reply to (FC-5,
 /// device-api.md §11.4). Static, never a stack local under an HTTP call.
 inline constexpr size_t kReplyBodyCap = 512U;
-char gReplyBody[kReplyBodyCap] = {};
+/// In gBig as well (bridge 3.1.0, the heap floor): a member's call never runs
+/// while the heartbeat answer is still wanted — that answer is adopted in the
+/// pass it arrives and written to flash at the top of the next, before any
+/// scan of that pass is read.
+char* const gReplyBody = gBig.text;
 
 /// Write a frame to the Mega, all of it or none of it. A fragment would fail
 /// the Mega's checksum AND be read as the head of the next frame.
@@ -868,7 +1016,6 @@ void spendScan() {
 /// one left armed behind a forgotten scan is a confirm on nobody's code.
 void forgetScan() {
   spendScan();
-  gPayFor.clear();
   applyAuth(gAuth.disarm());
 }
 
@@ -911,7 +1058,6 @@ void setupIdentity() {
   uint8_t mac[6] = {0U, 0U, 0U, 0U, 0U, 0U};
   WiFi.macAddress(mac);
   static_cast<void>(dc::hex::encodeLower(mac, sizeof(mac), gMacHex, sizeof(gMacHex)));
-  static_cast<void>(devapi::renderAuthorization(gAuthHeader, sizeof(gAuthHeader), DEVICE_API_KEY));
 }
 
 /// Decimal value of an argument the decoder already validated.
@@ -965,6 +1111,9 @@ void noteMegaCounters(const proto::Frame& frame, uint32_t nowMs) {
 void sendMegaSettings();
 void sendLand(uint32_t nowMs);
 void onMegaBoot(uint32_t nowMs);
+void noteHeld(const proto::Frame& frame, uint32_t nowMs);
+void adoptLifeline(const char* response, size_t responseLen, uint32_t nowMs);
+void settleProvisional(uint32_t nowMs);
 
 void noteMegaPong(const proto::Frame& frame, uint32_t nowMs) {
   const uint32_t seconds = argU32(frame, 1U);
@@ -972,7 +1121,9 @@ void noteMegaPong(const proto::Frame& frame, uint32_t nowMs) {
   // The dialect follows the Mega's version (a 2.1.0 Mega sends no !BOOT).
   gTx.setMegaVersion(frame.arg(0));
   snprintf(gMegaVersion, sizeof(gMegaVersion), "%s", frame.arg(0));
-  const bool restarted = gMegaSeen && seconds < gMegaUptime;
+  // A restart is a boot instant that moved, not merely an uptime smaller than
+  // the last one: after a heard !BOOT the last figure is 0 (MegaBootClock).
+  const bool restarted = gMegaBootClock.observe(nowMs, seconds) && gMegaSeen;
   const bool first = !gMegaSeen;
   gMegaSeen = true;
   gMegaUptime = seconds;
@@ -997,6 +1148,7 @@ void noteMegaBoot(const proto::Frame& frame, uint32_t nowMs) {
   gMegaHeard = true;
   gMegaSeen = true;
   gMegaUptime = 0U;
+  static_cast<void>(gMegaBootClock.observe(nowMs, 0U));
   onMegaBoot(nowMs);
 }
 
@@ -1103,10 +1255,8 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   snprintf(gLastScan, sizeof(gLastScan), "%s", frame.arg(0));
   // For the TENANT's scan memory, not the compile-time one (R19 D19-3).
   gScan.remember(nowMs);
-  // A new identity at the panel: any pay-for quote on the glass was somebody
-  // else's question.
-  gPayFor.clear();
-  // And any EXTEND prompt was somebody else's court press.
+  // A new identity at the panel: any EXTEND prompt was somebody else's court
+  // press.
   gExtendCourt = kNoExtend;
 
   // No `!AUTH` yet. The window used to be armed HERE, before anything had
@@ -1257,6 +1407,7 @@ void reconcileNow(uint32_t nowMs, bool force) {
   }
   bridgelogic::ReconcileSettings settings;
   settings.restoreEnabled = gLcdSettings.relayRestoreEnabled;
+  settings.minSeconds = gLife.reconcileMinSeconds;
   int32_t want[bridgelogic::kSnapshotRelays];
   if (!gReconciler.plan(gSnapshot, view, settings, nowMs, force, want)) {
     return;
@@ -1542,7 +1693,6 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     // this is where an unscanned court press is answered, and a lit court is
     // an EXTEND rather than a pay-for or the first half of switching off.
     const uint8_t relay = gPad.selectedCourt();
-    gPayFor.clear();
     const bool lit = courtLit(relay, nowMs);
     bridgelogic::ScreenFacts facts = screenFacts(nowMs);
     facts.court = relay;
@@ -1636,6 +1786,10 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     // switching relay coils, and the first week's numbers are expected to be
     // surprising.
     gFaults.note(faultForDecodeError(result.error), nowMs);
+    // The lost line may have been a `!BOOT`: ask for the uptime that proves it.
+    if (gMegaProbe.lineLost(nowMs)) {
+      static_cast<void>(sendToMega(proto::Frame::ping()));
+    }
     return;
   }
 
@@ -1656,11 +1810,12 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     noteMegaDiag(result.frame);
     return;
   case proto::Verb::Held:
-    // The setup gesture (court A + court D, `!HELD,09`) opens the setup
-    // portal, which arrives with the runtime network store (phase B, devnet).
-    // This image has no portal, so the gesture does nothing.
+    // The setup gesture (court A + court D for five seconds, `!HELD,09,5`,
+    // within 60 s of power-on) opens the setup portal (device-api.md §8).
+    noteHeld(result.frame, nowMs);
     return;
   case proto::Verb::Scan:
+    gLastInputMs = nowMs;
     handleScan(result.frame, nowMs);
     return;
   case proto::Verb::Evt:
@@ -1671,6 +1826,7 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     handleReceiveError(result.frame, nowMs);
     return;
   case proto::Verb::Btn:
+    gLastInputMs = nowMs;
     handleButton(result.frame, nowMs);
     return;
   case proto::Verb::State:
@@ -1704,47 +1860,96 @@ void pumpMegaLink(uint32_t nowMs) {
 /// The response body is read into a caller buffer rather than a String: the ESP's
 /// heap is shared with the network stack, and a heartbeat that allocates four
 /// times a minute is a heap that fragments over a season in a cupboard.
+/// One POST, its answer read into `out` by a bounded reader. Returns the HTTP
+/// status, or 0 when it never completed.
+///
+/// HTTP/1.0 and no reuse (ESPR-5: a kept-alive socket per call left TIME_WAIT
+/// pcbs on the heap), and no `String` (ESPR-3, BR-16: getString() held a second
+/// copy of a 4 KB answer on the heap): the body is streamed straight into the
+/// caller's buffer, and one whose `Content-Length` is at or past the buffer is
+/// refused before a byte is read — EMPTY, NOT HALF. A response cut mid-object
+/// is a body whose readers see whichever fields landed inside the buffer.
+int postOnce(const char* url, const char* body, char* out, size_t outCap, bool readRefusal) {
+  WiFiClient client;
+  HTTPClient http;
+  if (!http.begin(client, url)) {
+    return 0;
+  }
+  http.useHTTP10(true);
+  http.setReuse(false);
+  http.setTimeout(kHttpTimeoutMs);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader(devapi::kHeaderAuthorization, gKeys.header());
+  const int status = http.POST(reinterpret_cast<const uint8_t*>(body), strlen(body));
+  if (status > 0 && out != nullptr && outCap > 0U) {
+    out[0] = '\0';
+  }
+  if (status > 0 && out != nullptr && outCap > 0U && (readRefusal || (status >= 200 && status < 300))) {
+    const int declared = http.getSize();
+    WiFiClient* stream = http.getStreamPtr();
+    size_t got = 0U;
+    if (declared < 0 || static_cast<size_t>(declared) < outCap) {
+      const size_t want = declared < 0 ? outCap - 1U : static_cast<size_t>(declared);
+      const uint32_t startedAt = millis();
+      while (stream != nullptr && got < want && millis() - startedAt < kHttpTimeoutMs) {
+        const int avail = stream->available();
+        if (avail <= 0) {
+          if (!stream->connected()) {
+            break;
+          }
+          delay(1);
+          continue;
+        }
+        const size_t room = want - got;
+        const int n = stream->read(reinterpret_cast<uint8_t*>(out) + got,
+                                   static_cast<size_t>(avail) < room ? static_cast<size_t>(avail) : room);
+        if (n > 0) {
+          got += static_cast<size_t>(n);
+        }
+      }
+      if (declared >= 0 && got != static_cast<size_t>(declared)) {
+        got = 0U; // cut short: nothing, never half
+      } else if (declared < 0 && stream != nullptr && stream->available() > 0) {
+        got = 0U; // undeclared and longer than the buffer
+      }
+    }
+    out[got] = '\0';
+  }
+  http.end();
+  return status;
+}
+
 uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
   // The screen the member is waiting on reaches the glass before this call
   // blocks for up to four seconds (bounded: 200 ms is ~190 bytes at 9600).
   flushMega(200UL);
-  if (body == nullptr || gAuthHeader[0] == '\0') {
+  if (body == nullptr || gKeys.header()[0] == '\0') {
     // An unrenderable body, or a key that would not fit its buffer. Refused
     // locally rather than sent as something the server has to reject, and it
     // teaches the breaker nothing because it says nothing about the host.
     return 0U;
   }
 
-  char url[sizeof(API_BASE_URL) + 64U];
-  snprintf(url, sizeof(url), "%s%s", API_BASE_URL, path);
-
-  WiFiClient client;
-  HTTPClient http;
-  if (!http.begin(client, url)) {
+  // The base URL is the network set's (device-api.md §8): the compiled one is
+  // only the first-boot default.
+  char url[devnet::kBaseUrlMax + 64U];
+  const int urlLen = snprintf(url, sizeof(url), "%s%s", gNet.baseUrl(), path);
+  if (urlLen <= 0 || static_cast<size_t>(urlLen) >= sizeof(url)) {
     return 0U;
   }
-  http.setTimeout(kHttpTimeoutMs);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader(devapi::kHeaderAuthorization, gAuthHeader);
 
-  const int status = http.POST(reinterpret_cast<const uint8_t*>(body), strlen(body));
-  if (status > 0 && out != nullptr && outCap > 0U) {
-    const String payload = http.getString();
-    if (payload.length() < outCap) {
-      memcpy(out, payload.c_str(), payload.length());
-      out[payload.length()] = '\0';
-    } else {
-      // EMPTY, NOT HALF. A response cut mid-object is a body whose readers see
-      // whichever fields happened to land inside the buffer — and the activate
-      // reader used to refuse a grant whose `court_number` was in the lost tail,
-      // which is a dark court for an attendance the API had already recorded.
-      // Nothing here can recover the rest, so nothing here pretends to have it;
-      // bridgelogic::ScanFlow treats an absent body as no decision and the
-      // roster answers instead.
-      out[0] = '\0';
+  // The heartbeat's request lives in the tail of its own answer buffer, so a
+  // refusal's body is not read over it: the 401 retry must resend it whole.
+  const bool aliased = out != nullptr && body >= out && body < out + outCap;
+  int status = postOnce(url, body, out, outCap, !aliased);
+  if (status == 401 && gKeys.switchForRetry()) {
+    // A 401 is as likely a server restored to the old key as a retired one:
+    // ONE retry with the other key held, and neither is ever erased (§6).
+    status = postOnce(url, body, out, outCap, !aliased);
+    if (status == 401) {
+      gKeys.retryFailed();
     }
   }
-  http.end();
   const uint16_t result = status > 0 ? static_cast<uint16_t>(status) : 0U;
   // Every call that actually went to the socket teaches the breaker. A fresh
   // clock read, because the call may have just spent kHttpTimeoutMs.
@@ -1982,8 +2187,8 @@ void applyExtension(uint8_t court, const bridgelogic::ExtendResult& answer, uint
 /// `!EXT` sets the new relay deadline from now, capped at ninety minutes; a
 /// longer session is held past the cap by Relight exactly as a long booking is.
 ///
-/// (The D10 pay-for flow is no longer reachable from the panel: a lit court
-/// press is an extension now. bridgelogic::PayFor stays compiled.)
+/// (The D10 pay-for flow left the image at bridge 3.1.0: a lit court press is
+/// an extension, and nothing in this file can reach /pay-for.)
 void requestExtend(const court::WalkUpIntent& intent) {
   uint32_t nowMs = gClock.nowMs();
   if (!extendPreflight(intent, nowMs)) {
@@ -2128,6 +2333,17 @@ void drainEvents(uint32_t nowMs) {
   const auto post = [](const char* body, char* response, size_t cap) -> uint16_t {
     return callApi("/api/v1/device/events", body, response, cap);
   };
+  if (!gCarried.empty()) {
+    // Earlier boots' undelivered events first, one per call, under the boot
+    // they were queued in (BR-07): the server deduplicates on (device,
+    // boot_id, seq), so one whose receipt the cut lost is a no-op.
+    bridgelogic::DrainSource carried;
+    carried.mac = gMacHex;
+    carried.bootId = gCarried.headBootId();
+    carried.uptimeMs = gCarried.headUptimeMs();
+    static_cast<void>(bridgelogic::pumpEventDrain(gCarried, gDrainPace, carried, online, gClock, post));
+    return;
+  }
   static_cast<void>(bridgelogic::pumpEventDrain(gQueue, gDrainPace, source, online, gClock, post));
 }
 
@@ -2223,12 +2439,20 @@ const char* bridgeResetWord() {
 /// The v3 fields of this beat (device-api.md §2): caps, versions, the layout
 /// the Mega acknowledged, what was re-lit, the Mega's own report.
 void fillHeartbeatV3(devlink::HeartbeatV3& v3) {
-  v3.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapLcd2;
+  // Bridge 3.1.0 names the lifeline: signed OTA, key rotation and network
+  // changes are real in this image (device-api.md §1), so the server may offer
+  // images, rotate keys and move the box.
+  v3.caps = devlink::kCapCodes | devlink::kCapHb3 | devlink::kCapLcd2 | devlink::kCapOta | devlink::kCapKey |
+            devlink::kCapNet;
   v3.megaVersion = gMegaVersion[0] != '\0' ? gMegaVersion : nullptr;
-  v3.fwState = "committed";
+  v3.fwState = bridgelogic::fwStateName(gOta.state());
+  v3.fwFailed = gOta.failedVersion();
+  v3.fwError = gOta.error();
   v3.netReported = true;
-  v3.netVer = 0U;
-  v3.netSrc = "compiled";
+  v3.netVer = gNet.version();
+  v3.netSrc = bridgelogic::netSourceName(gNet.source());
+  // `restore` on the first accepted beat of a boot only (§2).
+  v3.restore = gRestoreReported ? nullptr : bridgelogic::restoreName(gRestoreKind);
   v3.lcdLayout = gTx.ackedLayout() < 0 ? nullptr : (gTx.ackedLayout() == 1 ? "expanded" : "compact");
   v3.relight = gRelitCount > 0U ? gRelit : nullptr;
   v3.relightCount = gRelitCount;
@@ -2254,7 +2478,7 @@ void fillDiag(devlink::DiagReport& diag) {
   diag.heapMin = gHeapMin;
   diag.block = ESP.getMaxFreeBlockSize();
   diag.stackMin = ESP.getFreeContStack();
-  diag.sketchFree = ESP.getFreeSketchSpace();
+  diag.sketchFree = gImageFlash.capacity();
   diag.flashMb = ESP.getFlashChipRealSize() / (1024UL * 1024UL);
 }
 
@@ -2274,10 +2498,12 @@ void adoptOperatorSettings(const char* response, size_t responseLen) {
   gWallClock.setTrustMinutes(gLcdSettings.clockTrustMs / 60000UL);
   gFaults.setEnabled(gLcdSettings.faultReporting);
   gFaults.setMaxPerHour(gLcdSettings.faultMaxPerHour);
+  // The four lifeline settings, read from inside `config` by exact kind.
+  bridgelogic::readLifelineSettings(response, responseLen, gLife, &gDrift);
 }
 
 /// The button map, the court list, the roster and the member-code sync.
-void adoptCourtsRosterAndCodes(const char* response, size_t responseLen) {
+void adoptCourtsRosterAndCodes(const char* response, size_t responseLen, uint32_t anchorMs, bool codes) {
   applyButtonMap(response, responseLen);
   // Absent keys leave the previous set alone, for the same reason the button
   // map's does: an older API must not blank what a newer one configured.
@@ -2287,7 +2513,7 @@ void adoptCourtsRosterAndCodes(const char* response, size_t responseLen) {
   // seconds — so the roster is anchored to a fresh read, not the pass's.
   // Every accepted heartbeat re-anchors it, which is what resets staleness;
   // ROSTER_MAX_AGE_MS only governs how long the last one survives offline.
-  const devlink::SyncResult sync = devlink::applyRoster(response, responseLen, gRoster, gClock.nowMs());
+  const devlink::SyncResult sync = devlink::applyRoster(response, responseLen, gRoster, anchorMs);
   if (sync.rejected > 0U) {
     // Bookings the server sent that this box could not read. It has always been
     // counted and never reported, and it is contract drift — the shape of an
@@ -2300,13 +2526,18 @@ void adoptCourtsRosterAndCodes(const char* response, size_t responseLen) {
   // Anchored to a FRESH read for the roster's reason, and wholesale like the
   // roster — an absent `code_keys` (a server that has not shipped member codes)
   // leaves both exactly as they were.
-  const devlink::CodeSyncResult codes =
-      devlink::applyCodeSync(response, responseLen, gStepClock, gKeyRing, gClock.nowMs());
-  if (codes.rejected > 0U || codes.dropped > 0U) {
+  if (!codes) {
+    // A cold restore: the step clock cannot be re-derived, so offline member
+    // codes wait for the first heartbeat (device-api.md §4).
+    return;
+  }
+  const devlink::CodeSyncResult codeSync =
+      devlink::applyCodeSync(response, responseLen, gStepClock, gKeyRing, anchorMs);
+  if (codeSync.rejected > 0U || codeSync.dropped > 0U) {
     // A key this box could not read, or could not hold, is a member it will
     // refuse offline. Contract drift or a server over the cap — both an admin's.
     gFaults.noteMany(bridgelogic::Fault::RosterRejected,
-                     static_cast<uint32_t>(codes.rejected) + codes.dropped, eventq::Event::kNoCourt,
+                     static_cast<uint32_t>(codeSync.rejected) + codeSync.dropped, eventq::Event::kNoCourt,
                      gClock.nowMs());
   }
 }
@@ -2374,14 +2605,16 @@ void pumpHeartbeat(uint32_t nowMs) {
   report.v3 = &v3;
 
   char* body = gHeartbeatRequest;
-  if (devlink::renderHeartbeatBody(body, sizeof(gHeartbeatRequest), gMacHex, fw::kFirmwareVersion,
-                                   gUptime.value(), report) == 0U) {
+  if (devlink::renderHeartbeatBody(body, kHeartbeatRequestCap, gMacHex, fw::kFirmwareVersion, gUptime.value(),
+                                   report) == 0U) {
     return;
   }
+  // The answer is read over the request's buffer (gBig): any persisted copy of
+  // the previous answer was written at the top of this pass (pumpLifeline).
 
   char* response = gHeartbeatBody;
   response[0] = '\0';
-  const uint16_t status = callApi("/api/v1/device/heartbeat", body, response, sizeof(gHeartbeatBody));
+  const uint16_t status = callApi("/api/v1/device/heartbeat", body, response, kHeartbeatBodyCap);
   const size_t responseLen = strlen(response);
 
   if (devapi::react(status) != devapi::Reaction::Accepted) {
@@ -2399,7 +2632,17 @@ void pumpHeartbeat(uint32_t nowMs) {
   // Accepted: what this beat reported has been heard.
   gRelitCount = 0U;
   gDrift.clear();
+  gRestoreReported = true;
+  gStall.reset(gClock.nowMs());
+  gNet.heartbeatAccepted();
+  // Probation commits on an ACCEPTED beat with the Mega heard (§7, §11.1).
+  gOta.heartbeatAccepted(gMegaHeard || gMegaSeen);
   const bool whole = devapi::json::isCompleteObject(response, responseLen);
+  // The lifeline first, from any complete object, even when everything else
+  // has drifted (§11.1): it is how this image gets replaced.
+  if (whole) {
+    adoptLifeline(response, responseLen, gClock.nowMs());
+  }
   if (!whole) {
     // ACCEPTED, AND NOTHING TO ADOPT. A body longer than gHeartbeatBody arrives
     // here as an empty buffer (callApi refuses to keep half of one) and a cut
@@ -2412,7 +2655,7 @@ void pumpHeartbeat(uint32_t nowMs) {
 
   adoptOperatorSettings(response, responseLen);
 
-  adoptCourtsRosterAndCodes(response, responseLen);
+  adoptCourtsRosterAndCodes(response, responseLen, gClock.nowMs(), true);
   // The tenant's cadence, bounded. Takes effect from the NEXT arm; the one
   // above already used the old value, which is a one-interval delay and not
   // worth a re-arm that could shorten this interval to nothing.
@@ -2428,6 +2671,12 @@ void pumpHeartbeat(uint32_t nowMs) {
   }
 
   adoptSnapshot(response, responseLen, whole, settledAt);
+  if (whole) {
+    // Kept whole for a boot with the server down (device-api.md §4), written
+    // at the top of a later pass.
+    gBody.accepted(gSnapshot, gEpoch.now(settledAt), settledAt);
+    settleProvisional(settledAt);
+  }
 
   // The Mega: its settings, the court numbers, the status row, the landing's
   // paid minutes, then the reconcile — on every accepted heartbeat.
@@ -2497,6 +2746,284 @@ void pumpMegaV3(uint32_t nowMs) {
   }
 }
 
+// --- bridge 3.1.0: the lifeline ---------------------------------------------------
+
+const char* currentBaseUrl() {
+  return gNet.baseUrl();
+}
+
+const char* currentAuthHeader() {
+  return gKeys.header();
+}
+
+/// The lifeline objects of an accepted, complete answer (§11.1): read
+/// independently of everything else, so a body whose roster or config this
+/// image can no longer read can still replace this image.
+void adoptLifeline(const char* response, size_t responseLen, uint32_t nowMs) {
+  const char* object = nullptr;
+  size_t objectLen = 0U;
+  if (devnet::json::topLevelObjectText(response, responseLen, "key_next", object, objectLen)) {
+    const devnet::Refusal key = gKeys.adopt(object, objectLen);
+    if (key != devnet::Refusal::Ok && key != devnet::Refusal::Current && key != devnet::Refusal::Held) {
+      gDrift.add("key_next");
+    }
+  }
+  if (devnet::json::topLevelObjectText(response, responseLen, "net", object, objectLen)) {
+    const char* ssidBefore = gNet.ssid(0U);
+    char before[devnet::kSsidMax + 1U];
+    snprintf(before, sizeof(before), "%s", ssidBefore);
+    const devnet::NetResult net = gNet.adopt(object, objectLen, nowMs);
+    if (net.adopted()) {
+      if (strcmp(before, gNet.ssid(0U)) != 0) {
+        // A new first profile: join it now. The previous one is still listed,
+        // so a wrong password costs one supervisor step, never the box.
+        WiFi.disconnect();
+        WiFi.begin(gNet.ssid(0U), gNet.psk(0U));
+      }
+    } else if (net.reason != devnet::Refusal::NotNewer) {
+      gDrift.add("net");
+    }
+  }
+  if (devnet::json::topLevelObjectText(response, responseLen, "ota", object, objectLen)) {
+    gOta.offer(object, objectLen, nowMs);
+  }
+}
+
+/// The first accepted snapshot after a COLD restore: each provisional light is
+/// confirmed by the reconcile, or — where the server says dark — switched off
+/// by the bridge itself, cause `reconcile` (device-api.md §4).
+void settleProvisional(uint32_t nowMs) {
+  gEverAccepted = true;
+  gColdTrustArmed = false;
+  if (gProvisional == 0U || !gSnapshot.valid) {
+    return;
+  }
+  const uint8_t off = bridgelogic::provisionalToRelease(gProvisional, gSnapshot);
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    if ((off & (1U << i)) == 0U) {
+      continue;
+    }
+    if (sendToMega(proto::Frame::off(static_cast<proto::Court>(i))) && gHeld[i].held) {
+      releaseCourt(i, tb::since(nowMs, gHeld[i].sinceMs), nowMs, eventq::Cause::Reconcile);
+    }
+  }
+  gProvisional = 0U;
+}
+
+/// Restores the last accepted answer from flash at boot: warm exactly, cold
+/// inside the trust window (device-api.md §4).
+void restoreFromFlash(bool epochCarried, uint32_t nowMs) {
+  bridgelogic::BodyMeta meta;
+  const size_t len = gBody.load(gHeartbeatBody, kHeartbeatBodyCap, meta);
+  bridgelogic::LifelineSettings stored = gLife;
+  if (len > 0U) {
+    bridgelogic::readLifelineSettings(gHeartbeatBody, len, stored, nullptr);
+  }
+  gRestoreKind = bridgelogic::classifyRestore(epochCarried, len > 0U, stored.trustMinutes);
+  if (gRestoreKind == bridgelogic::RestoreKind::None) {
+    gHeartbeatBody[0] = '\0';
+    return;
+  }
+  gLife = stored;
+  const bool warm = gRestoreKind == bridgelogic::RestoreKind::Warm;
+  // Warm: aged exactly by the epoch the reset did not interrupt. Cold: as of
+  // now, and trusted only for the window.
+  const uint64_t epochNow = gEpoch.now(nowMs);
+  const uint64_t age = warm && epochNow > meta.epochMs ? epochNow - meta.epochMs : 0U;
+  const uint32_t anchor = nowMs - static_cast<uint32_t>(age > 0x7FFFFFFFULL ? 0x7FFFFFFFULL : age);
+  adoptOperatorSettings(gHeartbeatBody, len);
+  adoptCourtsRosterAndCodes(gHeartbeatBody, len, anchor, warm);
+  bridgelogic::MegaConfig next;
+  bridgelogic::readMegaConfig(gHeartbeatBody, len, gMegaCfg, next, gDrift);
+  gMegaCfg = next;
+  gDrift.clear(); // our own flash is not the server's drift
+  if (bridgelogic::readSnapshot(gHeartbeatBody, len, gSnapshot, anchor) == bridgelogic::ReadResult::Adopted &&
+      !warm) {
+    gProvisional = bridgelogic::capColdSnapshot(gSnapshot, gLife.trustMinutes);
+  }
+  if (!warm) {
+    gColdTrust.arm(nowMs, gLife.trustMinutes * 60000UL);
+    gColdTrustArmed = true;
+  }
+  gRestorePending = false;
+  gHeartbeatBody[0] = '\0';
+}
+
+/// The lifeline's idle rule (device-api.md §7 step 2): no scan remembered, no
+/// button window or choice armed, nothing waiting on the Mega, and no member
+/// input for a minute. Lit courts are fine — the Mega holds them.
+bool bridgeIdle(uint32_t nowMs) {
+  return gLastScan[0] == '\0' && !gAuth.armed(nowMs) && !gPad.hasSelection() && gExtendCourt == kNoExtend &&
+         !gFollowUpPending && gTx.idle() && tb::since(nowMs, gLastInputMs) >= 60000UL;
+}
+
+/// Keeps the Mega link and the core alive through a copy or a download.
+class OtaHooks final : public bridgelogic::BridgeOta::Hooks {
+public:
+  void during() override {
+    const uint32_t now = gClock.nowMs();
+    pumpMegaLink(now);
+    gTx.pump(gMega, now);
+    yield();
+  }
+};
+
+/// Signed OTA, from the top of loop(): the pending signature check (in the
+/// heartbeat buffer, once the answer it came in was written to flash), then
+/// the update itself when the board is idle.
+void pumpOta(uint32_t nowMs) {
+  if (gOta.verifyDue() && !gBody.due()) {
+    const uint8_t* modulus = loadOtaModulus();
+    if (modulus != nullptr) {
+      gOta.verifyOffer(modulus, gBig.rsa);
+    }
+    gHeartbeatBody[0] = '\0';
+  }
+  if (!gOta.ready() || !gWifiUp || !bridgeIdle(nowMs)) {
+    return;
+  }
+  // The Mega holds every lit court through the restart and must not read a
+  // two-minute silence as a dead bridge.
+  static_cast<void>(sendToMega(proto::Frame::note(180U, "UPDATING")));
+  static_cast<void>(sendToMega(proto::Frame::live(120U)));
+  flushMega(300UL);
+  OtaHooks hooks;
+  const uint8_t* modulus = loadOtaModulus();
+  if (modulus == nullptr) {
+    return;
+  }
+  const bool armed = gOta.run(gDownload, gImageFlash, modulus, gBig.rsa,
+                              reinterpret_cast<uint8_t*>(gBig.text) + 2048U, 2048U, hooks, gClock.nowMs());
+  gHeartbeatBody[0] = '\0';
+  if (armed) {
+    flushMega(300UL);
+    ESP.restart();
+  }
+  static_cast<void>(sendToMega(proto::Frame::note(0U, "")));
+  static_cast<void>(sendToMega(proto::Frame::live(kLiveEveryMs / 1000UL)));
+}
+
+/// Probation: a new image that has not proven itself within the window goes
+/// back to the previous one (device-api.md §7 step 5).
+void pumpProbation(uint32_t nowMs) {
+  if (!gOta.tick(nowMs, gLife.probationMinutes)) {
+    return;
+  }
+  OtaHooks hooks;
+  if (gOta.rollBack(gImageFlash, reinterpret_cast<uint8_t*>(gBig.text), 2048U, hooks, "probation")) {
+    ESP.restart();
+  }
+}
+
+/// The live event queue to flash whenever it changed (BR-07), from the top of
+/// loop(): a cheap signature (size, newest and oldest seq) says when.
+void persistEvents() {
+  eventq::Event head;
+  const uint32_t headSeq = gQueue.peek(head) ? head.seq : 0U;
+  if (gQueue.size() == gEventsSize && gQueue.lastSeq() == gEventsLastSeq && headSeq == gEventsHeadSeq) {
+    return;
+  }
+  if (bridgelogic::writeLiveEvents(gFiles, gQueue, gBootId, gUptime.value())) {
+    gEventsSize = gQueue.size();
+    gEventsLastSeq = gQueue.lastSeq();
+    gEventsHeadSeq = headSeq;
+  }
+}
+
+/// What the setup portal saves: a `local` network set, and optionally a key.
+bool savePortal(const devnet::NetSet& net, const char* keyId, const char* key) {
+  if (keyId != nullptr && !gKeys.adoptLocal(keyId, key)) {
+    return false;
+  }
+  return gNet.adoptLocal(net);
+}
+
+/// `!HELD,09,5` within 60 s of power-on: the setup portal (device-api.md §8).
+void noteHeld(const proto::Frame& frame, uint32_t nowMs) {
+  if (gPortal.isOpen() || !gChord.held(frame.arg(0), frame.arg(1), nowMs)) {
+    return;
+  }
+  char ap[32];
+  if (!bridgelogic::setupApName(gMacHex, ap, sizeof(ap))) {
+    return;
+  }
+  // The heartbeat buffer is the form's scratch: nothing else runs meanwhile.
+  if (!gPortal.open(ap, SETUP_AP_PASSWORD, savePortal, gBig.text, kHeartbeatBodyCap)) {
+    return;
+  }
+  gPortalUntil.arm(nowMs, kPortalMs);
+  char note[24];
+  snprintf(note, sizeof(note), "SETUP AP %s", ap + strlen(ap) - 4U);
+  static_cast<void>(sendToMega(proto::Frame::note(kPortalMs / 1000UL, note)));
+}
+
+/// The portal, while open: it serves, and it closes after ten minutes or a save
+/// — with a restart either way, onto whatever network the box now holds.
+bool pumpPortal(uint32_t nowMs) {
+  if (!gPortal.isOpen()) {
+    return false;
+  }
+  if (gPortal.pump() || gPortalUntil.expired(nowMs)) {
+    gPortal.close();
+    flushMega(300UL);
+    ESP.restart();
+  }
+  return true;
+}
+
+/// The link supervisor and the stall watchdog (device-api.md §8, HW-8), and an
+/// unproven base URL's fallback.
+void superviseLink(uint32_t nowMs) {
+  const bool up = WiFi.status() == WL_CONNECTED;
+  switch (gSupervisor.tick(nowMs, up)) {
+  case devnet::Action::ReconnectNextProfile: {
+    const uint8_t next = gNet.advanceProfile();
+    WiFi.disconnect();
+    WiFi.begin(gNet.ssid(next), gNet.psk(next));
+    break;
+  }
+  case devnet::Action::Restart:
+    gRestartWanted = true;
+    break;
+  case devnet::Action::None:
+    break;
+  }
+  if (gStall.stalled(nowMs, up)) {
+    gRestartWanted = true;
+  }
+  if (gNet.tick(nowMs, gLife.fallbackMinutes)) {
+    gFaults.note(bridgelogic::Fault::NetFallback, nowMs);
+  }
+  if (gColdTrustArmed && gColdTrust.expired(nowMs)) {
+    // A cold restore nobody confirmed: the roster it brought back is past its
+    // trust window and admits nobody offline any more.
+    gColdTrustArmed = false;
+    gRoster.forget();
+  }
+  if (gRestartWanted && bridgeIdle(nowMs)) {
+    // Safe: the Mega holds its relays, and every record is in flash.
+    flushMega(300UL);
+    ESP.restart();
+  }
+}
+
+/// Everything the lifeline does from the TOP of loop(), where a flash write is
+/// shallowest (ESPR-1). True while the setup portal owns the loop.
+bool pumpLifeline(uint32_t nowMs) {
+  static_cast<void>(gEpoch.tick(nowMs));
+  if (gBody.due()) {
+    gBody.flush(gHeartbeatBody, strlen(gHeartbeatBody), nowMs);
+  }
+  persistEvents();
+  if (pumpPortal(nowMs)) {
+    return true;
+  }
+  pumpOta(nowMs);
+  pumpProbation(nowMs);
+  superviseLink(nowMs);
+  return false;
+}
+
 } // namespace
 
 void setup() {
@@ -2505,14 +3032,27 @@ void setup() {
   // its own link with the core default.
   gMega.begin(kMegaRxBufferBytes);
   static_cast<void>(gStore.begin());
+  arduino_hal::LittleFsFiles::prepare();
 
-  // The credential is the compiled-in one and nothing else — persistent(false)
-  // keeps the core from writing a second, invisible copy in its own flash
-  // record, which would outlive a reflash and join the wrong network.
-  // DHCP: no WiFi.config(), no static address — see the header.
+  // PROBATION FIRST, before any network (device-api.md §7 step 5): a new image
+  // on its fourth boot unproven goes back to the previous one now.
+  if (gOta.begin(&gFiles, fw::kFirmwareVersion) == bridgelogic::BridgeOta::Boot::RollBack) {
+    OtaHooks hooks;
+    if (gOta.rollBack(gImageFlash, reinterpret_cast<uint8_t*>(gBig.text), 2048U, hooks, "probation")) {
+      ESP.restart();
+    }
+  }
+
+  // The compiled WiFi, base URL and key are only the first-boot defaults: the
+  // persisted network set and key ring win (device-api.md §6, §8).
+  gKeys.begin(DEVICE_API_KEY, &gFiles);
+  gNet.begin(WIFI_SSID, WIFI_PASSWORD, API_BASE_URL, &gFiles);
+  // persistent(false) keeps the core from writing a second, invisible copy of
+  // the credential in its own flash record. DHCP: no WiFi.config(), no static
+  // address — see the header.
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(gNet.ssid(0U), gNet.psk(0U));
 
   setupIdentity();
 
@@ -2534,6 +3074,19 @@ void setup() {
   gQueue.begin();
   gSession.onBoot(now);
 
+  // What survived the reset (device-api.md §4): the epoch decides warm or
+  // cold, the carried events go first, the last answer comes back.
+  const rst_info* reset = ESP.getResetInfoPtr();
+  const bool powerOn = reset == nullptr || reset->reason == REASON_DEFAULT_RST;
+  const bool warm = gEpoch.begin(powerOn, now);
+  gBody.begin(&gFiles);
+  gCarried.begin(&gFiles);
+  restoreFromFlash(warm, now);
+  gNet.startClock(now);
+  gStall.begin(now);
+  gChord.begin(now);
+  gLastInputMs = now - 60000UL;
+
   // LAST. A freshly flashed box should say what it is from the moment it comes
   // up, rather than leaving the Mega's own idle text on the glass and letting
   // the technician read that as "already working" (review 3, finding 9). If the
@@ -2547,6 +3100,15 @@ void loop() {
   // lapse deadlines are never evaluated against two different instants.
   const uint32_t now = gClock.nowMs();
   gUptime.tick(now);
+
+  // The lifeline from the TOP of the pass: flash writes, OTA, probation, the
+  // supervisor. While the setup portal is open it owns the loop, and the Mega
+  // link is still served.
+  if (pumpLifeline(now)) {
+    pumpMegaLink(now);
+    pumpMegaV3(now);
+    return;
+  }
 
   // EVERY "HOW OLD IS IT?" AGE, ON EVERY PASS, LINK OR NO LINK (review round
   // 18, D18-2). Each is a 32-bit difference, so one 2^32 ms + 1 s old reads
@@ -2572,8 +3134,6 @@ void loop() {
   }
   // The outcome a greeting was holding back, once its card hold is over.
   pumpFollowUp(now);
-  // A pay-for question nobody answered lapses on its own, for the same reason.
-  static_cast<void>(gPayFor.tick(now));
   if (gLastScan[0] != '\0' && gScan.expired(now)) {
     // Lapsed unspent. The Mega's own window lapses at the same TTL, but the
     // explicit `!AUTH,0` is what keeps the two from drifting by a loop pass.

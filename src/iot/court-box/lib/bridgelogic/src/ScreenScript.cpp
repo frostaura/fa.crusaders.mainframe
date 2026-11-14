@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bridgelogic/FlashTable.h"
 #include "devapi/Json.h"
 
 namespace bridgelogic {
@@ -82,7 +83,7 @@ constexpr RowSpec kBlank = {"", RowArg::None, ""};
 /// court::kSafeSubsetCols (16) so a 1602 degrades rather than lies, and row 3
 /// is bounded at 16 so the countdown zone stays clear. A longer sentence that
 /// clips to half of itself is worse than a short one that does not.
-constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
+constexpr ScreenSpec kScreenSpecs[kScreenCount] BRIDGE_FLASH = {
     // --- a court came on ----------------------------------------------------
     {ScreenId::Grant,
      {{"COURT ", RowArg::CourtLetter, " IS ON"},
@@ -469,6 +470,14 @@ constexpr bool screenSpecsAreInEnumOrder(size_t i = 0U) {
 
 static_assert(screenSpecsAreInEnumOrder(), "kScreenSpecs must be indexed by ScreenId");
 
+/// One screen's spec, copied out of the table (BRIDGE_FLASH: on the ESP8266 the
+/// table is in flash and never read in place).
+ScreenSpec specAt(size_t index) {
+  ScreenSpec spec;
+  flashCopy(&spec, &kScreenSpecs[index], sizeof(spec));
+  return spec;
+}
+
 /// Appends what fits and terminates. The one place in this file that touches
 /// the row's capacity, so the clip rule is stated once.
 void append(char* out, size_t cap, const char* text) {
@@ -648,7 +657,7 @@ void readMemberDisplay(const char* body, size_t len, ScreenFacts& facts) {
 HoldClass holdClassOf(ScreenId id) {
   const size_t index = static_cast<size_t>(id) < kScreenCount ? static_cast<size_t>(id)
                                                               : static_cast<size_t>(ScreenId::SeeTheDesk);
-  return holdClassFor(kScreenSpecs[index].holdSeconds);
+  return holdClassFor(specAt(index).holdSeconds);
 }
 
 Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings) {
@@ -689,7 +698,7 @@ proto::Frame screenFrame(const Screen& screen, size_t index) {
 
 bool invitesCourtPress(ScreenId id) {
   return static_cast<size_t>(id) < kScreenCount &&
-         kScreenSpecs[static_cast<size_t>(id)].rows[proto::kMaxRows - 1U].arg == RowArg::CourtCells;
+         specAt(static_cast<size_t>(id)).rows[proto::kMaxRows - 1U].arg == RowArg::CourtCells;
 }
 
 Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings,
@@ -720,7 +729,7 @@ Screen screenFor(ScreenId id, const ScreenFacts& facts) {
   Screen screen;
   const size_t index = static_cast<size_t>(id) < kScreenCount ? static_cast<size_t>(id)
                                                               : static_cast<size_t>(ScreenId::SeeTheDesk);
-  const ScreenSpec& spec = kScreenSpecs[index];
+  const ScreenSpec spec = specAt(index);
   for (size_t row = 0U; row < proto::kMaxRows; ++row) {
     renderRow(spec.rows[row], facts, screen.rows[row], sizeof(screen.rows[row]));
   }

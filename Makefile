@@ -533,6 +533,8 @@ test-e2e-device:
 	DOTNET="$${DOTNET:-dotnet}" PIO="$(PIO)" "$(PY)" test/e2e-device/scenario.py
 	"$(PIO)" run -d $(IOT_DIR)/door-gate -e simulator
 	DOTNET="$${DOTNET:-dotnet}" "$(PY)" test/e2e-device/door_evening.py
+	"$(PIO)" run -d $(IOT_DIR)/court-box -e bridge_sim
+	DOTNET="$${DOTNET:-dotnet}" PIO="$(PIO)" "$(PY)" test/e2e-device/ota_e2e.py
 
 # Service virtualization as plain processes.
 #

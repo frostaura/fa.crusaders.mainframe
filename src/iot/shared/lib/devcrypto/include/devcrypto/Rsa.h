@@ -47,6 +47,20 @@ inline constexpr size_t kRsa2048Bytes = 256U;
 /// key is generated with it (`src/iot/tools/ota_sign.py keygen`).
 inline constexpr uint32_t kRsaPublicExponent = 65537UL;
 
+/// One 2048-bit number, little-endian 32-bit limbs.
+struct RsaBig {
+  uint32_t limb[kRsa2048Bytes / 4U];
+};
+
+/// The working memory of one public operation: seven 2048-bit numbers, 1,792
+/// bytes. The overloads without one use a static of their own; a board that
+/// has a large buffer idle at the moment it verifies (the bridge's heartbeat
+/// answer, once adopted) lends that instead, so the verify costs it no RAM.
+/// Only public values pass through it (a modulus, a signature).
+struct RsaWorkspace {
+  RsaBig n, x, r2, xm, a, b, one;
+};
+
 /// True when `signature`, read as a big-endian integer, is strictly less than
 /// `modulus`. A signature at or above the modulus is refused BEFORE any
 /// exponentiation (`ota/` `sig-out-of-range`): it is not a value the private
@@ -58,12 +72,16 @@ bool rsa2048InRange(const uint8_t modulus[kRsa2048Bytes], const uint8_t signatur
 /// all) or when `input` is not below it.
 bool rsa2048PublicOp(const uint8_t modulus[kRsa2048Bytes], const uint8_t input[kRsa2048Bytes],
                      uint8_t out[kRsa2048Bytes]);
+bool rsa2048PublicOp(const uint8_t modulus[kRsa2048Bytes], const uint8_t input[kRsa2048Bytes],
+                     uint8_t out[kRsa2048Bytes], RsaWorkspace& work);
 
 /// RSASSA-PKCS1-v1_5 verification of a SHA-256 `digest` under `modulus`
 /// (e = 65537). True only when `signature` is in range and its public operation
 /// equals, byte for byte, the one encoding of `digest` the scheme allows.
 bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t digest[32],
                          const uint8_t signature[kRsa2048Bytes]);
+bool rsa2048VerifySha256(const uint8_t modulus[kRsa2048Bytes], const uint8_t digest[32],
+                         const uint8_t signature[kRsa2048Bytes], RsaWorkspace& work);
 
 } // namespace dc
 

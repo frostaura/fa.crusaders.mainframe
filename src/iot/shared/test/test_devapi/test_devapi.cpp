@@ -656,6 +656,26 @@ void setUp() {
 void tearDown() {
 }
 
+// FC-11: a fraction, an exponent or a quoted number is not an integer. 2.3.0
+// read 45.9 as 45 and 4.5e1 as 4; every reader built on these now reads them
+// as absent, so the caller keeps its value and reports drift.
+void test_an_integer_field_is_read_by_its_exact_kind(void) {
+  uint32_t v = 7U;
+  const char ok[] = "{\"a\":45,\"b\":0}";
+  TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(ok, strlen(ok), "a", v));
+  TEST_ASSERT_EQUAL_UINT32(45U, v);
+  TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(ok, strlen(ok), "b", v));
+  TEST_ASSERT_EQUAL_UINT32(0U, v);
+  const char* const drifted[] = {"{\"a\":45.9}",   "{\"a\":4.5e1}", "{\"a\":45e0}", "{\"a\":45E2}",
+                                 "{\"a\":\"45\"}", "{\"a\":-45}",   "{\"a\":true}"};
+  for (const char* body : drifted) {
+    v = 7U;
+    TEST_ASSERT_FALSE_MESSAGE(devapi::json::topLevelUnsignedField(body, strlen(body), "a", v), body);
+    TEST_ASSERT_FALSE_MESSAGE(devapi::json::unsignedField(body, strlen(body), "a", v), body);
+    TEST_ASSERT_EQUAL_UINT32(7U, v);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -697,6 +717,7 @@ int main(int, char**) {
   RUN_TEST(test_escape_into_keeps_every_byte_value_inside_the_expansion_bound);
   RUN_TEST(test_escape_into_refuses_a_high_byte_that_does_not_fit);
   RUN_TEST(test_react_drops_an_event_the_server_calls_malformed);
+  RUN_TEST(test_an_integer_field_is_read_by_its_exact_kind);
 
   return UNITY_END();
 }

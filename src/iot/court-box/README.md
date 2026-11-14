@@ -17,24 +17,30 @@ adapts to the hardware, never the reverse.
 
 ## Flashing — the whole procedure
 
-Both halves are flashed over USB **one last time, at 3.0.0 — the Mega first,
-then the bridge** (founder, 2026-11-13). The Mega can never be updated over
-WiFi (its ESP sits on Serial3, not the bootloader port), so Mega 3.0.0 is its
-last image: every timeout is bounded on the Mega itself and every hardware fact
-it used to compile in is a runtime `!CFG` setting
+Both halves are flashed over USB **one last time — Mega 3.0.0 first, then
+bridge 3.1.0** (founder, 2026-11-13). The Mega can never be updated over WiFi
+(its ESP sits on Serial3, not the bootloader port), so Mega 3.0.0 is its last
+image: every timeout is bounded on the Mega itself and every hardware fact it
+used to compile in is a runtime `!CFG` setting
 ([`device-serial-protocol.md`](../../../docs/specs/device-serial-protocol.md)
-v3). The bridge's signed over-the-air update, key rotation, runtime WiFi and
-server URL and the setup portal arrive with the over-the-air libraries
-([`device-api.md`](../../../docs/specs/device-api.md) §6–§8) — **until that
-bridge image is flashed, changing the WiFi password, the API key or the base
-URL is still a bridge reflash.** The values in `secrets.h` are the first-boot
-defaults.
+v3). **Bridge 3.1.0 is the first bridge that never needs the cable again**
+([`device-api.md`](../../../docs/specs/device-api.md) §6–§8): a signed image
+arrives over HTTP from the club's own server (verified before a byte is
+fetched and again over the staged bytes, committed by an accepted heartbeat,
+rolled back from its own copy of the previous image on the fourth unproven
+boot), a rotated key arrives as `key_next`, a new WiFi or server address as
+`net`, and the setup portal (hold court A and court D together for five seconds
+within a minute of power-on; the glass says `SETUP AP 1A2B`) changes them at
+the box. The values in `secrets.h` are only the first-boot defaults. Before an
+enclosure is sealed, each box takes one signed release over the air on the
+bench (`docs/go-live-checklist.md` §5).
 
 **The bridge needs the 4M2M flash layout** (`eagle.flash.4m2m.ld`, "4MB
 (FS:2MB OTA:~1019KB)" in the IDE): it is what leaves the update its staging
 area. Read esptool's **"Auto-detected Flash size"** line in the upload log — it
 must say 4MB — and keep **"Erase Flash: Only Sketch"**, so the LittleFS records
-(the event sequence mark) survive the flash (HW-10).
+(the event sequence mark, and on 3.1.0 everything under *What the box keeps in
+flash*) survive the flash (HW-10).
 
 **The route is the Arduino IDE 2: open the sketch, pick the board and the port,
 press Upload.** No terminal, no `make`, and nothing to install from the Library
@@ -106,8 +112,10 @@ same API through it. So `/api/v1/device/*` is reachable from the internet, and
 the key is what stands in front of it. Nothing in this firmware assumes the box
 is ever off the LAN, and nothing assumes the API is LAN-only.
 
-Regenerating the key on the Devices page invalidates the old one **immediately**,
-so a regeneration is a reflash and has to be planned as one.
+A key is never "regenerated" any more: a rotation (device-api.md §6) keeps every
+unretired key valid, delivers the new one in the heartbeat as `key_next`, and the
+bridge persists it before it uses it; a 401 is retried once with the other key
+it holds. No rotation is a reflash.
 
 **The DIP block, in order** — the same rows as the table under *DIP switches*
 below, which is the wiring sheet's and is hardware truth:
@@ -650,22 +658,14 @@ changing any of it:
   remainder, and the court is lit for that), and one whose window is over is
   `409 purchase_ended` — `PURCHASE ENDED / SCAN TO START`.
 
-### What the event queue does not survive
+### What the event queue survives
 
-**A power cut.** The ring is in RAM. It survives the WiFi going away, a router
-reboot, a two-day outage — the box stays powered throughout — and it does not
-survive the breaker. This used to say the store made that impossible
-(`hal::IStore` held 32-byte values, an `Event` is 48); the cap is **128** now and
-an event would fit, so the honest statement is that persisting the ring has not
-been built, not that it cannot be. It needs a record per slot plus a durable head
-and tail, and a half-right version — a torn ring that replays a stale activation
-— charges a member twice.
-
-The cost when it happens: a court lit during an outage that ended in a power cut is
-never reported, so the sweep treats it as a no-show and refunds it less a penalty
-the member did not earn. Visible in the ledger, reversible by an admin, and in the
-go-live checklist. The **sequence number** does persist, in blocks of 64 — that is
-what the API's deduplication rests on, and reusing one loses a real event.
+**A power cut, from bridge 3.1.0.** Every undelivered event is written to flash
+whenever the queue changes, and the next boot uploads them first under their own
+boot id and seq, so the server's `(device, boot_id, seq)` key makes a re-upload of
+one whose receipt the cut lost a no-op (BR-07). Past 64 carried events, faults and
+unknown scans are shed before any activation or release. The **sequence number**
+persists as before, in blocks of 64 — what the API's deduplication rests on.
 
 ## What the box keeps in flash
 
@@ -673,13 +673,24 @@ what the API's deduplication rests on, and reusing one loses a real event.
 recovered by the bridge re-applying its snapshot (`!WANT`) within seconds of
 `!BOOT`, and the bridge re-sends every setting.
 
-**The bridge 3.0.0 keeps one record: the event queue's sequence high-water
-mark.** The device v3 contract also calls for the last snapshot, the roster and
-code sync, every undelivered event, the network set, the keys and the OTA state
-in LittleFS (device-api.md §4); those records are not in this image yet, so a
-power cut with the server down still restores nothing and loses queued
-attendance until a later bridge adds them (recorded in
-`memory/decisions-court-box-v3-firmware.md`).
+**Bridge 3.1.0 keeps, in LittleFS** (device-api.md §4; `lib/bridgelogic/Records.h`,
+every record sealed with its own check digits so a damaged one reads as absent):
+
+| Record | Written | What it brings back |
+|---|---|---|
+| the last accepted heartbeat answer, whole (`/st/beat.bin`) | at most once a minute, and at once when the snapshot's lit courts change | the court map, buttons, layout and settings, the snapshot (re-lit from it), the roster, and — after a warm reset only — the member-code sync |
+| every undelivered event (`/st/events.bin`, `/st/carry.bin`) | whenever the queue changes | after the next boot they are uploaded first, one per call, under the boot id they were queued in |
+| the device keys, the network set, the OTA state | on change | how the box reaches the club, and whether an image is on probation |
+| a copy of the running image (`/ota/prev.bin`) | before an update is staged | the rollback |
+
+A WARM reset (watchdog, exception, software, an update) is aged exactly by an
+epoch kept in RTC memory (`restore: warm`). A POWER-ON is `cold`: the answer is
+adopted as of boot, the roster is trusted for `device_power_restore_trust_minutes`
+only, member codes wait for the first heartbeat, and every court the snapshot owed
+is lit provisionally for at most that window — the first accepted snapshot
+confirms each, or switches off the ones it says are dark (cause `reconcile`).
+Every write happens at the top of `loop()`, where a LittleFS write is shallowest
+on the 4 KB stack (ESPR-1).
 
 The sequence mark earns its place because the API deduplicates events on
 `(tenant, device, seq)` with a **permanent** unique index. A box that restarted

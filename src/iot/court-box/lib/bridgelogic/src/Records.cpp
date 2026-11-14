@@ -1,0 +1,73 @@
+#include "bridgelogic/Records.h"
+
+#include <string.h>
+
+namespace bridgelogic {
+
+uint32_t crc32(const void* data, size_t len, uint32_t seed) {
+  // Bitwise, no table: 1 KB of table is RAM on the ESP8266, and a record is
+  // written at most a few times a minute.
+  uint32_t crc = ~seed;
+  const uint8_t* p = static_cast<const uint8_t*>(data);
+  for (size_t i = 0U; i < len; ++i) {
+    crc ^= p[i];
+    for (uint8_t b = 0U; b < 8U; ++b) {
+      crc = (crc >> 1) ^ (0xEDB88320UL & (0U - (crc & 1U)));
+    }
+  }
+  return ~crc;
+}
+
+bool sealedWrite(IFiles& files, const char* path, uint16_t layout, const Part* parts, uint8_t count) {
+  if (count == 0U || count > 7U) {
+    return false;
+  }
+  RecordHeader header = {kRecordMagic, layout, 0U, 0U, 0U};
+  uint32_t crc = 0U;
+  for (uint8_t i = 0U; i < count; ++i) {
+    header.length += static_cast<uint32_t>(parts[i].len);
+    crc = crc32(parts[i].data, parts[i].len, crc);
+  }
+  header.crc = crc;
+  Part all[8];
+  all[0] = Part{&header, sizeof(header)};
+  for (uint8_t i = 0U; i < count; ++i) {
+    all[i + 1U] = parts[i];
+  }
+  return files.write(path, all, static_cast<uint8_t>(count + 1U));
+}
+
+bool sealedRead(IFiles& files, const char* path, uint16_t layout, const Part* parts, uint8_t count,
+                size_t& lastLen) {
+  lastLen = 0U;
+  if (count == 0U) {
+    return false;
+  }
+  RecordHeader header;
+  if (files.read(path, 0U, &header, sizeof(header)) != sizeof(header) || header.magic != kRecordMagic ||
+      header.layout != layout || files.size(path) != sizeof(header) + header.length) {
+    return false;
+  }
+  uint32_t offset = sizeof(header);
+  uint32_t remaining = header.length;
+  uint32_t crc = 0U;
+  for (uint8_t i = 0U; i < count; ++i) {
+    const bool last = i + 1U == count;
+    const size_t want = last ? remaining : parts[i].len;
+    if (want > parts[i].len || want > remaining) {
+      return false;
+    }
+    if (files.read(path, offset, parts[i].data, want) != want) {
+      return false;
+    }
+    crc = crc32(parts[i].data, want, crc);
+    offset += static_cast<uint32_t>(want);
+    remaining -= static_cast<uint32_t>(want);
+    if (last) {
+      lastLen = want;
+    }
+  }
+  return remaining == 0U && crc == header.crc;
+}
+
+} // namespace bridgelogic

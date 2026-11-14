@@ -896,11 +896,47 @@ def lcd_pad(text: str) -> str:
     return text.ljust(LCD_COLS)[:LCD_COLS]
 
 
+def _display_corpus():
+    """The display/ family's own composer (src/contracts/device-protocol/display/gen_cases.py):
+    the landing and marquee rules the Mega 3.0.0 renders and the corpus pins, imported rather
+    than restated, so this harness and the firmware read one definition of the glass."""
+    import importlib.util
+    path = ROOT / "src" / "contracts" / "device-protocol" / "display" / "gen_cases.py"
+    spec = importlib.util.spec_from_file_location("display_gen_cases", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+DISPLAY = _display_corpus()
+
+
+def landing_title_rows() -> set:
+    """Row 0 of every v3 landing (device-serial-protocol.md v3): the call to action in
+    either layout, or OUT OF SERVICE while the Mega has declared its bridge dead."""
+    titles = set()
+    for layout, width in DISPLAY.WIDTH.items():
+        titles.add(lcd_pad(DISPLAY.center(DISPLAY.CTA[layout], width)))
+        titles.add(lcd_pad(DISPLAY.center(DISPLAY.OUT_OF_SERVICE, width)))
+    return titles
+
+
+LANDING_TITLES = landing_title_rows()
+
+
+def shows(row: str, text: str, width: int = 16) -> bool:
+    """`row` is `text` as the Mega 3.0.0 renders it on a `width`-wide layout: whole when it
+    fits, else one window of the display/ corpus's software marquee (one row, smooth)."""
+    loop = len(text) + len(DISPLAY.GAP)
+    return any(row == lcd_pad(DISPLAY.marquee_window(text, width, k)) for k in range(max(1, loop)))
+
+
 def is_landing(frame: "LcdFrame") -> bool:
-    """The Mega's own landing screen: SCAN YOUR CODE over TO PLAY, or over the lit
-    courts' minutes left (Mega 2.1.0). A hint on row 1 is NOT the landing screen."""
-    row1 = frame.row(1).rstrip()
-    return frame.row(0) == lcd_pad(IDLE_ROW0) and (row1 == IDLE_ROW1 or bool(LANDING_SUMMARY.match(row1)))
+    """The Mega 3.0.0's own landing screen, by its title row (the display/ corpus's
+    `landing`). Mega 3.0.0 composes the landing itself — the call to action over every
+    court's state and the status item — in the compact layout it always boots in."""
+    return frame.row(0) in LANDING_TITLES
 
 
 class Simulator:
@@ -1883,15 +1919,18 @@ def extend_lit_court(w: World, sim: Optional[Simulator]) -> None:
         errs = [f for f in sim.frames_after(state_mark) if f.verb == "ERR"]
         REPORT.check("EXT", "...and the Mega accepted it (no !ERR): the relay was closed, so this is a deadline "
                             "moved, never an implicit !ON", not errs, f"{[str(f) for f in errs]}")
-        minutes_left = (int(st.args[2]) + 59) // 60
+        # As a v3 bridge does on every Mega boot and beat: the court map, so the Mega's own
+        # landing (display/ `landing`, compact + marquee) names court 2 behind relay B.
+        sim.send("MAP", "1", "2", "3", "4")
+        seconds_left = int(st.args[2])
+        items = {DISPLAY.court_item(2, True, seconds_left), DISPLAY.court_item(2, True, seconds_left - 60)}
         shown = sim.expect_screen(
-            lambda f: f.row(0) == lcd_pad(IDLE_ROW0) and f.row(1).rstrip() in
-            (f"COURT B {minutes_left} MIN", f"COURT B {minutes_left - 1} MIN"),
-            # An earlier step's scan can still hold the glass ("CHECKING CODE ... READY IN
-            # <n> s", up to kRevertSeconds); the landing screen is what follows it.
-            15, "the landing screen's minutes for court B after the extension", landing)
-        REPORT.check("EXT", "the Mega's landing row 1 reads the extended minutes for court B (what an unscanned "
-                            "press then shows as SCAN TO EXTEND)", True, shown.text())
+            lambda f: is_landing(f) and any(item in f.row(1) for item in items),
+            # An earlier step's scan can still hold the glass ("CHECKING CODE ..."); the
+            # landing is what follows it, and the marquee scrolls the item into view.
+            20, "the landing's marquee naming court 2's extended minutes", landing)
+        REPORT.check("EXT", "the Mega 3.0.0 landing's marquee reads the extended minutes for court 2 (display/ "
+                            "court_item: what an unscanned press then shows as SCAN TO EXTEND)", True, shown.text())
 
     # Truncation, and the refusal behind it: B6 starts three hours out on court 2,
     # and every extension chains onto the end of the one before. Each 90 is
@@ -2228,11 +2267,14 @@ def screen_deadlines(sim: Simulator, label: str) -> None:
                  scan.args == ["RANDOMRECEIPT42"], str(scan))
     feedback = sim.expect_screen(lambda f: f.row(0) == lcd_pad(SCAN_FEEDBACK_ROW0), 4,
                                  "the scan's own local feedback", mark)
+    # Mega 3.0.0 counts the wait down at the right of row 1, inside the 16 columns.
     REPORT.check("E-LCD-1", f"[{label}] the scan's own feedback fits the club's 16x2: "
-                            f"`{SCAN_FEEDBACK_ROW0}` / `{SCAN_FEEDBACK_ROW1}`",
-                 feedback.row(1) == lcd_pad(SCAN_FEEDBACK_ROW1), feedback.text())
+                            f"`{SCAN_FEEDBACK_ROW0}` / `{SCAN_FEEDBACK_ROW1}` (and its countdown)",
+                 feedback.row(1).startswith(SCAN_FEEDBACK_ROW1) and feedback.row(1)[16:].strip() == "",
+                 feedback.text())
     sim.send("LCD", "CODE NOT RECOGNISED", "THEN SCAN AGAIN")
-    refusal = sim.expect_screen(lambda f: f.row(0) == lcd_pad("CODE NOT RECOGNISED"), 4,
+    # Nineteen characters on a compact (16-column) glass: the Mega scrolls it.
+    refusal = sim.expect_screen(lambda f: shows(f.row(0), "CODE NOT RECOGNISED"), 4,
                                 "the refusal screen", mark)
     sim.send("AUTH", "0")
     home = sim.expect_landing(DEFAULT_HOLD_SECONDS + 1.0, mark)
@@ -2244,7 +2286,7 @@ def screen_deadlines(sim: Simulator, label: str) -> None:
     # to drop, which is the other half of the same incident.
     press = sim.lcd_mark()
     sim.console("btn 1")
-    sim.expect_screen(lambda f: f.row(3) == lcd_pad(HINT_ROW) and f.row(1) == lcd_pad(HINT_ROW1), 3,
+    sim.expect_screen(lambda f: f.row(1) == lcd_pad(HINT_ROW1), 3,
                       "the dropped-press hint", press)
     REPORT.check("E-LCD-1", f"[{label}] ...and a press behind it is ANSWERED rather than swallowed",
                  True)
@@ -2270,18 +2312,21 @@ def screen_deadlines(sim: Simulator, label: str) -> None:
     # (e) `!IDLE` paints the action row, so it is a verb that can paint and is in
     # this sweep on exactly those terms. It has no hold because it does not take
     # the glass away from anybody: it changes the landing screen itself.
-    for flags, hhmm, expect in ((0b1000, "----", "STARTING UP"), (0b0000, "----", "READY NO WIFI"),
-                                (0b0001, "----", "READY NO SERVER"), (0b0111, "1345", "READY")):
+    # Mega 3.0.0 renders it as the landing's STATUS ITEM (display/ `status_item`): on row 1 of
+    # the compact layout, after any mapped courts.
+    for flags, hhmm, status, clock in ((0b1000, "----", "starting", None), (0b0000, "----", "no_wifi", None),
+                                       (0b0001, "----", "no_server", None), (0b0111, "1345", "ready", "1345")):
+        expect = DISPLAY.status_item(status, clock, None)
         mark = sim.lcd_mark()
         sim.send("IDLE", str(flags), hhmm)
-        got = sim.expect_screen(lambda f, e=expect: f.row(3).startswith(e), 4,
-                                f"an action row reading {expect!r}", mark)
-        REPORT.check("E-LCD-1", f"[{label}] !IDLE,{flags},{hhmm} -> the action row reads {expect!r}",
-                     True, repr(got.row(3)))
-    clocked = sim.expect_screen(lambda f: f.row(3).endswith("13:45"), 4, "the club's wall clock", 0)
-    REPORT.check("E-LCD-1", f"[{label}] ...and a trusted clock renders in the action row's last five cells, "
-                            f"where a countdown would otherwise be",
-                 clocked.row(3) == lcd_pad("READY")[:LCD_COLS - 5] + "13:45", repr(clocked.row(3)))
+        # A steady state may already be true (the simulator prints only on change).
+        time.sleep(0.3)
+        got = sim.screen()
+        if not (is_landing(got) and expect in got.row(1)):
+            got = sim.expect_screen(lambda f, e=expect: is_landing(f) and e in f.row(1), 4,
+                                    f"a landing status item reading {expect!r}", mark)
+        REPORT.check("E-LCD-1", f"[{label}] !IDLE,{flags},{hhmm} -> the landing's status item reads {expect!r}",
+                     True, repr(got.row(1)))
 
 
 def show_ceiling(sim: Simulator, label: str) -> None:

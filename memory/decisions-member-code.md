@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-member-code
-description: "D1's single rotating code as built in firmware: 19 chars to fit the Mega's limits, ON server-only and OFF under a 12-byte per-day key devices hold, rosters naming players; pay-for left the box at bridge 3.0.0."
+description: "D1's single rotating code as built in firmware: 19 chars to fit the Mega's limits, ON server-only and OFF under a 12-byte per-day key devices hold, rosters naming players; pay-for left the box at bridge 3.1.0."
 type: decision
 last_verified: 2026-10-03
 ---
@@ -35,8 +35,8 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   one that bought lit their booking at a second box.
 - **A device that loses its key entitlement is sent EMPTY `code_days`/`code_keys`, never an
   omission** — an absent key means "no member codes here" and keeps the old ring.
-- **D10 pay-for is out of the court-box image from bridge 3.0.0** (founder, 2026-11-13). *Why:* the
-  panel stopped reaching it at 2.3.0, and dead code in a last-flash image is debt. The server keeps
+- **D10 pay-for is out of the court-box image from bridge 3.1.0** (founder, 2026-11-13; 3.0.0
+  still linked it, BR-17). *Why:* the panel stopped reaching it at 2.3.0, and dead code in a last-flash image is debt. The server keeps
   `/pay-for` (three-row glass, online only, `amount_label` echo — spec §9), held to
   `membercode/payfor.json`, read by the server only: it can return by bridge OTA, no Mega change.
 - **A code the device already acted on is refused LOCALLY before any online call**

@@ -56,11 +56,12 @@ inline constexpr char kCodeUsedLine2[] = "WAIT 30 SECONDS";
 inline constexpr char kThrottledLine1[] = "TOO MANY TRIES";
 inline constexpr char kThrottledLine2[] = "TRY IN A MINUTE";
 
-/// Key ring and replay ring sizes for the court box. 24 keys fit the 2048-byte
-/// heartbeat contract beside sixteen four-player entries (the corpus's
-/// `heartbeat-response-codes-full` is the proof); 16 remembered uses cover more
-/// distinct members than four courts see inside one ninety-second window.
-inline constexpr uint8_t kCourtKeyRingSlots = 24U;
+/// Key ring and replay ring sizes for the court box. 64 keys: the most the
+/// server sends a hb:3 box (device-api.md §11.4, MCV1-07 — 3.0.0 held 24, and
+/// the 40 it shed were booked members refused offline). The ring replaces in
+/// place (memcode::KeyRing), so 64 cost 1.3 KB rather than 2.6. 16 remembered
+/// uses cover more distinct members than four courts see in ninety seconds.
+inline constexpr uint8_t kCourtKeyRingSlots = 64U;
 inline constexpr uint8_t kCourtReplaySlots = 16U;
 
 struct MemberScanResult {

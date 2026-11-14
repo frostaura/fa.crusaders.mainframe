@@ -41,6 +41,7 @@ Two entry points, and `door_evening.py` calls only the first:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import queue
@@ -704,6 +705,41 @@ def _owner(door: Any):
     return sys.modules[type(door).__module__]
 
 
+def _v1_code(door: Any) -> str:
+    """M's member code as M's phone shows it NOW: the single rotating v1 code
+    (member-code.md; src/iot/tools/membercode_vectors.py is its reference).
+
+    WHY THE OFFLINE LEGS SCAN THIS AND NOT THE BOOKING'S OWN CODE. A codes:m1 door
+    is sent v1 roster elements in EVERY phase (MCV1-04, backend-device), naming
+    players by REF, and verifies a code offline under the per-day key the
+    heartbeat delivers. The legacy per-booking code is in no such roster, so an
+    offline scan of it is `not_recognised` — correctly — and the legs read as a
+    firmware defect. Phones have shown only v1 codes since 42d3990d. Minted at the
+    point of use: a v1 code is good for its 30-second step."""
+    enrolment = getattr(door, "_v1_enrolment", None)
+    if enrolment is None:
+        # What M's phone does once: enrol, and hold the secret (member-code.md §10).
+        enrolment = sc.expect_status(door.w.http.call("POST", "/api/v1/me/code/enrol", {},
+                                                      token=door.w.m_token), 200, "enrol M's code").json
+        door._v1_enrolment = enrolment
+    tools = str(sc.ROOT / "src" / "iot" / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import membercode_vectors as mv  # noqa: E402 — the contract's own reference implementation
+
+    raw = enrolment["secret"]
+    secret = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    step = mv.step_of(int(time.time()))
+    return expect_v1(mv.token(enrolment["ref"], mv.on_code(secret, step),
+                              mv.off_code(secret, step, enrolment["tz"])))
+
+
+def expect_v1(code: str) -> str:
+    if not (len(code) == 19 and code[0] == "1"):
+        raise StepFailed(f"the phone's code is not a v1 member code: {code!r}")
+    return code
+
+
 def _minted_ident(door: Any, user_id: str) -> str:
     """A live `MemberIdent` code for somebody, written the way `door_evening.py`'s
     own `mint_ident_for` writes one — through that function, not a copy of it."""
@@ -828,9 +864,10 @@ def _dsim_clock_bases(door: Any, live_code: str) -> None:
             chk("DSIM", f"[{label}] a board whose millis() starts at {start_ms} loads its roster",
                 int(pushed.get("roster", "0")) >= 1, pushed.raw)
 
+            v1 = _v1_code(door)
             sim.wifi(False)
             offline_from = sim.mark()
-            allowed = sim.scan(live_code)
+            allowed = sim.scan(v1)
             chk("DSIM", f"[{label}] it decides from the cached roster and opens",
                 allowed.flag("released") and allowed.flag("queued"), allowed.raw)
 
@@ -887,6 +924,14 @@ def _dsim_power_cut(door: Any, live_code: str) -> None:
         pushed = first.force_heartbeat()
         chk("DSIM-V3", "a 2.0.0 board loads its roster before the power cut",
             int(pushed.get("roster", "0")) >= 1, pushed.raw)
+        # Offline BEFORE the cut, while the step clock is synced: a v1 code is
+        # verified under the day key and the record queued (and written to NVS at
+        # the top of the next pass).
+        v1 = _v1_code(door)
+        first.wifi(False)
+        allowed = first.scan(v1)
+        chk("DSIM-V3", "offline before the cut, the board admits M's v1 code from its roster and queues "
+                       "the record", allowed.flag("released") and allowed.flag("queued"), allowed.raw)
         # Past the board's top-of-pass flash write.
         time.sleep(0.5)
     finally:
@@ -902,9 +947,11 @@ def _dsim_power_cut(door: Any, live_code: str) -> None:
         chk("DSIM-V3", "after a power cut with the server down the board has its roster back from flash "
                        "(1.1.2 came back with none)",
             int(restored.get("roster", "0")) >= 1, restored.raw)
-        allowed = dark.scan(live_code)
-        chk("DSIM-V3", "and admits a rostered booking from it, queuing the record",
-            allowed.flag("released") and allowed.flag("queued"), allowed.raw)
+        # The step clock is never cold-restored (door-gate.md §14.1, device-api.md §4): a
+        # member code waits for the first heartbeat, so a fresh v1 code is NOT admitted now.
+        cold = dark.scan(_v1_code(door))
+        chk("DSIM-V3", "...and, cold, it admits no member code until a heartbeat re-derives the step "
+                       "(the keys are never written to flash)", not cold.flag("released"), cold.raw)
         time.sleep(0.5)
     finally:
         dark.stop()
@@ -916,8 +963,8 @@ def _dsim_power_cut(door: Any, live_code: str) -> None:
                     "the carried record drained")
         time.sleep(1.0)
         opens = _audit_count(door, "device.gate_open", device_code)
-        chk("DSIM-V3", "THE OFFLINE ENTRY FROM BEFORE THE SECOND CUT REACHES THE SERVER, exactly once "
-                       "(1.1.2's RAM-only ring lost it)",
+        chk("DSIM-V3", "THE OFFLINE ENTRY FROM BEFORE THE CUTS REACHES THE SERVER, exactly once, across "
+                       "two power cuts (1.1.2's RAM-only ring lost it)",
             opens == 1, f"gate_open={opens}")
     finally:
         back.stop()
@@ -1162,9 +1209,10 @@ def dsim_firmware(door: Any) -> None:
             door.set_policy("active_member")
 
         # -- D S 4 : the API is unreachable ---------------------------------
+        v1 = _v1_code(door)
         sim.wifi(False)
         offline_from = sim.mark()
-        allowed = sim.scan(live_code)
+        allowed = sim.scan(v1)
         chk("DSIM", "WITH THE RADIO GONE the firmware decides from its CACHED roster and opens for a "
                     "rostered booking — in microseconds, with no call to make",
             allowed.flag("released") and allowed.flag("queued"), allowed.raw)

@@ -5,7 +5,15 @@
 namespace dc {
 namespace {
 
-const uint32_t kRoundConstants[64] = {
+// In FLASH on the ESP8266, whose .rodata is RAM: 32-bit aligned loads from
+// flash are legal there, and this table is only ever read a word at a time.
+#if defined(ARDUINO_ARCH_ESP8266)
+#define DC_WORDS_IN_FLASH __attribute__((section(".irom.text.dc_sha256_k")))
+#else
+#define DC_WORDS_IN_FLASH
+#endif
+
+const uint32_t kRoundConstants[64] DC_WORDS_IN_FLASH = {
     0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
     0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U, 0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,
     0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU, 0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU,

@@ -17,6 +17,7 @@ exchanges plus the API log tail.
 | `door_evening.py` | the **door**: one board's whole evening — and it reads every device response *the way the board does*, over a raw socket. See [Why the door reads its own sockets](#why-the-door-reads-its-own-sockets) |
 | `wire.py` | not a scenario: the board-grade HTTP reader `door_evening.py` uses |
 | `gate_sim.py` | not a scenario either: the **compiled door firmware**, driven as a process. Step `DSIM`. See [The door's own firmware](#dsim--the-doors-own-firmware-in-the-chain) |
+| `ota_e2e.py` | **signed OTA for the court box bridge** (device-api.md §7): `src/iot/court-box/src/bridge_sim` — the real `bridgelogic` OTA, key ring and network over a socket, the ESP8266's flash played by files and its restart by an exit code — against the API with a release key generated for the run. OTA-1 a foreign signature refused at upload; OTA-2 discover, verify before fetching, copy the running image, download, stage, verify the staged bytes, switch, probation, commit; OTA-3 an image that crashes on every boot rolled back on its fourth, reported `rolled_back`, never offered again |
 
 The court box runs first because it is the shorter of the two and a shorter failure is the
 cheaper signal. The rest of this file is `scenario.py`'s unless a heading says otherwise.

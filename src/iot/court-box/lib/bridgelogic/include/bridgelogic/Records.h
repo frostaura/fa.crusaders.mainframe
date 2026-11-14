@@ -1,0 +1,127 @@
+// Crusaders Mainframe — what the bridge keeps in flash, and the check digits
+// that make a damaged record read as absent (docs/specs/device-api.md §4, §6–§8).
+//
+// WHY WHOLE FILES, NOT hal::IStore
+// --------------------------------
+// hal::IStore holds at most 128 bytes a record, which was enough for the one
+// thing bridge 3.0.0 kept (the event sequence mark). Bridge 3.1.0 keeps the
+// last accepted heartbeat answer (up to 4 KB: the snapshot, the court map, the
+// buttons, the settings, the roster and the member-code sync in one), every
+// undelivered event, the network set, the device keys and the OTA state — and
+// the previous firmware image itself. LittleFS files on the board, a directory
+// in the simulator, RAM in a test.
+//
+// SEALED
+// ------
+// Every record is a 16-byte header — magic, layout, length, CRC-32 over the
+// payload — and the payload. A torn write, an old layout, a blank part or a
+// flipped bit reads as ABSENT, never as a roster, a key or a lit court. Writes
+// are atomic in the port (a temporary file and a rename), so a power cut
+// leaves the old record or the new one.
+//
+// WHEN
+// ----
+// Only from the top of loop() (ESPR-1): a LittleFS write with directory
+// compaction is the deepest stack path in the image. A record that changed is
+// marked dirty where it changed and written by the loop.
+//
+// No Arduino headers, no heap. C++11-valid.
+
+#ifndef CRUSADERS_BRIDGELOGIC_RECORDS_H
+#define CRUSADERS_BRIDGELOGIC_RECORDS_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+namespace bridgelogic {
+
+/// One piece of a record, written or read in order.
+struct Part {
+  void* data;
+  size_t len;
+};
+
+/// The bridge's files.
+class IFiles {
+public:
+  virtual ~IFiles() = default;
+
+  /// `parts`, concatenated, as the whole of `path` — atomically: a power cut
+  /// leaves the previous file or this one. False when it did not complete.
+  virtual bool write(const char* path, const Part* parts, uint8_t count) = 0;
+
+  /// Up to `cap` bytes of `path` from `offset`; the count read (0 when the
+  /// file is absent or `offset` is past its end).
+  virtual size_t read(const char* path, uint32_t offset, void* out, size_t cap) = 0;
+
+  /// The file's length, 0 when absent.
+  virtual uint32_t size(const char* path) = 0;
+
+  virtual void remove(const char* path) = 0;
+
+  // --- one streamed file at a time (the previous image, ~400 KB) ------------
+
+  /// Starts writing `path` afresh. Nothing is visible at `path` until close().
+  virtual bool begin(const char* path) = 0;
+  virtual bool append(const void* data, size_t len) = 0;
+  /// Commits the streamed file (`keep`), or discards it.
+  virtual bool end(bool keep) = 0;
+};
+
+uint32_t crc32(const void* data, size_t len, uint32_t seed = 0U);
+
+inline constexpr uint32_t kRecordMagic = 0x43524231UL; // "CRB1"
+
+struct RecordHeader {
+  uint32_t magic;
+  uint16_t layout;
+  uint16_t reserved;
+  uint32_t length;
+  uint32_t crc;
+};
+
+static_assert(sizeof(RecordHeader) == 16U, "the header is the on-flash layout");
+
+/// Writes `parts` sealed under `path`. The CRC covers every part, in order.
+bool sealedWrite(IFiles& files, const char* path, uint16_t layout, const Part* parts, uint8_t count);
+
+/// Reads a sealed record into `parts`: every part but the last must be filled
+/// exactly; the last takes whatever remains, up to its `len`, and
+/// `lastLen` says how much that was. False — with nothing meaningful in the
+/// parts — when the record is absent, of another layout, too long for the
+/// parts, or its CRC does not match.
+bool sealedRead(IFiles& files, const char* path, uint16_t layout, const Part* parts, uint8_t count,
+                size_t& lastLen);
+
+/// One fixed-size value, sealed.
+template <class T> bool sealedPut(IFiles& files, const char* path, uint16_t layout, const T& value) {
+  const Part part = {const_cast<T*>(&value), sizeof(T)};
+  return sealedWrite(files, path, layout, &part, 1U);
+}
+
+/// One fixed-size value, sealed, read straight into `out` (no copy: a record
+/// can be two network sets, and a second copy of it is RAM the heap needs).
+/// On anything but a whole record `out` is RESET to `T()` — absent, never half.
+template <class T> bool sealedGet(IFiles& files, const char* path, uint16_t layout, T& out) {
+  const Part part = {&out, sizeof(T)};
+  size_t got = 0U;
+  if (!sealedRead(files, path, layout, &part, 1U, got) || got != sizeof(T)) {
+    out = T();
+    return false;
+  }
+  return true;
+}
+
+// --- the bridge's record names --------------------------------------------------
+
+inline constexpr char kFileBody[] = "/st/beat.bin";     ///< last accepted heartbeat answer
+inline constexpr char kFileEvents[] = "/st/events.bin"; ///< this boot's undelivered events
+inline constexpr char kFileCarried[] = "/st/carry.bin"; ///< earlier boots' undelivered events
+inline constexpr char kFileKeys[] = "/st/keys.bin";
+inline constexpr char kFileNet[] = "/st/net.bin";
+inline constexpr char kFileOta[] = "/ota/state.bin";
+inline constexpr char kFilePrevImage[] = "/ota/prev.bin";
+
+} // namespace bridgelogic
+
+#endif // CRUSADERS_BRIDGELOGIC_RECORDS_H

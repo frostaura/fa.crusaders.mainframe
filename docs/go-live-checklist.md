@@ -6,7 +6,7 @@ undone, breaks the club in a specific way that is written next to it. Finding id
 (`IO-…`, `FC-…`) are the 2026-11-13 pre-go-live analysis; the older ones decode against
 [`reviews/adversarial-e2e-review.md`](reviews/adversarial-e2e-review.md).
 
-**The flash in §5 is the last one a cable delivers.** Device contract v3 (Mega 3.0.0, bridge 3.0.0,
+**The flash in §5 is the last one a cable delivers.** Device contract v3 (Mega 3.0.0, bridge 3.1.0,
 door gate 2.0.0 — `specs/device-api.md`) makes every later change — WiFi, the server's address,
 the device key, ESP firmware — a server-side action. So §2b and §2c are **preconditions of that
 flash**, not tidy-ups after it: anything they leave undone has no second chance at the wall.
@@ -176,9 +176,10 @@ told by. Settle these before §5.
       `OTA_PUBLIC_KEY_N` and into the stack as `DeviceOta__PublicKeyModulus` — the two must
       match, or no ESP will ever accept an update.
 - [ ] **`SETUP_AP_PASSWORD`** chosen, compiled in, and printed on a label inside each enclosure.
-- [ ] **A bridge image that can be updated over the air.** The integrated bridge 3.0.0 cannot
-      (§5). Either wait for the phase-B bridge before the court boxes' last flash, or flash the
-      Mega 3.0.0 now (its last) with bridge 3.0.0 and plan one more bridge cable flash.
+- [ ] **The bridge image is 3.1.0** — the first bridge that can be updated over the air (signed
+      OTA, key rotation, runtime network, setup portal, link supervisor, flash persistence;
+      `fix/bridge-ota`). Never flash a 3.0.0 bridge into a box that is to be sealed: 3.0.0
+      cannot take an update without a cable.
 - [ ] **`MemberCodes__MasterKey` set once, before members enrol** (MCV1-09): a key changed later
       rotates every member's code. Then, from the Devices page, every board's running version and
       capabilities recorded, the court boxes acknowledged, and `member_code_manual_hold` set until
@@ -226,7 +227,7 @@ indifferent to which end the debit is taken from.
 
 ---
 
-## 5. Flash both halves and see the box come up — Mega 3.0.0 first, then bridge 3.0.0
+## 5. Flash both halves and see the box come up — Mega 3.0.0 first, then bridge 3.1.0
 
 Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pad access —
 the whole procedure is the **Arduino IDE 2**: open the sketch, pick the board and the port,
@@ -234,18 +235,29 @@ press Upload. `src/iot/court-box/arduino/README.md` is the page, and it needs no
 `make` and nothing from the Library Manager. The `make flash-*` targets do the same two
 uploads from PlatformIO and are the developer alternative.
 
-**What is and is not the last cable flash, as of `fix/ironclad`:**
+**What is and is not the last cable flash, as of `fix/bridge-ota`:**
 
 - **The Mega 3.0.0 flash is its last.** It is complete against the v3 serial protocol: a generic
   renderer and relay guard whose behaviour the bridge steers within the Mega's own bounds, with
   every timeout bounded on the Mega itself. Flash it with confidence.
 - **Gate 2.0.0 is updatable over the air** (signed OTA, key rotation, runtime network, setup
   portal). Its flash is its last cable flash.
-- **Bridge 3.0.0 is NOT yet updatable over the air.** Its caps are `codes:m1 hb:3 lcd:2` only: the
-  signed OTA, `key_next`, runtime network, setup portal, link supervisor and flash persistence
-  (device-api.md §4, §6–§8 — "phase B") are still owed. A box flashed with this bridge needs the
-  cable once more when phase B lands. **Do not seal an enclosure, and do not call this the last
-  flash, until the bridge on it reports `ota:1 key:1 net:1` on the Boards page.**
+- **Bridge 3.1.0 is updatable over the air** (caps `codes:m1 hb:3 lcd:2 ota:1 key:1 net:1`). Every
+  decision of the lifeline is host-tested (`test_lifeline`), and the whole update — discover,
+  verify before fetching, copy the running image, download, stage, verify the staged bytes,
+  switch, probation, commit, and the fourth-boot rollback — passes end to end against the real
+  API (`test/e2e-device/ota_e2e.py`, 19/19). What only the chip can prove is the ESP8266's own
+  half: the core's Updater writing the 4m2m staging area and eboot copying it. **So the
+  enclosure-sealing block is lifted for bridge 3.1.0 on one condition, the bench round trip
+  below: do not seal a box until it has taken and committed a signed release over the air.**
+- [ ] **The bench OTA round trip, per box, before sealing.** On the Boards page the box reports
+      `ota:1 key:1 net:1` and bridge 3.1.0. Sign a release one patch newer than what runs (the
+      same source, a higher version: `ota_sign.py sign --target court_bridge --version 3.1.1`),
+      upload it on Firmware, roll it out to this box only, and watch it go `downloading` →
+      (restart) → `probation` → `committed` with running version 3.1.1, the courts that were lit
+      staying lit throughout (the Mega holds them). Then hold court A and court D together for
+      five seconds within a minute of a power cycle and confirm `SETUP AP <last four of the MAC>`
+      on the glass and the `CRUSADERS-SETUP-…` access point, and leave it to close by itself.
 
 **`secrets.h` holds the first-boot values.** It is gitignored and lives on the flashing
 machine only; the build `#error`s on a missing value and refuses a placeholder or the test
@@ -280,7 +292,7 @@ appears on the admin Devices screen by itself.
       CODE` (Mega 2.0.0) or `SCAN YOUR CODE / TO PLAY` (2.1.0) means the Mega upload did NOT
       land** — and 2.0.0 next to the solid-state relays lights the courts it means to switch off.
 - [ ] Confirm the box appears on the admin Devices page within one heartbeat (30 s by
-      default) with four court numbers against it, **bridge 3.0.0 and Mega 3.0.0** both shown
+      default) with four court numbers against it, **bridge 3.1.0 and Mega 3.0.0** both shown
       (v3 reports the Mega's version), and acknowledge it.
 
 **If skipped:** the box has no firmware, or a Mega whose relay polarity is the opposite of the
@@ -362,7 +374,7 @@ exercises it.
 
 ## 8. Event-queue durability
 
-**Bridge 3.0.0 persists its snapshot, roster and every undelivered event to flash** (LittleFS,
+**Bridge 3.1.0 persists its snapshot, roster and every undelivered event to flash** (LittleFS,
 `specs/device-api.md` §4), so a power cut with the network down no longer loses attendance and a
 paid court is restored for at most `device_power_restore_trust_minutes`. Verify it once, on the
 bench, as §10 asks; the text below describes the 2.x bridges and is kept because a box left on

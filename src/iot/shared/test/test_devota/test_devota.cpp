@@ -162,6 +162,13 @@ void test_every_signature_verifies_or_is_refused_for_its_reason() {
     const devota::Refusal got = devota::verifySignature(manifest, len, sig, n);
     TEST_ASSERT_EQUAL_STRING_MESSAGE(reason, devota::refusalName(got), id);
     TEST_ASSERT_EQUAL_MESSAGE(flag(c, "valid"), got == devota::Refusal::Ok, id);
+    // The same verdict in a LENT workspace, pre-filled with garbage each time:
+    // the bridge verifies in its idle heartbeat buffer, so the arithmetic may
+    // not lean on a zeroed static.
+    static dc::RsaWorkspace lent;
+    memset(&lent, 0xA5 ^ static_cast<int>(g_executed[1]), sizeof(lent));
+    const devota::Refusal inLent = devota::verifySignature(manifest, len, sig, n, lent);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(reason, devota::refusalName(inLent), id);
     ++g_executed[1];
   }
   TEST_ASSERT_EQUAL_size_t(declared("signatures"), g_executed[1]);
@@ -252,7 +259,13 @@ devota::Refusal stream(const uint8_t* image, size_t len, size_t chunk, const dev
   }
   uint8_t digest[32] = {};
   hash.finish(digest);
-  return devota::verifyStaged(offer, digest, bytes, n);
+  const devota::Refusal own = devota::verifyStaged(offer, digest, bytes, n);
+  // And in a lent, dirty workspace: the same verdict.
+  static dc::RsaWorkspace lent;
+  memset(&lent, static_cast<int>(chunk & 0xFFU), sizeof(lent));
+  const devota::Refusal inLent = devota::verifyStaged(offer, digest, bytes, n, lent);
+  TEST_ASSERT_EQUAL_STRING(devota::refusalName(own), devota::refusalName(inLent));
+  return own;
 }
 
 void test_every_image_streams_hashes_and_verifies_in_any_chunking() {
