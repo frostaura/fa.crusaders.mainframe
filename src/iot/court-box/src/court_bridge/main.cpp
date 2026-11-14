@@ -91,6 +91,7 @@
 #include "arduino_hal/SerialTransport.h"
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/BootId.h"
+#include "bridgelogic/CallBudget.h"
 #include "bridgelogic/EventDrain.h"
 #include "bridgelogic/Extend.h"
 #include "bridgelogic/FaultLog.h"
@@ -201,17 +202,20 @@ namespace {
 /// this ring by interrupt while a call is in flight. The core default is 256
 /// bytes — ~267 ms at 9600 baud — so a scan or an `!EVT,AUTOOFF` release arriving
 /// during a heartbeat or walk-up POST was dropped mid-frame. At 960 bytes/s, this
-/// holds ~4.3 s, which covers a call bounded by kHttpTimeoutMs even if the ring
+/// holds ~4.3 s, which covers a call bounded by bridgelogic::kCallBudgetMs even if the ring
 /// was not freshly drained. It is a mitigation, not a cure: only non-blocking
 /// HTTP removes the window entirely, and a call that exceeds the timeout can
 /// still overrun this. The per-frame cost of an overrun is bounded to one frame
 /// regardless, because the decoder resynchronises on the next delimiter.
 constexpr size_t kMegaRxBufferBytes = 4096U;
 
-/// Blocking HTTP is bounded so the window above stays inside the ring. Shorter
-/// than the core's 5 s default; a genuinely slow response is retried on the next
-/// heartbeat rather than allowed to starve the Mega link for five seconds.
-constexpr uint16_t kHttpTimeoutMs = 4000U;
+/// Blocking HTTP is bounded so the window above stays inside the ring: ONE
+/// budget for the whole call, retry included (bridgelogic::CallBudget, BR-11 —
+/// a per-phase timeout let a stalled server hold the loop three times over). A
+/// genuinely slow response is retried on the next heartbeat rather than allowed
+/// to starve the Mega link.
+static_assert(bridgelogic::kCallBudgetMs * 960UL / 1000UL <= kMegaRxBufferBytes,
+              "the whole-call budget must fit the Mega receive ring at 9600 baud");
 
 /// Bytes drained from the Mega link per pass, matching the UART ring.
 constexpr uint16_t kBytesPerPass = 64U;
@@ -1843,11 +1847,10 @@ void pumpMegaLink(uint32_t nowMs) {
 /// refused before a byte is read — EMPTY, NOT HALF. A response cut mid-object
 /// is a body whose readers see whichever fields landed inside the buffer.
 /// Reads from `stream` into `out` until `want` bytes, the server closes, or
-/// kHttpTimeoutMs passes. Returns the bytes read.
-size_t readUpTo(WiFiClient* stream, char* out, size_t want) {
+/// the call's whole budget runs out (BR-11). Returns the bytes read.
+size_t readUpTo(WiFiClient* stream, char* out, size_t want, const bridgelogic::CallBudget& budget) {
   size_t got = 0U;
-  const uint32_t startedAt = millis();
-  while (stream != nullptr && got < want && millis() - startedAt < kHttpTimeoutMs) {
+  while (stream != nullptr && got < want && !budget.expired(gClock.nowMs())) {
     const int avail = stream->available();
     if (avail <= 0) {
       if (!stream->connected()) {
@@ -1869,12 +1872,13 @@ size_t readUpTo(WiFiClient* stream, char* out, size_t want) {
 /// The body's length in `out`, or 0 — EMPTY, NOT HALF — when its declared
 /// length is at or past the buffer, it was cut short, or an undeclared body
 /// is longer than the buffer.
-size_t readBody(WiFiClient* stream, int declared, char* out, size_t outCap) {
+size_t readBody(WiFiClient* stream, int declared, char* out, size_t outCap,
+                const bridgelogic::CallBudget& budget) {
   if (declared >= 0 && static_cast<size_t>(declared) >= outCap) {
     return 0U;
   }
   const size_t want = declared < 0 ? outCap - 1U : static_cast<size_t>(declared);
-  const size_t got = readUpTo(stream, out, want);
+  const size_t got = readUpTo(stream, out, want, budget);
   if (declared >= 0 && got != static_cast<size_t>(declared)) {
     return 0U; // cut short: nothing, never half
   }
@@ -1884,7 +1888,11 @@ size_t readBody(WiFiClient* stream, int declared, char* out, size_t outCap) {
   return got;
 }
 
-int postOnce(const char* url, const char* body, char* out, size_t outCap, bool readRefusal) {
+/// One POST inside `budget` (BR-11): the client's per-phase timeout is half of
+/// what is left, so the connect and the status line together end by the
+/// deadline, and the body read stops at it.
+int postOnce(const char* url, const char* body, char* out, size_t outCap, bool readRefusal,
+             const bridgelogic::CallBudget& budget) {
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) {
@@ -1892,7 +1900,7 @@ int postOnce(const char* url, const char* body, char* out, size_t outCap, bool r
   }
   http.useHTTP10(true);
   http.setReuse(false);
-  http.setTimeout(kHttpTimeoutMs);
+  http.setTimeout(budget.phaseTimeoutMs(gClock.nowMs()));
   http.addHeader("Content-Type", "application/json");
   http.addHeader(devapi::kHeaderAuthorization, gKeys.header());
   const int status = http.POST(reinterpret_cast<const uint8_t*>(body), strlen(body));
@@ -1901,7 +1909,7 @@ int postOnce(const char* url, const char* body, char* out, size_t outCap, bool r
     out[0] = '\0';
   }
   if (hasOut && (readRefusal || (status >= 200 && status < 300))) {
-    out[readBody(http.getStreamPtr(), http.getSize(), out, outCap)] = '\0';
+    out[readBody(http.getStreamPtr(), http.getSize(), out, outCap, budget)] = '\0';
   }
   http.end();
   return status;
@@ -1949,18 +1957,21 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
   // The heartbeat's request lives in the tail of its own answer buffer, so a
   // refusal's body is not read over it: the 401 retry must resend it whole.
   const bool aliased = out != nullptr && body >= out && body < out + outCap;
-  int status = postOnce(url, body, out, outCap, !aliased);
-  if (status == 401 && gKeys.switchForRetry()) {
+  // ONE deadline for the whole call, retry included (BR-11): it ends inside
+  // the six-second wait screen and inside the Mega receive ring.
+  const bridgelogic::CallBudget budget(gClock.nowMs(), bridgelogic::kCallBudgetMs);
+  int status = postOnce(url, body, out, outCap, !aliased, budget);
+  if (status == 401 && budget.allowsAttempt(gClock.nowMs()) && gKeys.switchForRetry()) {
     // A 401 is as likely a server restored to the old key as a retired one:
     // ONE retry with the other key held, and neither is ever erased (§6).
-    status = postOnce(url, body, out, outCap, !aliased);
+    status = postOnce(url, body, out, outCap, !aliased, budget);
     if (status == 401) {
       gKeys.retryFailed();
     }
   }
   const uint16_t result = status > 0 ? static_cast<uint16_t>(status) : 0U;
   // Every call that actually went to the socket teaches the breaker. A fresh
-  // clock read, because the call may have just spent kHttpTimeoutMs.
+  // clock read, because the call may have just spent its whole budget.
   const uint32_t settledAt = gClock.nowMs();
   const bool wasOpen = gBreaker.open(settledAt);
   gBreaker.onResult(result, settledAt);

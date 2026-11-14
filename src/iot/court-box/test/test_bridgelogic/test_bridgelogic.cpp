@@ -29,6 +29,7 @@
 
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/BootId.h"
+#include "bridgelogic/CallBudget.h"
 #include "bridgelogic/Extend.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
@@ -4864,6 +4865,26 @@ void test_a_rescan_on_the_members_own_lit_court_keeps_the_scan_for_an_extension(
   TEST_ASSERT_TRUE(pad.press(map, 4U, 30000U) == court::PadResult::Ignored);
 }
 
+/// BR-11: one deadline for the whole call. Each phase gets half of what is
+/// left, so connect + status line end by the deadline; the call ends inside
+/// the six-second wait screen; a 401 retry only starts with time to finish.
+void test_a_whole_http_call_ends_inside_the_wait_screen(void) {
+  TEST_ASSERT_TRUE(bridgelogic::kCallBudgetMs + 200UL <
+                   static_cast<uint32_t>(bridgelogic::kWaitSeconds) * 1000UL);
+  const bridgelogic::CallBudget budget(0xFFFFF000UL, bridgelogic::kCallBudgetMs); // across the wrap
+  TEST_ASSERT_EQUAL_UINT32(bridgelogic::kCallBudgetMs, budget.remainingMs(0xFFFFF000UL));
+  TEST_ASSERT_EQUAL_UINT16(2000U, budget.phaseTimeoutMs(0xFFFFF000UL));
+  // A server that stalls in the connect for its whole phase leaves the status
+  // line only half of the rest: never more than the deadline in total.
+  const uint32_t afterConnect = 0xFFFFF000UL + 2000UL;
+  TEST_ASSERT_EQUAL_UINT16(1000U, budget.phaseTimeoutMs(afterConnect));
+  TEST_ASSERT_TRUE(budget.allowsAttempt(afterConnect));
+  TEST_ASSERT_FALSE(budget.allowsAttempt(0xFFFFF000UL + 3500UL));
+  TEST_ASSERT_FALSE(budget.expired(0xFFFFF000UL + 3999UL));
+  TEST_ASSERT_TRUE(budget.expired(0xFFFFF000UL + 4000UL));
+  TEST_ASSERT_EQUAL_UINT16(1U, budget.phaseTimeoutMs(0xFFFFF000UL + 9000UL));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
@@ -5007,5 +5028,6 @@ int main(int, char**) {
   RUN_TEST(test_a_server_that_decided_nothing_is_never_read_as_not_recognised);
   RUN_TEST(test_a_duration_prompt_lives_no_longer_than_the_scan_and_rearms_the_window);
   RUN_TEST(test_a_rescan_on_the_members_own_lit_court_keeps_the_scan_for_an_extension);
+  RUN_TEST(test_a_whole_http_call_ends_inside_the_wait_screen);
   return UNITY_END();
 }
