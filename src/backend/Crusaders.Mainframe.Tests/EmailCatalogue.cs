@@ -189,6 +189,7 @@ internal static class EmailCatalogue
             ("YouPaidForACourt", EmailTemplates.YouPaidForACourt(club, to, new PaidForCourt("Court 3", "Tue 29 Sep, 18:00", 24, "Thandi Mokoena"))),
             ("YourCourtWasPaidFor", EmailTemplates.YourCourtWasPaidFor(club, to, new PaidForCourt("Court 3", "Tue 29 Sep, 18:00", 24, "Jason Fourie"))),
             ("AdminBoardLostMemberCodes", EmailTemplates.AdminBoardLostMemberCodes(club, to, new BoardLostMemberCodes("Court box 1-4", "box-2ad001", "2.0.0", ConsoleUrl))),
+            ("AdminCodesPhaseMoved", EmailTemplates.AdminCodesPhaseMoved(club, to, new CodesPhaseMoved("legacy", "v1", "Sat 28 Nov 2026", 14, ConsoleUrl))),
 
             // D11's players messages.
             ("PlayerInvite", EmailTemplates.PlayerInvite(club, to, new PlayerInviteNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12, GameUrl))),
