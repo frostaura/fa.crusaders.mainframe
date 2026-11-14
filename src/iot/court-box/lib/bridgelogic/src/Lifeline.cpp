@@ -369,27 +369,29 @@ bool BridgeNet::tick(uint32_t nowMs, uint32_t fallbackMinutes) {
 
 namespace {
 
-/// One lifeline setting: its `config` key and the bounds its value is clamped into.
-struct ClampedKey {
-  const char* key;
-  uint32_t lo;
-  uint32_t hi;
+/// The `config` object being read, and where an unreadable value is reported.
+/// Built at run time: a table of constant keys and bounds would sit in the
+/// ESP8266's DRAM (.rodata), above a heap floor with no room to spare.
+struct ConfigObject {
+  const char* obj;
+  size_t len;
+  Drift* drift;
 };
 
-void readClamped(const char* obj, size_t len, const ClampedKey& k, uint32_t& value, Drift* drift) {
-  if (devapi::json::findTopLevelKey(obj, len, k.key) == devapi::json::kNotFound) {
+void readClamped(const ConfigObject& in, const char* key, uint32_t lo, uint32_t hi, uint32_t& value) {
+  if (devapi::json::findTopLevelKey(in.obj, in.len, key) == devapi::json::kNotFound) {
     return;
   }
   uint32_t v = 0U;
-  if (!devapi::json::topLevelUnsignedField(obj, len, k.key, v)) {
-    if (drift != nullptr) {
+  if (!devapi::json::topLevelUnsignedField(in.obj, in.len, key, v)) {
+    if (in.drift != nullptr) {
       char name[Drift::kNameLen] = "config.";
-      strncat(name, k.key, sizeof(name) - strlen(name) - 1U);
-      drift->add(name);
+      strncat(name, key, sizeof(name) - strlen(name) - 1U);
+      in.drift->add(name);
     }
     return;
   }
-  value = v < k.lo ? k.lo : (v > k.hi ? k.hi : v);
+  value = v < lo ? lo : (v > hi ? hi : v);
 }
 
 } // namespace
@@ -403,11 +405,11 @@ void readLifelineSettings(const char* body, size_t len, LifelineSettings& curren
   // findTopLevelObject points at the first byte INSIDE the braces; the readers
   // want the object with its braces.
   const char* obj = body + at - 1U;
-  const size_t n = objLen + 2U;
-  readClamped(obj, n, {"device_power_restore_trust_minutes", 0U, 120U}, current.trustMinutes, drift);
-  readClamped(obj, n, {"device_net_fallback_minutes", 3U, 60U}, current.fallbackMinutes, drift);
-  readClamped(obj, n, {"device_ota_probation_minutes", 3U, 60U}, current.probationMinutes, drift);
-  readClamped(obj, n, {"relay_reconcile_min_seconds", 30U, 600U}, current.reconcileMinSeconds, drift);
+  const ConfigObject in{obj, objLen + 2U, drift};
+  readClamped(in, "device_power_restore_trust_minutes", 0U, 120U, current.trustMinutes);
+  readClamped(in, "device_net_fallback_minutes", 3U, 60U, current.fallbackMinutes);
+  readClamped(in, "device_ota_probation_minutes", 3U, 60U, current.probationMinutes);
+  readClamped(in, "relay_reconcile_min_seconds", 30U, 600U, current.reconcileMinSeconds);
 }
 
 // --- the stall watchdog ---------------------------------------------------------------
