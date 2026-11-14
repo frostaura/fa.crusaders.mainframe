@@ -564,7 +564,7 @@ bool tagArg(const Arg& a) {
 ///   k CFG key, 1-6 uppercase letters · v value 0-65535 ·
 ///   l '-' or seconds 0-86400 (clamped) · T note TTL [0,3600] · P live [1,120] ·
 ///   a ack id (tag or S<seq>) · e ack code 0-4 · b two uppercase hex ·
-///   G held seconds [5,60] · n any decimal · p 0|1 · d 0-5.
+///   n any decimal · p 0|1 · d 0-5.
 /// The plain bounded-integer letters. `handled` false for every other letter.
 bool numericArg(char letter, Arg& a, bool& handled) {
   uint32_t value = 0;
@@ -620,8 +620,6 @@ bool shapedArg(char letter, Arg& a) {
     return ackIdArg(a);
   case 'b':
     return isUpperHex(a, 2U);
-  case 'G':
-    return clampArg(a, kHeldMinSeconds, kHeldMaxSeconds);
   default:
     return false;
   }
@@ -634,7 +632,7 @@ bool shapedArg(char letter, Arg& a) {
 ///   k CFG key, 1-6 uppercase letters · v value 0-65535 ·
 ///   l '-' or seconds 0-86400 (clamped) · T note TTL [0,3600] · P live [1,120] ·
 ///   a ack id (tag or S<seq>) · e ack code 0-4 · b two uppercase hex ·
-///   G held seconds [5,60] · n any decimal · p 0|1 · d 0-5.
+///   n any decimal · p 0|1 · d 0-5.
 /// Two switches rather than a table: a table would sit in the Mega's 8 KB of
 /// RAM (AVR keeps constexpr data in .data), and the image is at its 4 KB budget.
 bool v3Arg(char letter, Arg& a) {

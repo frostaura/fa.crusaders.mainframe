@@ -474,9 +474,9 @@ DOOR_GATE_SUBS = [
 ]
 
 COURT_BOX_SECRETS_EXAMPLE_SUBS = [
-    ("// Copy to secrets.h and fill in all five values before flashing. secrets.h is",
+    ("// Copy to secrets.h and fill in all four values before flashing. secrets.h is",
      "// Copy to secrets.h — in THIS folder, beside court_bridge.ino — and fill in all\n"
-     "// five values before flashing. secrets.h is"),
+     "// four values before flashing. secrets.h is"),
     ("at the box. See\n// src/iot/court-box/README.md's Flashing section.",
      "at the box. See\n// src/iot/court-box/arduino/README.md."),
 ]

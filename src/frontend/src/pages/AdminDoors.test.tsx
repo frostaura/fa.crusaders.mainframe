@@ -284,7 +284,9 @@ describe("the doors surface", () => {
         doorFixture({ name: "Zulu door", gate_key: "zulu" }),
       ]);
 
-      await screen.findAllByText(/door/);
+      // Wait for the CARDS, not any "door" text: the page's own "Doors" heading matches /door/
+      // before the list has rendered, which made this flaky under CI load.
+      await screen.findByRole("heading", { level: 3, name: "Zulu door" });
       const names = () => screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
       expect(names()).toEqual(["Alpha door", "Zulu door"]);
 

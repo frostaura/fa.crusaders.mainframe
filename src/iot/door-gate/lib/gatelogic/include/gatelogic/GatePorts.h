@@ -147,30 +147,6 @@ public:
   virtual void read(GateDiag& out) = 0;
 };
 
-/// A plain button: the board's BOOT button on GPIO 0.
-class IButton {
-public:
-  virtual ~IButton() = default;
-  virtual bool pressed() = 0;
-};
-
-struct PortalForm;
-
-/// The setup portal's access point and its one page (device-api.md §8).
-class ISetupPortal {
-public:
-  virtual ~ISetupPortal() = default;
-  /// Opens `CRUSADERS-SETUP-<last four hex of the MAC>` and the page.
-  virtual void open(const char* apName) = 0;
-  /// Serves the page. True when a form was submitted, filled into `form`.
-  virtual bool service(PortalForm& form) = 0;
-  /// The submission was refused: the page shows `reason` and stays open.
-  virtual void refuse(const char* reason) = 0;
-  /// Accepted: the page says so; the board restarts next.
-  virtual void accept() = 0;
-  virtual void close() = 0;
-};
-
 } // namespace gatelogic
 
 #endif // CRUSADERS_GATELOGIC_GATEPORTS_H

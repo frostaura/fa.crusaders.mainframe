@@ -636,6 +636,46 @@ void renderActionRow(const court::ButtonMap& map, uint8_t from, char* out, size_
   }
 }
 
+ScreenId pressFirst(bool scanned) {
+  return scanned ? ScreenId::PickCourt : ScreenId::ScanFirst;
+}
+
+bool verdictScreen(const court::Outcome& outcome, ScreenId& id, ScreenFacts& facts) {
+  if (outcome.action == court::Action::TurnOn) {
+    if (outcome.court >= 4U) {
+      return false;
+    }
+    id = ScreenId::Grant;
+    facts.court = outcome.court;
+    facts.minutes = static_cast<uint32_t>((outcome.durationMs + 59999UL) / 60000UL);
+    return true;
+  }
+
+  struct Words {
+    const char* line1;
+    const char* line2; // null: any
+    ScreenId id;
+  };
+
+  static const Words kWords[] = {
+      {"NO BOOKING", nullptr, ScreenId::NoBooking},
+      {"TOO FEW MINUTES", nullptr, ScreenId::InsufficientBalance},
+      {"SLOT ENDED", nullptr, ScreenId::SlotEnded},
+      {"CODE USED", nullptr, ScreenId::CodeUsed},
+      {"NOT RECOGNISED", nullptr, ScreenId::NotRecognised},
+      {"NO CONNECTION", "BOOKINGS ONLY", ScreenId::NoConnection},
+      {"SEE THE DESK", "", ScreenId::SeeTheDesk},
+  };
+  for (const Words& w : kWords) {
+    if (strcmp(outcome.line1, w.line1) == 0 && (w.line2 == nullptr || strcmp(outcome.line2, w.line2) == 0)) {
+      id = w.id;
+      facts.court = outcome.court < 4U ? outcome.court : 0U;
+      return true;
+    }
+  }
+  return false;
+}
+
 void readMemberDisplay(const char* body, size_t len, ScreenFacts& facts) {
   facts.name[0] = '\0';
   if (body == nullptr || len == 0U) {
@@ -701,10 +741,21 @@ bool invitesCourtPress(ScreenId id) {
          specAt(static_cast<size_t>(id)).rows[proto::kMaxRows - 1U].arg == RowArg::CourtCells;
 }
 
+bool invitesPress(ScreenId id) {
+  if (static_cast<size_t>(id) >= kScreenCount) {
+    return false;
+  }
+  const RowArg action = specAt(static_cast<size_t>(id)).rows[proto::kMaxRows - 1U].arg;
+  return action == RowArg::CourtCells || action == RowArg::DurationCells;
+}
+
 Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings,
                  uint32_t scanLeftMs) {
   Screen screen = screenFor(id, facts, settings);
-  if (!invitesCourtPress(id)) {
+  // A DURATION press needs the scan as much as a court press does (BR-09,
+  // DL-07): CHOOSE TIME and EXTEND:PICK TIME counted their whole choice
+  // window down past the scan, and every black button after it was refused.
+  if (!invitesPress(id)) {
     return screen;
   }
   // WHOLE seconds, rounded down: the countdown may end before the scan, never

@@ -495,9 +495,7 @@ private:
     ports.bootReason = nullptr;
     ports.heartbeatBody = heartbeatBody_;
     ports.heartbeatBodyCap = sizeof(heartbeatBody_);
-    // 2.0.0. No setup portal: a simulator cannot open an access point, and
-    // pretending would test the pretence. The portal is proven against the same
-    // GateApp in test/test_gate_v3.
+    // 2.0.0.
     ports.blobs = &blobs_;
     ports.warmBytes = warm_;
     ports.warmBytesCap = sizeof(warm_);

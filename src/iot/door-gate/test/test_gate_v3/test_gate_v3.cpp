@@ -266,43 +266,6 @@ public:
   }
 };
 
-class Button final : public gatelogic::IButton {
-public:
-  bool pressed() override { return down; }
-
-  bool down = false;
-};
-
-class Portal final : public gatelogic::ISetupPortal {
-public:
-  void open(const char* apName) override {
-    name = apName;
-    isOpen = true;
-  }
-
-  bool service(gatelogic::PortalForm& out) override {
-    if (!submitted) {
-      return false;
-    }
-    submitted = false;
-    out = form;
-    return true;
-  }
-
-  void refuse(const char* reason) override { refused = reason; }
-
-  void accept() override { accepted = true; }
-
-  void close() override { isOpen = false; }
-
-  std::string name;
-  bool isOpen = false;
-  bool submitted = false;
-  gatelogic::PortalForm form;
-  std::string refused;
-  bool accepted = false;
-};
-
 class Log final : public gatelogic::IDecisionLog {
 public:
   void decided(const gatelogic::ScanDecision& d, const char* token, uint32_t grantedMs,
@@ -360,8 +323,6 @@ struct Boot {
     p.radio = &radio;
     p.system = &chip;
     p.diag = &health;
-    p.setupButton = &button;
-    p.portal = &portal;
     app.reset(new gatelogic::GateApp(p));
     authHeader = keys.header();
     baseUrl = net.baseUrl();
@@ -426,8 +387,6 @@ struct Boot {
   Radio radio;
   Chip chip;
   Health health;
-  Button button;
-  Portal portal;
   Log log;
   char body[gatelogic::kGateResponseCap] = {};
   std::unique_ptr<gatelogic::GateApp> app;
@@ -689,53 +648,6 @@ void test_the_link_supervisor_rejoins_and_finally_restarts() {
   TEST_ASSERT_TRUE(sawCompiled);
 }
 
-/// The setup portal: the BOOT button held five seconds within a minute of boot
-/// opens it; a valid form saves a `local` network and restarts.
-void test_the_setup_portal_saves_a_local_network() {
-  Board board;
-  {
-    Boot b(board, true);
-    b.run(2000U);
-    b.button.down = true;
-    b.run(5100U, 100U);
-    TEST_ASSERT_TRUE(b.portal.isOpen);
-    TEST_ASSERT_EQUAL_STRING("CRUSADERS-SETUP-1B2C", b.portal.name.c_str());
-    TEST_ASSERT_TRUE(b.app->setupOpen());
-    b.button.down = false;
-    // A bad base URL is refused with the corpus reason, and the page stays.
-    b.portal.form.ssid = "CLUB-NEW";
-    b.portal.form.psk = "a-new-password";
-    b.portal.form.base = "https://10.0.0.5";
-    b.portal.submitted = true;
-    b.tick();
-    TEST_ASSERT_EQUAL_STRING("base_https", b.portal.refused.c_str());
-    TEST_ASSERT_EQUAL_UINT32(0U, b.chip.restarts);
-    b.portal.form.base = "http://10.0.0.5:8088";
-    b.portal.submitted = true;
-    b.tick();
-    TEST_ASSERT_TRUE(b.portal.accepted);
-    TEST_ASSERT_EQUAL_UINT32(1U, b.chip.restarts);
-  }
-  Boot b(board, false);
-  TEST_ASSERT_EQUAL_STRING("http://10.0.0.5:8088", b.net.baseUrl());
-  TEST_ASSERT_TRUE(b.net.source() == gatelogic::NetSource::Local);
-  TEST_ASSERT_EQUAL_STRING("CLUB-NEW/a-new-password", b.radio.joins.front().c_str());
-  b.server.on(gatelogic::kPathHeartbeat, 200U, kRoster);
-  b.run(100U);
-  TEST_ASSERT_NOT_NULL(
-      strstr(b.server.last(gatelogic::kPathHeartbeat)->body.c_str(), "\"net_src\":\"local\""));
-}
-
-/// A hold that starts after the first minute never opens the portal.
-void test_a_late_hold_does_not_open_the_portal() {
-  Board board;
-  Boot b(board, true);
-  b.run(61000U, 1000U);
-  b.button.down = true;
-  b.run(6000U, 100U);
-  TEST_ASSERT_FALSE(b.portal.isOpen);
-}
-
 // =============================================================================
 // The analysis's door checks
 // =============================================================================
@@ -948,8 +860,6 @@ int main(int, char**) {
   RUN_TEST(test_a_key_rotation_is_adopted_persisted_and_survives_a_401);
   RUN_TEST(test_a_new_base_url_that_never_answers_is_abandoned_for_the_old_one);
   RUN_TEST(test_the_link_supervisor_rejoins_and_finally_restarts);
-  RUN_TEST(test_the_setup_portal_saves_a_local_network);
-  RUN_TEST(test_a_late_hold_does_not_open_the_portal);
   RUN_TEST(test_the_lamp_says_scan_seen_before_the_server_answers);
   RUN_TEST(test_a_stray_byte_never_spoils_the_next_scan_and_a_suffixless_line_is_read);
   RUN_TEST(test_a_refused_heartbeat_shows_the_degraded_blip);

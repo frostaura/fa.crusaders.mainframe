@@ -1,6 +1,6 @@
 // Bridge 3.1.0's lifeline, host-tested: the flash records, the device key
-// ring, the runtime network, the lifeline settings, the stall watchdog, the
-// setup chord and portal form, and what a boot restores after a power cut with no network
+// ring, the runtime network, the lifeline settings, the stall watchdog, and
+// what a boot restores after a power cut with no network
 // (docs/specs/device-api.md §4, §6–§8, §11.1; BR-01, BR-06, BR-07, FSF-09,
 // HW-8).
 //
@@ -220,20 +220,6 @@ void test_a_key_that_cannot_be_persisted_is_not_used() {
   TEST_ASSERT_EQUAL_STRING("k0", keys.activeId());
 }
 
-void test_a_portal_key_becomes_current_and_keeps_the_previous() {
-  FakeFiles files;
-  bridgelogic::BridgeKeys keys;
-  keys.begin("compiled", &files);
-  TEST_ASSERT_FALSE(keys.adoptLocal("k0", "Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr"));
-  TEST_ASSERT_FALSE(keys.adoptLocal("k3", "not-43-characters"));
-  TEST_ASSERT_TRUE(keys.adoptLocal("k3", "Zq7Hn2Vb5Rt8Wy1Lp4Mk6Xc9Ds3Fg0Jh_a-QeUoIiEr"));
-  TEST_ASSERT_EQUAL_STRING("k3", keys.activeId());
-  TEST_ASSERT_TRUE(keys.ring().hasPrevious);
-  TEST_ASSERT_EQUAL_STRING("k0", keys.ring().previousId);
-}
-
-// --- the network (§8) ----------------------------------------------------------------
-
 void test_a_server_net_is_adopted_whole_and_the_previous_set_is_the_fallback() {
   FakeFiles files;
   bridgelogic::BridgeNet net;
@@ -310,59 +296,6 @@ void test_a_new_base_that_never_answers_is_abandoned_and_never_readopted() {
   after.begin("COMPILED", "compiled-pass", "http://192.168.1.10:8088", &files);
   after.startClock(0U);
   TEST_ASSERT_FALSE(after.tick(60UL * 60000UL, 10U));
-}
-
-void test_the_setup_portal_saves_a_local_set_by_the_server_rules() {
-  static char scratch[1536];
-  bridgelogic::PortalForm form;
-  form.ssid = "CLUB WIFI";
-  form.psk = "squash+court&1";
-  form.base = "http://192.168.1.40:8088";
-  devnet::NetSet set;
-  TEST_ASSERT_EQUAL_STRING(
-      "ok", devnet::refusalName(bridgelogic::validatePortalForm(form, set, scratch, sizeof(scratch))));
-  TEST_ASSERT_EQUAL_STRING("squash+court&1", set.wifi[0].psk);
-  FakeFiles files;
-  bridgelogic::BridgeNet net;
-  net.begin("COMPILED", "compiled-pass", "http://192.168.1.10:8088", &files);
-  TEST_ASSERT_TRUE(net.adoptLocal(set));
-  TEST_ASSERT_EQUAL_STRING("local", bridgelogic::netSourceName(net.source()));
-  TEST_ASSERT_EQUAL_UINT32(0U, net.version());
-  TEST_ASSERT_EQUAL_STRING("http://192.168.1.40:8088", net.baseUrl());
-  TEST_ASSERT_FALSE(net.tick(120UL * 60000UL, 10U)); // typed at the box: trusted
-  // The refusals a technician sees are the console's words.
-  form.base = "https://192.168.1.40";
-  TEST_ASSERT_EQUAL_STRING("base_https", devnet::refusalName(bridgelogic::validatePortalForm(
-                                             form, set, scratch, sizeof(scratch))));
-  form.base = "http://192.168.1.40:8088";
-  form.psk = "short";
-  TEST_ASSERT_EQUAL_STRING(
-      "wifi0_psk", devnet::refusalName(bridgelogic::validatePortalForm(form, set, scratch, sizeof(scratch))));
-  char decoded[32];
-  TEST_ASSERT_TRUE(bridgelogic::urlDecode("squash%2Bcourt+1", 16U, decoded, sizeof(decoded)));
-  TEST_ASSERT_EQUAL_STRING("squash+court 1", decoded);
-  TEST_ASSERT_FALSE(bridgelogic::urlDecode("bad%zz", 6U, decoded, sizeof(decoded)));
-  TEST_ASSERT_FALSE(bridgelogic::urlDecode("nul%00", 6U, decoded, sizeof(decoded)));
-  char ap[32];
-  TEST_ASSERT_TRUE(bridgelogic::setupApName("5ccf7f1a2b3c", ap, sizeof(ap)));
-  TEST_ASSERT_EQUAL_STRING("CRUSADERS-SETUP-2B3C", ap);
-}
-
-void test_the_setup_chord_opens_the_portal_only_inside_the_window() {
-  bridgelogic::SetupChord chord;
-  chord.begin(1000U);
-  TEST_ASSERT_FALSE(chord.held("09", "4", 6000U)); // not five seconds yet
-  TEST_ASSERT_FALSE(chord.held("01", "5", 7000U)); // court A alone
-  TEST_ASSERT_FALSE(chord.held("0B", "5", 7000U)); // A, B and D
-  TEST_ASSERT_TRUE(chord.held("09", "5", 7000U));  // A + D for five seconds
-  TEST_ASSERT_FALSE(chord.held("09", "5", 9000U)); // once
-  bridgelogic::SetupChord late;
-  late.begin(1000U);
-  // The hold began at 61 s + 1 s after boot: outside the window.
-  TEST_ASSERT_FALSE(late.held("09", "5", 1000U + 67000U));
-  bridgelogic::SetupChord edge;
-  edge.begin(1000U);
-  TEST_ASSERT_TRUE(edge.held("09", "6", 1000U + 66000U)); // began at exactly 60 s
 }
 
 // --- the lifeline settings, the stall watchdog -------------------------------------
@@ -579,12 +512,9 @@ int main(int, char**) {
   RUN_TEST(test_a_sealed_record_reads_back_and_a_damaged_one_reads_as_absent);
   RUN_TEST(test_key_next_is_persisted_before_use_and_survives_a_reset);
   RUN_TEST(test_a_key_that_cannot_be_persisted_is_not_used);
-  RUN_TEST(test_a_portal_key_becomes_current_and_keeps_the_previous);
   RUN_TEST(test_a_server_net_is_adopted_whole_and_the_previous_set_is_the_fallback);
   RUN_TEST(test_one_bad_field_adopts_nothing);
   RUN_TEST(test_a_new_base_that_never_answers_is_abandoned_and_never_readopted);
-  RUN_TEST(test_the_setup_portal_saves_a_local_set_by_the_server_rules);
-  RUN_TEST(test_the_setup_chord_opens_the_portal_only_inside_the_window);
   RUN_TEST(test_the_lifeline_settings_are_read_from_config_by_exact_kind_and_clamped);
   RUN_TEST(test_the_stall_watchdog_fires_after_six_hours_up_with_nothing_accepted);
   RUN_TEST(test_the_last_answer_is_written_at_most_once_a_minute_and_at_once_when_a_court_lights);

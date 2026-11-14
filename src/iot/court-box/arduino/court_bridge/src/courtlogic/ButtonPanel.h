@@ -30,6 +30,17 @@
 // one event would silently drop the second and leave it looking like a
 // debounce fault. The mask reports every press that completed on this pass.
 //
+// WHY A SAMPLE CAN HAPPEN BETWEEN PASSES (DL-15)
+// ----------------------------------------------
+// The window is only as good as the samples that feed it. A pass that spends
+// 8 ms painting the glass — or 10 ms re-initialising it — is 8-10 ms in which
+// nothing looked at the pins, and a press of 85 ms with a stall in the wrong
+// place is seen as held for less than 80 ms and lost. sample() runs the same
+// rule as poll() and LATCHES any press it completes, and the LCD driver calls
+// it (through CourtBox::sampleButtons) between bus transactions; poll() hands
+// the latched presses over on the next pass. The rule is unchanged — a level
+// must hold 80 ms — it is simply looked at often enough to be applied.
+//
 // No Arduino headers, no heap, no String/std::string/std::vector.
 
 #ifndef CRUSADERS_COURTLOGIC_BUTTONPANEL_H
@@ -64,7 +75,13 @@ public:
   /// Only the press edge is reported. A release is not an event this protocol
   /// has a frame for, and inventing one would double the traffic on a 9600 baud
   /// link for something no consumer reads.
+  /// Includes every press a sample() between passes completed and latched.
   uint8_t poll(uint32_t nowMs);
+
+  /// Sample every channel once under the same rule as poll(), latching any
+  /// press that completes for the next poll(). Safe to call at any time
+  /// outside poll() itself — from inside a display write, say.
+  void sample(uint32_t nowMs);
 
   /// Debounced level, not the raw pin. True while the switch is held.
   bool isPressed(uint8_t channel) const;
@@ -82,6 +99,8 @@ private:
   tb::Deadline settle_[hal::kButtonCount];
   bool candidate_[hal::kButtonCount];
   bool stable_[hal::kButtonCount];
+  /// Presses completed by sample() and not yet handed over by poll().
+  uint8_t latched_;
 };
 
 } // namespace courtlogic

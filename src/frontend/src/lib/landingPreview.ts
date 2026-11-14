@@ -33,7 +33,7 @@ export type LandingInput = {
   status: LandingStatus;
   /** `HHMM` of the club's wall clock, or null before the bridge has one. */
   clock: string | null;
-  /** A bridge `!NOTE` (e.g. `SETUP AP 1A2B`), replacing the status item. */
+  /** A bridge `!NOTE` (e.g. `SERVICE VISIT`), replacing the status item. */
   note: string | null;
   courts: readonly LandingCourt[];
   /** Pages turned since landing was entered. */

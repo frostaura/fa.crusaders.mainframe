@@ -119,7 +119,7 @@ struct NetResult {
 /// The heartbeat's `net` object (braces included). ALL OR NOTHING: one invalid
 /// field and nothing is adopted, because a half-applied network change is a
 /// board on the wrong network with the wrong server. `appliedVer` is the
-/// version the board runs now (0 for compiled or portal values); a `ver` not
+/// version the board runs now (0 for compiled values); a `ver` not
 /// above it is `not_newer` and nothing is rewritten — no flash wear.
 NetResult adoptNet(const char* netObjectJson, size_t len, uint32_t appliedVer, NetSet& out);
 

@@ -23,9 +23,9 @@ was decided and why is [`decisions-door-gate.md`](decisions-door-gate.md) and
    reset, and the pre-`setup()` window where the pin is hi-Z and the relay module's input bias
    decides. **Do not close this by reasoning about the flags** — an earlier pass asserted "Carl's
    board is wired fail-secure" and prescribed a rewire, unverified and against wiring-is-fixed.
-2. **No gate has run on hardware, and every gate change is a cable flash** (no OTA since
-   2026-11-14). Bench one board first: a power cut with the server down, the BOOT-button portal and
-   the RTC image across a watchdog reset. Fire egress must be mechanical; nothing here is a
+2. **No gate has run on hardware, and every gate change is a cable flash** with the four secrets
+   (no OTA, no setup portal since 2026-11-14). Bench one board first: a power cut with the server
+   down and the RTC image across a watchdog reset. Fire egress must be mechanical; nothing here is a
    life-safety device.
 3. **A court box's roster is a door key, and nothing gates it — open question for the owner.**
    A gate is pushed no roster until an admin names the door, which stops anyone holding the club
@@ -51,11 +51,8 @@ was decided and why is [`decisions-door-gate.md`](decisions-door-gate.md) and
    GIN index on `details_json` would buy nothing and cost write amplification on the hottest table
    in the product. The numbers are in `door-gate.md` §13. Revisit if a club's door outgrows a
    day's rows per page.
-5. **GitGuardian is red on PR #3 and is very probably wrong.** The value it objects to is a
-   **corpus fixture, not a credential**: a fake device API key beginning `k7Qz3mR9`, generated for
-   the wire-protocol vectors and shared by the C++ and .NET suites. It lives in the two
-   `cases.json` files under `src/contracts/device-protocol/`, that family's generator
-   `gate/gen_cases.py`, and `src/iot/court-box/test/test_bridge/test_bridge.cpp`. It authenticates
-   against nothing. **Confirm that before dismissing it** — read the finding, not this sentence —
-   then either mark it as a known fixture or accept a permanently red check on every branch that
-   touches the corpus. A scanner nobody believes is ignored on the day it is right.
+5. **GitGuardian now ignores the published test vectors** (`.gitguardian.yaml`:
+   `src/contracts/device-protocol/**`, `src/iot/**/test/**`), decided at PR #15's merge
+   (2026-11-14), where it was red only on those fixtures. *Why:* a check red on every corpus branch
+   gets ignored on the day it is right. The cost: a real secret pasted under those paths would not
+   be flagged, so real keys stay in the gitignored `secrets.h` and `.env` only.

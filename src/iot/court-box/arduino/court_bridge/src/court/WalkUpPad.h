@@ -103,6 +103,15 @@ public:
   /// cannot be completed twice by a second duration press.
   void clear();
 
+  /// Selects `court` as a court press would, for a screen that asks for the
+  /// duration straight away (FSF-06: the extend prompt after a rescan on the
+  /// member's own lit court).
+  void select(uint8_t court, uint32_t nowMs) {
+    selected_ = true;
+    court_ = court;
+    selectedAtMs_ = nowMs;
+  }
+
   /// Adopt the tenant's `lcd_choice_seconds`.
   ///
   /// Takes effect from the NEXT selection, never from the live one: shortening

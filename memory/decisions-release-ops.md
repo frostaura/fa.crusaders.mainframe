@@ -8,8 +8,8 @@ last_verified: 2026-11-13
 # Release and operations — what was decided, and why
 
 **The frame.** Dean's go-ahead for the pre-go-live pass ("fix any and all, full e2e testing") came
-with the founder decision that the coming flash is the **last physical one** and that nothing an
-operator does may force another. Every item below either keeps the club recoverable without the
+with the founder decision that nothing an operator does may force a visit to the box (the flash
+itself is now the last *planned* visit, not the last possible one — `decisions-device-v3.md`). Every item below either keeps the club recoverable without the
 founder at the box, or makes the release knowable. Procedures: `docs/runbooks/`.
 
 - **Images are released by commit, `:latest` only follows.** Builds push `sha-<commit>-<arch>`;
@@ -34,11 +34,12 @@ founder at the box, or makes the release knowable. Procedures: `docs/runbooks/`.
   outside `Down()` with a small C# lexer, not only `Sql("…")` inside `Up()`: `MinutesReplaceCredits`
   raises from a helper's raw string and the first cut missed exactly the migration that crash-looped
   the 2026-10-06 redeploy. False alarms are accepted (a trigger body reads as `CAN REFUSE`).
-- **The API runs as uid 1654** and a one-shot `volume-init` chowns the volumes first. *Why:* a
-  container escape should not land as root on the Pi; and an image moved to non-root without the
-  chown fails every photo upload on volumes a root backend created (verified both ways). The
-  consequence: redeploying the new image with the OLD stack file breaks uploads — the runbook
-  makes replacing the stack file a precondition.
+- **The API runs as uid 1654, and the image hands itself its volumes**: `src/backend/docker-entrypoint.sh`
+  chowns `/app/media` and `/app/biometric` as root, then drops to 1654 via `setpriv` (no caps).
+  *Why:* a container escape should not land as root on the Pi, and a non-root image without the
+  chown fails every upload on volumes a root backend created. It replaced a `volume-init` service
+  (gone from every compose file, `1f5fa9ae`) because the founder required the deploy to stay as
+  before: the club's existing Portainer stack file deploys unchanged.
 - **Third-party images are pinned** (cloudflared 2026.10.7, nginx 1.31.8-alpine, MailHog v1.0.1,
   arduino-cli v1.5.1, actionlint 1.7.12), so a redeploy changes only what this repository changed.
 - **Every service rotates its log and EF Core logs at Warning.** 35 KB/min idle was filling the SD.

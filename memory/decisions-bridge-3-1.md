@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-bridge-3-1
-description: "Bridge 3.1.0 (2026-11-14): key ring, runtime network, portal, supervisor and flash persistence, how it fits the heap floor (26,536 B, 1,960 B over), and why its signed OTA was removed before it ever shipped."
+description: "Bridge 3.1.0 (2026-11-14): key ring, server-pushed network, supervisor and flash persistence, how it fits the heap floor, and why its signed OTA and setup hotspot were removed before it ever shipped."
 type: decision
 last_verified: 2026-11-14
 ---
@@ -17,13 +17,12 @@ Contract and its why: `decisions-device-v3*.md`. These are the bridge's own choi
   kept for whoever restores it from `99e9c5ee`:* verification ran through the core's own
   `Update.installSignature` hook so what was verified was what eboot copied, and the running image
   was copied to LittleFS first because eboot overwrites the only way back.
-- **One 5 KB buffer (`gBig`) holds the answer, the request (its tail), the member reply and the
-  portal's scratch** — none overlap in time. **Tables are flash-resident**
+- **One 5 KB buffer (`gBig`) holds the answer, the request (its tail) and the member reply** —
+  none overlap in time. **Tables are flash-resident**
   (`bridgelogic/FlashTable.h`, `memcpy_P` copies of rows with byte fields; pointer/word tables read
   in place). **The roster and the 64-key ring replace in place**, each deciding an all-unreadable
   array in a first pass (FC-1). *Why:* phase B added ~8 KB of static RAM to an image 240 B above
-  the 24 KB heap floor. After the OTA removal static RAM is 55,384 B and the heap **26,536 B,
-  1,960 B above the 24,576 B floor** (it was 56 B over). Headroom, not a licence: the floor binds.
+  the 24 KB heap floor. It was 56 B over; heap now in `state.md`. Headroom, not a licence: the floor binds.
 - **The last accepted answer is persisted WHOLE and re-adopted through the live readers.**
   *Why:* one adoption path; a restored box cannot read its own flash differently from the wire.
   Once a minute, at once when the lit set changes. Warm = RTC-memory epoch (exact ages); cold =
@@ -33,8 +32,10 @@ Contract and its why: `decisions-device-v3*.md`. These are the bridge's own choi
 - **Events are persisted per sealed entry and carried to the next boot under their own boot id**,
   re-uploaded from the start after another cut (the server dedups on device/boot_id/seq); faults
   shed first past 64. Delivered carried entries are not rewritten out — the file goes when all are.
-- **The portal is a bounded `WiFiServer` parse, not ESP8266WebServer.** *Why:* its form parser
-  has an unbounded VLA frame the stack gate refuses, and its templates cost RAM.
+- **No setup hotspot** (removed 2026-11-14, `899e4388`; why in `decisions-device-v3.md`): the
+  softAP, its form parser, the A + D chord and `local` adoption are gone; the network is compiled
+  in and re-pointed by cable or the server's `net`. *Superseded design:* a bounded `WiFiServer`
+  parse, because ESP8266WebServer's form parser has an unbounded VLA frame the stack gate refuses.
 - **A line the Mega garbled earns a `!PING`** (3, then one per 5 s), and a reset is a moved boot
   instant (`MegaBootClock`), not "uptime went down". *Why:* soak seeds 114940677/110498118 — a
   lost `!BOOT` left a paid court dark for the Mega's 10 s `!STATE` period.
@@ -46,6 +47,5 @@ Contract and its why: `decisions-device-v3*.md`. These are the bridge's own choi
 
 ## Provable only on the chip
 
-LittleFS wear, the softAP portal, the RTC epoch across a watchdog reset. The checklist (§5)
-makes the per-box portal check the condition for sealing. Host-test results after the removal
-are the state topic's gate slot, not this topic's.
+LittleFS wear and the RTC epoch across a watchdog reset. Host-test results are the state topic's
+gate slot, not this topic's.

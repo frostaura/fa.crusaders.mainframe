@@ -276,7 +276,8 @@ point kept them up instead of the landing screen (DL-08, BR-10). The landing's s
 (`READY` / `NO WIFI` / `NO SERVER` / `STARTING UP`) says the same thing without leaving landing.
 And the compiled values are no longer the only ones: WiFi credentials, the server URL and the
 device key are runtime-changeable without a cable ([`device-api.md`](device-api.md) §5, §6 and
-§8), and the setup portal is entered by a button gesture the Mega reports as `!HELD`. There is
+§8), through the server's heartbeat; a box the server cannot reach is re-pointed by a cable
+flash. There is
 still no `!WIFI` verb: credentials never cross this link, because the Mega has no business
 holding them.
 
@@ -357,7 +358,7 @@ Mega returning to landing, opening a relay at its deadline, or noticing that the
 | Mega | Bridge | What happens |
 |---|---|---|
 | 3.0.0 | 3.0.0 | v3 throughout. |
-| 3.0.0 | 2.3.0 | The flash window (Mega first, then bridge). The v3 Mega accepts every v2 frame: untagged relay frames, `!ROW`/`!SHOW`, `!LCD`, `!IDLE`, `!MAP`. The v3 rules that need no bridge cooperation still hold — the screen ceiling, presses never re-arming a hold, staging cleared after each commit, the self-healing glass, the authorisation cap, `!ON` never shortening — and the bridge-liveness verdict uses the **legacy timeout** (330 s, longer than the widest heartbeat cadence) because a 2.3.0 bridge sends no `!LIVE`. The 2.3.0 bridge decodes `!BOOT`, `!ACK`, `!DIAG` and `!HELD` as `BADVERB` and ignores them, which is harmless. |
+| 3.0.0 | 2.3.0 | The flash window (Mega first, then bridge). The v3 Mega accepts every v2 frame: untagged relay frames, `!ROW`/`!SHOW`, `!LCD`, `!IDLE`, `!MAP`. The v3 rules that need no bridge cooperation still hold — the screen ceiling, presses never re-arming a hold, staging cleared after each commit, the self-healing glass, the authorisation cap, `!ON` never shortening — and the bridge-liveness verdict uses the **legacy timeout** (330 s, longer than the widest heartbeat cadence) because a 2.3.0 bridge sends no `!LIVE`. The 2.3.0 bridge decodes `!BOOT`, `!ACK` and `!DIAG` as `BADVERB` and ignores them, which is harmless. |
 | 2.1.0 | 3.0.0 | A bridge flashed first, or a Mega flash that failed. The bridge reads the Mega's version from `!PONG` (2.1.0 sends no `!BOOT`) and speaks **v2 only** to a Mega older than 3.0.0: no tags, `!ROW`/`!SHOW` instead of `!RW`/`!CMT`, no `!WANT` (one `!ON` per relay instead), no `%21` (a 2.1.0 decoder refuses any escape but `%2C` and `%25`, so the bridge replaces `!` in text before encoding). Until it has heard a version it speaks the v2 subset and **sends no relay frame at all** (BR-05). |
 | 2.1.0 | 2.3.0 | Today's pair; unchanged. |
 
@@ -367,8 +368,8 @@ v3, and a `!PONG` naming anything older switches it back. Versions compare as th
 ### The new frames
 
 Verbs are **appended** to `proto::Verb` in this order — `RW CMT WANT CFG LAND NOTE LIVE ACK BOOT
-HELD DIAG HW` — so `kVerbCount` becomes 30 and the append-only rule above holds (`HW` is the
-2026-11-13 addendum's, *Hardware facts* below). No frame grows
+DIAG HW` — so `kVerbCount` is 29, and `verbSpecsAreInEnumOrder()` holds `kVerbSpecs` to that order
+(`HW` is the 2026-11-13 addendum's, *Hardware facts* below). No frame grows
 past `kMaxArgs` (5) or `kMaxArgLen` (24), so `Frame` keeps its size on an 8 KB chip.
 
 **Downlink — bridge → Mega**
@@ -381,7 +382,7 @@ past `kMaxArgs` (5) or `kMaxArgLen` (24), so `Frame` keeps its size on an 8 KB c
 | `!WANT,<tag>,<a>,<b>,<c>,<d>` | **The relay reconcile.** For each relay A–D, `-` (no opinion) or seconds 1–5400 (clamped, never 0): *ensure this relay is lit for at least this long*. A dark relay is closed for that long; a lit one whose deadline is sooner is extended to it; **nothing is ever opened**. It does not restart the authorisation clock, and a relay locked by the cap refuses it. Always all four relays: a reconcile is a whole snapshot, not a delta. Answered `!ACK,<tag>,0` when every opinion is now satisfied, `!ACK,<tag>,2` when any relay refused, and always followed by `!STATE`. |
 | `!CFG,<tag>,<key>,<value>` | Set one Mega setting — table below. `key` is 1–6 uppercase letters, `value` 0–65535; the decoder takes any key, and the Mega answers `!ACK,<tag>,0` with the value **clamped** into the key's bounds and applied, or `!ACK,<tag>,2` for a key it does not know or a value outside an enumerated key's set, changing nothing. |
 | `!LAND,<a>,<b>,<c>,<d>` | Per relay, the seconds of **paid** light left as the server's snapshot has it — chained extensions included, so it can exceed the 90-minute relay cap — or `-` for no figure. 0–86400, clamped. The Mega counts each figure down from receipt and shows the **larger** of it and its own deadline while the relay is closed; an open relay reads `OFF` whatever this says. Discarded when the bridge is declared dead. |
-| `!NOTE,<ttl>,<text>` | A landing note: `text` (≤ 24) replaces the landing's status item for `ttl` seconds (0–3600, clamped; 0 clears). For the setup portal's name, an update in progress, or anything a future bridge wants a passer-by to read. Cleared when the bridge is declared dead and at Mega boot. |
+| `!NOTE,<ttl>,<text>` | A landing note: `text` (≤ 24) replaces the landing's status item for `ttl` seconds (0–3600, clamped; 0 clears). For an update in progress, or anything a future bridge wants a passer-by to read. Cleared when the bridge is declared dead and at Mega boot. |
 | `!LIVE,<period>` | Bridge liveness: the next downlink frame will arrive within `period` seconds (1–120, clamped). A 3.0.0 bridge sends `!LIVE,5` every five seconds and, before anything that blocks it, `!LIVE` with the longer period it needs, up to `!LIVE,120`. |
 | `!RST` · `!PING` · `!LCD` · `!ROW` · `!SHOW` · `!IDLE` · `!MAP` | Unchanged from v2. `!IDLE` stays the status source; a 3.0.0 bridge sends it on **every** accepted heartbeat and every 30 s rather than only on change, and records it as sent only when it was queued (DL-13, FSF-10). |
 
@@ -391,7 +392,6 @@ past `kMaxArgs` (5) or `kMaxArgLen` (24), so `Frame` keeps its size on an 8 KB c
 |---|---|
 | `!ACK,<id>,<code>` | `id` is a tag 1–255, or `S<seq>` for a screen commit. `code`: **0** applied · **1** duplicate (that tag was already applied; nothing changed) · **2** refused (an `!EXT` on a dark relay, a `!WANT` relay locked by the cap, an unknown `!CFG` key) · **3** incomplete (a commit whose rows did not all arrive or whose CRC did not match; nothing painted) · **4** busy (a commit inside the landing dwell; nothing painted). |
 | `!BOOT,<version>,<cause>,<held>` | The Mega's **first frame after every reset**, before the LCD is initialised: its version, the reset cause (`MCUSR`, two uppercase hex digits — bit0 power-on, bit1 external, bit2 brown-out, bit3 watchdog), and the keys held at that instant (two hex digits: bit0–3 courts A–D, bit4–7 durations 1–4). Followed at once by `!STATE`. `MCUSR` is copied to a `.noinit` variable before `.init3` clears it (FWM-12). |
-| `!HELD,<mask>,<seconds>` | A set of keys held together continuously for `seconds` (5–60, clamped) by a hold that began within **60 s of Mega boot**: the setup gesture (court A + court D = `09` opens the setup portal, [`device-api.md`](device-api.md) §8). Sent once per boot when a hold first reaches 5 s. Other masks are reserved for gestures a later bridge may define; the Mega reports, the bridge decides. |
 | `!DIAG,<lcd_errors>,<lcd_reinits>,<rx_overruns>,<ceilings>,<cap_offs>` | Since-boot counters, sent right after every `!PONG`: LCD bus errors — I2C timeouts **and** NACKs, so a backpack that stopped answering is counted, not silent (HW-2) — controller re-initialisations (periodic and recovery), Serial3 RX overruns, screen ceilings that forced landing, and relays opened by the authorisation cap. The bridge reports per-heartbeat rises as faults (FSF-07). |
 | `!EVT,CAPOFF,<court>` · `!EVT,CEIL,` · `!EVT,LIVE,1` | New `!EVT` names: the authorisation cap opened this relay; the screen ceiling forced landing; the Mega revived a bridge it had declared dead (the bridge then re-sends the settings and landing figures). |
 | `!HW,<lcd>,<rpol>,<sbaud>,<ssuf>,<keys>` | The hardware facts the Mega is **actually running with** (*Hardware facts* below): the LCD backpack address that answered, two uppercase hex digits (`00` = none answered); the relay drive level (`0` active-high, `1` active-low); the scanner baud code (`0` auto, not yet locked; `1` 9600, `2` 19200, `3` 38400, `4` 57600, `5` 115200); the scanner line end (`0` auto, `1` CR/LF only); the unarmed-forward key mask, two uppercase hex digits. Sent once the LCD is initialised, after every `!DIAG`, and whenever one of them changes. Any other value is `BADARG`. |
@@ -442,7 +442,10 @@ loop and is what makes the line rate safe to use in full: painting is time-budge
 most 8 ms of blocking per pass** (I2C at 400 kHz, `Wire.setClock(400000)`, where the backpack
 allows it; diff-painting only the cells that changed), and the decoder runs between rows and
 between budgeted segments. v2 painted a whole screen synchronously, 110–150 ms at the 100 kHz
-default.
+default. **The buttons are sampled inside the paint** (DL-15): the LCD driver samples the panel
+between bus transactions and through every wait, at most every 0.5 ms, and a press the 80 ms
+debounce completes there is latched for the next pass — so no tap held 83 ms or more is lost to
+an 8 ms paint or a 10 ms re-init. The debounce rule itself is unchanged.
 
 ### Screens, staged by sequence and committed atomically
 
@@ -496,7 +499,9 @@ reintroduce a stuck screen.
    `AFTON` seconds, to end by then.
 4. **A forwarded press the bridge does not answer within 1.5 s gets the Mega's own hint**,
    whether or not the window was armed (FWM-15): `ONE MOMENT` while the bridge is alive,
-   `NO CONNECTION` when it is dead. The hint's rate-limit deadline is disarmed once it expires,
+   `NO CONNECTION` when it is dead. A hint asked for inside the 2 s rate limit is **deferred** to
+   the limit's end, never dropped, unless a bridge screen arrives first or the same hint is already on the glass, which is never extended (FSF-11, E-BTN-1). The hint's
+   rate-limit deadline is disarmed once it expires,
    so it cannot go silent for 24.8 days after a 2³¹ ms quiet spell (FWM-13).
 5. **The scan feedback** (`CHECKING CODE` / `PLEASE WAIT`) holds `SCANH` seconds, under the
    ceiling; with the bridge dead it is `NO CONNECTION` / `SEE THE DESK` instead, because there

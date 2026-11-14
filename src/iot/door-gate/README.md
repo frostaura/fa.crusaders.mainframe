@@ -34,22 +34,11 @@ over-the-air update:
 | What | How it changes after the flash | Where it lives |
 |---|---|---|
 | the device key | `key_next` on the heartbeat; persisted before it is used; a 401 retried once with the other key; both kept | `GateKeys` |
-| WiFi and the server URL | the server's `net` (all or nothing) or the **setup portal**; profiles tried new → previous → compiled; a new base URL that brings no accepted heartbeat within `net_fallback_minutes` abandoned for the old one | `GateNet` |
+| WiFi and the server URL | the server's `net` (all or nothing); profiles tried new → previous → compiled; a new base URL that brings no accepted heartbeat within `net_fallback_minutes` abandoned for the old one | `GateNet` |
 | what survives a reset | warm (watchdog, panic, brown-out, software): roster, member-code keys and step clock, gate settings and replay ring in RTC memory, every age continuing; cold (power-on): the same from NVS, written only on a **content** change, the roster trusted for `power_restore_trust_minutes`; undelivered events persisted and re-uploaded with their own boot id | `GateStore`, `GateAppV3.cpp` |
 
 The values in `secrets.h` — WiFi, base URL, `DEVICE_API_KEY` — are **first-boot
-defaults** only. One value is new and mandatory: `SETUP_AP_PASSWORD`, the portal's
-WPA2 password, printed on the enclosure label.
-
-**The setup portal.** Power the door up, wait for the two boot blinks, then hold
-the board's **BOOT** button for five seconds within the first minute (never *during*
-power-up — that enters the ROM loader). The lamp shows the setup pattern and the
-board opens `CRUSADERS-SETUP-<last four hex of the MAC>`; join it, open
-`http://192.168.4.1/`, enter the WiFi (one or two networks), the server address and,
-optionally, a device key id and key. The page validates with the same rules as a
-server `net` and names the field it refused. A saved set is `net_src: local` and the
-server never overwrites it unless an admin pushes the club's network to that board.
-The portal closes after ten minutes either way.
+defaults** only; there are four of them and nothing else to set at flash time.
 
 **The analysis's door checks, closed in 2.0.0:** the link supervisor re-joins the
 next profile after 30 s down and restarts the chip after fifteen minutes (Arduino-ESP32
@@ -706,7 +695,6 @@ owed and is a shared-library change neither device's lane could make alone.
 | Fast 4 Hz blink | the task watchdog refused to arm — a board to look at |
 | 2 quick blinks | the board has just booted |
 | Solid, the moment a scan is read | the board is asking the server (2.0.0, DG-4) — written straight to the pin before the call |
-| Long-short, repeating | the setup portal is open (2.0.0) |
 | One short blip every 5 s | degraded: the last heartbeat failed, or the roster is empty or older than two intervals (2.0.0, DG-6) |
 
 Solid beats everything: while the door is open the lamp is solid even if the WiFi
@@ -930,8 +918,7 @@ against:
 make install-iot                 # once: creates src/iot/.venv
 cp src/iot/door-gate/src/common/secrets.h.example \
    src/iot/door-gate/src/common/secrets.h
-# fill in WIFI_SSID, WIFI_PASSWORD, API_BASE_URL, DEVICE_API_KEY and
-# SETUP_AP_PASSWORD — it is gitignored
+# fill in WIFI_SSID, WIFI_PASSWORD, API_BASE_URL, DEVICE_API_KEY — it is gitignored
 make build-iot                   # compiles every board target, this one included
 src/iot/.venv/bin/pio run -d src/iot/door-gate -e door_gate -t upload
 src/iot/.venv/bin/pio device monitor -d src/iot/door-gate -e door_gate
@@ -962,10 +949,10 @@ door-gate/
   platformio.ini          the wiring flags, the board pin and the host test envs
   lib/gatelogic/          every decision, pure, host-tested
     GateApp               the loop itself — one pass, over ports a fake answers
-    GateAppV3.cpp         its 2.0.0 half: persistence, lifeline, supervisor, portal, stall
+    GateAppV3.cpp         its 2.0.0 half: persistence, lifeline, supervisor, stall
     GateReply, JsonView   the §11.2 readers: strict JSON, exact kinds, drift
     GateStore             sealed flash records and the warm (RTC) image
-    GateKeys, GateNet     the key ring, the network, the portal form, the setup gesture
+    GateKeys, GateNet     the key ring, the network
     GatePorts             watchdog, link, scanner-error, decision-log and 2.0.0 ports
     ApiBaseUrl/StaticText compile-time checks on API_BASE_URL, C++11-clean
   lib/esp32_hal/          the only place allowed to include Arduino headers

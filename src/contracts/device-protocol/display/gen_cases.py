@@ -176,8 +176,8 @@ def main() -> int:
        "expanded", True, "ready", "1805", None, [{"number": 2, "lit": True, "seconds": 7140}], 0)
     lc("land-x-wide-court-number", "a four-digit court label shortens to CT before the state is cut", "expanded", True,
        "ready", "1805", None, [{"number": 1234, "lit": True, "seconds": 59400}], 0)
-    lc("land-x-note", "a bridge !NOTE replaces the status item (here: the setup portal is open)", "expanded", True,
-       "ready", "1805", "SETUP AP 1A2B", four[:1], 0)
+    lc("land-x-note", "a bridge !NOTE replaces the status item", "expanded", True,
+       "ready", "1805", "SERVICE VISIT", four[:1], 0)
     lc("land-c-marquee-offset0", "compact with the marquee: every court and the status on row 1", "compact", True, "ready",
        "1805", None, four, 0, 0)
     lc("land-c-marquee-offset7", "seven steps on", "compact", True, "ready", "1805", None, four, 0, 7)

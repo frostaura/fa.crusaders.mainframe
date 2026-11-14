@@ -206,8 +206,6 @@ bool v3UpFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
   } else if (eq(v, "BOOT")) {
     out = Frame::boot(s.args[0], static_cast<uint8_t>(hexOf(s.args[1])),
                       static_cast<uint8_t>(hexOf(s.args[2])));
-  } else if (eq(v, "HELD")) {
-    out = Frame::held(static_cast<uint8_t>(hexOf(s.args[0])), toU32(s.args[1]));
   } else if (eq(v, "DIAG")) {
     const uint16_t c[5] = {toU16(s.args[0]), toU16(s.args[1]), toU16(s.args[2]), toU16(s.args[3]),
                            toU16(s.args[4])};

@@ -46,10 +46,6 @@ public:
   /// used; a refusal (corpus reason) changes nothing.
   devnet::Refusal adopt(const char* object, size_t len);
 
-  /// A key restored at the setup portal: it becomes current, the previous key
-  /// is kept. Validated with the `provision/` `keys` rules.
-  bool adoptLocal(const char* id, const char* key);
-
   const devnet::KeyRing& ring() const { return ring_; }
 
   /// Which key the last success used: false = current.

@@ -77,6 +77,10 @@ struct MemberScanResult {
   /// used code shown its own lit court — the OFF is bound, but a walk-up or a
   /// pay-for must never ride a code that may be a photo of somebody's screen.
   bool scanSpent = false;
+  /// The code may well be a valid member's: verified with nothing booked
+  /// here, or no key to verify it with (MCV1-08). The caller words its
+  /// refusal for why the server was not heard (explainNoDecision).
+  bool couldBeMember = false;
 };
 
 /// A refused v1 scan, recorded as an unknown scan and told in its own words.
@@ -208,6 +212,7 @@ decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeyRingT,
     }
     result.outcome =
         session.onMemberScan(token, ref, roster::Verdict::Unknown, courts, eventq::Method::Qr, nowMs);
+    result.couldBeMember = cache.decideMember(ref, courts, nowMs).verdict == roster::Verdict::Unknown;
     return result;
   }
   case memcode::Status::Replayed:
@@ -255,6 +260,9 @@ decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeyRingT,
   }
   result.outcome =
       session.onMemberScan(token, nullptr, roster::Verdict::Unknown, courts, eventq::Method::Qr, nowMs);
+  // No key: the box cannot tell, and a member whose key was shed is not an
+  // unknown code. A wrong or malformed code IS one.
+  result.couldBeMember = result.verdict.status == memcode::Status::NoKey;
   return result;
 }
 

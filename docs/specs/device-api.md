@@ -24,8 +24,8 @@ the board.
    heartbeat instead of in an image.
 2. **Nothing an operator does may force a reflash.** Device keys rotate with an overlap window
    delivered over the heartbeat (§6); WiFi credentials and the server URL change without a cable
-   — from the server (§8) or at a setup portal entered by a button gesture (§8). The values
-   compiled into `secrets.h` are only the first-boot defaults.
+   — from the server (§8). The values compiled into `secrets.h` are the first-boot defaults and
+   the last fallback; a board the server cannot reach is re-pointed by a cable flash.
 3. **The backend is the source of truth for hardware state.** Every heartbeat answer carries a
    complete snapshot of what should be lit, chained paid extensions included, and the box
    **reconciles continuously** — not once per boot (§4). The bridge persists that snapshot, its
@@ -98,7 +98,7 @@ After the 2.x fields (`mac`, `firmware_version`, `uptime_ms`, the gate's `kind`,
 |---|---|---|
 | `relay_state` | box | Unchanged grammar, one rule tightened: **absent** until the first `!STATE` of the current Mega boot has been received — never `[]`, which the server reads as "confirmed off" for every relay (BR-12). |
 | `mega_version` | box | From `!BOOT` or `!PONG`; absent until heard. The server already stores it. |
-| `net_ver` · `net_src` | both | The network configuration version applied (0 = the compiled defaults or the setup portal's) and where it came from: `server`, `local` (the setup portal) or `compiled`. |
+| `net_ver` · `net_src` | both | The network configuration version applied (0 = the compiled defaults) and where it came from: `server` or `compiled`. The server still accepts `local`, which no current image sends. |
 | `lcd_layout` | box | The layout the Mega has **acknowledged** (`compact`/`expanded`), so the console can say what the glass is actually doing. Absent until a `!CFG,LAYOUT` was acknowledged this Mega boot. |
 | `restore` | both | First accepted beat of a boot only: `warm` (a non-power reset; state carried in RTC memory with a valid clock), `cold` (a power-on reset that used the flash copy inside the trust window, §4), `none`. |
 | `relight` | box | `"<relay>|<ref>"` for every relay the bridge re-lit **from the snapshot** since the last accepted beat. Replaces `restored_relays`, which a v3 box never sends. |
@@ -358,7 +358,7 @@ one more cable flash.
 
 ---
 
-## 8. Network changes, the setup portal, and the link supervisor
+## 8. Network changes and the link supervisor
 
 **From the server.** A club's device network is a tenant-scoped configuration — up to two WiFi
 profiles (SSID, password) and the server base URL — with a version that increments on every save.
@@ -381,21 +381,12 @@ board whose reported `net_ver` is lower, and whose `net_src` is not `local`, is 
 - The board reports the version as soon as it is persisted, so the password is not re-sent every
   beat.
 
-**At the board: the setup portal.** For the cases no server can reach — a new router with nothing
-pre-staged, a server that moved — a technician:
-
-- **Court box**: power-cycles the box, and within 60 s of power-on holds **court A and court D
-  together for five seconds** (the Mega reports `!HELD,09,5`).
-- **Door gate**: powers it up, waits for the boot blinks, then holds the board's **BOOT button for
-  five seconds** within 60 s (never *during* power-on, which enters the ROM loader).
-
-The board opens a WPA2 access point `CRUSADERS-SETUP-<last four hex of the MAC>` with the password
-compiled as `SETUP_AP_PASSWORD` (printed on a label inside the enclosure), serves one page at
-`http://192.168.4.1/` (WiFi SSID and password, an optional second profile, the server base URL, and
-optionally a device key), validates it with the same rules, saves it as `net_src: local`, and
-reboots. The portal closes after ten minutes either way. The court box shows `SETUP AP 1A2B` as a
-landing `!NOTE`; the gate shows its setup lamp pattern. A `local` configuration is never overwritten
-by the server's `net` until an admin explicitly pushes the club's configuration to that board.
+**At the board: a cable flash.** For the cases no server can reach — a new router with nothing
+pre-staged, a server that moved — the board has no access point, page or button gesture. The WiFi
+and the server address are compiled in (`WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL`, with
+`DEVICE_API_KEY`), so a technician re-flashes the board by cable with the new values
+([`deployment.md`](deployment.md)). Anything the server can still reach is changed by its `net`
+push instead.
 
 **The link supervisor** (`provision/` `supervisor`), on both chips: the core's own reconnect is
 left alone for 30 s; then the board disconnects and reconnects on its next profile, backing off 30,
@@ -464,7 +455,7 @@ wording, and reads back after a save.
 - **Boards › Club network**: the two WiFi profiles (passwords write-only) and the server base URL,
   validated with the `provision/` rules and warned in plain words ("every board will try this
   address; if it is wrong they return to the old one after 10 minutes"); per-board applied version;
-  *Push to this board* for a `local` one.
+  *Push to this board*, which re-sends the configuration whatever version the board reports.
 - **Control board**: a lit court's countdown is the **lights'** time left (`lights.seconds_remaining`),
   not the booking's (FA-8); *lights on, nothing booked* and *checked in, lights confirmed off* are
   attention states (BA-04); the offline banner names the boxes' last-heard time (BA-09). Faults copy
@@ -688,7 +679,8 @@ SDK, lwIP and libc objects, as the analysis's `stackan.py` did.
   added later by a server change and a bridge flash alone, with no Mega change; it is not on the
   founder's list, and an off authority on the heartbeat is the one thing a dropped or replayed
   response must never be able to exercise. Deferred, not rejected (FA-9, BA-27).
-- **No admin-signed configuration QR at the door** (DG-1 c). The setup portal covers the same case
-  with less code; a long-line scanner path would be a second parser on a board with no screen.
+- **No admin-signed configuration QR at the door** (DG-1 c). A gate the server cannot reach is
+  re-pointed by a cable flash; a long-line scanner path would be a second parser on a board with no
+  screen.
 - **No relay state in the Mega's EEPROM** — [`device-serial-protocol.md`](device-serial-protocol.md),
   v3, *Relay reconcile*.

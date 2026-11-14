@@ -332,7 +332,7 @@
     },
     {
       "id": "net-ver-zero",
-      "note": "0 is the board's own (compiled or portal) configuration",
+      "note": "0 is the board's own (compiled) configuration",
       "net": {
         "ver": 0,
         "base": "http://192.168.1.20:8088",

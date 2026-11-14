@@ -9,7 +9,6 @@
 
 #include <HTTPClient.h>
 #include <Preferences.h>
-#include <WebServer.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <string.h>
@@ -492,126 +491,6 @@ void Esp32Diag::read(gatelogic::GateDiag& out) {
   out.stackMin = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
   out.sketchFree = ESP.getFreeSketchSpace();
   out.flashMb = ESP.getFlashChipSize() / (1024U * 1024U);
-}
-
-void Esp32BootButton::begin() {
-  pinMode(0, INPUT_PULLUP);
-}
-
-bool Esp32BootButton::pressed() {
-  return digitalRead(0) == LOW;
-}
-
-namespace {
-
-WebServer gPortalServer(80);
-bool gSubmitted = false;
-char gReason[32] = {};
-bool gAccepted = false;
-
-char gSsid[devnet::kSsidMax + 1U];
-char gPsk[devnet::kPskMax + 1U];
-char gSsid2[devnet::kSsidMax + 1U];
-char gPsk2[devnet::kPskMax + 1U];
-char gBase[devnet::kBaseUrlMax + 1U];
-char gKeyId[devnet::kKeyIdCap];
-char gKey[devnet::kKeyLen + 1U];
-
-void copyArg(const char* name, char* out, size_t cap) {
-  const String value = gPortalServer.arg(name);
-  if (value.length() + 1U > cap) {
-    out[0] = '\0';
-    return;
-  }
-  memcpy(out, value.c_str(), value.length() + 1U);
-}
-
-void sendPage() {
-  String page = F("<!doctype html><meta name=viewport content='width=device-width'>"
-                  "<title>Crusaders door setup</title><h1>Door setup</h1>");
-  if (gAccepted) {
-    page += F("<p>Saved. The door restarts now and joins the network you entered.</p>");
-  } else {
-    if (gReason[0] != '\0') {
-      page += F("<p><b>Not saved:</b> ");
-      page += gReason;
-      page += F("</p>");
-    }
-    page +=
-        F("<form method=post action=/save>"
-          "<p>WiFi name<br><input name=ssid maxlength=32 required></p>"
-          "<p>WiFi password<br><input name=psk type=password maxlength=63></p>"
-          "<p>Second WiFi name (optional)<br><input name=ssid2 maxlength=32></p>"
-          "<p>Second WiFi password<br><input name=psk2 type=password maxlength=63></p>"
-          "<p>Server address, e.g. http://192.168.1.10:8088<br><input name=base maxlength=96 required></p>"
-          "<p>Device key id and key (optional)<br><input name=key_id maxlength=7>"
-          "<input name=key maxlength=43></p><p><button>Save</button></p></form>");
-  }
-  gPortalServer.send(200, "text/html", page);
-}
-
-} // namespace
-
-void Esp32Portal::open(const char* apName) {
-  WiFi.mode(WIFI_AP_STA);
-  static_cast<void>(WiFi.softAP(apName, password_));
-  gSubmitted = false;
-  gAccepted = false;
-  gReason[0] = '\0';
-  gPortalServer.on("/", HTTP_GET, []() { sendPage(); });
-  gPortalServer.on("/save", HTTP_POST, []() {
-    copyArg("ssid", gSsid, sizeof(gSsid));
-    copyArg("psk", gPsk, sizeof(gPsk));
-    copyArg("ssid2", gSsid2, sizeof(gSsid2));
-    copyArg("psk2", gPsk2, sizeof(gPsk2));
-    copyArg("base", gBase, sizeof(gBase));
-    copyArg("key_id", gKeyId, sizeof(gKeyId));
-    copyArg("key", gKey, sizeof(gKey));
-    gSubmitted = true;
-    gReason[0] = '\0';
-    sendPage();
-  });
-  gPortalServer.begin();
-  open_ = true;
-}
-
-bool Esp32Portal::service(gatelogic::PortalForm& form) {
-  if (!open_) {
-    return false;
-  }
-  gPortalServer.handleClient();
-  if (!gSubmitted) {
-    return false;
-  }
-  gSubmitted = false;
-  form.ssid = gSsid;
-  form.psk = gPsk;
-  form.ssid2 = gSsid2;
-  form.psk2 = gPsk2;
-  form.base = gBase;
-  form.keyId = gKeyId;
-  form.key = gKey;
-  return true;
-}
-
-void Esp32Portal::refuse(const char* reason) {
-  snprintf(gReason, sizeof(gReason), "%s", reason);
-}
-
-void Esp32Portal::accept() {
-  gAccepted = true;
-  // The page that says so, before the restart takes the access point away.
-  for (int i = 0; i < 50; ++i) {
-    gPortalServer.handleClient();
-    delay(10);
-  }
-}
-
-void Esp32Portal::close() {
-  gPortalServer.stop();
-  static_cast<void>(WiFi.softAPdisconnect(true));
-  WiFi.mode(WIFI_STA);
-  open_ = false;
 }
 
 } // namespace esp32_hal

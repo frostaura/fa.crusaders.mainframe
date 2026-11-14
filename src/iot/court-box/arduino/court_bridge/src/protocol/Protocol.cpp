@@ -512,13 +512,6 @@ Frame Frame::boot(const char* version, uint8_t cause, uint8_t held) {
   return f;
 }
 
-Frame Frame::held(uint8_t mask, uint32_t seconds) {
-  Frame f = ofVerb(Verb::Held);
-  static_cast<void>(f.pushArgHex(mask, 2U));
-  static_cast<void>(f.pushArgU32(clampSeconds(seconds, kHeldMinSeconds, kHeldMaxSeconds)));
-  return f;
-}
-
 Frame Frame::diag(const uint16_t counters[5]) {
   Frame f = ofVerb(Verb::Diag);
   for (size_t i = 0; i < 5; ++i) {

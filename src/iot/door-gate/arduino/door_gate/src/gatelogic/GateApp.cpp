@@ -24,7 +24,7 @@ GateApp::GateApp(const Ports& ports)
       warmBytesCap_(ports.warmBytesCap), warmClock_(ports.warmClock), coldBoot_(ports.coldBoot),
       keys_(ports.keys), net_(ports.net), compiledKey_(ports.compiledKey), compiledSsid_(ports.compiledSsid),
       compiledPsk_(ports.compiledPsk), compiledBase_(ports.compiledBase), radio_(ports.radio),
-      system_(ports.system), diag_(ports.diag), setupButton_(ports.setupButton), portal_(ports.portal) {
+      system_(ports.system), diag_(ports.diag) {
 }
 
 void GateApp::fault(const char* code) {
@@ -90,7 +90,6 @@ void GateApp::begin() {
     }
   }
   restoreState(now);
-  gesture_.begin(now);
   stallAt_.arm(now, kStallRestartMs);
 
   queue_.begin();
@@ -136,7 +135,7 @@ void GateApp::pass() {
   // rule; on this chip it keeps an NVS commit out from under a blocking call).
   persistDirty(now);
   forgetElapsedWindows(now);
-  pumpSetup(now);
+  pumpIdleInput(now);
 
   // THE LINK FIRST, because it is the input every step below is decided
   // against. Read after the scanner, `linkUp_` was a whole pass out of date,

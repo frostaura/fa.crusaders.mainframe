@@ -274,10 +274,6 @@ public:
     IRadio* radio = nullptr;
     ISystem* system = nullptr;
     IDiagSource* diag = nullptr;
-
-    /// The setup gesture's button and the portal it opens (§14.3).
-    IButton* setupButton = nullptr;
-    ISetupPortal* portal = nullptr;
   };
 
   explicit GateApp(const Ports& ports);
@@ -377,8 +373,6 @@ public:
   const Drift& drift() const { return drift_; }
 
   const GateBoardState& boardState() const { return state_; }
-
-  bool setupOpen() const { return setupOpen_; }
 
   bool degraded() const { return degraded_; }
 
@@ -494,20 +488,15 @@ private:
   GateReport report(GateDiag& diag) const;
 
   /// Lock engaged, no window, nothing in the assembler, nothing scanned for a
-  /// minute, no portal: the only moment a self-restart (the link supervisor's
+  /// minute: the only moment a self-restart (the link supervisor's
   /// or the stall watchdog's, device-api.md §8) may take the door down.
   bool idle(uint32_t nowMs) const;
   void pumpSupervisor(uint32_t nowMs);
-  void pumpSetup(uint32_t nowMs);
+  /// "No member input in the last minute" lapses on its own.
+  void pumpIdleInput(uint32_t nowMs);
   void pumpStall(uint32_t nowMs);
   void updateDegraded(uint32_t nowMs);
   void restart();
-
-  /// The setup portal (door-gate.md §14.5): opened by the BOOT-button gesture,
-  /// closed after ten minutes, and the one form it takes.
-  void openSetup(uint32_t nowMs);
-  void closeSetup();
-  void takePortalForm(const PortalForm& form);
 
   /// A carried event from an earlier boot is uploaded first, one per call.
   bool pumpCarried(uint32_t nowMs);
@@ -703,22 +692,17 @@ private:
   IRadio* radio_;
   ISystem* system_;
   IDiagSource* diag_;
-  IButton* setupButton_;
-  ISetupPortal* portal_;
 
   Between between_{*this};
 
   GateBoardState state_;
   Drift drift_;
   devnet::Supervisor supervisor_;
-  SetupGesture gesture_;
 
   const char* restore_ = "none";
   bool restoreReported_ = false;
   bool lastHeartbeatOk_ = false;
   bool degraded_ = false;
-  bool setupOpen_ = false;
-  tb::Deadline setupCloseAt_;
   /// The power-on trust window of a cold-restored roster (§14.1).
   tb::Deadline coldTrustUntil_;
   /// No accepted heartbeat for six hours with the link up: restart when idle
@@ -764,8 +748,6 @@ private:
 
 /// The stall watchdog's bound (device-api.md §8): a contract constant.
 constexpr uint32_t kStallRestartMs = 6UL * 60UL * 60UL * 1000UL;
-/// The setup portal closes after this, whatever happened (§8).
-constexpr uint32_t kSetupPortalMs = 10UL * 60UL * 1000UL;
 /// "No member input in the last 60 s": the quiet a self-restart waits for.
 constexpr uint32_t kIdleAfterInputMs = 60000UL;
 

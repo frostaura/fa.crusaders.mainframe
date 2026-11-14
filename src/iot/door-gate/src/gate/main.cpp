@@ -54,7 +54,7 @@
 // --------------------------------------------
 // Everything below secrets.h's four values is now a FIRST-BOOT DEFAULT: the
 // keys rotate over the heartbeat, and the WiFi and the server URL change from
-// the server or at the BOOT-button setup portal. The image itself changes only
+// the server. The image itself changes only
 // by cable. What survives a reset is in RTC memory (warm) and NVS (cold). This
 // file wires the ports for all of it; GateApp decides.
 
@@ -189,19 +189,6 @@ static_assert(gatelogic::isValidApiBaseUrl(API_BASE_URL),
               "cannot become an image on a wall");
 static_assert(gatelogic::apiBaseUrlFits(API_BASE_URL),
               "API_BASE_URL does not fit the URL buffer together with the longest device path");
-
-// 2.0.0's ONE NEW VALUE, mandatory like the four above (device-api.md §8).
-//
-// SETUP_AP_PASSWORD is the setup portal's WPA2 password, printed on the label
-// inside the enclosure: 8 to 63 characters.
-#ifndef SETUP_AP_PASSWORD
-#error "secrets.h does not define SETUP_AP_PASSWORD — see src/iot/door-gate/src/common/secrets.h.example"
-#endif
-static_assert(sizeof(SETUP_AP_PASSWORD) >= 9U && sizeof(SETUP_AP_PASSWORD) <= 64U,
-              "SETUP_AP_PASSWORD must be 8 to 63 characters (WPA2)");
-static_assert(!gatelogic::text::equals(SETUP_AP_PASSWORD, "REPLACE_ME_SETUP_AP_PASSWORD"),
-              "SETUP_AP_PASSWORD is still secrets.h.example's placeholder — choose one and print it on the "
-              "label inside the enclosure");
 
 namespace {
 
@@ -364,8 +351,6 @@ esp32_hal::Esp32RtcClock gRtc;
 esp32_hal::Esp32Radio gRadio;
 esp32_hal::Esp32System gSystem;
 esp32_hal::Esp32Diag gDiag;
-esp32_hal::Esp32BootButton gBootButton;
-esp32_hal::Esp32Portal gPortal(SETUP_AP_PASSWORD);
 
 // THE WARM IMAGE, in RTC slow memory that no reset but a power-on clears. Raw
 // bytes rather than a WarmImage: an object here would be constructed — zeroed —
@@ -424,8 +409,6 @@ GateApp::Ports wire() {
   ports.radio = &gRadio;
   ports.system = &gSystem;
   ports.diag = &gDiag;
-  ports.setupButton = &gBootButton;
-  ports.portal = &gPortal;
   return ports;
 }
 
@@ -499,8 +482,6 @@ void setup() {
   static_cast<void>(gStore.begin());
   // The records of §14.1. Opened before gApp.begin(), which restores from them.
   static_cast<void>(gBlobs.begin());
-
-  gBootButton.begin();
 
   // persistent(false) keeps the core from writing a second, invisible copy of
   // the credential in its own flash record, which would outlive a reflash and

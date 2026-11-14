@@ -356,13 +356,13 @@
     },
     {
       "id": "land-x-note",
-      "note": "a bridge !NOTE replaces the status item (here: the setup portal is open)",
+      "note": "a bridge !NOTE replaces the status item",
       "input": {
         "layout": "expanded",
         "marquee": true,
         "status": "ready",
         "clock": "1805",
-        "note": "SETUP AP 1A2B",
+        "note": "SERVICE VISIT",
         "courts": [
           {
             "number": 1,
@@ -376,7 +376,7 @@
       "rows": [
         " SCAN YOUR QR CODE  ",
         "COURT 1    ON 45 MIN",
-        "SETUP AP 1A2B       ",
+        "SERVICE VISIT       ",
         "                    "
       ]
     },

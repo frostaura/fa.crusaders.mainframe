@@ -15,34 +15,6 @@ bool isCompiled(const char* id) {
   return strcmp(id, kCompiledId) == 0;
 }
 
-bool validKey(const char* key) {
-  if (key == nullptr || strlen(key) != devnet::kKeyLen) {
-    return false;
-  }
-  for (size_t i = 0U; i < devnet::kKeyLen; ++i) {
-    const char c = key[i];
-    const bool ok =
-        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
-    if (!ok) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool validId(const char* id) {
-  const size_t n = id == nullptr ? 0U : strlen(id);
-  if (n < 2U || n > 7U || id[0] != 'k' || id[1] < '1' || id[1] > '9') {
-    return false;
-  }
-  for (size_t i = 2U; i < n; ++i) {
-    if (id[i] < '0' || id[i] > '9') {
-      return false;
-    }
-  }
-  return true;
-}
-
 } // namespace
 
 void GateKeys::begin(const char* compiledKey, IBlobStore* store) {
@@ -114,27 +86,6 @@ devnet::Refusal GateKeys::adopt(const char* object, size_t len) {
   onPrevious_ = false;
   render();
   return got;
-}
-
-bool GateKeys::adoptLocal(const char* id, const char* key) {
-  if (!validId(id) || !validKey(key)) {
-    return false;
-  }
-  devnet::KeyRing next;
-  memcpy(next.currentId, id, strlen(id) + 1U);
-  memcpy(next.currentKey, key, devnet::kKeyLen + 1U);
-  next.hasPrevious = true;
-  memcpy(next.previousId, ring_.currentId, sizeof(next.previousId));
-  memcpy(next.previousKey, ring_.currentKey, sizeof(next.previousKey));
-  const devnet::KeyRing before = ring_;
-  ring_ = next;
-  if (!persist()) {
-    ring_ = before;
-    return false;
-  }
-  onPrevious_ = false;
-  render();
-  return true;
 }
 
 } // namespace gatelogic

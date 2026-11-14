@@ -15,18 +15,14 @@
 //                    request; a 401 is retried once with the other key and
 //                    neither is ever erased (§6).
 //   * BridgeNet    — the network set: up to two WiFi profiles and the base
-//                    URL from the server's `net` (all or nothing) or the setup
-//                    portal (`local`), the previous set kept as the fallback,
+//                    URL from the server's `net` (all or nothing), the
+//                    previous set kept as the fallback,
 //                    and a base URL that never earns an accepted heartbeat
 //                    abandoned after `device_net_fallback_minutes` (§8).
 //   * StallWatch   — the link is up and nothing has been accepted for six
 //                    hours: restart when idle (HW-8). devnet::Supervisor does
 //                    the link-down half (30 s grace, 30–300 s backoff, a
 //                    restart at 15 min).
-//   * SetupChord   — court A and court D held together for five seconds
-//                    within 60 s of power-on (`!HELD,09,5`) opens the setup
-//                    portal; validatePortalForm reads what the technician
-//                    typed by the same rules as a server `net`.
 //
 // The door gate implements the same contract in gatelogic::GateNet/GateKeys;
 // these are the court box's own, over its own flash (bridgelogic::IFiles), and
@@ -70,9 +66,6 @@ public:
   /// Persisted before use; any refusal (the corpus reason) changes nothing.
   devnet::Refusal adopt(const char* object, size_t len);
 
-  /// A key the technician typed at the setup portal: current, the previous kept.
-  bool adoptLocal(const char* id, const char* key);
-
   const devnet::KeyRing& ring() const { return ring_; }
 
   /// The id of the key the header carries (`k0` for the compiled one).
@@ -91,7 +84,7 @@ private:
 
 // --- the network (§8) -----------------------------------------------------------
 
-enum class NetSource : uint8_t { Compiled = 0U, Server = 1U, Local = 2U };
+enum class NetSource : uint8_t { Compiled = 0U, Server = 1U };
 
 const char* netSourceName(NetSource source);
 
@@ -137,10 +130,6 @@ public:
   /// abandoned before is `not_newer`.
   devnet::NetResult adopt(const char* object, size_t len, uint32_t nowMs);
 
-  /// The setup portal's set: source `local`, version 0, trusted (never
-  /// auto-abandoned: the technician typed it standing at the box).
-  bool adoptLocal(const devnet::NetSet& local);
-
   /// Starts the fallback window's clock (at boot and on adoption).
   void startClock(uint32_t nowMs) { adoptedAtMs_ = nowMs; }
 
@@ -150,7 +139,7 @@ public:
   /// Abandons an unproven base after `fallbackMinutes`. True on the pass it did.
   bool tick(uint32_t nowMs, uint32_t fallbackMinutes);
 
-  /// `net_ver`: the server version applied, 0 for compiled or local.
+  /// `net_ver`: the server version applied, 0 for compiled.
   uint32_t version() const;
 
   NetSource source() const { return static_cast<NetSource>(record_.meta.source); }
@@ -204,55 +193,6 @@ public:
 private:
   uint32_t sinceMs_ = 0U;
 };
-
-// --- the setup chord and portal (§8) -------------------------------------------
-
-class SetupChord {
-public:
-  static constexpr uint32_t kWindowMs = 60000UL;
-  static constexpr uint32_t kHoldSeconds = 5U;
-  /// Court A (bit 0) and court D (bit 3).
-  static constexpr uint8_t kMask = 0x09U;
-
-  void begin(uint32_t nowMs) {
-    bootMs_ = nowMs;
-    fired_ = false;
-  }
-
-  /// `!HELD,<mask hex>,<seconds>`. True exactly once: the chord, held five
-  /// seconds, with the hold BEGUN inside 60 s of this bridge's power-on.
-  bool held(const char* maskHex, const char* secondsText, uint32_t nowMs);
-
-private:
-  uint32_t bootMs_ = 0U;
-  bool fired_ = false;
-};
-
-/// One submitted form, already URL-decoded field by field.
-struct PortalForm {
-  const char* ssid = nullptr;
-  const char* psk = nullptr;
-  const char* ssid2 = nullptr;
-  const char* psk2 = nullptr;
-  const char* base = nullptr;
-  const char* keyId = nullptr;
-  const char* key = nullptr;
-};
-
-/// Validates the form with the `provision/` rules — by writing it as the JSON a
-/// server `net` would be into `scratch` and reading that with
-/// devnet::adoptNet, so a value the portal accepts is one the server would
-/// have sent. The reason names the first bad field. `scratch` needs ~1.5 KB.
-devnet::Refusal validatePortalForm(const PortalForm& form, devnet::NetSet& out, char* scratch,
-                                   size_t scratchCap);
-
-/// Decodes one `application/x-www-form-urlencoded` value. False if it does not
-/// fit or carries a bad or NUL `%xx`.
-bool urlDecode(const char* in, size_t inLen, char* out, size_t cap);
-
-/// `CRUSADERS-SETUP-<last four hex of the MAC>`: the access point's name, and
-/// the landing `!NOTE` the Mega shows (`SETUP AP 1A2B`).
-bool setupApName(const char* macHex, char* out, size_t cap);
 
 } // namespace bridgelogic
 

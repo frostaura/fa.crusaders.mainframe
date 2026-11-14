@@ -110,6 +110,16 @@ public:
 
   /// Whether an OFF press for `court` is honoured right now: the window must
   /// be armed, unexpired and bound to exactly that court.
+  /// A screen inviting a press is going up on a scan with `scanLeftMs` to
+  /// live: re-arm the window for exactly that long, keeping its binding, so
+  /// an `!AUTH` the link lost cannot strand the press the glass asks for and
+  /// the window never outlives the scan (BR-09, DL-07). The caller sends
+  /// `!AUTH` with scanLeftMs / 1000 seconds.
+  AuthCommand coverScan(uint32_t scanLeftMs, uint32_t nowMs);
+
+  /// What is left of the window, 0 when shut.
+  uint32_t remainingMs(uint32_t nowMs) const { return armed(nowMs) ? until_.remaining(nowMs) : 0U; }
+
   bool allowsRelease(uint8_t court, uint32_t nowMs) const;
 
   /// The window ran out on its own. True exactly once, on the pass it lapsed,
