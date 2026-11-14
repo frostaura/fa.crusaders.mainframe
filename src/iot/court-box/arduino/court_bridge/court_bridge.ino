@@ -1745,7 +1745,9 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
   }
 }
 
-void pumpMegaLink(uint32_t nowMs) {
+// Never inlined (nor pumpMegaV3): each is called once from loop(), and inlined
+// its frame lands in loop()'s own — 928 B against stack_budget.json's 208 B.
+__attribute__((noinline)) void pumpMegaLink(uint32_t nowMs) {
   uint8_t byte = 0U;
   for (uint16_t i = 0U; i < kBytesPerPass && gMega.read(byte); ++i) {
     if (!gUplink.feed(static_cast<char>(byte))) {
@@ -2631,7 +2633,7 @@ void pumpRelight(uint32_t nowMs) {
 /// `!IDLE` every thirty (DL-13, FSF-10), the queue out to the UART, and every
 /// frame the Mega never acknowledged reported — a relay one painted TRY AGAIN
 /// and left dark in this half's books, exactly as an unsendable `!ON` is.
-void pumpMegaV3(uint32_t nowMs) {
+__attribute__((noinline)) void pumpMegaV3(uint32_t nowMs) {
   if (!gLiveDue.isArmed() || gLiveDue.expired(nowMs)) {
     gLiveDue.arm(nowMs, kLiveEveryMs);
     static_cast<void>(sendToMega(proto::Frame::live(kLiveEveryMs / 1000UL)));
