@@ -33,7 +33,12 @@ import { useRead } from "@/lib/useRead";
 type Extra = { base: UnsettledBookingsPage | null; items: UnsettledBooking[]; cursor: string | null };
 
 function useUnsettled() {
-  const load = useCallback(() => adminEndpoints.unsettledBookings(), []);
+  const [readAt, setReadAt] = useState<number | null>(null);
+  const load = useCallback(async () => {
+    const page = await adminEndpoints.unsettledBookings();
+    setReadAt(Date.now());
+    return page;
+  }, []);
   const [first, retry] = useRead("unsettled", load);
   const [extra, setExtra] = useState<Extra>({ base: null, items: [], cursor: null });
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
@@ -47,7 +52,7 @@ function useUnsettled() {
   });
   const items = [...(base?.items ?? []), ...(follows ? extra.items : [])].filter((r) => !gone.has(r.booking_id));
   return {
-    page: base, items, cursor, loading: first.loading, error: first.error, retry, more,
+    page: base, readAt, items, cursor, loading: first.loading, error: first.error, retry, more,
     drop: (ids: string[]) => setGone((prev) => new Set([...prev, ...ids])),
   };
 }
@@ -87,7 +92,7 @@ export default function AdminBookingsPage() {
         title={COPY.title}
         description={COPY.description}
         actions={<RefreshButton onRefresh={list.retry} loading={list.loading} label={COPY.refresh} />}
-        freshness={<Freshness at={list.page ? Date.now() : null} />}
+        freshness={<Freshness at={list.readAt} />}
       />
       <ToggleGroup type="single" aria-label={COPY.filterLabel} value="unsettled" className="w-fit rounded-lg bg-bg-muted p-1">
         <ToggleGroupItem value="unsettled">

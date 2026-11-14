@@ -113,7 +113,7 @@ describe("chart colours and the theme", () => {
     }) as DOMRect);
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const { container } = render(<MyFlowBarChart data={ME} />);
+    const { container, unmount } = render(<MyFlowBarChart data={ME} />);
     // Every painted fill in the chart — jsdom draws the legend swatches (the series colours)
     // and the axis ticks even where it cannot lay the bars out.
     const fills = () => [...container.querySelectorAll("[fill]")].map((el) => el.getAttribute("fill"));
@@ -125,5 +125,8 @@ describe("chart colours and the theme", () => {
     expect(fills()).not.toContain(themes.light.accent.strong);
     // The axis ticks too: the muted role, in the painted theme.
     expect(fills()).toContain(themes.dark.text.muted);
+    // FM-7: recharts keeps animating after the last assertion; every frame it painted between the
+    // test's end and the shared cleanup was an update outside act (813 warnings from this one test).
+    unmount();
   });
 });

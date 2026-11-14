@@ -305,10 +305,13 @@ export function MemberNightPage() {
     navigate(`/admin/members/${encodeURIComponent(userId)}/night${day ? `?day=${day}` : ""}`);
   };
   return (
-    <PageShell width="content">
+    // BA-25: the full frame, like every admin page — a centred 580px column on a 1180px desktop was
+    // half the screen wasted. From lg the picker and the privacy notice it is read under sit side by side.
+    <PageShell width="full">
       <PageHeader title={NIGHT_TAB_COPY.pickerTitle} description={NIGHT_TAB_COPY.pickerDescription} />
-      <Alert tone="warning" live="standing" announceKey="night-privacy">{NIGHT_PRIVACY_NOTICE}</Alert>
-      <Card>
+      <div data-night-picker="" className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <Alert tone="warning" live="standing" announceKey="night-privacy" className="lg:order-2">{NIGHT_PRIVACY_NOTICE}</Alert>
+      <Card className="lg:order-1">
         <CardContent className="flex flex-col gap-1.5">
           <MemberCombobox
             label={NIGHT_TAB_COPY.pickerLabel}
@@ -324,6 +327,7 @@ export function MemberNightPage() {
           ) : null}
         </CardContent>
       </Card>
+      </div>
     </PageShell>
   );
 }

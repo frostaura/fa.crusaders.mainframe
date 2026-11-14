@@ -1,8 +1,10 @@
 import { ApiError } from "@/lib/api";
 import { adminEndpoints, type ReversalKind, type ReversibleEntry } from "@/lib/adminApi";
 import { newIdempotencyKey } from "@/lib/deskLedger";
+import { parseAmount } from "@/lib/amount";
+import { formatMoney } from "@/lib/utils";
 import { LIVE_SAID } from "@/lib/deskMinutesCopy";
-import { REVERSAL_LOST, reversalRefusal } from "@/lib/reversalCopy";
+import { REVERSAL_COPY as COPY, REVERSAL_LOST, reversalRefusal } from "@/lib/reversalCopy";
 import { rateLimited, refusedOutright, type AdjustmentKey } from "./adjustmentAttempt";
 
 /**
@@ -115,3 +117,22 @@ export async function attemptReversal(input: ReversalInput, keyRef: { current: A
     return refused(err, keyRef);
   }
 }
+
+/** The rand typed, as a number, or a complaint. Above zero, whole cents, at most what is left. */
+export function checkZar(text: string, left: number): { value: number | null; complaint?: string } {
+  if (!text.trim()) return { value: null, complaint: COPY.zarMissing };
+  const parsed = parseAmount(text, { max: 1_000_000 });
+  if (!parsed.ok) return { value: null, complaint: COPY.zarNotCents };
+  if (Math.round(parsed.value * 100) > Math.round(left * 100)) return { value: null, complaint: COPY.zarTooMuch(formatMoney(left)) };
+  return { value: parsed.value };
+}
+
+/** The minutes typed, as a whole number 0..left, or a complaint. */
+export function checkMinutes(text: string, left: number): { value: number | null; complaint?: string } {
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) return { value: null, complaint: COPY.minutesInvalid };
+  const n = Number(trimmed);
+  if (n > left) return { value: null, complaint: COPY.minutesTooMany(left) };
+  return { value: n };
+}
+

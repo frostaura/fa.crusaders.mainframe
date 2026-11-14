@@ -19,12 +19,11 @@ import { StateBlock } from "@/components/ui/state-block";
 import { useIsSmUp } from "@/components/ui/use-media-query";
 import { adminEndpoints, REVERSAL_KINDS, type ReversalKind, type ReversibleEntry } from "@/lib/adminApi";
 import { clubDayAndClock } from "@/lib/clubClock";
-import { parseAmount } from "@/lib/amount";
 import { REVERSAL_COPY as COPY, REVERSAL_LOST } from "@/lib/reversalCopy";
 import { cn, formatMoney } from "@/lib/utils";
 import type { AdjustmentKey } from "./adjustmentAttempt";
 import { DESK_FOOTER_CLASS, DeskConfirmFooter } from "./DeskConfirmFooter";
-import { attemptReversal, type ReversalOutcome } from "./reversalAttempt";
+import { attemptReversal, checkMinutes, checkZar, type ReversalOutcome } from "./reversalAttempt";
 import { useMenuReturnFocus } from "./useMenuReturnFocus";
 import { useStepFocus } from "./useStepFocus";
 
@@ -80,24 +79,6 @@ function useReversible(userId: string) {
       : now));
   }, []);
   return { state, read, settleLeft };
-}
-
-/** The rand typed, as a number, or a complaint. Above zero, whole cents, at most what is left. */
-export function checkZar(text: string, left: number): { value: number | null; complaint?: string } {
-  if (!text.trim()) return { value: null, complaint: COPY.zarMissing };
-  const parsed = parseAmount(text, { max: 1_000_000 });
-  if (!parsed.ok) return { value: null, complaint: COPY.zarNotCents };
-  if (Math.round(parsed.value * 100) > Math.round(left * 100)) return { value: null, complaint: COPY.zarTooMuch(formatMoney(left)) };
-  return { value: parsed.value };
-}
-
-/** The minutes typed, as a whole number 0..left, or a complaint. */
-export function checkMinutes(text: string, left: number): { value: number | null; complaint?: string } {
-  const trimmed = text.trim();
-  if (!/^\d+$/.test(trimmed)) return { value: null, complaint: COPY.minutesInvalid };
-  const n = Number(trimmed);
-  if (n > left) return { value: null, complaint: COPY.minutesTooMany(left) };
-  return { value: n };
 }
 
 function useReversalFlow(list: ListState) {

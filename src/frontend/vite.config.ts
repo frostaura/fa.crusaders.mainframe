@@ -6,6 +6,11 @@ import type { Plugin } from "vite";
 import { createHash } from "node:crypto";
 import { SHIPPED_ICON_WEIGHTS } from "./src/components/ui/iconWeights";
 import { stampServiceWorker } from "./src/swBuild";
+import { staleDependencies, staleDependenciesMessage } from "./src/depsFreshness";
+
+// FM-12: every gate that loads this config (build, vitest, dev) stops over a stale install.
+const stale = staleDependencies(__dirname);
+if (stale.length > 0) throw new Error(staleDependenciesMessage(stale));
 
 /**
  * F4.3 — `precache.json`: every JS and CSS file the build emitted, for the service worker to fetch
