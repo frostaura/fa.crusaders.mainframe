@@ -71,9 +71,11 @@ export function RowActions({ row, handlers, compact = false }: { row: MemberRow;
   return (
     // V-1: an armed Approve is a sentence above a pair of buttons. In a no-wrap row it was squeezed
     // beside Reject and its text ran underneath it, so the armed group takes the whole row and the
-    // rest wraps below it.
+    // rest wraps below it. Only an armed row may wrap: a resting row that wraps lets the table
+    // squeeze the column until the buttons stack (rows measured 92.5-136.5px against 60.5-69px).
     <div data-row-actions="" className={cn(
-      "flex flex-row flex-wrap items-center justify-end gap-2",
+      "flex flex-row flex-nowrap items-center justify-end gap-2",
+      "has-[[data-confirm-pair]]:flex-wrap",
       "[&_[data-confirm-group]:has([data-confirm-pair])]:basis-full",
     )}>
       {row.status === "PendingApproval" ? (

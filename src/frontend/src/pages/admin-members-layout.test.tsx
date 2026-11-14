@@ -77,7 +77,10 @@ describe("the admin members table", () => {
     // rows against 60.5-69px on one line. Wrapping is the cause of the tall row, not the cure.
     expect(actions.className).toContain("flex-row");
     expect(actions.className).not.toContain("flex-col");
-    expect(actions.className).not.toContain("flex-wrap");
+    // Only an armed confirm may wrap the row (V-1); at rest it is one line.
+    const tokens = actions.className.split(/\s+/);
+    expect(tokens).toContain("flex-nowrap");
+    expect(tokens).not.toContain("flex-wrap");
   });
 
   it("pins the actions column so the buttons do not start off-screen", async () => {

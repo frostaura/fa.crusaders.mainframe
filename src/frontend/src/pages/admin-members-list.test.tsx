@@ -135,7 +135,7 @@ describe("the row is the way into a member", () => {
     renderPage(<AdminMembersPage />, { initialEntries: ["/admin/members?status=PendingApproval"] });
     const approve = (await screen.findAllByRole("button", { name: ROW_ACTIONS.approve }))[0];
     const row = approve.closest<HTMLElement>("[data-row-actions]")!;
-    expect(row.className).toContain("flex-wrap");
+    expect(row.className.split(/\s+/)).toContain("has-[[data-confirm-pair]]:flex-wrap");
     expect(row.className).toContain("[&_[data-confirm-group]:has([data-confirm-pair])]:basis-full");
     fireEvent.click(approve, { detail: 1 });
     expect(row.querySelector("[data-confirm-group] [data-confirm-pair]")).not.toBeNull();
