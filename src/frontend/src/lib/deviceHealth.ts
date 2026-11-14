@@ -140,18 +140,13 @@ function stackLine(d: DeviceDiag): HealthLine | null {
   return { text: `Stack headroom at its lowest: ${d.stack_min} bytes, and it needs at least ${HEALTH_FLOORS.stackMin}.`, attention: short };
 }
 
-function otaSpaceLine(d: DeviceDiag): HealthLine | null {
-  if (typeof d.sketch_free !== "number") return null;
-  return { text: `Room for an update: ${kb(d.sketch_free)}.`, attention: d.sketch_free === 0 };
-}
-
 function flashLine(d: DeviceDiag): HealthLine | null {
   if (typeof d.flash_mb !== "number") return null;
   return { text: `Flash: ${d.flash_mb} MB.`, attention: false };
 }
 
 /** One builder per `diag` field, in the order the panel reads them; each returns null when unsent. */
-const DIAG_LINES: readonly DiagLine[] = [resetLine, heapLine, blockLine, stackLine, otaSpaceLine, flashLine];
+const DIAG_LINES: readonly DiagLine[] = [resetLine, heapLine, blockLine, stackLine, flashLine];
 
 /** The board's own `diag`, line by line, each marked when it needs attention. */
 export function diagLines(diag: DeviceDiag | null | undefined): HealthLine[] {

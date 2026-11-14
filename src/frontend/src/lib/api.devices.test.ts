@@ -77,24 +77,18 @@ describe("device API wrappers", () => {
     ]);
   });
 
-  it("reads and saves the club network, and rolls a firmware release out", async () => {
+  it("reads and saves the club network, and reads the member-code rollout", async () => {
     const stub = stubFetch([
       { path: "/api/v1/admin/devices/network", body: { ver: 1, base: null, wifi: [], updated_at: null, updated_by: null } },
       { method: "PUT", path: "/api/v1/admin/devices/network", body: { ver: 2, base: "http://10.0.0.5", wifi: [], updated_at: null, updated_by: null } },
-      { path: "/api/v1/admin/devices/firmware", body: [] },
-      { method: "PATCH", path: "/api/v1/admin/devices/firmware/", body: {} },
       { path: "/api/v1/admin/devices/member-codes", body: {} },
     ]);
     await endpoints.adminDeviceNetwork();
     await endpoints.adminDeviceNetworkSave({ ver: 1, base: "http://10.0.0.5", wifi: [{ ssid: "CLUB", psk: null }] });
-    await endpoints.adminFirmwareList();
-    await endpoints.adminFirmwareRollout("r1", { rollout: "one", device_id: ID });
     await endpoints.adminMemberCodeRollout();
     expect(stub.calls.map((c) => [c.method, c.path])).toEqual([
       ["GET", "/api/v1/admin/devices/network"],
       ["PUT", "/api/v1/admin/devices/network"],
-      ["GET", "/api/v1/admin/devices/firmware"],
-      ["PATCH", "/api/v1/admin/devices/firmware/r1"],
       ["GET", "/api/v1/admin/devices/member-codes"],
     ]);
     // A null password keeps the stored one: it is sent as null, never dropped.

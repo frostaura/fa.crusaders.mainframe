@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { deviceCaps, type AdminDevice } from "../../lib/api";
 import {
-  boardKeyLine, firmwareLine, latestRelease, megaLine, networkLine, screenLine, targetOf,
+  boardKeyLine, firmwareLine, megaLine, networkLine, screenLine,
 } from "../../lib/deviceV3Copy";
 import { asLayout, landingClock } from "../../lib/landingPreview";
 import {
@@ -13,8 +13,8 @@ import { LandingPreview } from "./LandingPreview";
 
 /**
  * One board's v3 state and remote fixes on Boards (device-api §10, FA-6, FA-12): what its screen
- * is showing and what it was asked for, a preview of its own start screen, firmware against the
- * latest release, the Mega's version and last restart, its network and key, and its capabilities.
+ * is showing and what it was asked for, a preview of its own start screen, the firmware it runs,
+ * the Mega's version and last restart, its network and key, and its capabilities.
  *
  * <p>
  * <b>Everything is presence-gated.</b> An API that serves none of the v3 fields renders none of
@@ -24,11 +24,10 @@ import { LandingPreview } from "./LandingPreview";
 
 /** The status lines under a board's name: firmware, Mega, network, key, capabilities. */
 export function BoardStatusLines({ device, context }: { device: AdminDevice; context: BoardsContext }) {
-  if (!servesStatusLines(device, context)) return null;
-  const latest = context.releases ? latestRelease(context.releases, targetOf(device)) : null;
+  if (!servesStatusLines(device)) return null;
   const caps = [...deviceCaps(device)].sort();
   const lines = [
-    firmwareLine(device, latest),
+    firmwareLine(device),
     megaLine(device),
     networkLine(device, context.networkVer),
     boardKeyLine(device, context.keyId, context.nextKeyId),

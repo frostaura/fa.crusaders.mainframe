@@ -583,16 +583,6 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     writer: "AdminDeviceEndpoints.UpdateAsync (push_network)", before: null, after: { push_network: true },
   }),
   row({
-    action: "firmware.uploaded", area: "device", headline: "Uploaded a firmware release — Court box bridge 3.0.1",
-    writer: "FirmwareService.UploadAsync", before: null,
-    after: { target: "court_bridge", version: "3.0.1", size: 372144, sha256: "ab".repeat(32) },
-  }),
-  row({
-    action: "firmware.rollout_changed", area: "device", headline: "Changed a firmware rollout — Court box bridge 3.0.1",
-    writer: "FirmwareService.SetRolloutAsync", before: { rollout: "off", device_id: null, paused: false },
-    after: { rollout: "all", device_id: null, paused: false },
-  }),
-  row({
     action: "doors.shut_all", area: "device", headline: "Shut every door at once",
     writer: "AdminDoorFleetEndpoint.ApplyAsync", before: null, after: { doors: 2, door_names: ["Front door", "Side door"] },
   }),

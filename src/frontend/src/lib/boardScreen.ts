@@ -1,4 +1,4 @@
-import type { AdminDevice, AdminSettings, FirmwareRelease } from "./api";
+import type { AdminDevice, AdminSettings } from "./api";
 import type { MegaDiagName } from "./deviceHealth";
 import { asLayout, type LandingCourt } from "./landingPreview";
 
@@ -12,7 +12,6 @@ export type ClubScreen = { layout: string | undefined; marquee: boolean | undefi
 
 /** What the Boards page knows beside the board list, all optional. */
 export type BoardsContext = {
-  releases: readonly FirmwareRelease[] | null;
   networkVer: number | null;
   keyId: string | null;
   nextKeyId: string | null;
@@ -45,11 +44,11 @@ export function servesScreen(device: AdminDevice): boolean {
 
 
 /**
- * Whether a board has anything v3 to say beyond its versions — its firmware state, a release to
- * compare against, its network, its key, its capabilities, a restore. Without any of it the
- * versions stay in the identity line and the status lines are not drawn (a phone's dense card).
+ * Whether a board has anything v3 to say beyond its versions — its network, its key, its
+ * capabilities, a restore, its Mega. Without any of it the versions stay in the identity line and
+ * the status lines are not drawn (a phone's dense card).
  */
-export function servesStatusLines(device: AdminDevice, context: Pick<BoardsContext, "releases">): boolean {
-  const v3 = [device.fw_state, device.net_ver, device.net_src, device.key_id, device.capabilities, device.restore_report, device.mega];
-  return v3.some((value) => value !== undefined && value !== null) || (context.releases?.length ?? 0) > 0;
+export function servesStatusLines(device: AdminDevice): boolean {
+  const v3 = [device.net_ver, device.net_src, device.key_id, device.capabilities, device.restore_report, device.mega];
+  return v3.some((value) => value !== undefined && value !== null);
 }
