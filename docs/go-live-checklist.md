@@ -157,7 +157,7 @@ card without this is every balance gone and every board locked out.
       against a throwaway stack: 18 s from empty to a healthy restored backend.)
 - [ ] In the password manager, **off the club's machine**: the database password, `Jwt__Secret`,
       `MemberCodes__MasterKey`, the cloudflared tunnel token, the bootstrap admin password, the
-      **device API key**, the backup encryption passphrase and `SETUP_AP_PASSWORD` (§2c). Today the first four exist only in the Portainer stack file
+      **device API key**, the backup encryption passphrase. Today the first four exist only in the Portainer stack file
       on the same host as the database.
 
 **If skipped:** one dead SD card ends the club's money records, and a rebuilt database mints a
@@ -179,8 +179,7 @@ told by. Settle these before §5.
 - [ ] **The device API key** read off the Devices page and stored in the password manager before
       it is compiled into any board. Never press anything that replaces it without the v3
       rotation (§6).
-- [ ] **`SETUP_AP_PASSWORD`** chosen, compiled in, and printed on a label inside each enclosure.
-- [ ] **The bridge image is 3.1.0** — key rotation, runtime network, setup portal, link
+- [ ] **The bridge image is 3.1.0** — key rotation, runtime network, link
       supervisor and flash persistence. Never seal a box with a 3.0.0 bridge: it has none of
       them, so a key or network change would mean a visit to it.
 - [ ] **`MemberCodes__MasterKey` set once, before members enrol** (MCV1-09): a key changed later
@@ -248,9 +247,7 @@ uploads from PlatformIO and are the developer alternative.
   the server (caps `codes:m1 hb:3 lcd:2 key:1 net:1` on the box, `codes:m1 key:1 net:1` on a
   door), so nothing an operator does needs a cable. A new bridge or gate image does.
 - [ ] **The bench check, per box, before sealing.** On the Boards page the box reports
-      `key:1 net:1` and bridge 3.1.0. Then hold court A and court D together for five seconds
-      within a minute of a power cycle and confirm `SETUP AP <last four of the MAC>` on the glass
-      and the `CRUSADERS-SETUP-…` access point, and leave it to close by itself.
+      `key:1 net:1` and bridge 3.1.0.
 
 **`secrets.h` holds the first-boot values.** It is gitignored and lives on the flashing
 machine only; the build `#error`s on a missing value and refuses a placeholder, so there is no
@@ -265,8 +262,7 @@ itself.
 - [ ] `cp src/iot/court-box/arduino/court_bridge/secrets.h.example src/iot/court-box/arduino/court_bridge/secrets.h`
       on the flashing machine and fill in every value (§2c), then do not commit it:
       `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL` (the server's **reserved LAN** address and
-      port, `http://`, no trailing slash), `DEVICE_API_KEY` (from the Devices page),
-      and `SETUP_AP_PASSWORD`.
+      port, `http://`, no trailing slash) and `DEVICE_API_KEY` (from the Devices page).
 - [ ] **Mega first.** Open `src/iot/court-box/arduino/court_mega/court_mega.ino`, board
       **Arduino Mega or Mega 2560**, processor **ATmega2560**, pick the port, **Upload** — with
       DIP **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
@@ -303,8 +299,8 @@ than one machine.
       network as the second profile in the club's device network setting (Devices), wait until
       every board reports the new `net_ver`, then switch the router — the boards fall back to
       the previous profile, then to the compiled one, if the new one fails
-      (`specs/device-api.md` §8). A board nothing can reach is re-pointed through its setup
-      portal (court box: hold courts A and D together for 5 s within 60 s of power-on).
+      (`specs/device-api.md` §8). A board nothing can reach is re-pointed by a cable flash
+      with corrected `secrets.h` values.
 - [ ] **The device key is rotated, never regenerated**: Devices → rotate starts an overlap in
       which both keys work and the new one is delivered in every heartbeat; the old one retires
       when every acknowledged board is on the new one and `device_key_grace_hours` has passed
@@ -692,10 +688,8 @@ certified as one, and no combination of the build flags turns it into one.
       exist and neither is read by the other route: `src/iot/door-gate/src/common/secrets.h`
       is the developer's, for `pio run`. Copy `secrets.h.example` from whichever folder is
       being built and fill in all four values. Both are gitignored.
-- [ ] **Gate 2.0.0** (v3): besides the four values below, `secrets.h` carries
-      `SETUP_AP_PASSWORD` (§2c), and all of them are first-boot defaults — WiFi, the
-      server's address and the key change later over the heartbeat, and the setup portal is the
-      BOOT button held 5 s within 60 s of power-on (never *during* power-on). The roster now
+- [ ] **Gate 2.0.0** (v3): the four values below are first-boot defaults — WiFi, the
+      server's address and the key change later over the heartbeat. The roster now
       survives a reset, so the "nobody gets in until the server answers" window is gone; check
       it with the server down after a power cycle.
 - [ ] **All four values actually replaced.** Every value in the `.example` is a placeholder

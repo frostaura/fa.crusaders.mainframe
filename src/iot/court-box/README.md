@@ -25,10 +25,8 @@ itself and every hardware fact it used to compile in is a runtime `!CFG`
 setting ([`device-serial-protocol.md`](../../../docs/specs/device-serial-protocol.md)
 v3). **Nothing an operator does needs the cable for bridge 3.1.0**
 ([`device-api.md`](../../../docs/specs/device-api.md) §6, §8): a rotated key
-arrives as `key_next`, a new WiFi or server address as `net`, and the setup
-portal (hold court A and court D together for five seconds within a minute of
-power-on; the glass says `SETUP AP 1A2B`) changes them at the box. The values in
-`secrets.h` are only the first-boot defaults. A new bridge image is a cable
+arrives as `key_next` and a new WiFi or server address as `net`, both from the
+server. The four values in `secrets.h` are only the first-boot defaults. A new bridge image is a cable
 flash at the box, by this same procedure.
 
 **The bridge needs the 4M2M flash layout** (`eagle.flash.4m2m.ld`, "4MB
