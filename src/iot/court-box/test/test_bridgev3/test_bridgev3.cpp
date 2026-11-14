@@ -70,6 +70,46 @@ void test_a_fast_server_still_lights_the_court_behind_a_busy_fifo(void) {
   TEST_ASSERT_EQUAL_UINT8(0U, link.partialLineLen());
 }
 
+/// MCV1-06: the v1 paths queue more around the relay frames than the v0 path
+/// did — the CHECKING CODE wait, the greeting, the !ON, the !AUTH and the
+/// follow-up screen for an online v1 activation answered in ~40 ms; the
+/// offline v1 grant's !ON behind the greeting; the walk-up's !ON and !AUTH
+/// behind ONE MOMENT. Every relay and !AUTH frame reaches the wire whole and
+/// exactly once, whatever screens are queued around it.
+void test_the_v1_paths_lose_no_on_and_no_auth_behind_their_screens(void) {
+  bridgelogic::MegaTx tx;
+  tx.setMegaVersion("3.0.0");
+  fakes::FakeTransport link;
+  link.setMaxChunk(8U);
+  // Online v1 activation, a 40 ms server.
+  TEST_ASSERT_TRUE(tx.screen(screenOf("ONE MOMENT", "Checking code", 6U), 0U));
+  tx.pump(link, 0U);
+  TEST_ASSERT_TRUE(tx.screen(screenOf("HI ANNA", "BALANCE 120 MIN", 2U), 40U));
+  TEST_ASSERT_TRUE(tx.command(proto::Frame::on(proto::Court::B, 2700U), 40U));
+  TEST_ASSERT_TRUE(tx.command(proto::Frame::auth(30U), 40U));
+  TEST_ASSERT_TRUE(tx.screen(screenOf("COURT B", "45 MIN", 10U), 41U));
+  // Offline v1 grant behind its greeting, on another court.
+  TEST_ASSERT_TRUE(tx.screen(screenOf("HI", "WELCOME", 2U), 45U));
+  TEST_ASSERT_TRUE(tx.command(proto::Frame::on(proto::Court::C, 1800U), 45U));
+  // Walk-up: ONE MOMENT, then the !ON and the !AUTH bound to it.
+  TEST_ASSERT_TRUE(tx.screen(screenOf("ONE MOMENT", "Buying your time", 6U), 50U));
+  TEST_ASSERT_TRUE(tx.command(proto::Frame::on(proto::Court::D, 1800U), 60U));
+  TEST_ASSERT_TRUE(tx.command(proto::Frame::auth(20U), 60U));
+  for (uint32_t t = 40U; t < 3000U; t += 5U) {
+    tx.pump(link, t);
+    link.drainTx();
+  }
+  TEST_ASSERT_TRUE(countLines(link, "!ON,B,2700,") >= 1U);
+  TEST_ASSERT_TRUE(countLines(link, "!ON,C,1800,") >= 1U);
+  TEST_ASSERT_TRUE(countLines(link, "!ON,D,1800,") >= 1U);
+  TEST_ASSERT_TRUE(countLines(link, "!AUTH,30,") >= 1U);
+  TEST_ASSERT_TRUE(countLines(link, "!AUTH,20,") >= 1U);
+  TEST_ASSERT_EQUAL_UINT8(0U, link.partialLineLen());
+  // Superseded screens may be dropped (only the latest waits); a relay or
+  // !AUTH frame never is, and none was handed back as unacked-and-lost
+  // without the retries a 3.0.0 Mega answers.
+}
+
 void test_relay_frames_overtake_queued_screens_but_never_split_one(void) {
   bridgelogic::MegaTx tx;
   tx.setMegaVersion("3.0.0");
@@ -467,6 +507,7 @@ void test_a_lost_line_earns_a_ping_paced_by_a_small_bucket(void) {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_a_fast_server_still_lights_the_court_behind_a_busy_fifo);
+  RUN_TEST(test_the_v1_paths_lose_no_on_and_no_auth_behind_their_screens);
   RUN_TEST(test_relay_frames_overtake_queued_screens_but_never_split_one);
   RUN_TEST(test_nothing_relay_goes_out_before_the_mega_is_heard);
   RUN_TEST(test_a_v2_mega_gets_untagged_v2_frames_and_no_bang);

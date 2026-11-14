@@ -29,6 +29,7 @@
 
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/BootId.h"
+#include "bridgelogic/CallBudget.h"
 #include "bridgelogic/Extend.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
@@ -43,6 +44,7 @@
 #include "bridgelogic/WalkUp.h"
 #include "bridgelogic/WallClock.h"
 #include "court/Session.h"
+#include "court/WalkUpPad.h"
 #include "devapi/DeviceClient.h"
 #include "devapi/Json.h"
 #include "devlink/Cadence.h"
@@ -2377,10 +2379,11 @@ void test_a_court_press_invitation_never_outlives_the_scan() {
       bridgelogic::ScreenId::CourtInUse,    bridgelogic::ScreenId::NoTimeAvailable,
       bridgelogic::ScreenId::PurchaseEnded, bridgelogic::ScreenId::PayForPriceChanged,
       bridgelogic::ScreenId::PayForQuote,   bridgelogic::ScreenId::Busy,
-      bridgelogic::ScreenId::CardNoBooking,
+      bridgelogic::ScreenId::CardNoBooking, bridgelogic::ScreenId::ChooseTime,
+      bridgelogic::ScreenId::ExtendPrompt,  bridgelogic::ScreenId::MinutesOutOfRange,
   };
   for (const bridgelogic::ScreenId id : inviting) {
-    TEST_ASSERT_TRUE(bridgelogic::invitesCourtPress(id));
+    TEST_ASSERT_TRUE(bridgelogic::invitesPress(id));
     const bridgelogic::Screen full = bridgelogic::screenFor(id, facts, settings);
     // 12.9 s of scan left: the countdown is at most twelve whole seconds.
     const bridgelogic::Screen capped = bridgelogic::screenFor(id, facts, settings, 12900UL);
@@ -2403,9 +2406,9 @@ void test_a_court_press_invitation_never_outlives_the_scan() {
   // A screen that invites no court press keeps its whole hold.
   const bridgelogic::ScreenId reading[] = {bridgelogic::ScreenId::CodeUsed, bridgelogic::ScreenId::SeeTheDesk,
                                            bridgelogic::ScreenId::ScanAgain,
-                                           bridgelogic::ScreenId::ChooseTime};
+                                           bridgelogic::ScreenId::MinutesLeft};
   for (const bridgelogic::ScreenId id : reading) {
-    TEST_ASSERT_FALSE(bridgelogic::invitesCourtPress(id));
+    TEST_ASSERT_FALSE(bridgelogic::invitesPress(id));
     TEST_ASSERT_EQUAL_UINT16(bridgelogic::screenFor(id, facts, settings).holdSeconds,
                              bridgelogic::screenFor(id, facts, settings, 400UL).holdSeconds);
   }
@@ -4759,6 +4762,199 @@ void test_a_fraction_or_exponent_in_a_mega_setting_is_drift_and_keeps_the_value(
   }
 }
 
+/// BR-08: a busy or unreachable server is not an unknown member.
+void test_a_server_that_decided_nothing_is_never_read_as_not_recognised(void) {
+  TEST_ASSERT_TRUE(bridgelogic::missFor(0U) == bridgelogic::OnlineMiss::Unreachable);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(429U) == bridgelogic::OnlineMiss::Busy);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(500U) == bridgelogic::OnlineMiss::Busy);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(503U) == bridgelogic::OnlineMiss::Busy);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(200U) == bridgelogic::OnlineMiss::Busy);
+  TEST_ASSERT_TRUE(bridgelogic::missFor(401U) == bridgelogic::OnlineMiss::Refused);
+
+  court::Outcome unknown;
+  unknown.action = court::Action::Refuse;
+  unknown.recognised = false;
+  court::detail::setLine(unknown.line1, "NOT RECOGNISED");
+  court::detail::setLine(unknown.line2, "SEE THE DESK");
+
+  court::Outcome o = unknown;
+  TEST_ASSERT_TRUE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(429U), true));
+  TEST_ASSERT_EQUAL_STRING("BUSY", o.line1);
+  TEST_ASSERT_EQUAL_STRING("SCAN AGAIN", o.line2);
+  TEST_ASSERT_FALSE(o.recognised);
+  o = unknown;
+  TEST_ASSERT_TRUE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), true));
+  TEST_ASSERT_EQUAL_STRING("NO CONNECTION", o.line1);
+  TEST_ASSERT_EQUAL_STRING("BOOKINGS ONLY", o.line2);
+  o = unknown;
+  TEST_ASSERT_TRUE(bridgelogic::explainNoDecision(o, bridgelogic::OnlineMiss::NotAsked, true));
+  TEST_ASSERT_EQUAL_STRING("NO CONNECTION", o.line1);
+
+  // Not a possible member (a stale roster, a wrong code): untouched.
+  o = unknown;
+  TEST_ASSERT_FALSE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), false));
+  TEST_ASSERT_EQUAL_STRING("NOT RECOGNISED", o.line1);
+  // A grant or a recognised refusal: untouched.
+  o = unknown;
+  o.recognised = true;
+  TEST_ASSERT_FALSE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), true));
+  o = unknown;
+  o.action = court::Action::TurnOn;
+  TEST_ASSERT_FALSE(bridgelogic::explainNoDecision(o, bridgelogic::missFor(0U), true));
+}
+
+/// BR-09 / DL-07: CHOOSE TIME and EXTEND:PICK TIME are held to the scan's
+/// life, and the window is re-armed for exactly that long — never longer, and
+/// a scan with nothing left shuts it.
+void test_a_duration_prompt_lives_no_longer_than_the_scan_and_rearms_the_window(void) {
+  bridgelogic::ScreenFacts facts;
+  devlink::LcdSettings settings;
+  settings.choiceMs = 20000UL;
+  settings.scanMemoryMs = 30000UL;
+  const bridgelogic::ScreenId prompts[] = {bridgelogic::ScreenId::ChooseTime,
+                                           bridgelogic::ScreenId::ExtendPrompt};
+  for (const bridgelogic::ScreenId id : prompts) {
+    TEST_ASSERT_EQUAL_UINT16(20U, bridgelogic::screenFor(id, facts, settings, 60000UL).holdSeconds);
+    TEST_ASSERT_EQUAL_UINT16(7U, bridgelogic::screenFor(id, facts, settings, 7999UL).holdSeconds);
+    const bridgelogic::Screen spent = bridgelogic::screenFor(id, facts, settings, 0UL);
+    TEST_ASSERT_EQUAL_STRING("SCAN WHEN READY", spent.rows[3]);
+  }
+
+  bridgelogic::AuthPolicy auth(30000UL);
+  court::Outcome noBooking;
+  noBooking.recognised = true;
+  TEST_ASSERT_TRUE(auth.afterScan(noBooking, 1000U) == bridgelogic::AuthCommand::Arm);
+  // The `!AUTH` after the scan was lost; the court press re-arms for what the
+  // scan has left (here 8 s), not the whole TTL.
+  TEST_ASSERT_TRUE(auth.coverScan(8000UL, 23000U) == bridgelogic::AuthCommand::Arm);
+  TEST_ASSERT_EQUAL_UINT32(8000UL, auth.remainingMs(23000U));
+  TEST_ASSERT_TRUE(auth.armed(30999U));
+  TEST_ASSERT_FALSE(auth.armed(31000U));
+  TEST_ASSERT_TRUE(auth.coverScan(0UL, 31000U) == bridgelogic::AuthCommand::Disarm);
+  TEST_ASSERT_EQUAL_UINT32(0UL, auth.remainingMs(31000U));
+}
+
+/// FSF-06 / MCV1-02: an online re-grant of a court this box already had lit
+/// keeps the scan, and the pad is pre-selected so the next black button is an
+/// extension of that court — never a loop on SCAN TO EXTEND.
+void test_a_rescan_on_the_members_own_lit_court_keeps_the_scan_for_an_extension(void) {
+  court::Outcome grant;
+  grant.action = court::Action::TurnOn;
+  grant.court = 1U;
+  grant.recognised = true;
+  grant.durationMs = 1800000UL;
+  TEST_ASSERT_TRUE(bridgelogic::regrantsLitCourt(grant, true));
+  // A court that was dark is a new game: the grant spends the scan as before.
+  TEST_ASSERT_FALSE(bridgelogic::regrantsLitCourt(grant, false));
+  court::Outcome refusal;
+  refusal.recognised = true;
+  TEST_ASSERT_FALSE(bridgelogic::regrantsLitCourt(refusal, true));
+  grant.court = bridgelogic::kStateCourts;
+  TEST_ASSERT_FALSE(bridgelogic::regrantsLitCourt(grant, true));
+
+  court::ButtonMap map;
+  court::WalkUpPad pad(20000UL);
+  pad.select(1U, 5000U);
+  TEST_ASSERT_TRUE(pad.hasSelection());
+  // Button 4 is the first black button (15 min) on the default map.
+  TEST_ASSERT_TRUE(pad.press(map, 4U, 9000U) == court::PadResult::Requested);
+  TEST_ASSERT_EQUAL_UINT8(1U, pad.intent().court);
+  TEST_ASSERT_EQUAL_UINT16(15U, pad.intent().minutes);
+  // And the selection lapses on its own like a pressed one.
+  pad.select(2U, 10000U);
+  TEST_ASSERT_TRUE(pad.press(map, 4U, 30000U) == court::PadResult::Ignored);
+}
+
+/// BR-11: one deadline for the whole call. Each phase gets half of what is
+/// left, so connect + status line end by the deadline; the call ends inside
+/// the six-second wait screen; a 401 retry only starts with time to finish.
+void test_a_whole_http_call_ends_inside_the_wait_screen(void) {
+  TEST_ASSERT_TRUE(bridgelogic::kCallBudgetMs + 200UL <
+                   static_cast<uint32_t>(bridgelogic::kWaitSeconds) * 1000UL);
+  const bridgelogic::CallBudget budget(0xFFFFF000UL, bridgelogic::kCallBudgetMs); // across the wrap
+  TEST_ASSERT_EQUAL_UINT32(bridgelogic::kCallBudgetMs, budget.remainingMs(0xFFFFF000UL));
+  TEST_ASSERT_EQUAL_UINT16(2000U, budget.phaseTimeoutMs(0xFFFFF000UL));
+  // A server that stalls in the connect for its whole phase leaves the status
+  // line only half of the rest: never more than the deadline in total.
+  const uint32_t afterConnect = 0xFFFFF000UL + 2000UL;
+  TEST_ASSERT_EQUAL_UINT16(1000U, budget.phaseTimeoutMs(afterConnect));
+  TEST_ASSERT_TRUE(budget.allowsAttempt(afterConnect));
+  TEST_ASSERT_FALSE(budget.allowsAttempt(0xFFFFF000UL + 3500UL));
+  TEST_ASSERT_FALSE(budget.expired(0xFFFFF000UL + 3999UL));
+  TEST_ASSERT_TRUE(budget.expired(0xFFFFF000UL + 4000UL));
+  TEST_ASSERT_EQUAL_UINT16(1U, budget.phaseTimeoutMs(0xFFFFF000UL + 9000UL));
+}
+
+/// BR-14: a grant and the refusals whose words name a designed screen paint
+/// that 4-row screen; rows 0-1 stay the 16-column safe subset, so compact
+/// reads them whole. A refusal carrying a number no designed screen holds keeps
+/// its two lines.
+void test_grants_and_refusals_paint_their_designed_four_row_screens(void) {
+  struct Case {
+    const char* l1;
+    const char* l2;
+    bridgelogic::ScreenId id;
+  };
+
+  const Case cases[] = {
+      {"NO BOOKING", "SEE THE DESK", bridgelogic::ScreenId::NoBooking},
+      {"TOO FEW MINUTES", "BUY & RETRY", bridgelogic::ScreenId::InsufficientBalance},
+      {"SLOT ENDED", "SEE THE DESK", bridgelogic::ScreenId::SlotEnded},
+      {"CODE USED", "WAIT 30 SECONDS", bridgelogic::ScreenId::CodeUsed},
+      {"NOT RECOGNISED", "SEE THE DESK", bridgelogic::ScreenId::NotRecognised},
+      {"NO CONNECTION", "BOOKINGS ONLY", bridgelogic::ScreenId::NoConnection},
+      {"SEE THE DESK", "", bridgelogic::ScreenId::SeeTheDesk},
+  };
+  for (const Case& c : cases) {
+    court::Outcome o;
+    court::detail::setLine(o.line1, c.l1);
+    court::detail::setLine(o.line2, c.l2);
+    bridgelogic::ScreenFacts facts;
+    bridgelogic::ScreenId id = bridgelogic::ScreenId::Grant;
+    TEST_ASSERT_TRUE_MESSAGE(bridgelogic::verdictScreen(o, id, facts), c.l1);
+    TEST_ASSERT_TRUE_MESSAGE(id == c.id, c.l1);
+    const bridgelogic::Screen screen = bridgelogic::screenFor(id, facts);
+    TEST_ASSERT_TRUE_MESSAGE(screen.rows[0][0] != '\0' && screen.rows[3][0] != '\0', c.l1);
+    TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[0]) <= court::kSafeSubsetCols, c.l1);
+    TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[1]) <= court::kSafeSubsetCols, c.l1);
+  }
+
+  court::Outcome grant;
+  grant.action = court::Action::TurnOn;
+  grant.court = 2U;
+  grant.durationMs = 2700000UL;
+  bridgelogic::ScreenFacts facts;
+  bridgelogic::ScreenId id = bridgelogic::ScreenId::SeeTheDesk;
+  TEST_ASSERT_TRUE(bridgelogic::verdictScreen(grant, id, facts));
+  TEST_ASSERT_TRUE(id == bridgelogic::ScreenId::Grant);
+  const bridgelogic::Screen g = bridgelogic::screenFor(id, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT C IS ON", g.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("45 MINUTES", g.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME", g.rows[3]);
+
+  // Numbers and courts the designed screens cannot hold: the two lines stand.
+  const char* const twoLine[][2] = {{"TOO EARLY", "WAIT 12 MIN"},
+                                    {"WRONG COURT", "YOU ARE ON B"},
+                                    {"BUSY", "SCAN AGAIN"},
+                                    {"NO CONNECTION", "SEE THE DESK"},
+                                    {"TRY AGAIN", "SCAN TO START"}};
+  for (const auto& lines : twoLine) {
+    court::Outcome o;
+    court::detail::setLine(o.line1, lines[0]);
+    court::detail::setLine(o.line2, lines[1]);
+    TEST_ASSERT_FALSE_MESSAGE(bridgelogic::verdictScreen(o, id, facts), lines[0]);
+  }
+}
+
+/// FSF-11: a press the pad ignores is still answered on the glass.
+void test_an_ignored_press_is_answered_with_what_comes_first(void) {
+  TEST_ASSERT_TRUE(bridgelogic::pressFirst(true) == bridgelogic::ScreenId::PickCourt);
+  TEST_ASSERT_TRUE(bridgelogic::pressFirst(false) == bridgelogic::ScreenId::ScanFirst);
+  court::ButtonMap map;
+  court::WalkUpPad pad(20000UL);
+  TEST_ASSERT_TRUE(pad.press(map, 4U, 1000U) == court::PadResult::Ignored);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corpus_v3_heartbeat_requests_render_byte_for_byte);
@@ -4899,5 +5095,11 @@ int main(int, char**) {
   RUN_TEST(test_plan_extension_caps_the_relay_and_holds_the_rest_for_relight);
   RUN_TEST(test_a_known_member_with_nothing_booked_is_invited_to_walk_up);
 
+  RUN_TEST(test_a_server_that_decided_nothing_is_never_read_as_not_recognised);
+  RUN_TEST(test_a_duration_prompt_lives_no_longer_than_the_scan_and_rearms_the_window);
+  RUN_TEST(test_a_rescan_on_the_members_own_lit_court_keeps_the_scan_for_an_extension);
+  RUN_TEST(test_a_whole_http_call_ends_inside_the_wait_screen);
+  RUN_TEST(test_grants_and_refusals_paint_their_designed_four_row_screens);
+  RUN_TEST(test_an_ignored_press_is_answered_with_what_comes_first);
   return UNITY_END();
 }

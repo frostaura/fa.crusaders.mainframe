@@ -4,19 +4,20 @@
     "court_bridge": {
       "loop_frame": 208,
       "max_frame": 928,
-      "worst_path": 2656,
+      "worst_path": 2768,
       "measured": {
-        "at": "fix/no-ota-fw (bridge 3.1.0, OTA removed; unchanged)",
+        "at": "fix/bridge-flows (bridge 3.1.0 scan-flow fixes)",
         "loop_frame": 208,
         "max_frame": 928,
-        "worst_path": 2608
+        "worst_path": 2720
       },
       "goal": {
         "loop_frame": 256,
         "max_frame": 512,
         "worst_path": 3000
       },
-      "lowered": "Bridge 3.1.0 moved the lifeline (persistence, the portal, the supervisor) out of loop()'s own frame into functions called from its top, and the heartbeat and reply buffers into one static: loop()'s frame went 928 -> 208 B and the deepest path 3,136 -> 2,608 B, so both budgets were lowered with it."
+      "lowered": "Bridge 3.1.0 moved the lifeline (persistence, the portal, the supervisor) out of loop()'s own frame into functions called from its top, and the heartbeat and reply buffers into one static: loop()'s frame went 928 -> 208 B and the deepest path 3,136 -> 2,608 B, so both budgets were lowered with it.",
+      "raised": "fix/bridge-flows (BR-14): a scan outcome now paints its designed 4-row screen, so applyOutcome calls paintOutcome (a ScreenFacts and a Screen, 176 B) where it called paintLines; the deepest path (scan -> settle -> paint -> MegaTx v2 screen) went 2,608 -> 2,720 B. Still 280 B inside the 3,000 B goal; the new press answers (FSF-11, BR-09) are kept out of handleButton's frame with noinline."
     },
     "door_gate": {
       "loop_frame": 32,

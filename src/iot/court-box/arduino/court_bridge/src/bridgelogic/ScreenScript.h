@@ -376,8 +376,13 @@ proto::Frame screenFrame(const Screen& screen, size_t index);
 /// remembered.
 bool invitesCourtPress(ScreenId id);
 
+/// Whether `id`'s action row asks for ANY press — the court cells or the
+/// duration cells. Both only work while the scan behind them is remembered,
+/// so both are held to its remaining life (BR-09, DL-07).
+bool invitesPress(ScreenId id);
+
 /// The same screen, never inviting a court press past the scan's remaining
-/// life (R19). `scanLeftMs` is the remembered scan's time left
+/// life (R19), and never a duration press either (BR-09). `scanLeftMs` is the remembered scan's time left
 /// (bridgelogic::ScanMemory::remainingMs). A screen with court cells holds at
 /// most the whole seconds of it — the countdown ends no later than the scan,
 /// and the Mega then reverts to its idle screen — and with less than one
@@ -387,6 +392,22 @@ bool invitesCourtPress(ScreenId id);
 /// counting down long after a court press could buy anything.
 Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings,
                  uint32_t scanLeftMs);
+
+/// The designed 4-row screen for a scan's two-line outcome (BR-14): a grant is
+/// Grant (court, minutes), and the refusals whose words name one designed
+/// screen — NO BOOKING, TOO FEW MINUTES, SLOT ENDED, CODE USED, NOT
+/// RECOGNISED, NO CONNECTION / BOOKINGS ONLY, SEE THE DESK — are theirs.
+/// `facts.court` and `facts.minutes` are filled; everything else in `facts`
+/// is the caller's. False for an outcome whose lines carry a number or a
+/// court no designed screen holds (TOO EARLY, WRONG COURT, BUSY, ...): the
+/// caller paints the two lines, which are the 16-column safe subset whatever
+/// the layout.
+bool verdictScreen(const court::Outcome& outcome, ScreenId& id, ScreenFacts& facts);
+
+/// The answer to a press the pad ignored — a black button or OFF with no court
+/// selected, or a button mapped to nothing (FSF-11: every input gets a visible
+/// answer): PICK A COURT when a scan is remembered, SCAN YOUR CODE when not.
+ScreenId pressFirst(bool scanned);
 
 /// Renders one action row: four cells of kActionCellCols columns, taken from
 /// physical buttons `from`..`from+3` of `map`. A SelectCourt cell renders its

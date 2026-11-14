@@ -91,6 +91,7 @@
 #include "arduino_hal/SerialTransport.h"
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/BootId.h"
+#include "bridgelogic/CallBudget.h"
 #include "bridgelogic/EventDrain.h"
 #include "bridgelogic/Extend.h"
 #include "bridgelogic/FaultLog.h"
@@ -180,17 +181,20 @@ namespace {
 /// this ring by interrupt while a call is in flight. The core default is 256
 /// bytes — ~267 ms at 9600 baud — so a scan or an `!EVT,AUTOOFF` release arriving
 /// during a heartbeat or walk-up POST was dropped mid-frame. At 960 bytes/s, this
-/// holds ~4.3 s, which covers a call bounded by kHttpTimeoutMs even if the ring
+/// holds ~4.3 s, which covers a call bounded by bridgelogic::kCallBudgetMs even if the ring
 /// was not freshly drained. It is a mitigation, not a cure: only non-blocking
 /// HTTP removes the window entirely, and a call that exceeds the timeout can
 /// still overrun this. The per-frame cost of an overrun is bounded to one frame
 /// regardless, because the decoder resynchronises on the next delimiter.
 constexpr size_t kMegaRxBufferBytes = 4096U;
 
-/// Blocking HTTP is bounded so the window above stays inside the ring. Shorter
-/// than the core's 5 s default; a genuinely slow response is retried on the next
-/// heartbeat rather than allowed to starve the Mega link for five seconds.
-constexpr uint16_t kHttpTimeoutMs = 4000U;
+/// Blocking HTTP is bounded so the window above stays inside the ring: ONE
+/// budget for the whole call, retry included (bridgelogic::CallBudget, BR-11 —
+/// a per-phase timeout let a stalled server hold the loop three times over). A
+/// genuinely slow response is retried on the next heartbeat rather than allowed
+/// to starve the Mega link.
+static_assert(bridgelogic::kCallBudgetMs * 960UL / 1000UL <= kMegaRxBufferBytes,
+              "the whole-call budget must fit the Mega receive ring at 9600 baud");
 
 /// Bytes drained from the Mega link per pass, matching the UART ring.
 constexpr uint16_t kBytesPerPass = 64U;
@@ -777,6 +781,19 @@ void paintLines(const char* line1, const char* line2) {
   sendAfterGreeting(linesScreen(line1, line2));
 }
 
+/// An outcome as its designed screen (BR-14) — composed for the acknowledged
+/// layout by sendScreen, held to the scan's life by screenNow — or as its two
+/// lines when no designed screen holds what they say. After the greeting.
+__attribute__((noinline)) void paintOutcome(const court::Outcome& outcome, uint32_t nowMs) {
+  bridgelogic::ScreenFacts facts = screenFacts(nowMs);
+  bridgelogic::ScreenId id = bridgelogic::ScreenId::SeeTheDesk;
+  if (bridgelogic::verdictScreen(outcome, id, facts)) {
+    sendAfterGreeting(screenNow(id, facts));
+    return;
+  }
+  paintLines(outcome.line1, outcome.line2);
+}
+
 /// Two lines NOW, whatever was waiting: a failure the member must see.
 void sendLinesNow(const char* line1, const char* line2) {
   sendScreen(linesScreen(line1, line2));
@@ -956,6 +973,24 @@ bool holdForPressAgain(uint32_t nowMs) {
   return true;
 }
 
+/// A screen asking for a press on the remembered scan is about to go up:
+/// re-arm the Mega's window for what is left of the scan (BR-09, DL-07). False
+/// when not a whole second is left — SCAN AGAIN is then on the glass and
+/// nothing may invite a press.
+/// Out of line, like answerIgnoredPress: handleButton's frame is on the
+/// deepest path from loop() and the stack budget gate holds it (ESPR-4).
+__attribute__((noinline)) bool coverScanForPress(uint32_t nowMs) {
+  const uint32_t left = gScan.remainingMs(nowMs);
+  if (left < 1000UL) {
+    scanAgain(nowMs);
+    return false;
+  }
+  if (gAuth.coverScan(left, nowMs) == bridgelogic::AuthCommand::Arm) {
+    static_cast<void>(sendToMega(proto::Frame::auth(static_cast<uint16_t>(left / 1000UL))));
+  }
+  return true;
+}
+
 /// Learns this board's MAC and renders the one header every call carries.
 ///
 /// The MAC is available before the radio associates — it is a fact about the
@@ -1093,8 +1128,9 @@ void noteMegaDiag(const proto::Frame& frame) {
 /// game can leave true (D8-3).
 bool applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   // After the greeting, when one is on the glass (bridge 2.3.0); the relay
-  // below is never held back for it.
-  paintLines(outcome.line1, outcome.line2);
+  // below is never held back for it. The designed 4-row screen where the
+  // outcome names one (BR-14), else its two lines.
+  paintOutcome(outcome, nowMs);
   if (outcome.action != court::Action::TurnOn || outcome.court >= bridgelogic::kStateCourts) {
     return false;
   }
@@ -1129,8 +1165,16 @@ void noteOnlineLit(const court::Outcome& outcome, bool lit, const char* token) {
 /// longer than the relay cap for its `!EXT`. ONE function for the online and
 /// roster paths so the two cannot disagree about any of those. True when an
 /// `!ON` left on this call.
-bool settleScan(const court::Outcome& outcome, uint32_t nowMs) {
+bool settleScan(const court::Outcome& outcome, uint32_t nowMs, bool regrant = false) {
   const bool lit = applyOutcome(outcome, nowMs);
+  if (regrant) {
+    // The member's own lit court, re-granted (FSF-06): the scan stays buyable
+    // for the extension they rescanned for, and the window is bound to the
+    // court so their OFF works too.
+    gRelight.onGrant(outcome, nowMs);
+    applyAuth(gAuth.afterHeldCourtRescan(outcome.court, nowMs));
+    return lit;
+  }
   if (!bridgelogic::scanStaysBuyable(outcome)) {
     // A lit court spends the scan (review H1): the next walk-up must not buy
     // on this member's token. The window is the policy's, below — kept armed
@@ -1150,7 +1194,7 @@ bool settleScan(const court::Outcome& outcome, uint32_t nowMs) {
 /// Forward declarations: the API calls sit together further down, with the
 /// helpers they share. Moving them up to satisfy the compiler would put them
 /// away from the code they belong with.
-bool activateOnline(const char* token);
+bool activateOnline(const char* token, bridgelogic::OnlineMiss& miss);
 void requestWalkUp(const court::WalkUpIntent& intent);
 void requestExtend(const court::WalkUpIntent& intent);
 
@@ -1177,9 +1221,12 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   link.apiDown = gBreaker.open(nowMs);
   link.knownReplay = memcode::knownReplay(frame.arg(0), gStepClock, gKeyRing, gReplay, nowMs);
 
+  // Why the server, if asked, decided nothing — so a member the roster does
+  // not know reads what is true rather than NOT RECOGNISED (BR-08, MCV1-08).
+  bridgelogic::OnlineMiss miss = bridgelogic::OnlineMiss::NotAsked;
   switch (gScanFlow.onScan(link)) {
   case bridgelogic::Attempt::Online:
-    if (activateOnline(frame.arg(0))) {
+    if (activateOnline(frame.arg(0), miss)) {
       return;
     }
     // No decision from the API. The roster's scan, as below.
@@ -1208,8 +1255,9 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
                                 memcode::ReplayRing<bridgelogic::kCourtReplaySlots>>
         codes = {gStepClock, gKeyRing, gReplay, gGuessGuard};
     const bridgelogic::BoxCourts box = {gHeld, gCourtCount, &gOnlineGrants};
-    const bridgelogic::MemberScanResult member =
+    bridgelogic::MemberScanResult member =
         bridgelogic::decideOfflineMemberCode(frame.arg(0), codes, gRoster, gSession, box, now);
+    static_cast<void>(bridgelogic::explainNoDecision(member.outcome, miss, member.couldBeMember));
     if (member.alreadyOn) {
       if (member.scanSpent) {
         // The same code again on the member's own lit court: their OFF works,
@@ -1245,8 +1293,8 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // once more against sixteen entries so the guard sits in front of the event
   // rather than behind it.
   court::Outcome alreadyOn;
-  if (bridgelogic::regrantsHeldCourt(gRoster.decide(frame.arg(0), roster::CourtCount(gCourtCount), now),
-                                     gHeld, alreadyOn)) {
+  const roster::Decision held = gRoster.decide(frame.arg(0), roster::CourtCount(gCourtCount), now);
+  if (bridgelogic::regrantsHeldCourt(held, gHeld, alreadyOn)) {
     static_cast<void>(sendToMega(proto::Frame::lcd(alreadyOn.line1, alreadyOn.line2)));
     // Bound to the lit court: they are the member standing at the panel and
     // their OFF press has to work. The scan itself stays live, so they can
@@ -1255,8 +1303,11 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
 
-  const court::Outcome rostered =
+  court::Outcome rostered =
       gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, now);
+  // A legacy token the roster does not hold may be any member with nothing
+  // booked here; offline, the box cannot tell.
+  static_cast<void>(bridgelogic::explainNoDecision(rostered, miss, held.verdict == roster::Verdict::Unknown));
   if (rostered.recognised) {
     greet(bridgelogic::Greeting(), now);
   }
@@ -1584,6 +1635,12 @@ void handleState(const proto::Frame& frame, uint32_t nowMs) {
 /// the next booking — so it asks. That makes walk-ups the one thing that needs the
 /// network, which is the right way round: refusing to sell new time is a member at
 /// the desk, where refusing a booking they already paid for is a member in the dark.
+/// The glass's answer to a press the pad ignored (FSF-11). Out of line so its
+/// Screen and ScreenFacts stay out of handleButton's frame (ESPR-4).
+__attribute__((noinline)) void answerIgnoredPress(uint32_t nowMs) {
+  sendScreen(screenNow(bridgelogic::pressFirst(gLastScan[0] != '\0'), screenFacts(nowMs)));
+}
+
 void handleButton(const proto::Frame& frame, uint32_t nowMs) {
   // `!BTN` carries a key CHARACTER — 'A'-'D' then '1'-'4' — not a decimal index.
   // The translation lives in lib/court so the corpus tests it; see
@@ -1611,6 +1668,14 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
       gExtendCourt = kNoExtend;
       sendScreen(
           screenNow(lit ? bridgelogic::ScreenId::MinutesLeft : bridgelogic::ScreenId::ScanFirst, facts));
+      return;
+    }
+    // Both screens ask for a black button, which needs the scan AND the
+    // Mega's window: held to the scan's life (screenNow), the window re-armed
+    // for exactly that long so a lost `!AUTH` cannot strand the press, and
+    // with no second of scan left the glass asks for a fresh one (BR-09,
+    // DL-07).
+    if (!coverScanForPress(nowMs)) {
       return;
     }
     if (lit) {
@@ -1653,6 +1718,10 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
   case court::PadResult::Ignored:
+    // A black button (or OFF) with no court selected was answered by
+    // nothing, and the Mega's 1.5 s hint said ONE MOMENT about a press that
+    // was never going anywhere (FSF-11). Say what comes first.
+    answerIgnoredPress(nowMs);
     return;
   }
 }
@@ -1773,11 +1842,10 @@ __attribute__((noinline)) void pumpMegaLink(uint32_t nowMs) {
 /// refused before a byte is read — EMPTY, NOT HALF. A response cut mid-object
 /// is a body whose readers see whichever fields landed inside the buffer.
 /// Reads from `stream` into `out` until `want` bytes, the server closes, or
-/// kHttpTimeoutMs passes. Returns the bytes read.
-size_t readUpTo(WiFiClient* stream, char* out, size_t want) {
+/// the call's whole budget runs out (BR-11). Returns the bytes read.
+size_t readUpTo(WiFiClient* stream, char* out, size_t want, const bridgelogic::CallBudget& budget) {
   size_t got = 0U;
-  const uint32_t startedAt = millis();
-  while (stream != nullptr && got < want && millis() - startedAt < kHttpTimeoutMs) {
+  while (stream != nullptr && got < want && !budget.expired(gClock.nowMs())) {
     const int avail = stream->available();
     if (avail <= 0) {
       if (!stream->connected()) {
@@ -1799,12 +1867,13 @@ size_t readUpTo(WiFiClient* stream, char* out, size_t want) {
 /// The body's length in `out`, or 0 — EMPTY, NOT HALF — when its declared
 /// length is at or past the buffer, it was cut short, or an undeclared body
 /// is longer than the buffer.
-size_t readBody(WiFiClient* stream, int declared, char* out, size_t outCap) {
+size_t readBody(WiFiClient* stream, int declared, char* out, size_t outCap,
+                const bridgelogic::CallBudget& budget) {
   if (declared >= 0 && static_cast<size_t>(declared) >= outCap) {
     return 0U;
   }
   const size_t want = declared < 0 ? outCap - 1U : static_cast<size_t>(declared);
-  const size_t got = readUpTo(stream, out, want);
+  const size_t got = readUpTo(stream, out, want, budget);
   if (declared >= 0 && got != static_cast<size_t>(declared)) {
     return 0U; // cut short: nothing, never half
   }
@@ -1814,7 +1883,11 @@ size_t readBody(WiFiClient* stream, int declared, char* out, size_t outCap) {
   return got;
 }
 
-int postOnce(const char* url, const char* body, char* out, size_t outCap, bool readRefusal) {
+/// One POST inside `budget` (BR-11): the client's per-phase timeout is half of
+/// what is left, so the connect and the status line together end by the
+/// deadline, and the body read stops at it.
+int postOnce(const char* url, const char* body, char* out, size_t outCap, bool readRefusal,
+             const bridgelogic::CallBudget& budget) {
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) {
@@ -1822,7 +1895,7 @@ int postOnce(const char* url, const char* body, char* out, size_t outCap, bool r
   }
   http.useHTTP10(true);
   http.setReuse(false);
-  http.setTimeout(kHttpTimeoutMs);
+  http.setTimeout(budget.phaseTimeoutMs(gClock.nowMs()));
   http.addHeader("Content-Type", "application/json");
   http.addHeader(devapi::kHeaderAuthorization, gKeys.header());
   const int status = http.POST(reinterpret_cast<const uint8_t*>(body), strlen(body));
@@ -1831,7 +1904,7 @@ int postOnce(const char* url, const char* body, char* out, size_t outCap, bool r
     out[0] = '\0';
   }
   if (hasOut && (readRefusal || (status >= 200 && status < 300))) {
-    out[readBody(http.getStreamPtr(), http.getSize(), out, outCap)] = '\0';
+    out[readBody(http.getStreamPtr(), http.getSize(), out, outCap, budget)] = '\0';
   }
   http.end();
   return status;
@@ -1879,18 +1952,21 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
   // The heartbeat's request lives in the tail of its own answer buffer, so a
   // refusal's body is not read over it: the 401 retry must resend it whole.
   const bool aliased = out != nullptr && body >= out && body < out + outCap;
-  int status = postOnce(url, body, out, outCap, !aliased);
-  if (status == 401 && gKeys.switchForRetry()) {
+  // ONE deadline for the whole call, retry included (BR-11): it ends inside
+  // the six-second wait screen and inside the Mega receive ring.
+  const bridgelogic::CallBudget budget(gClock.nowMs(), bridgelogic::kCallBudgetMs);
+  int status = postOnce(url, body, out, outCap, !aliased, budget);
+  if (status == 401 && budget.allowsAttempt(gClock.nowMs()) && gKeys.switchForRetry()) {
     // A 401 is as likely a server restored to the old key as a retired one:
     // ONE retry with the other key held, and neither is ever erased (§6).
-    status = postOnce(url, body, out, outCap, !aliased);
+    status = postOnce(url, body, out, outCap, !aliased, budget);
     if (status == 401) {
       gKeys.retryFailed();
     }
   }
   const uint16_t result = status > 0 ? static_cast<uint16_t>(status) : 0U;
   // Every call that actually went to the socket teaches the breaker. A fresh
-  // clock read, because the call may have just spent kHttpTimeoutMs.
+  // clock read, because the call may have just spent its whole budget.
   const uint32_t settledAt = gClock.nowMs();
   const bool wasOpen = gBreaker.open(settledAt);
   gBreaker.onResult(result, settledAt);
@@ -1904,13 +1980,14 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
 /// not be asked or gave no decision, in which case the caller falls back to
 /// the roster. The interpretation is bridgelogic::ScanFlow's; this owns the
 /// socket and the one side effect it cannot see: the Mega.
-bool activateOnline(const char* token) {
+bool activateOnline(const char* token, bridgelogic::OnlineMiss& miss) {
   // Its own wait screen: OneMoment says "Buying your time", which is the
   // walk-up's sentence and false here (D8-2).
   showScreen(bridgelogic::kActivateWaitScreen, gClock.nowMs());
 
   char body[bridgelogic::kActivateBodyCap];
   if (bridgelogic::renderActivateBody(body, sizeof(body), gMacHex, token, scanAgeMs()) == 0U) {
+    miss = bridgelogic::OnlineMiss::Refused;
     return false;
   }
 
@@ -1926,6 +2003,7 @@ bool activateOnline(const char* token) {
   const bridgelogic::ActivationResult decision =
       gScanFlow.onActivateResponse(status, response, strlen(response), gCourtNumbers, gCourtCount);
   if (decision.fallbackToRoster) {
+    miss = bridgelogic::missFor(status);
     return false;
   }
   // Sampled AFTER the blocking call, not at the top of the pass: the held-since
@@ -1944,8 +2022,22 @@ bool activateOnline(const char* token) {
     bridgelogic::readGreeting(response, strlen(response), greeting);
     greet(greeting, gClock.nowMs());
   }
-  const bool lit = settleScan(decision.outcome, gClock.nowMs());
+  const bool regrant =
+      bridgelogic::regrantsLitCourt(decision.outcome, decision.outcome.court < bridgelogic::kStateCourts &&
+                                                          courtLit(decision.outcome.court, gClock.nowMs()));
+  const bool lit = settleScan(decision.outcome, gClock.nowMs(), regrant);
   noteOnlineLit(decision.outcome, lit, token);
+  if (regrant && lit) {
+    // Straight to the extend prompt for that court, the court already
+    // selected: the next black button extends it (FSF-06, MCV1-02).
+    const uint32_t now = gClock.nowMs();
+    bridgelogic::ScreenFacts facts = screenFacts(now);
+    facts.court = decision.outcome.court;
+    facts.minutes = (courtSecondsLeft(decision.outcome.court, now) + 59U) / 60U;
+    gPad.select(decision.outcome.court, now);
+    gExtendCourt = decision.outcome.court;
+    sendAfterGreeting(screenNow(bridgelogic::ScreenId::ExtendPrompt, facts));
+  }
   if (decision.invitesWalkUp && gLastScan[0] != '\0') {
     // A known member with nothing to light: invite the walk-up instead of
     // NO BOOKING / SEE THE DESK.
