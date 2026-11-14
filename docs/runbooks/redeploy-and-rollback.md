@@ -34,8 +34,10 @@ Portainer. Read the first section every time — it is the part that has gone wr
      changes every member's code;
    - the gateway service names `frostaura/crusaders-mainframe-gateway` and bind-mounts no
      `nginx.conf` (a stack that does keeps its old gateway config through every redeploy);
-   - the file is the current `docker-compose.prod.yml` shape: it has the `backup` and `volume-init`
-     services and the three images read `${CRUSADERS_IMAGE_TAG:-latest}`.
+   - an older stack file still deploys: the backend image hands its own volumes to its
+     unprivileged user, so no new service or value is required. The current
+     `docker-compose.prod.yml` adds the `backup` service and `${CRUSADERS_IMAGE_TAG:-latest}`;
+     carry those across when convenient, never as a precondition of a redeploy.
 4. **Copy the stack file somewhere safe before pressing Update.** A failed Portainer update discards
    the edits you made in the editor, and with them the record of what you changed.
 

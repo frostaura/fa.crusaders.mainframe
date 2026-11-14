@@ -17,8 +17,8 @@ The club's server (Portainer stack, docker-compose.prod.yml)
   │     ├── /api/, /uploads/, /healthz, /readyz → backend:5000
   │     └── /                                    → frontend:80
   ├── frontend      (nginx + React build)
-  ├── backend       (.NET 10, :5000, runs as uid 1654; migrates on start)
-  ├── volume-init   (one-shot: hands the media/biometric volumes to uid 1654)
+  ├── backend       (.NET 10, :5000; its entrypoint hands the media/biometric volumes to uid 1654
+  │                  and drops to it; migrates on start)
   ├── postgres      (16-alpine)
   └── backup        (daily pg_dump + photos to a HOST directory, retention, restore)
   │
@@ -123,7 +123,7 @@ Each carries `sha-<commit>` (immutable, multi-arch, the tag to deploy), `sha-<co
 Third-party images are pinned too — `postgres:16-alpine`, `cloudflare/cloudflared:2026.10.7`, the `nginx:1.31.8-alpine` base of the frontend and gateway, `jcalonso/mailhog:v1.0.1` in development — so a redeploy changes only what this repository changed. Bump them deliberately.
 
 ## Compose files
-`docker-compose.yml` (base) carries six services: `postgres` (16-alpine, `expose: 5432`), `mailhog`, `volume-init`, `backend` (built from `src/backend/Dockerfile`, `expose: 5000`, env from the variables below), `frontend`, and `gateway` (built from `nginx/Dockerfile`, `${GATEWAY_PORT:-8088}:80`, with `nginx.conf` **baked in** as an envsubst template rather than bind-mounted — see *Three images, not two* above). Its network is a pinned `172.29.83.0/24`. Biometric peripheral passthrough on the backend service is commented out until a real driver is selected; the USB device path goes under `devices:` (or `privileged: true` as a last resort). **The API runs as uid 1654, not root**, so a passed-through device node also needs its group under `group_add:`; `volume-init` chowns the two data volumes to 1654 before the backend starts, which is what lets a volume a root backend created keep working.
+`docker-compose.yml` (base) carries five services: `postgres` (16-alpine, `expose: 5432`), `mailhog`, `backend` (built from `src/backend/Dockerfile`, `expose: 5000`, env from the variables below), `frontend`, and `gateway` (built from `nginx/Dockerfile`, `${GATEWAY_PORT:-8088}:80`, with `nginx.conf` **baked in** as an envsubst template rather than bind-mounted — see *Three images, not two* above). Its network is a pinned `172.29.83.0/24`. Biometric peripheral passthrough on the backend service is commented out until a real driver is selected; the USB device path goes under `devices:` (or `privileged: true` as a last resort). **The API runs as uid 1654, not root**, so a passed-through device node also needs its group under `group_add:`; `volume-init` chowns the two data volumes to 1654 before the backend starts, which is what lets a volume a root backend created keep working.
 
 `docker-compose.onprem.yml` (overlay, optional) moves the backend to `network_mode: host`, points Postgres and MailHog at loopback, binds Kestrel to two addresses rather than all of them, gives the gateway `extra_hosts: backend:host-gateway`, adds the backup service and log rotation, and sends mail to the relay `.env` names. The header of that file is the operational note for whoever applies it, including why it is now a choice rather than a requirement.
 
