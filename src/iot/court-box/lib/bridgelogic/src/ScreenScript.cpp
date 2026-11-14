@@ -647,7 +647,7 @@ bool verdictScreen(const court::Outcome& outcome, ScreenId& id, ScreenFacts& fac
     }
     id = ScreenId::Grant;
     facts.court = outcome.court;
-    facts.minutes = (outcome.durationMs + 59999UL) / 60000UL;
+    facts.minutes = static_cast<uint32_t>((outcome.durationMs + 59999UL) / 60000UL);
     return true;
   }
 
