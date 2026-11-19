@@ -1,0 +1,13 @@
+// /etc/polkit-1/rules.d/50-court-brain-wifi.rules
+//
+// Lets the `court` user (court-brain) join a WiFi network through
+// NetworkManager — how the server's runtime `net` (device-api.md §8) still
+// moves the box to a new access point without a visit. Nothing else.
+polkit.addRule(function (action, subject) {
+  if (subject.user === "court" &&
+      (action.id === "org.freedesktop.NetworkManager.network-control" ||
+       action.id === "org.freedesktop.NetworkManager.settings.modify.system" ||
+       action.id === "org.freedesktop.NetworkManager.wifi.scan")) {
+    return polkit.Result.YES;
+  }
+});

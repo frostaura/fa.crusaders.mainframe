@@ -1,0 +1,44 @@
+# Crusaders court box on a Raspberry Pi — court-io, the Mega's role: relays,
+# buttons, LCD, scanner, the independent auto-off timer.
+#
+# The safety chain this unit is part of (docs/specs/court-box-pi.md §5):
+#   ExecStartPre / ExecStopPost  `court-io --release`: every relay line an
+#                                input, whatever the previous process left.
+#   WatchdogSec=2                a loop pass that does not return in 2 s is
+#                                killed and restarted (the Mega's 2 s WDT).
+#   Restart=always, no limit     a court box that gives up restarting is a
+#                                court box that stopped timing courts out.
+[Unit]
+Description=Crusaders court box — I/O (relays, buttons, LCD, scanner)
+After=local-fs.target
+Before=court-brain.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=court
+Group=court
+SupplementaryGroups=gpio i2c dialout
+ExecStartPre=/usr/local/bin/court-io --release
+ExecStart=/usr/local/bin/court-io
+ExecStopPost=/usr/local/bin/court-io --release
+Restart=always
+RestartSec=1
+WatchdogSec=2
+TimeoutStartSec=10
+# /run/court-box: the link socket and the restart marker. Preserved across a
+# restart (the marker is how !BOOT tells a watchdog restart from a power-on),
+# wiped by a reboot because /run is tmpfs.
+RuntimeDirectory=court-box
+RuntimeDirectoryMode=0770
+RuntimeDirectoryPreserve=yes
+# The relay timer outranks everything else on the box.
+Nice=-10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

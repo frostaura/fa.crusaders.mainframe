@@ -1,0 +1,544 @@
+<title>Court Box on Raspberry Pi</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a wiring sheet — one reading column, drawings break out wider, wire colours carry meaning everywhere. */
+:root {
+  --bg: #f2f5f3; --surface: #ffffff; --ink: #17201d; --muted: #56645e; --line: #c7d1cc; --accent: #0d6b5f;
+  --w-relay: #c2362b; --w-btn: #2b7a34; --w-dur: #2a2f2d; --w-i2c: #1d5bbd; --w-uart: #a77a06; --w-power: #cf6a12; --w-3v3: #8a4fc0; --w-led: #b0407a;
+  --mains: #fbeaea; --warn: #a3261c; --ok: #2b7a34; --mid: #a77a06;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1412; --surface: #151e1b; --ink: #e3ece8; --muted: #9aaba4; --line: #2d3b36; --accent: #45bba9;
+  --w-relay: #ff6d5e; --w-btn: #62c66f; --w-dur: #c9d3cf; --w-i2c: #74a6ff; --w-uart: #e8b73f; --w-power: #f49a4a; --w-3v3: #c08cf0; --w-led: #f07ab4;
+  --mains: #2b1715; --warn: #ff8a7e; --ok: #62c66f; --mid: #e8b73f; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e1412; --surface: #151e1b; --ink: #e3ece8; --muted: #9aaba4; --line: #2d3b36; --accent: #45bba9;
+  --w-relay: #ff6d5e; --w-btn: #62c66f; --w-dur: #c9d3cf; --w-i2c: #74a6ff; --w-uart: #e8b73f; --w-power: #f49a4a; --w-3v3: #c08cf0; --w-led: #f07ab4;
+  --mains: #2b1715; --warn: #ff8a7e; --ok: #62c66f; --mid: #e8b73f; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--f-body); }
+.wrap { max-width: 1200px; margin: 0 auto; padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 44px; }
+.col { max-width: 72ch; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 700; }
+h2 { font-size: 26px; font-weight: 600; }
+h3 { font-size: 17px; font-weight: 600; }
+p { margin: 0; }
+section { display: grid; gap: 14px; min-width: 0; }
+.eyebrow { font: 500 12px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.lede { font-size: 17px; color: var(--muted); max-width: 70ch; }
+.status { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.tag { font: 500 12px/1 var(--f-mono); padding: 6px 9px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
+.tag b { color: var(--accent); font-weight: 500; }
+figure { margin: 0; display: grid; gap: 10px; min-width: 0; }
+.draw { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.draw svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.draw.small svg { min-width: 620px; }
+figcaption { color: var(--muted); font-size: 14px; max-width: 80ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 22px; height: 3px; display: inline-block; border-radius: 2px; }
+/* svg vocabulary */
+svg text { fill: var(--ink); }
+.lbl { font: 12px var(--f-body); }
+.tiny { font: 11px var(--f-body); fill: var(--muted); }
+.pin { font: 10.5px var(--f-mono); }
+.mono { font: 11.5px var(--f-mono); }
+.ptitle { font: 600 12.5px var(--f-display); }
+.psub { font: 10.5px var(--f-body); fill: var(--muted); }
+.pititle { font: 700 16px var(--f-display); }
+.rowlbl { font: 600 13px var(--f-display); fill: var(--accent); }
+.warn { font: 600 11px var(--f-mono); fill: var(--warn); letter-spacing: .05em; }
+.pnum { font: 500 10px var(--f-mono); fill: var(--bg); pointer-events: none; }
+.part { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; }
+.part.new { stroke: var(--accent); stroke-width: 1.8; }
+.part.proc { stroke: var(--accent); stroke-width: 1.6; }
+.part.sysd { stroke-dasharray: 5 3; }
+.pi { fill: var(--bg); stroke: var(--accent); stroke-width: 2.2; }
+.bound { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.mains { fill: var(--mains); stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 6 4; }
+.fuse { fill: var(--surface); stroke: var(--w-power); stroke-width: 1.5; }
+.node { fill: var(--w-relay); }
+.sw { fill: var(--surface); stroke: var(--ink); stroke-width: 1.3; }
+.sw-lever { stroke: var(--ink); stroke-width: 1.6; fill: none; }
+.coil, .lamp { fill: var(--surface); stroke: var(--warn); stroke-width: 1.4; }
+.led { fill: var(--w-led); }
+.timer { fill: var(--surface); stroke: var(--w-relay); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.lane { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 3 4; fill: none; }
+.ahead { fill: var(--ink); }
+[class^="w-"] { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.w-relay { stroke: var(--w-relay); } .w-btn { stroke: var(--w-btn); } .w-dur { stroke: var(--w-dur); }
+.w-i2c { stroke: var(--w-i2c); } .w-uart { stroke: var(--w-uart); } .w-power { stroke: var(--w-power); }
+.w-3v3 { stroke: var(--w-3v3); } .w-led { stroke: var(--w-led); } .w-gnd { stroke: var(--ink); stroke-width: 1.6; }
+.w-ac { stroke: var(--warn); stroke-width: 1.5; } .w-link { stroke: var(--ink); stroke-width: 1.6; }
+.w-map { stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 4 4; } .w-dash { stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 4 3; }
+/* header */
+.hdrboard { fill: #1f5c3a; }
+:root[data-theme="dark"] .hdrboard { fill: #173f29; }
+.hpin { cursor: pointer; }
+.hpin rect { stroke: var(--surface); stroke-width: 1.5; }
+.hpin:hover rect, .hpin:focus rect, .hpin.on rect { stroke: #fff; stroke-width: 3; }
+.hpin:focus { outline: none; }
+.pin-relay { fill: var(--w-relay); background: var(--w-relay); } .pin-btn { fill: var(--w-btn); background: var(--w-btn); }
+.pin-dur { fill: #3a403e; background: #3a403e; } .pin-i2c { fill: var(--w-i2c); background: var(--w-i2c); }
+.pin-uart { fill: var(--w-uart); background: var(--w-uart); } .pin-pwr { fill: var(--w-power); background: var(--w-power); }
+.pin-3v3 { fill: var(--w-3v3); background: var(--w-3v3); } .pin-led { fill: var(--w-led); background: var(--w-led); }
+.pin-gnd { fill: #0b0f0d; background: #0b0f0d; } .pin-free { fill: #8d9893; background: #8d9893; }
+.pinpanel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); gap: 16px; align-items: start; }
+.detail { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 4px; padding: 14px 16px; display: grid; gap: 6px; min-height: 130px; }
+.detail .big { font: 600 22px var(--f-display); }
+.detail .kv { font: 13px var(--f-mono); color: var(--muted); }
+@media (max-width: 760px) { .pinpanel { grid-template-columns: 1fr; } }
+/* tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--bg); position: sticky; top: 0; }
+tr:last-child td { border-bottom: 0; }
+td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.hl td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.chip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: 0; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters button { font: 500 12px var(--f-mono); padding: 6px 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.filters button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.filters button:focus-visible, .hpin:focus-visible rect { outline: 2px solid var(--accent); }
+.sev { display: inline-block; font: 600 11px var(--f-mono); padding: 3px 7px; border-radius: 3px; white-space: nowrap; }
+.sev.dark { color: var(--ok); border: 1px solid var(--ok); } .sev.timer { color: var(--mid); border: 1px solid var(--mid); } .sev.wd { color: var(--warn); border: 1px solid var(--warn); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+ol, ul { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; overflow-wrap: anywhere; }
+.note { border-left: 3px solid var(--warn); padding: 10px 14px; background: var(--mains); border-radius: 0 4px 4px 0; max-width: 80ch; }
+@media (prefers-reduced-motion: no-preference) { .hpin rect { transition: stroke-width .12s; } }
+</style>
+
+<div class="wrap">
+<header style="display:grid;gap:14px">
+  <div class="eyebrow">Crusaders Mainframe · court box · proposal</div>
+  <h1>Court box on a Raspberry Pi</h1>
+  <p class="lede">The WeMos Mega 2560 + ESP8266 board comes out and one Raspberry Pi goes in. Relays, buttons, LCD, scanner and power supply all stay. The Pi runs the court box's existing, tested firmware logic as two Linux processes, so the box behaves exactly as it does today.</p>
+  <div class="status">
+    <span class="tag">court-io = <b>Mega 3.0.0</b> logic</span>
+    <span class="tag">court-brain = <b>bridge 3.1.0</b> logic</span>
+    <span class="tag">serial protocol <b>v3</b>, unchanged</span>
+    <span class="tag">device API <b>v3</b>, unchanged</span>
+  </div>
+</header>
+
+<section>
+  <div class="eyebrow">What changes</div>
+  <h2>Two chips become two processes</h2>
+  <p class="col">The Mega kept the lights safe when the ESP crashed because they were separate chips. On the Pi they are separate processes with no shared memory, talking the same v3 bytes over a Unix socket instead of Serial3. The C++ under <code>court-box/lib</code> and <code>court_bridge/main.cpp</code> is compiled as-is; only the hardware layer is new.</p>
+  <figure>
+    <div class="draw small"><svg viewBox="0 0 1000 250" role="img" aria-label="Today the Mega and the ESP8266 are two chips joined by Serial3; on the Pi they become two processes joined by a Unix socket carrying the same bytes.">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ahead"/></marker><marker id="ahs" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" class="ahead"/></marker></defs>
+<text x="20" y="54" class="rowlbl" text-anchor="start">Today</text><rect x="150" y="20" width="220" height="64" rx="4" class="part"/><text x="260.0" y="48.0" class="ptitle" text-anchor="middle">ATmega2560</text><text x="260.0" y="64.0" class="psub" text-anchor="middle">I/O + independent timer</text><path class="w-link" d="M370 52 H570" marker-end="url(#ah)" marker-start="url(#ahs)"/><text x="470" y="44" class="tiny" text-anchor="middle">Serial3 · 9600 · DIP 1,2</text><rect x="570" y="20" width="220" height="64" rx="4" class="part"/><text x="680.0" y="48.0" class="ptitle" text-anchor="middle">ESP8266</text><text x="680.0" y="64.0" class="psub" text-anchor="middle">brain · WiFi</text><path class="w-link" d="M790 52 H960" marker-end="url(#ah)"/><text x="875" y="44" class="tiny" text-anchor="middle">WiFi · HTTP</text><text x="968" y="56" class="ptitle" text-anchor="start">API</text>
+<text x="20" y="194" class="rowlbl" text-anchor="start">On the Pi</text><rect x="150" y="160" width="220" height="64" rx="4" class="part"/><text x="260.0" y="188.0" class="ptitle" text-anchor="middle">court-io process</text><text x="260.0" y="204.0" class="psub" text-anchor="middle">same courtlogic source</text><path class="w-link" d="M370 192 H570" marker-end="url(#ah)" marker-start="url(#ahs)"/><text x="470" y="184" class="tiny" text-anchor="middle">Unix socket · same v3 bytes</text><rect x="570" y="160" width="220" height="64" rx="4" class="part"/><text x="680.0" y="188.0" class="ptitle" text-anchor="middle">court-brain process</text><text x="680.0" y="204.0" class="psub" text-anchor="middle">same bridge 3.1.0 source</text><path class="w-link" d="M790 192 H960" marker-end="url(#ah)"/><text x="875" y="184" class="tiny" text-anchor="middle">WiFi or Ethernet</text><text x="968" y="196" class="ptitle" text-anchor="start">API</text>
+<path class="w-map" d="M260 84 V160"/><path class="w-map" d="M680 84 V160"/>
+<text x="270" y="126" class="tiny" text-anchor="start">chip → process</text><text x="690" y="126" class="tiny" text-anchor="start">chip → process</text>
+</svg></div>
+    <figcaption>The dashed lines are the whole port: each chip's source becomes one process. DIP switches and the Serial3 wire disappear; nothing above the hardware layer changes.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="eyebrow">Electrical</div>
+  <h2>Wiring schematic</h2>
+  <p class="col">The Pi's GPIO is 3.3 V and not 5 V tolerant, so every 5 V part reaches it through an interface: a BSS138 shifter for the LCD and scanner, a 74AHCT125 buffer for the SSR inputs. Buttons switch to ground and use the Pi's own pull-ups, as on the Mega.</p>
+  <div class="legend">
+    <span><i style="background:var(--w-relay)"></i>relay drive</span><span><i style="background:var(--w-btn)"></i>court buttons</span><span><i style="background:var(--w-dur)"></i>duration buttons</span>
+    <span><i style="background:var(--w-i2c)"></i>I²C (LCD)</span><span><i style="background:var(--w-uart)"></i>UART (scanner)</span><span><i style="background:var(--w-power)"></i>5 V</span><span><i style="background:var(--w-3v3)"></i>3.3 V</span><span><i style="background:var(--warn)"></i>mains side</span>
+  </div>
+  <figure>
+    <div class="draw"><svg viewBox="0 0 1200 770" role="img" aria-label="Wiring schematic: power to the Pi, level shifter to LCD and scanner, eight buttons to ground, four relay GPIOs through pull-downs and a 74AHCT125 buffer to the SSRs, which switch contactor coils on the mains side.">
+<rect x="20" y="20" width="150" height="56" rx="4" class="part"/><text x="95.0" y="44.0" class="ptitle" text-anchor="middle">Mean Well PSU</text><text x="95.0" y="60.0" class="psub" text-anchor="middle">existing</text>
+<path class="w-power" d="M170 48 H200"/><rect x="200" y="42" width="34" height="12" class="fuse"/><text x="217" y="36" class="tiny" text-anchor="middle">F 3 A</text><path class="w-power" d="M234 48 H260"/>
+<rect x="260" y="20" width="150" height="56" rx="4" class="part new"/><text x="335.0" y="44.0" class="ptitle" text-anchor="middle">5.1 V 3 A buck</text><text x="335.0" y="60.0" class="psub" text-anchor="middle">new · Pi only</text>
+<path class="w-power" d="M410 48 H540 V170"/><text x="548" y="162" class="tiny" text-anchor="start">USB-C pigtail</text>
+<path class="w-power" d="M95 76 V120 H1000"/><text x="600" y="113" class="tiny" text-anchor="start">5 V rail · existing fused LM2596 (LCD, scanner, buffer)</text>
+<path class="w-gnd" d="M20 750 H1180"/><text x="24" y="765" class="tiny" text-anchor="start">GND · common to PSU, rails and Pi</text>
+<rect x="440" y="170" width="200" height="530" rx="8" class="pi"/>
+<text x="540" y="392" class="pititle" text-anchor="middle">Raspberry Pi 4 B</text>
+<text x="540" y="410" class="psub" text-anchor="middle">court-io + court-brain</text>
+<rect x="20" y="200" width="150" height="80" rx="4" class="part"/><text x="95.0" y="236.0" class="ptitle" text-anchor="middle">LCD 2004 / 1602</text><text x="95.0" y="252.0" class="psub" text-anchor="middle">PCF8574 backpack · 5 V</text>
+<rect x="20" y="300" width="150" height="70" rx="4" class="part"/><text x="95.0" y="331.0" class="ptitle" text-anchor="middle">QR scanner</text><text x="95.0" y="347.0" class="psub" text-anchor="middle">TTL UART · 5 V</text>
+<path class="w-power" d="M95 120 V200"/><path class="w-power" d="M10 120 V335 H20"/>
+<path class="w-gnd" d="M40 280 v8 M31 288 h18 M34 292 h12 M37 296 h6"/><path class="w-gnd" d="M40 370 v8 M31 378 h18 M34 382 h12 M37 386 h6"/>
+<rect x="230" y="180" width="130" height="200" rx="4" class="part new"/>
+<text x="295" y="172" class="ptitle" text-anchor="middle">BSS138 level shifter</text>
+<text x="238" y="209" class="pin" text-anchor="start">HV</text><text x="352" y="209" class="pin" text-anchor="end">LV</text>
+<text x="238" y="249" class="pin" text-anchor="start">A1</text><text x="352" y="249" class="pin" text-anchor="end">B1</text>
+<text x="238" y="289" class="pin" text-anchor="start">A2</text><text x="352" y="289" class="pin" text-anchor="end">B2</text>
+<text x="238" y="329" class="pin" text-anchor="start">A3</text><text x="352" y="329" class="pin" text-anchor="end">B3</text>
+<text x="238" y="364" class="pin" text-anchor="start">GND</text><text x="352" y="364" class="pin" text-anchor="end">GND</text>
+<path class="w-power" d="M260 120 V180"/>
+<path class="w-i2c" d="M170 245 H230"/><path class="w-i2c" d="M170 265 H200 V285 H230"/><text x="176" y="240" class="tiny" text-anchor="start">SDA</text><text x="176" y="260" class="tiny" text-anchor="start">SCL</text>
+<path class="w-uart" d="M170 325 H230"/><text x="176" y="320" class="tiny" text-anchor="start">TX</text>
+<path class="w-3v3" d="M360 205 H440"/>
+<path class="w-i2c" d="M360 245 H440"/><path class="w-i2c" d="M360 285 H440"/><path class="w-uart" d="M360 325 H440"/>
+<path class="w-gnd" d="M295 380 V392"/><path class="w-gnd" d="M295 392 v8 M286 400 h18 M289 404 h12 M292 408 h6"/>
+<text x="448" y="209" class="pin" text-anchor="start">p1 3V3</text>
+<text x="448" y="249" class="pin" text-anchor="start">p3 GPIO2 SDA</text>
+<text x="448" y="289" class="pin" text-anchor="start">p5 GPIO3 SCL</text>
+<text x="448" y="329" class="pin" text-anchor="start">p10 GPIO15 RXD</text>
+<path class="w-gnd" d="M250 440 V678"/><path class="w-gnd" d="M250 678 v8 M241 686 h18 M244 690 h12 M247 694 h6"/>
+<path class="w-btn" d="M250 440 H296"/><circle cx="300" cy="440" r="3.5" class="sw"/><circle cx="330" cy="440" r="3.5" class="sw"/><path class="sw-lever" d="M302 438 L328 429"/><path class="w-btn" d="M334 440 H440"/>
+<text x="345" y="435" class="tiny" text-anchor="start">Court A</text>
+<text x="448" y="444" class="pin" text-anchor="start">p29 GPIO5</text>
+<path class="w-btn" d="M250 474 H296"/><circle cx="300" cy="474" r="3.5" class="sw"/><circle cx="330" cy="474" r="3.5" class="sw"/><path class="sw-lever" d="M302 472 L328 463"/><path class="w-btn" d="M334 474 H440"/>
+<text x="345" y="469" class="tiny" text-anchor="start">Court B</text>
+<text x="448" y="478" class="pin" text-anchor="start">p31 GPIO6</text>
+<path class="w-btn" d="M250 508 H296"/><circle cx="300" cy="508" r="3.5" class="sw"/><circle cx="330" cy="508" r="3.5" class="sw"/><path class="sw-lever" d="M302 506 L328 497"/><path class="w-btn" d="M334 508 H440"/>
+<text x="345" y="503" class="tiny" text-anchor="start">Court C</text>
+<text x="448" y="512" class="pin" text-anchor="start">p33 GPIO13</text>
+<path class="w-btn" d="M250 542 H296"/><circle cx="300" cy="542" r="3.5" class="sw"/><circle cx="330" cy="542" r="3.5" class="sw"/><path class="sw-lever" d="M302 540 L328 531"/><path class="w-btn" d="M334 542 H440"/>
+<text x="345" y="537" class="tiny" text-anchor="start">Court D</text>
+<text x="448" y="546" class="pin" text-anchor="start">p35 GPIO19</text>
+<path class="w-dur" d="M250 576 H296"/><circle cx="300" cy="576" r="3.5" class="sw"/><circle cx="330" cy="576" r="3.5" class="sw"/><path class="sw-lever" d="M302 574 L328 565"/><path class="w-dur" d="M334 576 H440"/>
+<text x="345" y="571" class="tiny" text-anchor="start">15 min</text>
+<text x="448" y="580" class="pin" text-anchor="start">p37 GPIO26</text>
+<path class="w-dur" d="M250 610 H296"/><circle cx="300" cy="610" r="3.5" class="sw"/><circle cx="330" cy="610" r="3.5" class="sw"/><path class="sw-lever" d="M302 608 L328 599"/><path class="w-dur" d="M334 610 H440"/>
+<text x="345" y="605" class="tiny" text-anchor="start">30 min</text>
+<text x="448" y="614" class="pin" text-anchor="start">p36 GPIO16</text>
+<path class="w-dur" d="M250 644 H296"/><circle cx="300" cy="644" r="3.5" class="sw"/><circle cx="330" cy="644" r="3.5" class="sw"/><path class="sw-lever" d="M302 642 L328 633"/><path class="w-dur" d="M334 644 H440"/>
+<text x="345" y="639" class="tiny" text-anchor="start">45 min</text>
+<text x="448" y="648" class="pin" text-anchor="start">p38 GPIO20</text>
+<path class="w-dur" d="M250 678 H296"/><circle cx="300" cy="678" r="3.5" class="sw"/><circle cx="330" cy="678" r="3.5" class="sw"/><path class="sw-lever" d="M302 676 L328 667"/><path class="w-dur" d="M334 678 H440"/>
+<text x="345" y="673" class="tiny" text-anchor="start">60 min</text>
+<text x="448" y="682" class="pin" text-anchor="start">p40 GPIO21</text>
+<text x="250" y="428" class="tiny" text-anchor="middle">panel buttons, NO, to GND</text>
+<rect x="740" y="185" width="100" height="215" rx="4" class="part new"/>
+<text x="790" y="178" class="ptitle" text-anchor="middle">74AHCT125</text>
+<path class="w-power" d="M790 120 V185"/><text x="798" y="150" class="tiny" text-anchor="start">VCC 5 V</text>
+<text x="790" y="392" class="tiny" text-anchor="middle">OE̅ → GND</text>
+<path class="w-gnd" d="M820 400 V410"/><path class="w-gnd" d="M820 410 v8 M811 418 h18 M814 422 h12 M817 426 h6"/>
+<rect x="1000" y="180" width="190" height="245" rx="6" class="mains"/>
+<text x="1095" y="198" class="warn" text-anchor="middle">MAINS · electrician only</text>
+<text x="632" y="229" class="pin" text-anchor="end">p11 GPIO17</text>
+<path class="w-relay" d="M640 225 H740"/><circle cx="680" cy="225" r="3" class="node"/>
+<path class="w-relay" d="M680 228 L686 229.83333333333334 L674 233.5 L686 237.16666666666666 L674 240.83333333333334 L686 244.5 L674 248.16666666666666 L680 250" fill="none"/>
+<path class="w-gnd" d="M680 250 v8 M671 258 h18 M674 262 h12 M677 266 h6"/>
+<text x="748" y="229" class="pin" text-anchor="start">1A</text><text x="832" y="229" class="pin" text-anchor="end">1Y</text>
+<path class="w-relay" d="M840 225 H880"/>
+<rect x="880" y="209" width="90" height="32" rx="3" class="part"/><text x="925" y="223" class="ptitle" text-anchor="middle">SSR A</text><text x="925" y="235" class="psub" text-anchor="middle">DC in + / −</text>
+<path class="w-ac" d="M970 225 H1033"/><circle cx="1045" cy="225" r="12" class="coil"/><text x="1045" y="229" class="pin" text-anchor="middle">K1</text>
+<path class="w-ac" d="M1057 225 H1108"/><circle cx="1120" cy="225" r="12" class="lamp"/><path class="w-ac" d="M1112 217 L1128 233 M1128 217 L1112 233"/><path class="w-ac" d="M1132 225 H1180"/>
+<text x="1120" y="250" class="tiny" text-anchor="middle">court 1 lights</text>
+<text x="632" y="279" class="pin" text-anchor="end">p13 GPIO27</text>
+<path class="w-relay" d="M640 275 H740"/><circle cx="680" cy="275" r="3" class="node"/>
+<path class="w-relay" d="M680 278 L686 279.8333333333333 L674 283.5 L686 287.1666666666667 L674 290.8333333333333 L686 294.5 L674 298.1666666666667 L680 300" fill="none"/>
+<path class="w-gnd" d="M680 300 v8 M671 308 h18 M674 312 h12 M677 316 h6"/>
+<text x="748" y="279" class="pin" text-anchor="start">2A</text><text x="832" y="279" class="pin" text-anchor="end">2Y</text>
+<path class="w-relay" d="M840 275 H880"/>
+<rect x="880" y="259" width="90" height="32" rx="3" class="part"/><text x="925" y="273" class="ptitle" text-anchor="middle">SSR B</text><text x="925" y="285" class="psub" text-anchor="middle">DC in + / −</text>
+<path class="w-ac" d="M970 275 H1033"/><circle cx="1045" cy="275" r="12" class="coil"/><text x="1045" y="279" class="pin" text-anchor="middle">K2</text>
+<path class="w-ac" d="M1057 275 H1108"/><circle cx="1120" cy="275" r="12" class="lamp"/><path class="w-ac" d="M1112 267 L1128 283 M1128 267 L1112 283"/><path class="w-ac" d="M1132 275 H1180"/>
+<text x="1120" y="300" class="tiny" text-anchor="middle">court 2 lights</text>
+<text x="632" y="329" class="pin" text-anchor="end">p15 GPIO22</text>
+<path class="w-relay" d="M640 325 H740"/><circle cx="680" cy="325" r="3" class="node"/>
+<path class="w-relay" d="M680 328 L686 329.8333333333333 L674 333.5 L686 337.1666666666667 L674 340.8333333333333 L686 344.5 L674 348.1666666666667 L680 350" fill="none"/>
+<path class="w-gnd" d="M680 350 v8 M671 358 h18 M674 362 h12 M677 366 h6"/>
+<text x="748" y="329" class="pin" text-anchor="start">3A</text><text x="832" y="329" class="pin" text-anchor="end">3Y</text>
+<path class="w-relay" d="M840 325 H880"/>
+<rect x="880" y="309" width="90" height="32" rx="3" class="part"/><text x="925" y="323" class="ptitle" text-anchor="middle">SSR C</text><text x="925" y="335" class="psub" text-anchor="middle">DC in + / −</text>
+<path class="w-ac" d="M970 325 H1033"/><circle cx="1045" cy="325" r="12" class="coil"/><text x="1045" y="329" class="pin" text-anchor="middle">K3</text>
+<path class="w-ac" d="M1057 325 H1108"/><circle cx="1120" cy="325" r="12" class="lamp"/><path class="w-ac" d="M1112 317 L1128 333 M1128 317 L1112 333"/><path class="w-ac" d="M1132 325 H1180"/>
+<text x="1120" y="350" class="tiny" text-anchor="middle">court 3 lights</text>
+<text x="632" y="379" class="pin" text-anchor="end">p16 GPIO23</text>
+<path class="w-relay" d="M640 375 H740"/><circle cx="680" cy="375" r="3" class="node"/>
+<path class="w-relay" d="M680 378 L686 379.8333333333333 L674 383.5 L686 387.1666666666667 L674 390.8333333333333 L686 394.5 L674 398.1666666666667 L680 400" fill="none"/>
+<path class="w-gnd" d="M680 400 v8 M671 408 h18 M674 412 h12 M677 416 h6"/>
+<text x="748" y="379" class="pin" text-anchor="start">4A</text><text x="832" y="379" class="pin" text-anchor="end">4Y</text>
+<path class="w-relay" d="M840 375 H880"/>
+<rect x="880" y="359" width="90" height="32" rx="3" class="part"/><text x="925" y="373" class="ptitle" text-anchor="middle">SSR D</text><text x="925" y="385" class="psub" text-anchor="middle">DC in + / −</text>
+<path class="w-ac" d="M970 375 H1033"/><circle cx="1045" cy="375" r="12" class="coil"/><text x="1045" y="379" class="pin" text-anchor="middle">K4</text>
+<path class="w-ac" d="M1057 375 H1108"/><circle cx="1120" cy="375" r="12" class="lamp"/><path class="w-ac" d="M1112 367 L1128 383 M1128 367 L1112 383"/><path class="w-ac" d="M1132 375 H1180"/>
+<text x="1120" y="400" class="tiny" text-anchor="middle">court 4 lights</text>
+<text x="680" y="432" class="tiny" text-anchor="middle">4 × 10 kΩ pull-downs:</text><text x="680" y="446" class="tiny" text-anchor="middle">dark with no software</text>
+<text x="1095" y="418" class="tiny" text-anchor="middle">Kn = contactor coil (confirm on site)</text>
+<text x="632" y="504" class="pin" text-anchor="end">p18 GPIO24</text>
+<path class="w-led" d="M640 500 H670"/><path class="w-led" d="M670 500 L673.3333333333334 506 L680.0 494 L686.6666666666666 506 L693.3333333333334 494 L700.0 506 L706.6666666666666 494 L710 500" fill="none"/><text x="690" y="490" class="tiny" text-anchor="middle">330 Ω</text>
+<path class="w-led" d="M710 500 H740"/><path class="led" d="M740 491 L740 509 L756 500 Z"/><path class="w-led" d="M756 491 V509 M756 500 H780"/><path class="w-gnd" d="M780 500 v8 M771 508 h18 M774 512 h12 M777 516 h6"/>
+<text x="760" y="528" class="tiny" text-anchor="middle">status LED: lit while any court is</text>
+</svg></div>
+    <figcaption>Teal outlines are new parts. Each relay GPIO has a 10 kΩ pull-down before the buffer, so a Pi that is off, booting or crashed holds every SSR input low and every court dark. The mains side and the contactor assumption carry over unchanged from <code>memory/safety-relays.md</code>: a qualified electrician confirms them.</figcaption>
+  </figure>
+  <div class="note"><b>Polarity is now set by a resistor.</b> The club's SSRs trigger active-high, so the resistors pull down. If an active-low module were ever fitted, swap them to pull-ups and set <code>hw_relay_active_level</code> to low; the box still fails dark.</div>
+</section>
+
+<section>
+  <div class="eyebrow">Header map</div>
+  <h2>Where each wire lands on the 40-pin header</h2>
+  <p class="col">Tap a pin to see what it does and which Mega pin it replaces.</p>
+  <div class="pinpanel">
+    <div class="draw small"><svg viewBox="0 0 760 120" role="img" aria-label="The Pi 40-pin header with each pin coloured by its court-box function." id="hdr">
+<rect x="10" y="22" width="740" height="76" rx="6" class="hdrboard"/>
+<g class="hpin" data-pin="1" tabindex="0"><rect x="18" y="30" width="24" height="24" rx="2" class="pin-3v3"/><text x="30" y="46" class="pnum" text-anchor="middle">1</text></g>
+<g class="hpin" data-pin="2" tabindex="0"><rect x="18" y="66" width="24" height="24" rx="12" class="pin-pwr"/><text x="30" y="82" class="pnum" text-anchor="middle">2</text></g>
+<g class="hpin" data-pin="3" tabindex="0"><rect x="54" y="30" width="24" height="24" rx="12" class="pin-i2c"/><text x="66" y="46" class="pnum" text-anchor="middle">3</text></g>
+<g class="hpin" data-pin="4" tabindex="0"><rect x="54" y="66" width="24" height="24" rx="12" class="pin-pwr"/><text x="66" y="82" class="pnum" text-anchor="middle">4</text></g>
+<g class="hpin" data-pin="5" tabindex="0"><rect x="90" y="30" width="24" height="24" rx="12" class="pin-i2c"/><text x="102" y="46" class="pnum" text-anchor="middle">5</text></g>
+<g class="hpin" data-pin="6" tabindex="0"><rect x="90" y="66" width="24" height="24" rx="12" class="pin-gnd"/><text x="102" y="82" class="pnum" text-anchor="middle">6</text></g>
+<g class="hpin" data-pin="7" tabindex="0"><rect x="126" y="30" width="24" height="24" rx="12" class="pin-free"/><text x="138" y="46" class="pnum" text-anchor="middle">7</text></g>
+<g class="hpin" data-pin="8" tabindex="0"><rect x="126" y="66" width="24" height="24" rx="12" class="pin-uart"/><text x="138" y="82" class="pnum" text-anchor="middle">8</text></g>
+<g class="hpin" data-pin="9" tabindex="0"><rect x="162" y="30" width="24" height="24" rx="12" class="pin-gnd"/><text x="174" y="46" class="pnum" text-anchor="middle">9</text></g>
+<g class="hpin" data-pin="10" tabindex="0"><rect x="162" y="66" width="24" height="24" rx="12" class="pin-uart"/><text x="174" y="82" class="pnum" text-anchor="middle">10</text></g>
+<g class="hpin" data-pin="11" tabindex="0"><rect x="198" y="30" width="24" height="24" rx="12" class="pin-relay"/><text x="210" y="46" class="pnum" text-anchor="middle">11</text></g>
+<g class="hpin" data-pin="12" tabindex="0"><rect x="198" y="66" width="24" height="24" rx="12" class="pin-free"/><text x="210" y="82" class="pnum" text-anchor="middle">12</text></g>
+<g class="hpin" data-pin="13" tabindex="0"><rect x="234" y="30" width="24" height="24" rx="12" class="pin-relay"/><text x="246" y="46" class="pnum" text-anchor="middle">13</text></g>
+<g class="hpin" data-pin="14" tabindex="0"><rect x="234" y="66" width="24" height="24" rx="12" class="pin-gnd"/><text x="246" y="82" class="pnum" text-anchor="middle">14</text></g>
+<g class="hpin" data-pin="15" tabindex="0"><rect x="270" y="30" width="24" height="24" rx="12" class="pin-relay"/><text x="282" y="46" class="pnum" text-anchor="middle">15</text></g>
+<g class="hpin" data-pin="16" tabindex="0"><rect x="270" y="66" width="24" height="24" rx="12" class="pin-relay"/><text x="282" y="82" class="pnum" text-anchor="middle">16</text></g>
+<g class="hpin" data-pin="17" tabindex="0"><rect x="306" y="30" width="24" height="24" rx="12" class="pin-3v3"/><text x="318" y="46" class="pnum" text-anchor="middle">17</text></g>
+<g class="hpin" data-pin="18" tabindex="0"><rect x="306" y="66" width="24" height="24" rx="12" class="pin-led"/><text x="318" y="82" class="pnum" text-anchor="middle">18</text></g>
+<g class="hpin" data-pin="19" tabindex="0"><rect x="342" y="30" width="24" height="24" rx="12" class="pin-free"/><text x="354" y="46" class="pnum" text-anchor="middle">19</text></g>
+<g class="hpin" data-pin="20" tabindex="0"><rect x="342" y="66" width="24" height="24" rx="12" class="pin-gnd"/><text x="354" y="82" class="pnum" text-anchor="middle">20</text></g>
+<g class="hpin" data-pin="21" tabindex="0"><rect x="378" y="30" width="24" height="24" rx="12" class="pin-free"/><text x="390" y="46" class="pnum" text-anchor="middle">21</text></g>
+<g class="hpin" data-pin="22" tabindex="0"><rect x="378" y="66" width="24" height="24" rx="12" class="pin-free"/><text x="390" y="82" class="pnum" text-anchor="middle">22</text></g>
+<g class="hpin" data-pin="23" tabindex="0"><rect x="414" y="30" width="24" height="24" rx="12" class="pin-free"/><text x="426" y="46" class="pnum" text-anchor="middle">23</text></g>
+<g class="hpin" data-pin="24" tabindex="0"><rect x="414" y="66" width="24" height="24" rx="12" class="pin-free"/><text x="426" y="82" class="pnum" text-anchor="middle">24</text></g>
+<g class="hpin" data-pin="25" tabindex="0"><rect x="450" y="30" width="24" height="24" rx="12" class="pin-gnd"/><text x="462" y="46" class="pnum" text-anchor="middle">25</text></g>
+<g class="hpin" data-pin="26" tabindex="0"><rect x="450" y="66" width="24" height="24" rx="12" class="pin-free"/><text x="462" y="82" class="pnum" text-anchor="middle">26</text></g>
+<g class="hpin" data-pin="27" tabindex="0"><rect x="486" y="30" width="24" height="24" rx="12" class="pin-free"/><text x="498" y="46" class="pnum" text-anchor="middle">27</text></g>
+<g class="hpin" data-pin="28" tabindex="0"><rect x="486" y="66" width="24" height="24" rx="12" class="pin-free"/><text x="498" y="82" class="pnum" text-anchor="middle">28</text></g>
+<g class="hpin" data-pin="29" tabindex="0"><rect x="522" y="30" width="24" height="24" rx="12" class="pin-btn"/><text x="534" y="46" class="pnum" text-anchor="middle">29</text></g>
+<g class="hpin" data-pin="30" tabindex="0"><rect x="522" y="66" width="24" height="24" rx="12" class="pin-gnd"/><text x="534" y="82" class="pnum" text-anchor="middle">30</text></g>
+<g class="hpin" data-pin="31" tabindex="0"><rect x="558" y="30" width="24" height="24" rx="12" class="pin-btn"/><text x="570" y="46" class="pnum" text-anchor="middle">31</text></g>
+<g class="hpin" data-pin="32" tabindex="0"><rect x="558" y="66" width="24" height="24" rx="12" class="pin-free"/><text x="570" y="82" class="pnum" text-anchor="middle">32</text></g>
+<g class="hpin" data-pin="33" tabindex="0"><rect x="594" y="30" width="24" height="24" rx="12" class="pin-btn"/><text x="606" y="46" class="pnum" text-anchor="middle">33</text></g>
+<g class="hpin" data-pin="34" tabindex="0"><rect x="594" y="66" width="24" height="24" rx="12" class="pin-gnd"/><text x="606" y="82" class="pnum" text-anchor="middle">34</text></g>
+<g class="hpin" data-pin="35" tabindex="0"><rect x="630" y="30" width="24" height="24" rx="12" class="pin-btn"/><text x="642" y="46" class="pnum" text-anchor="middle">35</text></g>
+<g class="hpin" data-pin="36" tabindex="0"><rect x="630" y="66" width="24" height="24" rx="12" class="pin-dur"/><text x="642" y="82" class="pnum" text-anchor="middle">36</text></g>
+<g class="hpin" data-pin="37" tabindex="0"><rect x="666" y="30" width="24" height="24" rx="12" class="pin-dur"/><text x="678" y="46" class="pnum" text-anchor="middle">37</text></g>
+<g class="hpin" data-pin="38" tabindex="0"><rect x="666" y="66" width="24" height="24" rx="12" class="pin-dur"/><text x="678" y="82" class="pnum" text-anchor="middle">38</text></g>
+<g class="hpin" data-pin="39" tabindex="0"><rect x="702" y="30" width="24" height="24" rx="12" class="pin-gnd"/><text x="714" y="46" class="pnum" text-anchor="middle">39</text></g>
+<g class="hpin" data-pin="40" tabindex="0"><rect x="702" y="66" width="24" height="24" rx="12" class="pin-dur"/><text x="714" y="82" class="pnum" text-anchor="middle">40</text></g>
+<text x="30" y="15" class="tiny" text-anchor="start">pin 1 · board edge →</text>
+<text x="30" y="116" class="tiny" text-anchor="start">odd pins on top row, even pins below (looking down at the board, USB ports to the right)</text>
+</svg></div>
+    <div class="detail" id="detail" aria-live="polite">
+      <div class="kv">Pin 11</div>
+      <div class="big">GPIO17</div>
+      <div>Relay A → buffer 1A, 10 k to GND</div>
+      <div class="kv">replaces Mega pin D2</div>
+    </div>
+  </div>
+  <div class="filters" role="group" aria-label="Filter pins">
+    <button type="button" id="f-used" data-f="used" aria-pressed="true">In use</button>
+    <button type="button" id="f-all" data-f="all" aria-pressed="false">All 40</button>
+    <button type="button" id="f-relay" data-f="relay" aria-pressed="false">Relays</button>
+    <button type="button" id="f-btn" data-f="btn" aria-pressed="false">Buttons</button>
+    <button type="button" id="f-bus" data-f="bus" aria-pressed="false">LCD + scanner</button>
+  </div>
+  <div class="tbl" style="max-height:440px">
+    <table id="pins"><thead><tr><th>Pin</th><th>Name</th><th>Court box use</th><th>Mega pin</th></tr></thead>
+    <tbody><tr data-pin="1" data-g="3v3"><td class="num">1</td><td><span class="chip pin-3v3"></span>3V3</td><td>Level shifter LV reference</td><td class="num">—</td></tr>
+<tr data-pin="2" data-g="pwr"><td class="num">2</td><td><span class="chip pin-pwr"></span>5V</td><td>Not used: the Pi is fed by USB-C</td><td class="num">—</td></tr>
+<tr data-pin="3" data-g="i2c"><td class="num">3</td><td><span class="chip pin-i2c"></span>GPIO2 SDA</td><td>LCD SDA, through the level shifter</td><td class="num">SDA 20</td></tr>
+<tr data-pin="4" data-g="pwr"><td class="num">4</td><td><span class="chip pin-pwr"></span>5V</td><td>Not used</td><td class="num">—</td></tr>
+<tr data-pin="5" data-g="i2c"><td class="num">5</td><td><span class="chip pin-i2c"></span>GPIO3 SCL</td><td>LCD SCL, through the level shifter</td><td class="num">SCL 21</td></tr>
+<tr data-pin="6" data-g="gnd"><td class="num">6</td><td><span class="chip pin-gnd"></span>GND</td><td>Level shifter + LCD ground</td><td class="num">GND</td></tr>
+<tr data-pin="7" data-g="free"><td class="num">7</td><td><span class="chip pin-free"></span>GPIO4</td><td>Free (1-wire default)</td><td class="num">—</td></tr>
+<tr data-pin="8" data-g="uart"><td class="num">8</td><td><span class="chip pin-uart"></span>GPIO14 TXD</td><td>Scanner RX — optional, never written</td><td class="num">TX2 16</td></tr>
+<tr data-pin="9" data-g="gnd"><td class="num">9</td><td><span class="chip pin-gnd"></span>GND</td><td>Scanner ground</td><td class="num">GND</td></tr>
+<tr data-pin="10" data-g="uart"><td class="num">10</td><td><span class="chip pin-uart"></span>GPIO15 RXD</td><td>Scanner TX, through the level shifter</td><td class="num">RX2 17</td></tr>
+<tr data-pin="11" data-g="relay"><td class="num">11</td><td><span class="chip pin-relay"></span>GPIO17</td><td>Relay A → buffer 1A, 10 k to GND</td><td class="num">D2</td></tr>
+<tr data-pin="12" data-g="free"><td class="num">12</td><td><span class="chip pin-free"></span>GPIO18</td><td>Free</td><td class="num">—</td></tr>
+<tr data-pin="13" data-g="relay"><td class="num">13</td><td><span class="chip pin-relay"></span>GPIO27</td><td>Relay B → buffer 2A, 10 k to GND</td><td class="num">D3</td></tr>
+<tr data-pin="14" data-g="gnd"><td class="num">14</td><td><span class="chip pin-gnd"></span>GND</td><td>74AHCT125 ground</td><td class="num">GND</td></tr>
+<tr data-pin="15" data-g="relay"><td class="num">15</td><td><span class="chip pin-relay"></span>GPIO22</td><td>Relay C → buffer 3A, 10 k to GND</td><td class="num">D4</td></tr>
+<tr data-pin="16" data-g="relay"><td class="num">16</td><td><span class="chip pin-relay"></span>GPIO23</td><td>Relay D → buffer 4A, 10 k to GND</td><td class="num">D5</td></tr>
+<tr data-pin="17" data-g="3v3"><td class="num">17</td><td><span class="chip pin-3v3"></span>3V3</td><td>Spare 3.3 V</td><td class="num">—</td></tr>
+<tr data-pin="18" data-g="led"><td class="num">18</td><td><span class="chip pin-led"></span>GPIO24</td><td>Status LED via 330 Ω</td><td class="num">D13</td></tr>
+<tr data-pin="19" data-g="free"><td class="num">19</td><td><span class="chip pin-free"></span>GPIO10</td><td>Free (SPI0)</td><td class="num">—</td></tr>
+<tr data-pin="20" data-g="gnd"><td class="num">20</td><td><span class="chip pin-gnd"></span>GND</td><td>LED ground</td><td class="num">GND</td></tr>
+<tr data-pin="21" data-g="free"><td class="num">21</td><td><span class="chip pin-free"></span>GPIO9</td><td>Free (SPI0)</td><td class="num">—</td></tr>
+<tr data-pin="22" data-g="free"><td class="num">22</td><td><span class="chip pin-free"></span>GPIO25</td><td>Spare — a future hardware dead-man</td><td class="num">—</td></tr>
+<tr data-pin="23" data-g="free"><td class="num">23</td><td><span class="chip pin-free"></span>GPIO11</td><td>Free (SPI0)</td><td class="num">—</td></tr>
+<tr data-pin="24" data-g="free"><td class="num">24</td><td><span class="chip pin-free"></span>GPIO8</td><td>Free (SPI0)</td><td class="num">—</td></tr>
+<tr data-pin="25" data-g="gnd"><td class="num">25</td><td><span class="chip pin-gnd"></span>GND</td><td>Spare ground</td><td class="num">GND</td></tr>
+<tr data-pin="26" data-g="free"><td class="num">26</td><td><span class="chip pin-free"></span>GPIO7</td><td>Free (SPI0)</td><td class="num">—</td></tr>
+<tr data-pin="27" data-g="free"><td class="num">27</td><td><span class="chip pin-free"></span>ID_SD</td><td>HAT EEPROM — never use</td><td class="num">—</td></tr>
+<tr data-pin="28" data-g="free"><td class="num">28</td><td><span class="chip pin-free"></span>ID_SC</td><td>HAT EEPROM — never use</td><td class="num">—</td></tr>
+<tr data-pin="29" data-g="btn"><td class="num">29</td><td><span class="chip pin-btn"></span>GPIO5</td><td>Court A button (green), to GND</td><td class="num">D22</td></tr>
+<tr data-pin="30" data-g="gnd"><td class="num">30</td><td><span class="chip pin-gnd"></span>GND</td><td>Button common</td><td class="num">GND</td></tr>
+<tr data-pin="31" data-g="btn"><td class="num">31</td><td><span class="chip pin-btn"></span>GPIO6</td><td>Court B button (green)</td><td class="num">D24</td></tr>
+<tr data-pin="32" data-g="free"><td class="num">32</td><td><span class="chip pin-free"></span>GPIO12</td><td>Free</td><td class="num">—</td></tr>
+<tr data-pin="33" data-g="btn"><td class="num">33</td><td><span class="chip pin-btn"></span>GPIO13</td><td>Court C button (green)</td><td class="num">D26</td></tr>
+<tr data-pin="34" data-g="gnd"><td class="num">34</td><td><span class="chip pin-gnd"></span>GND</td><td>Button common</td><td class="num">GND</td></tr>
+<tr data-pin="35" data-g="btn"><td class="num">35</td><td><span class="chip pin-btn"></span>GPIO19</td><td>Court D button (green)</td><td class="num">D28</td></tr>
+<tr data-pin="36" data-g="dur"><td class="num">36</td><td><span class="chip pin-dur"></span>GPIO16</td><td>30 min button (black)</td><td class="num">D32</td></tr>
+<tr data-pin="37" data-g="dur"><td class="num">37</td><td><span class="chip pin-dur"></span>GPIO26</td><td>15 min button (black)</td><td class="num">D30</td></tr>
+<tr data-pin="38" data-g="dur"><td class="num">38</td><td><span class="chip pin-dur"></span>GPIO20</td><td>45 min button (black)</td><td class="num">D34</td></tr>
+<tr data-pin="39" data-g="gnd"><td class="num">39</td><td><span class="chip pin-gnd"></span>GND</td><td>Button common</td><td class="num">GND</td></tr>
+<tr data-pin="40" data-g="dur"><td class="num">40</td><td><span class="chip pin-dur"></span>GPIO21</td><td>60 min button (black)</td><td class="num">D36</td></tr></tbody></table>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Software</div>
+  <h2>Inside the Pi</h2>
+  <figure>
+    <div class="draw"><svg viewBox="0 0 1100 430" role="img" aria-label="Inside the Pi: court-io owns GPIO, I2C and UART and talks to court-brain over a Unix socket; court-brain owns the SD-card records and calls the API; systemd watches both and feeds the SoC watchdog.">
+<defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ahead"/></marker></defs>
+<rect x="190" y="20" width="700" height="390" rx="10" class="bound"/><text x="206" y="42" class="rowlbl" text-anchor="start">Raspberry Pi · Linux</text>
+<rect x="20" y="70" width="140" height="36" rx="4" class="part"/><text x="90" y="93" class="ptitle" text-anchor="middle">4 relay GPIOs</text>
+<path class="w-relay" d="M160 88 H230" marker-end="url(#ah2)"/>
+<rect x="20" y="122" width="140" height="36" rx="4" class="part"/><text x="90" y="145" class="ptitle" text-anchor="middle">8 button GPIOs</text>
+<path class="w-btn" d="M160 140 H230" marker-end="url(#ah2)"/>
+<rect x="20" y="174" width="140" height="36" rx="4" class="part"/><text x="90" y="197" class="ptitle" text-anchor="middle">I2C1 → LCD</text>
+<path class="w-i2c" d="M160 192 H230" marker-end="url(#ah2)"/>
+<rect x="20" y="226" width="140" height="36" rx="4" class="part"/><text x="90" y="249" class="ptitle" text-anchor="middle">UART0 ← scanner</text>
+<path class="w-uart" d="M160 244 H230" marker-end="url(#ah2)"/>
+<rect x="230" y="60" width="270" height="210" rx="6" class="part proc"/>
+<text x="365" y="84" class="pititle" text-anchor="middle">court-io</text>
+<text x="246" y="110" class="mono" text-anchor="start">courtlogic::CourtBox (unchanged)</text>
+<text x="246" y="134" class="mono" text-anchor="start">RelayGuard · 90-min hard cap</text>
+<text x="246" y="158" class="mono" text-anchor="start">ButtonPanel · debounce</text>
+<text x="246" y="182" class="mono" text-anchor="start">ScanAssembler · baud auto-detect</text>
+<text x="246" y="206" class="mono" text-anchor="start">ScreenBuffer · landing, deadlines</text>
+<text x="246" y="230" class="mono" text-anchor="start">linux_hal: gpio-cdev, i2c-dev, tty</text>
+<rect x="610" y="60" width="260" height="210" rx="6" class="part proc"/>
+<text x="740" y="84" class="pititle" text-anchor="middle">court-brain</text>
+<text x="626" y="110" class="mono" text-anchor="start">court_bridge/main.cpp 3.1.0 (unchanged)</text>
+<text x="626" y="134" class="mono" text-anchor="start">bridgelogic · scan flow · walk-up</text>
+<text x="626" y="158" class="mono" text-anchor="start">roster + member-code offline</text>
+<text x="626" y="182" class="mono" text-anchor="start">event queue · key ring · net</text>
+<text x="626" y="206" class="mono" text-anchor="start">compat/: Arduino, WiFi, HTTP, FS</text>
+<text x="626" y="230" class="mono" text-anchor="start"></text>
+<path class="w-link" d="M500 150 H610" marker-end="url(#ah2)"/><path class="w-link" d="M610 180 H500" marker-end="url(#ah2)"/>
+<text x="555" y="140" class="tiny" text-anchor="middle">!ON !RW !CMT</text><text x="555" y="198" class="tiny" text-anchor="middle">!SCAN !BTN !EVT</text>
+<text x="555" y="222" class="tiny" text-anchor="middle">link.sock</text>
+<path class="w-link" d="M870 130 H1080" marker-end="url(#ah2)"/><text x="975" y="120" class="tiny" text-anchor="middle">POST heartbeat · activate</text><text x="975" y="150" class="tiny" text-anchor="middle">walkup · extend · events</text>
+<rect x="960" y="170" width="120" height="50" rx="4" class="part"/><text x="1020" y="192" class="ptitle" text-anchor="middle">Crusaders API</text><text x="1020" y="208" class="psub" text-anchor="middle">/api/v1/device/*</text>
+<rect x="640" y="300" width="230" height="44" rx="4" class="part"/><text x="755" y="320" class="mono" text-anchor="middle">/var/lib/court-box/brain</text><text x="755" y="336" class="psub" text-anchor="middle">records · fsync on every write</text>
+<path class="w-link" d="M740 270 V300" marker-end="url(#ah2)"/>
+<rect x="230" y="300" width="380" height="90" rx="4" class="part sysd"/><text x="420" y="322" class="ptitle" text-anchor="middle">systemd</text>
+<text x="246" y="344" class="mono" text-anchor="start">court-io  WatchdogSec=2 · ExecStopPost --release</text>
+<text x="246" y="362" class="mono" text-anchor="start">court-brain  WatchdogSec=30 · Restart=always</text>
+<text x="246" y="380" class="mono" text-anchor="start">SoC watchdog  RuntimeWatchdogSec=15</text>
+<path class="w-dash" d="M350 300 V270" marker-end="url(#ah2)"/><path class="w-dash" d="M610 320 H630 V270" marker-end="url(#ah2)"/>
+<text x="355" y="290" class="tiny" text-anchor="start">kick / restart</text>
+</svg></div>
+    <figcaption>court-io owns every pin and the auto-off timer; court-brain owns the network and the SD-card records. systemd restarts either one independently, and the SoC watchdog resets the board if Linux itself stops.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="eyebrow">Flow</div>
+  <h2>From a scan to a lit court and back to dark</h2>
+  <figure>
+    <div class="draw"><svg viewBox="0 0 1000 600" role="img" aria-label="Sequence from a QR scan to a lit court and back to dark: scanner bytes, !SCAN, POST activate, grant, !ON, GPIO high, then the court-io timer releases the relay and posts the event.">
+<defs><marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ahead"/></marker></defs>
+<rect x="10" y="14" width="120" height="30" rx="4" class="part"/><text x="70" y="34" class="ptitle" text-anchor="middle">Member</text>
+<path class="lane" d="M70 44 V585"/>
+<rect x="170" y="14" width="120" height="30" rx="4" class="part"/><text x="230" y="34" class="ptitle" text-anchor="middle">Scanner</text>
+<path class="lane" d="M230 44 V585"/>
+<rect x="340" y="14" width="120" height="30" rx="4" class="part"/><text x="400" y="34" class="ptitle" text-anchor="middle">court-io</text>
+<path class="lane" d="M400 44 V585"/>
+<rect x="520" y="14" width="120" height="30" rx="4" class="part"/><text x="580" y="34" class="ptitle" text-anchor="middle">court-brain</text>
+<path class="lane" d="M580 44 V585"/>
+<rect x="700" y="14" width="120" height="30" rx="4" class="part"/><text x="760" y="34" class="ptitle" text-anchor="middle">API</text>
+<path class="lane" d="M760 44 V585"/>
+<rect x="870" y="14" width="120" height="30" rx="4" class="part"/><text x="930" y="34" class="ptitle" text-anchor="middle">Relay C</text>
+<path class="lane" d="M930 44 V585"/>
+<path class="w-link" d="M70 80 H224" marker-end="url(#ah3)"/>
+<text x="150.0" y="73" class="tiny" text-anchor="middle">shows QR code</text>
+<path class="w-uart" d="M230 126 H394" marker-end="url(#ah3)"/>
+<text x="315.0" y="119" class="tiny" text-anchor="middle">bytes on UART0 (9600, auto-detected)</text>
+<path class="w-link" d="M400 172 H574" marker-end="url(#ah3)"/>
+<text x="490.0" y="165" class="tiny" text-anchor="middle">!SCAN,&lt;token&gt;  (framed by ScanAssembler)</text>
+<path class="w-link" d="M580 218 H754" marker-end="url(#ah3)"/>
+<text x="670.0" y="211" class="tiny" text-anchor="middle">POST /activate {mac, method:qr, token}</text>
+<path class="w-link" d="M760 264 H586" marker-end="url(#ah3)"/>
+<text x="670.0" y="257" class="tiny" text-anchor="middle">200 {granted_seconds, greeting_name}</text>
+<path class="w-link" d="M580 310 H406" marker-end="url(#ah3)"/>
+<text x="490.0" y="303" class="tiny" text-anchor="middle">!ON,C,&lt;secs&gt; tagged → !ACK</text>
+<path class="w-relay" d="M400 356 H924" marker-end="url(#ah3)"/>
+<text x="665.0" y="349" class="tiny" text-anchor="middle">GPIO22 → output HIGH: SSR closes</text>
+<path class="w-i2c" d="M400 402 H76" marker-end="url(#ah3)"/>
+<text x="235.0" y="395" class="tiny" text-anchor="middle">LCD: HI DEAN / COURT C IS ON</text>
+<rect x="340" y="434" width="120" height="40" rx="4" class="timer"/><text x="400" y="452" class="tiny" text-anchor="middle">RelayGuard timer</text><text x="400" y="466" class="tiny" text-anchor="middle">runs out (court-io)</text>
+<path class="w-relay" d="M400 498 H924" marker-end="url(#ah3)"/><text x="665" y="491" class="tiny" text-anchor="middle">GPIO22 → input: pull-down, SSR opens, court dark</text>
+<path class="w-link" d="M400 538 H574" marker-end="url(#ah3)"/><text x="490" y="531" class="tiny" text-anchor="middle">!EVT,OFF</text>
+<path class="w-link" d="M580 544 H754" marker-end="url(#ah3)"/><text x="670" y="560" class="tiny" text-anchor="middle">POST /events (queued if offline)</text>
+</svg></div>
+    <figcaption>Run end to end on the bench build: a stub API granted 6 s, court C closed, and court-io released it on time. Offline, court-brain answers the same scan from its cached roster or the offline member code and sends the same <code>!ON</code>.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="eyebrow">Failure chain</div>
+  <h2>What keeps a court from burning</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>What fails</th><th>What happens</th><th>Lights</th></tr></thead>
+      <tbody>
+        <tr><td>court-brain crashes or hangs mid-game</td><td>court-io keeps every court on its own timer and paints OUT OF SERVICE after ~16 s. systemd restarts court-brain; it reconnects and re-reads state. <b>Tested:</b> SIGKILL mid-game, court released on time.</td><td><span class="sev timer">off on timer</span></td></tr>
+        <tr><td>court-io crashes</td><td>systemd runs <code>court-io --release</code> (every relay an input → pull-downs), restarts court-io in 1 s; court-brain re-lights booked courts from the server snapshot, as after a Mega reset.</td><td><span class="sev dark">dark ≤ 1 s</span></td></tr>
+        <tr><td>court-io hangs</td><td><code>WatchdogSec=2</code> kills it, then the same release and restart.</td><td><span class="sev dark">dark ≤ 3 s</span></td></tr>
+        <tr><td>Linux or systemd hangs</td><td>The SoC hardware watchdog resets the board; from reset the SoC pulls relay GPIOs down and <code>config.txt</code> holds them there until court-io starts.</td><td><span class="sev wd">dark ≤ 15 s</span></td></tr>
+        <tr><td>Power cut, SD card dead, Pi removed</td><td>No drive on any relay input; the 10 kΩ pull-downs hold the SSRs open.</td><td><span class="sev dark">dark</span></td></tr>
+        <tr><td>WiFi, server or API down</td><td>Unchanged from today: roster and offline member codes, events queued and fsynced, the 90-minute hard cap.</td><td><span class="sev timer">off on timer</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Parts</div>
+  <h2>What stays, what goes, what's new</h2>
+  <div class="grid2">
+    <div class="card"><h3>Stays</h3><ul><li>Mean Well PSU and the fused LM2596 5 V rail</li><li>4 SSRs and whatever they switch (contactors)</li><li>8 panel buttons (4 green, 4 black)</li><li>LCD 2004/1602 with PCF8574 backpack</li><li>QR scanner, enclosure, glands</li></ul></div>
+    <div class="card"><h3>Goes</h3><ul><li>WeMos Mega 2560 + ESP8266 board</li><li>The 8-way DIP switch and its procedure</li><li>The 9 V rail, if it only fed the Mega</li><li>Arduino IDE flashing at the box</li></ul></div>
+    <div class="card"><h3>New</h3><ul><li>Raspberry Pi 4 Model B 2 GB (Pi 3B+, Zero 2 W or Pi 5 also run it)</li><li>32 GB high-endurance microSD</li><li>Fused 5.1 V 3 A buck + USB-C pigtail</li><li>74AHCT125 quad buffer + 100 nF</li><li>4-channel BSS138 level shifter</li><li>4 × 10 kΩ, 1 × 330 Ω; GPIO screw-terminal breakout</li></ul></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Install</div>
+  <h2>Commissioning order</h2>
+  <ol class="col">
+    <li>Flash Raspberry Pi OS Lite (64-bit) to the card; enable SSH with a key, set the WiFi or plug in Ethernet.</li>
+    <li>Wire the board with the mains isolated. Before connecting the SSRs, check each buffer output reads 0 V with the Pi powered off and booting.</li>
+    <li>Clone the repo on the Pi, copy <code>court-pi/config/common/secrets.h.example</code> to <code>secrets.h</code> and fill in the four values.</li>
+    <li>Run <code>sudo src/iot/court-pi/deploy/install.sh</code>, then reboot.</li>
+    <li>To keep the old box's court numbers and button map, put the ESP8266's MAC in <code>COURT_BRAIN_MAC</code> in <code>/etc/court-box/court-box.env</code>. Never run both boxes at once.</li>
+    <li>Watch <code>journalctl -u court-io -u court-brain -f</code>; the Devices page should show firmware 3.1.0 and Mega 3.0.0 within one heartbeat.</li>
+    <li>Run the go-live bench checks: pull the power mid-game, <code>kill -9</code> each process, confirm every court goes dark or times out as the table above says.</li>
+  </ol>
+</section>
+</div>
+
+<script>
+const PINS = {"1": ["3V3", "3v3", "Level shifter LV reference", "\u2014"], "2": ["5V", "pwr", "Not used: the Pi is fed by USB-C", "\u2014"], "3": ["GPIO2 SDA", "i2c", "LCD SDA, through the level shifter", "SDA 20"], "4": ["5V", "pwr", "Not used", "\u2014"], "5": ["GPIO3 SCL", "i2c", "LCD SCL, through the level shifter", "SCL 21"], "6": ["GND", "gnd", "Level shifter + LCD ground", "GND"], "7": ["GPIO4", "free", "Free (1-wire default)", "\u2014"], "8": ["GPIO14 TXD", "uart", "Scanner RX \u2014 optional, never written", "TX2 16"], "9": ["GND", "gnd", "Scanner ground", "GND"], "10": ["GPIO15 RXD", "uart", "Scanner TX, through the level shifter", "RX2 17"], "11": ["GPIO17", "relay", "Relay A \u2192 buffer 1A, 10 k to GND", "D2"], "12": ["GPIO18", "free", "Free", "\u2014"], "13": ["GPIO27", "relay", "Relay B \u2192 buffer 2A, 10 k to GND", "D3"], "14": ["GND", "gnd", "74AHCT125 ground", "GND"], "15": ["GPIO22", "relay", "Relay C \u2192 buffer 3A, 10 k to GND", "D4"], "16": ["GPIO23", "relay", "Relay D \u2192 buffer 4A, 10 k to GND", "D5"], "17": ["3V3", "3v3", "Spare 3.3 V", "\u2014"], "18": ["GPIO24", "led", "Status LED via 330 \u03a9", "D13"], "19": ["GPIO10", "free", "Free (SPI0)", "\u2014"], "20": ["GND", "gnd", "LED ground", "GND"], "21": ["GPIO9", "free", "Free (SPI0)", "\u2014"], "22": ["GPIO25", "free", "Spare \u2014 a future hardware dead-man", "\u2014"], "23": ["GPIO11", "free", "Free (SPI0)", "\u2014"], "24": ["GPIO8", "free", "Free (SPI0)", "\u2014"], "25": ["GND", "gnd", "Spare ground", "GND"], "26": ["GPIO7", "free", "Free (SPI0)", "\u2014"], "27": ["ID_SD", "free", "HAT EEPROM \u2014 never use", "\u2014"], "28": ["ID_SC", "free", "HAT EEPROM \u2014 never use", "\u2014"], "29": ["GPIO5", "btn", "Court A button (green), to GND", "D22"], "30": ["GND", "gnd", "Button common", "GND"], "31": ["GPIO6", "btn", "Court B button (green)", "D24"], "32": ["GPIO12", "free", "Free", "\u2014"], "33": ["GPIO13", "btn", "Court C button (green)", "D26"], "34": ["GND", "gnd", "Button common", "GND"], "35": ["GPIO19", "btn", "Court D button (green)", "D28"], "36": ["GPIO16", "dur", "30 min button (black)", "D32"], "37": ["GPIO26", "dur", "15 min button (black)", "D30"], "38": ["GPIO20", "dur", "45 min button (black)", "D34"], "39": ["GND", "gnd", "Button common", "GND"], "40": ["GPIO21", "dur", "60 min button (black)", "D36"]};
+const detail = document.getElementById('detail');
+const rows = [...document.querySelectorAll('#pins tbody tr')];
+const gpins = [...document.querySelectorAll('.hpin')];
+function show(p) {
+  const [name, g, use, mega] = PINS[p];
+  detail.innerHTML = '';
+  const add = (cls, text) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; detail.appendChild(d); };
+  add('kv', 'Pin ' + p); add('big', name); add('', use); add('kv', mega === '—' ? 'no Mega counterpart' : 'replaces Mega pin ' + mega);
+  gpins.forEach(e => e.classList.toggle('on', e.dataset.pin === String(p)));
+  rows.forEach(r => r.classList.toggle('hl', r.dataset.pin === String(p)));
+}
+gpins.forEach(e => {
+  e.addEventListener('click', () => show(e.dataset.pin));
+  e.addEventListener('mouseenter', () => show(e.dataset.pin));
+  e.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); show(e.dataset.pin); } });
+});
+rows.forEach(r => r.addEventListener('click', () => show(r.dataset.pin)));
+const groups = { used: g => g !== 'free', all: () => true, relay: g => g === 'relay' || g === 'led', btn: g => g === 'btn' || g === 'dur' || g === 'gnd', bus: g => g === 'i2c' || g === 'uart' || g === '3v3' };
+function filter(f) {
+  document.querySelectorAll('.filters button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.f === f)));
+  rows.forEach(r => { r.hidden = !groups[f](r.dataset.g); });
+}
+document.querySelectorAll('.filters button').forEach(b => b.addEventListener('click', () => filter(b.dataset.f)));
+filter('used'); show('11');
+</script>

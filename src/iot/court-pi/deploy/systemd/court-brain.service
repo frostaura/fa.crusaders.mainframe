@@ -1,0 +1,38 @@
+# Crusaders court box on a Raspberry Pi — court-brain, the ESP8266's role:
+# bridge 3.1.0 (heartbeat, activation, roster, member codes, events, the key
+# ring and the runtime network), talking to court-io over /run/court-box.
+#
+# It may crash, hang in an HTTP call or restart at any time: court-io keeps
+# every court on its own timer, exactly as the Mega did when the ESP reset.
+[Unit]
+Description=Crusaders court box — brain (API, roster, events)
+After=court-io.service network-online.target
+Wants=court-io.service network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=court
+Group=court
+EnvironmentFile=/etc/court-box/court-box.env
+ExecStart=/usr/local/bin/court-brain
+Restart=always
+RestartSec=2
+# One bounded HTTP call can hold a pass for a few seconds (the bridge's call
+# budget); 30 s is a hang, not a slow server.
+WatchdogSec=30
+# /var/lib/court-box/brain: the bridge's LittleFS records (event sequence mark,
+# undelivered events, the last accepted answer, the key ring, the network set).
+StateDirectory=court-box/brain
+StateDirectoryMode=0750
+RuntimeDirectory=court-box
+RuntimeDirectoryMode=0770
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -30,6 +30,7 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
   C++11 as well as C++17** — `court_mega` and `door_gate` alike. `inline constexpr` variables survive as
   a GCC extension; a multi-statement `constexpr` function does not. Only the `arduino-cli compile` step
   in CI catches this; no PlatformIO build can, because PlatformIO unflags the core's standard.
+- **`src/iot/court-pi`** (proposed) — the court box on a Raspberry Pi: a CMake project that compiles `court-box/` and `shared/` **unchanged** into two processes, `court-io` (the Mega's `CourtBox` on Linux GPIO/I²C/UART via `lib/linux_hal`) and `court-brain` (`court_bridge/main.cpp` over the Arduino/ESP compat layer in `compat/`), joined by a Unix socket carrying the v3 serial protocol. It must never fork a court-box source; a call the bridge starts making that `compat/` lacks is meant to fail the Pi build. Spec: `docs/specs/court-box-pi.md`.
 - **`src/contracts/device-protocol`** — the wire-protocol fixture corpus, consumed by *both* the C++ and the
   .NET tests. Neutral ground: neither side may drift from the other without a test going red.
 
