@@ -4,8 +4,8 @@
 // baud auto-detect and the idle-gap line end are courtlogic::ScanAssembler's,
 // unchanged. setBaud() is how that auto-detect moves the port.
 //
-// The path is /dev/serial0 by default (the PL011 on GPIO 14/15 once
-// `dtoverlay=disable-bt` frees it), and any tty works — a scanner on USB is
+// The path is /dev/ttyAMA0 by default (UART0 on GPIO 14/15: `dtparam=uart0=on`
+// on the Pi 5), and any tty works — a scanner on USB is
 // /dev/ttyACM0 and needs no level shifter at all.
 
 #ifndef CRUSADERS_LINUX_HAL_UARTSCANNER_H

@@ -27,10 +27,23 @@ their directories and compiles them, as PlatformIO's `lib_extra_dirs` does.
 
 ## 2. Board
 
-**Raspberry Pi 4 Model B, 2 GB** is the recommendation: Ethernet where a cable reaches the box,
-a robust radio where it does not, and a 3 A supply budget. The software runs unchanged on a
-Pi 3B+, Zero 2 W and Pi 5: the GPIO chip is found by label (`pinctrl-bcm2835`, `-bcm2711`, `-rp1`).
-A Pi 5 needs a 5 A supply.
+**Raspberry Pi 5, 2 GB** is the board (founder, 2026-11-19). Ethernet where a cable reaches the box,
+a robust radio where it does not. 2 GB is far more than both processes use (a few MB each). What the
+Pi 5 changes against the older boards, all handled here:
+
+| Pi 5 fact | What the box does about it |
+|---|---|
+| GPIO lives on the **RP1** I/O controller (`pinctrl-rp1`), `gpiochip0` on 6.6+ kernels, `gpiochip4` on early 6.1 | court-io finds the chip **by label**, never by number |
+| The 40-pin header is pin-for-pin the Pi 4's | the pin map in §3.1 is unchanged |
+| `/dev/serial0` is the separate 3-pin **debug UART** connector, not GPIO 14/15 | the scanner is on **UART0** → `/dev/ttyAMA0`, enabled by `dtparam=uart0=on` |
+| RP1's reset-default pulls are not documented as the BCM2711's are | the box does not rely on them: `config.txt` `gpio=…=ip,pd` from the firmware stage, and the external pull-downs |
+| Wants **5 V 5 A** (27 W) over USB-C PD; on less it caps USB at 600 mA and warns | a fused **5.1 V 5 A** buck into USB-C plus `usb_max_current_enable=1` (no PD to negotiate) |
+| Throttles under sustained heat in a closed box | the **official Active Cooler** (or a vented case with fan); the load is light, but a sealed enclosure in summer is not |
+| Requires Raspberry Pi OS **Bookworm** or later | the install procedure says so |
+| Has an RTC header (`J5`) | optional: a battery there gives a correct clock before the first heartbeat; the bridge does not need it |
+
+The same build still runs on a Pi 4, 3B+ or Zero 2 W (`config.txt` carries a `[pi4]` section), so
+any of them is a usable spare.
 
 ## 3. Electrical
 
@@ -41,7 +54,7 @@ reaches the Pi through an interface:
 |---|---|---|
 | Relays A–D | **74AHCT125** quad buffer at 5 V, `OE̅` to GND, **10 kΩ pull-down on each input** | A 3.3 V-input/5 V-output buffer drives the SSRs as the Mega's 5 V pins did, keeps field wiring off the SoC, and the pull-downs hold every input low whenever no software drives it |
 | LCD SDA / SCL | **BSS138 bidirectional shifter** (HV 5 V, LV 3.3 V) | The PCF8574 backpack pulls its bus up to 5 V, and at 5 V its V<sub>IH</sub> is 3.5 V — above the Pi's 3.3 V high |
-| Scanner TX → Pi RX | third channel of the same shifter | 5 V TTL into a 3.3 V pin. A USB scanner needs no shifter: pass `--scanner /dev/ttyACM0` |
+| Scanner TX → Pi RX | third channel of the same shifter, into UART0 RXD (`/dev/ttyAMA0`) | 5 V TTL into a 3.3 V pin. A USB scanner needs no shifter: pass `--scanner /dev/ttyACM0` |
 | Buttons | none: SoC pull-ups, switch to GND | Same as the Mega (`INPUT_PULLUP`, pressed = LOW); debounce stays in `ButtonPanel` |
 | Status LED | 330 Ω | Lit while any court is lit, as on Mega pin 13 |
 
@@ -54,8 +67,10 @@ module is ever fitted, the resistors become pull-ups and `hw_relay_active_level`
 box still fails dark. court-io keeps the Mega's semantics on the Pi side (released = input with
 bias disabled, `relayDriveFor` unchanged), so a wrong `RPOL` still cannot light a court.
 
-**Power.** The Pi gets its own fused 5.1 V 3 A buck from the Mean Well PSU, into the USB-C socket
-(the header's 5 V pins bypass the Pi's input protection). The existing fused LM2596 5 V rail keeps
+**Power.** The Pi 5 gets its own fused **5.1 V 5 A** buck from the Mean Well PSU, into the USB-C
+socket (the header's 5 V pins bypass the Pi's input protection); check the Mean Well's spare
+capacity covers ~27 W more. A plain buck cannot negotiate USB-PD, so `config.txt` sets
+`usb_max_current_enable=1` to tell the Pi the supply is 5 A. The existing fused LM2596 5 V rail keeps
 feeding the LCD, the scanner, the buffer's VCC and the shifter's HV side. All grounds are common.
 The 9 V rail goes if it only fed the Mega's barrel jack.
 
@@ -71,14 +86,14 @@ BCM GPIO numbers with the 40-pin header's physical pin. The source of truth is
 | 15 / 30 / 45 / 60 min (black) | 30 / 32 / 34 / 36 | 26 / 16 / 20 / 21 | 37 / 36 / 38 / 40 |
 | Status LED | 13 | 24 | 18 |
 | LCD SDA / SCL | 20 / 21 | 2 / 3 (I2C1) | 3 / 5 |
-| Scanner TX → Pi RX | RX2 17 | 15 (UART0 RXD) | 10 |
+| Scanner TX → Pi RX | RX2 17 | 15 (UART0 RXD, `/dev/ttyAMA0`) | 10 |
 | Scanner RX (never written) | TX2 16 | 14 (UART0 TXD) | 8 |
 | 3.3 V reference (shifter LV) | — | — | 1 |
 | GND | — | — | 6, 9, 14, 20, 30, 34, 39 |
 
-Why these pins: every relay GPIO is pulled **down** by the SoC from reset (GPIO 9–27 reset to
-pull-down; 0–8 to pull-up), `config.txt` (`gpio=17,27,22,23=ip,pd`) holds them there from the
-firmware stage, and no pin touches the HAT ID EEPROM (0/1), I2C1 (2/3), 1-wire (4), SPI0 (7–11) or
+Why these pins: on the BCM2711 every relay GPIO is pulled **down** from reset (GPIO 9–27); on the
+Pi 5 that is not relied on — `config.txt` (`gpio=17,27,22,23=ip,pd`) sets pull-down from the
+firmware stage, and the external resistors hold them regardless — and no pin touches the HAT ID EEPROM (0/1), I2C1 (2/3), 1-wire (4), SPI0 (7–11) or
 UART0 (14/15) except for its own purpose. GPIO 25 (pin 22) is left spare for a future hardware
 dead-man if the committee wants one independent of software altogether.
 
@@ -88,7 +103,7 @@ dead-man if the committee wants one independent of software altogether.
 `linux_hal`: `GpioRelay` and `GpioButtons` on the GPIO character device (uAPI v2 — no libgpiod),
 `I2cLcd` (a port of `arduino_hal::LcdDisplay`: the same address probe order, `DisplayHoldoff`
 re-sync, and 8 ms paint budget, with the kernel's I2C timeout in place of Wire's), `UartScanner`
-(termios; `ScanAssembler` still auto-detects the baud), `UnixLinkServer`. Modes: the box; `--bench`
+(termios on `/dev/ttyAMA0`; `ScanAssembler` still auto-detects the baud), `UnixLinkServer`. Modes: the box; `--bench`
 (console relays/LCD, `scan`/`btn` on stdin — the box on a laptop); `--release` (every relay line an
 input, then exit).
 
@@ -124,7 +139,7 @@ holds the network does not — is kept by process isolation plus four layers beh
 | court-brain crashes / hangs | court-io times every court out itself and shows OUT OF SERVICE; systemd restarts court-brain (`WatchdogSec=30`) | off on their timers |
 | court-io crashes | `ExecStopPost=court-io --release` makes every relay line an input; restart in 1 s; court-brain re-lights booked courts from the snapshot as after a Mega reset | dark ≤ 1 s |
 | court-io hangs | `WatchdogSec=2` (the Mega's 2 s WDT) kills it; then as above | dark ≤ 3 s |
-| kernel / systemd hangs | SoC watchdog (`RuntimeWatchdogSec=15`) resets the board; the SoC and `config.txt` pull relay GPIOs down | dark ≤ 15 s |
+| kernel / systemd hangs | SoC watchdog (`RuntimeWatchdogSec=15`, the BCM2712's own) resets the board; the external pull-downs, then `config.txt`, hold relay inputs low through the reboot | dark ≤ 15 s |
 | power, SD card, Pi itself | nothing drives the buffer inputs; the 10 kΩ pull-downs hold the SSRs open | dark |
 
 The Linux GPIO driver leaves a line's direction as it was when its owner exits, which is why the
@@ -132,7 +147,7 @@ release step is explicit (`ExecStartPre` and `ExecStopPost`) rather than assumed
 
 ## 6. Install and migration
 
-See `court-pi/README.md` for the full procedure. In short: Raspberry Pi OS Lite 64-bit; fill in
+See `court-pi/README.md` for the full procedure. In short: Raspberry Pi OS Lite 64-bit (Bookworm or later); fit the Active Cooler; fill in
 `secrets.h`; `sudo src/iot/court-pi/deploy/install.sh`; reboot. The installer builds and runs the
 host tests on the Pi, installs both services, the watchdog configuration, the boot `config.txt`
 block, the polkit rule, and moves the journal to RAM to spare the SD card.
@@ -155,7 +170,8 @@ Verified on a Linux host (this branch):
 
 Owed on the bench before go-live (none of it reachable from a host):
 
-- GPIO, I2C and UART on a real Pi; LCD address probe and re-sync on the real backpack;
+- GPIO, I2C and UART on a real Pi 5 (RP1 found by label, UART0 on `/dev/ttyAMA0`); LCD address probe and re-sync on the real backpack;
+- the Pi 5 under the 5.1 V 5 A buck: no under-voltage or USB-current warning in `vcgencmd get_throttled`, and temperature in the closed box on a warm evening;
 - every buffer output at 0 V with the Pi off, booting, and with court-io stopped;
 - the SSRs' input current against the 74AHCT125's drive (spec 8 mA per output at 5 V; if an SSR
   needs more, a ULN2803-style sink per channel replaces the buffer);

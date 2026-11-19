@@ -1,4 +1,4 @@
-<title>Court Box on Raspberry Pi</title>
+<title>Court Box on Raspberry Pi 5</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -120,8 +120,8 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
 <div class="wrap">
 <header style="display:grid;gap:14px">
   <div class="eyebrow">Crusaders Mainframe · court box · proposal</div>
-  <h1>Court box on a Raspberry Pi</h1>
-  <p class="lede">The WeMos Mega 2560 + ESP8266 board comes out and one Raspberry Pi goes in. Relays, buttons, LCD, scanner and power supply all stay. The Pi runs the court box's existing, tested firmware logic as two Linux processes, so the box behaves exactly as it does today.</p>
+  <h1>Court box on a Raspberry Pi 5</h1>
+  <p class="lede">The WeMos Mega 2560 + ESP8266 board comes out and one Raspberry Pi 5 goes in. Relays, buttons, LCD, scanner and power supply all stay. The Pi runs the court box's existing, tested firmware logic as two Linux processes, so the box behaves exactly as it does today.</p>
   <div class="status">
     <span class="tag">court-io = <b>Mega 3.0.0</b> logic</span>
     <span class="tag">court-brain = <b>bridge 3.1.0</b> logic</span>
@@ -157,13 +157,13 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
   <figure>
     <div class="draw"><svg viewBox="0 0 1200 770" role="img" aria-label="Wiring schematic: power to the Pi, level shifter to LCD and scanner, eight buttons to ground, four relay GPIOs through pull-downs and a 74AHCT125 buffer to the SSRs, which switch contactor coils on the mains side.">
 <rect x="20" y="20" width="150" height="56" rx="4" class="part"/><text x="95.0" y="44.0" class="ptitle" text-anchor="middle">Mean Well PSU</text><text x="95.0" y="60.0" class="psub" text-anchor="middle">existing</text>
-<path class="w-power" d="M170 48 H200"/><rect x="200" y="42" width="34" height="12" class="fuse"/><text x="217" y="36" class="tiny" text-anchor="middle">F 3 A</text><path class="w-power" d="M234 48 H260"/>
-<rect x="260" y="20" width="150" height="56" rx="4" class="part new"/><text x="335.0" y="44.0" class="ptitle" text-anchor="middle">5.1 V 3 A buck</text><text x="335.0" y="60.0" class="psub" text-anchor="middle">new · Pi only</text>
+<path class="w-power" d="M170 48 H200"/><rect x="200" y="42" width="34" height="12" class="fuse"/><text x="217" y="36" class="tiny" text-anchor="middle">F 5 A</text><path class="w-power" d="M234 48 H260"/>
+<rect x="260" y="20" width="150" height="56" rx="4" class="part new"/><text x="335.0" y="44.0" class="ptitle" text-anchor="middle">5.1 V 5 A buck</text><text x="335.0" y="60.0" class="psub" text-anchor="middle">new · Pi 5 only</text>
 <path class="w-power" d="M410 48 H540 V170"/><text x="548" y="162" class="tiny" text-anchor="start">USB-C pigtail</text>
 <path class="w-power" d="M95 76 V120 H1000"/><text x="600" y="113" class="tiny" text-anchor="start">5 V rail · existing fused LM2596 (LCD, scanner, buffer)</text>
 <path class="w-gnd" d="M20 750 H1180"/><text x="24" y="765" class="tiny" text-anchor="start">GND · common to PSU, rails and Pi</text>
 <rect x="440" y="170" width="200" height="530" rx="8" class="pi"/>
-<text x="540" y="392" class="pititle" text-anchor="middle">Raspberry Pi 4 B</text>
+<text x="540" y="392" class="pititle" text-anchor="middle">Raspberry Pi 5</text>
 <text x="540" y="410" class="psub" text-anchor="middle">court-io + court-brain</text>
 <rect x="20" y="200" width="150" height="80" rx="4" class="part"/><text x="95.0" y="236.0" class="ptitle" text-anchor="middle">LCD 2004 / 1602</text><text x="95.0" y="252.0" class="psub" text-anchor="middle">PCF8574 backpack · 5 V</text>
 <rect x="20" y="300" width="150" height="70" rx="4" class="part"/><text x="95.0" y="331.0" class="ptitle" text-anchor="middle">QR scanner</text><text x="95.0" y="347.0" class="psub" text-anchor="middle">TTL UART · 5 V</text>
@@ -268,13 +268,21 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
 </svg></div>
     <figcaption>Teal outlines are new parts. Each relay GPIO has a 10 kΩ pull-down before the buffer, so a Pi that is off, booting or crashed holds every SSR input low and every court dark. The mains side and the contactor assumption carry over unchanged from <code>memory/safety-relays.md</code>: a qualified electrician confirms them.</figcaption>
   </figure>
+  <div class="grid2">
+    <div class="card"><h3>Pi 5 specifics</h3><ul>
+      <li>Scanner on UART0, <code>/dev/ttyAMA0</code>, with <code>dtparam=uart0=on</code>. On a Pi 5, <code>/dev/serial0</code> is the separate debug connector.</li>
+      <li>GPIO is on the RP1 chip; court-io finds it by label, because its number changed between kernels.</li>
+      <li>5.1 V 5 A into USB-C, with <code>usb_max_current_enable=1</code> since a buck cannot negotiate USB-PD.</li>
+      <li>Active Cooler: the load is light, a sealed box in summer is not.</li>
+    </ul></div>
+  </div>
   <div class="note"><b>Polarity is now set by a resistor.</b> The club's SSRs trigger active-high, so the resistors pull down. If an active-low module were ever fitted, swap them to pull-ups and set <code>hw_relay_active_level</code> to low; the box still fails dark.</div>
 </section>
 
 <section>
   <div class="eyebrow">Header map</div>
   <h2>Where each wire lands on the 40-pin header</h2>
-  <p class="col">Tap a pin to see what it does and which Mega pin it replaces.</p>
+  <p class="col">The Pi 5 header is pin-for-pin the Pi 4's. Tap a pin to see what it does and which Mega pin it replaces.</p>
   <div class="pinpanel">
     <div class="draw small"><svg viewBox="0 0 760 120" role="img" aria-label="The Pi 40-pin header with each pin coloured by its court-box function." id="hdr">
 <rect x="10" y="22" width="740" height="76" rx="6" class="hdrboard"/>
@@ -346,7 +354,7 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
 <tr data-pin="7" data-g="free"><td class="num">7</td><td><span class="chip pin-free"></span>GPIO4</td><td>Free (1-wire default)</td><td class="num">—</td></tr>
 <tr data-pin="8" data-g="uart"><td class="num">8</td><td><span class="chip pin-uart"></span>GPIO14 TXD</td><td>Scanner RX — optional, never written</td><td class="num">TX2 16</td></tr>
 <tr data-pin="9" data-g="gnd"><td class="num">9</td><td><span class="chip pin-gnd"></span>GND</td><td>Scanner ground</td><td class="num">GND</td></tr>
-<tr data-pin="10" data-g="uart"><td class="num">10</td><td><span class="chip pin-uart"></span>GPIO15 RXD</td><td>Scanner TX, through the level shifter</td><td class="num">RX2 17</td></tr>
+<tr data-pin="10" data-g="uart"><td class="num">10</td><td><span class="chip pin-uart"></span>GPIO15 RXD</td><td>Scanner TX, through the level shifter (UART0, /dev/ttyAMA0)</td><td class="num">RX2 17</td></tr>
 <tr data-pin="11" data-g="relay"><td class="num">11</td><td><span class="chip pin-relay"></span>GPIO17</td><td>Relay A → buffer 1A, 10 k to GND</td><td class="num">D2</td></tr>
 <tr data-pin="12" data-g="free"><td class="num">12</td><td><span class="chip pin-free"></span>GPIO18</td><td>Free</td><td class="num">—</td></tr>
 <tr data-pin="13" data-g="relay"><td class="num">13</td><td><span class="chip pin-relay"></span>GPIO27</td><td>Relay B → buffer 2A, 10 k to GND</td><td class="num">D3</td></tr>
@@ -386,7 +394,7 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
   <figure>
     <div class="draw"><svg viewBox="0 0 1100 430" role="img" aria-label="Inside the Pi: court-io owns GPIO, I2C and UART and talks to court-brain over a Unix socket; court-brain owns the SD-card records and calls the API; systemd watches both and feeds the SoC watchdog.">
 <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ahead"/></marker></defs>
-<rect x="190" y="20" width="700" height="390" rx="10" class="bound"/><text x="206" y="42" class="rowlbl" text-anchor="start">Raspberry Pi · Linux</text>
+<rect x="190" y="20" width="700" height="390" rx="10" class="bound"/><text x="206" y="42" class="rowlbl" text-anchor="start">Raspberry Pi 5 · Linux</text>
 <rect x="20" y="70" width="140" height="36" rx="4" class="part"/><text x="90" y="93" class="ptitle" text-anchor="middle">4 relay GPIOs</text>
 <path class="w-relay" d="M160 88 H230" marker-end="url(#ah2)"/>
 <rect x="20" y="122" width="140" height="36" rx="4" class="part"/><text x="90" y="145" class="ptitle" text-anchor="middle">8 button GPIOs</text>
@@ -402,7 +410,7 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
 <text x="246" y="158" class="mono" text-anchor="start">ButtonPanel · debounce</text>
 <text x="246" y="182" class="mono" text-anchor="start">ScanAssembler · baud auto-detect</text>
 <text x="246" y="206" class="mono" text-anchor="start">ScreenBuffer · landing, deadlines</text>
-<text x="246" y="230" class="mono" text-anchor="start">linux_hal: gpio-cdev, i2c-dev, tty</text>
+<text x="246" y="230" class="mono" text-anchor="start">linux_hal: RP1 gpio-cdev, i2c-1, ttyAMA0</text>
 <rect x="610" y="60" width="260" height="210" rx="6" class="part proc"/>
 <text x="740" y="84" class="pititle" text-anchor="middle">court-brain</text>
 <text x="626" y="110" class="mono" text-anchor="start">court_bridge/main.cpp 3.1.0 (unchanged)</text>
@@ -496,7 +504,7 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
   <div class="grid2">
     <div class="card"><h3>Stays</h3><ul><li>Mean Well PSU and the fused LM2596 5 V rail</li><li>4 SSRs and whatever they switch (contactors)</li><li>8 panel buttons (4 green, 4 black)</li><li>LCD 2004/1602 with PCF8574 backpack</li><li>QR scanner, enclosure, glands</li></ul></div>
     <div class="card"><h3>Goes</h3><ul><li>WeMos Mega 2560 + ESP8266 board</li><li>The 8-way DIP switch and its procedure</li><li>The 9 V rail, if it only fed the Mega</li><li>Arduino IDE flashing at the box</li></ul></div>
-    <div class="card"><h3>New</h3><ul><li>Raspberry Pi 4 Model B 2 GB (Pi 3B+, Zero 2 W or Pi 5 also run it)</li><li>32 GB high-endurance microSD</li><li>Fused 5.1 V 3 A buck + USB-C pigtail</li><li>74AHCT125 quad buffer + 100 nF</li><li>4-channel BSS138 level shifter</li><li>4 × 10 kΩ, 1 × 330 Ω; GPIO screw-terminal breakout</li></ul></div>
+    <div class="card"><h3>New</h3><ul><li>Raspberry Pi 5, 2 GB (a Pi 4 or 3B+ runs the same build as a spare)</li><li>Official Active Cooler</li><li>32 GB high-endurance microSD</li><li>Fused 5.1 V 5 A buck + USB-C pigtail</li><li>74AHCT125 quad buffer + 100 nF</li><li>4-channel BSS138 level shifter</li><li>4 × 10 kΩ, 1 × 330 Ω; GPIO screw-terminal breakout</li></ul></div>
   </div>
 </section>
 
@@ -504,7 +512,7 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
   <div class="eyebrow">Install</div>
   <h2>Commissioning order</h2>
   <ol class="col">
-    <li>Flash Raspberry Pi OS Lite (64-bit) to the card; enable SSH with a key, set the WiFi or plug in Ethernet.</li>
+    <li>Fit the Active Cooler. Flash Raspberry Pi OS Lite (64-bit, Bookworm or later) to the card; enable SSH with a key, set the WiFi or plug in Ethernet.</li>
     <li>Wire the board with the mains isolated. Before connecting the SSRs, check each buffer output reads 0 V with the Pi powered off and booting.</li>
     <li>Clone the repo on the Pi, copy <code>court-pi/config/common/secrets.h.example</code> to <code>secrets.h</code> and fill in the four values.</li>
     <li>Run <code>sudo src/iot/court-pi/deploy/install.sh</code>, then reboot.</li>
@@ -516,7 +524,7 @@ code { font: 13px var(--f-mono); background: var(--bg); border: 1px solid var(--
 </div>
 
 <script>
-const PINS = {"1": ["3V3", "3v3", "Level shifter LV reference", "\u2014"], "2": ["5V", "pwr", "Not used: the Pi is fed by USB-C", "\u2014"], "3": ["GPIO2 SDA", "i2c", "LCD SDA, through the level shifter", "SDA 20"], "4": ["5V", "pwr", "Not used", "\u2014"], "5": ["GPIO3 SCL", "i2c", "LCD SCL, through the level shifter", "SCL 21"], "6": ["GND", "gnd", "Level shifter + LCD ground", "GND"], "7": ["GPIO4", "free", "Free (1-wire default)", "\u2014"], "8": ["GPIO14 TXD", "uart", "Scanner RX \u2014 optional, never written", "TX2 16"], "9": ["GND", "gnd", "Scanner ground", "GND"], "10": ["GPIO15 RXD", "uart", "Scanner TX, through the level shifter", "RX2 17"], "11": ["GPIO17", "relay", "Relay A \u2192 buffer 1A, 10 k to GND", "D2"], "12": ["GPIO18", "free", "Free", "\u2014"], "13": ["GPIO27", "relay", "Relay B \u2192 buffer 2A, 10 k to GND", "D3"], "14": ["GND", "gnd", "74AHCT125 ground", "GND"], "15": ["GPIO22", "relay", "Relay C \u2192 buffer 3A, 10 k to GND", "D4"], "16": ["GPIO23", "relay", "Relay D \u2192 buffer 4A, 10 k to GND", "D5"], "17": ["3V3", "3v3", "Spare 3.3 V", "\u2014"], "18": ["GPIO24", "led", "Status LED via 330 \u03a9", "D13"], "19": ["GPIO10", "free", "Free (SPI0)", "\u2014"], "20": ["GND", "gnd", "LED ground", "GND"], "21": ["GPIO9", "free", "Free (SPI0)", "\u2014"], "22": ["GPIO25", "free", "Spare \u2014 a future hardware dead-man", "\u2014"], "23": ["GPIO11", "free", "Free (SPI0)", "\u2014"], "24": ["GPIO8", "free", "Free (SPI0)", "\u2014"], "25": ["GND", "gnd", "Spare ground", "GND"], "26": ["GPIO7", "free", "Free (SPI0)", "\u2014"], "27": ["ID_SD", "free", "HAT EEPROM \u2014 never use", "\u2014"], "28": ["ID_SC", "free", "HAT EEPROM \u2014 never use", "\u2014"], "29": ["GPIO5", "btn", "Court A button (green), to GND", "D22"], "30": ["GND", "gnd", "Button common", "GND"], "31": ["GPIO6", "btn", "Court B button (green)", "D24"], "32": ["GPIO12", "free", "Free", "\u2014"], "33": ["GPIO13", "btn", "Court C button (green)", "D26"], "34": ["GND", "gnd", "Button common", "GND"], "35": ["GPIO19", "btn", "Court D button (green)", "D28"], "36": ["GPIO16", "dur", "30 min button (black)", "D32"], "37": ["GPIO26", "dur", "15 min button (black)", "D30"], "38": ["GPIO20", "dur", "45 min button (black)", "D34"], "39": ["GND", "gnd", "Button common", "GND"], "40": ["GPIO21", "dur", "60 min button (black)", "D36"]};
+const PINS = {"1": ["3V3", "3v3", "Level shifter LV reference", "\u2014"], "2": ["5V", "pwr", "Not used: the Pi is fed by USB-C", "\u2014"], "3": ["GPIO2 SDA", "i2c", "LCD SDA, through the level shifter", "SDA 20"], "4": ["5V", "pwr", "Not used", "\u2014"], "5": ["GPIO3 SCL", "i2c", "LCD SCL, through the level shifter", "SCL 21"], "6": ["GND", "gnd", "Level shifter + LCD ground", "GND"], "7": ["GPIO4", "free", "Free (1-wire default)", "\u2014"], "8": ["GPIO14 TXD", "uart", "Scanner RX \u2014 optional, never written", "TX2 16"], "9": ["GND", "gnd", "Scanner ground", "GND"], "10": ["GPIO15 RXD", "uart", "Scanner TX, through the level shifter (UART0, /dev/ttyAMA0)", "RX2 17"], "11": ["GPIO17", "relay", "Relay A \u2192 buffer 1A, 10 k to GND", "D2"], "12": ["GPIO18", "free", "Free", "\u2014"], "13": ["GPIO27", "relay", "Relay B \u2192 buffer 2A, 10 k to GND", "D3"], "14": ["GND", "gnd", "74AHCT125 ground", "GND"], "15": ["GPIO22", "relay", "Relay C \u2192 buffer 3A, 10 k to GND", "D4"], "16": ["GPIO23", "relay", "Relay D \u2192 buffer 4A, 10 k to GND", "D5"], "17": ["3V3", "3v3", "Spare 3.3 V", "\u2014"], "18": ["GPIO24", "led", "Status LED via 330 \u03a9", "D13"], "19": ["GPIO10", "free", "Free (SPI0)", "\u2014"], "20": ["GND", "gnd", "LED ground", "GND"], "21": ["GPIO9", "free", "Free (SPI0)", "\u2014"], "22": ["GPIO25", "free", "Spare \u2014 a future hardware dead-man", "\u2014"], "23": ["GPIO11", "free", "Free (SPI0)", "\u2014"], "24": ["GPIO8", "free", "Free (SPI0)", "\u2014"], "25": ["GND", "gnd", "Spare ground", "GND"], "26": ["GPIO7", "free", "Free (SPI0)", "\u2014"], "27": ["ID_SD", "free", "HAT EEPROM \u2014 never use", "\u2014"], "28": ["ID_SC", "free", "HAT EEPROM \u2014 never use", "\u2014"], "29": ["GPIO5", "btn", "Court A button (green), to GND", "D22"], "30": ["GND", "gnd", "Button common", "GND"], "31": ["GPIO6", "btn", "Court B button (green)", "D24"], "32": ["GPIO12", "free", "Free", "\u2014"], "33": ["GPIO13", "btn", "Court C button (green)", "D26"], "34": ["GND", "gnd", "Button common", "GND"], "35": ["GPIO19", "btn", "Court D button (green)", "D28"], "36": ["GPIO16", "dur", "30 min button (black)", "D32"], "37": ["GPIO26", "dur", "15 min button (black)", "D30"], "38": ["GPIO20", "dur", "45 min button (black)", "D34"], "39": ["GND", "gnd", "Button common", "GND"], "40": ["GPIO21", "dur", "60 min button (black)", "D36"]};
 const detail = document.getElementById('detail');
 const rows = [...document.querySelectorAll('#pins tbody tr')];
 const gpins = [...document.querySelectorAll('.hpin')];

@@ -31,7 +31,7 @@ echo "== the court user"
 id court >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin court
 for g in gpio i2c dialout; do getent group "$g" >/dev/null && usermod -aG "$g" court; done
 
-echo "== build (about three minutes on a Pi 4)"
+echo "== build (about two minutes on a Pi 5)"
 cmake -S "$PROJECT" -B "$PROJECT/build" -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null
 cmake --build "$PROJECT/build" -j"$(nproc)"
 (cd "$PROJECT/build" && ctest --output-on-failure)

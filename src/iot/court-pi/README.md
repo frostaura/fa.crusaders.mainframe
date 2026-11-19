@@ -1,11 +1,12 @@
 # `src/iot/court-pi` — the court box on a Raspberry Pi
 
-The court light box with one **Raspberry Pi** in place of the WeMos Mega 2560 + ESP8266 board.
+The court light box with one **Raspberry Pi 5** in place of the WeMos Mega 2560 + ESP8266 board.
 Relays, buttons, LCD, scanner and power supply stay; see
 [`docs/specs/court-box-pi.md`](../../../docs/specs/court-box-pi.md) for the design and
 [`docs/court-box-pi.html`](../../../docs/court-box-pi.html) for the schematic and diagrams.
 
-**Status: proposed.** Built and smoke-tested on a Linux host; not yet run on a Pi.
+**Status: proposed.** Built and smoke-tested on a Linux host; not yet run on a Pi. Target board:
+Raspberry Pi 5 (a Pi 4 / 3B+ / Zero 2 W runs the same build as a spare).
 
 ## What is in here
 
@@ -44,8 +45,8 @@ court-io prints the relays and the glass; court-brain talks to `API_BASE_URL` fr
 
 ## Install on the Pi
 
-1. Raspberry Pi OS Lite (64-bit). Enable SSH with a key; join the WiFi or plug in Ethernet.
-2. Wire it by the schematic — mains isolated. Before connecting the SSRs, check every buffer output
+1. Raspberry Pi OS Lite (64-bit, Bookworm or later — the Pi 5 needs it). Enable SSH with a key; join the WiFi or plug in Ethernet.
+2. Fit the Active Cooler and feed USB-C from the fused 5.1 V 5 A buck. Wire it by the schematic — mains isolated. Before connecting the SSRs, check every buffer output
    reads 0 V with the Pi off and while it boots.
 3. Clone this repository on the Pi and fill in `config/common/secrets.h`.
 4. `sudo src/iot/court-pi/deploy/install.sh`, then `sudo reboot`.
@@ -66,5 +67,5 @@ An update is `git pull` and the same `install.sh`.
 | `COURT_BRAIN_MANAGE_WIFI` | `1` on `wl*` | `1`: the server's `net` drives nmcli; `0`: the OS owns the network |
 | `COURT_BRAIN_LINK` / `_DATA` / `_RUN` | `/run/court-box/link.sock`, `/var/lib/court-box/brain`, `/run/court-box` | paths |
 
-court-io takes `--gpiochip`, `--i2c` (default `/dev/i2c-1`), `--scanner` (default `/dev/serial0`;
+court-io takes `--gpiochip`, `--i2c` (default `/dev/i2c-1`), `--scanner` (default `/dev/ttyAMA0`, UART0 on GPIO 14/15;
 a USB scanner is `/dev/ttyACM0`) and `--link` on its command line.

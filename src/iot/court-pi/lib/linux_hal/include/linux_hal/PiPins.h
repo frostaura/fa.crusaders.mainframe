@@ -9,12 +9,18 @@
 //
 // WHY THESE PINS
 // --------------
-//   * Relays sit on GPIO 17, 27, 22, 23 — all four are pulled DOWN by the SoC
-//     from power-on until Linux runs court-io (BCM2835/2711/RP1 reset default:
-//     GPIO 0-8 pull up, 9-27 pull down). Together with the external 10 k
-//     pull-down on each buffer input, a Pi that is off, booting, crashed or
-//     mid-watchdog-reset holds every court DARK. This replaces the Mega's
-//     "released = INPUT" rule with a resistor that says the same thing.
+//   * Relays sit on GPIO 17, 27, 22, 23. Three things hold them DOWN before
+//     court-io runs, and the box relies on the last one alone:
+//       - the SoC's reset default (GPIO 0-8 pull up, 9-27 pull down on the
+//         BCM2835/2711; the Pi 5's RP1 is not relied on for it);
+//       - config.txt `gpio=17,27,22,23=ip,pd`, applied by the firmware before
+//         Linux starts, on every model including the Pi 5;
+//       - the external 10 k pull-down on each buffer input, which holds every
+//         court DARK with the Pi off, booting, crashed or mid-watchdog-reset.
+//     This replaces the Mega's "released = INPUT" rule with a resistor that
+//     says the same thing.
+//   * The target board is the Raspberry Pi 5 (RP1 I/O controller). Its 40-pin
+//     header is pin-for-pin the Pi 4's, so this table holds for both.
 //   * Nothing here touches GPIO 0/1 (HAT ID EEPROM), 2/3 (I2C1 — the LCD),
 //     14/15 (UART0 — the scanner), 4 (1-wire default) or 7-11 (SPI0).
 //   * Buttons use the SoC's own pull-ups, set by court-io at start; the panel
@@ -90,7 +96,10 @@ static_assert(physicalPinOf(kStatusLedGpio) != 0U && !reservedGpio(kStatusLedGpi
 
 /// Default device paths. All are overridable on court-io's command line.
 inline constexpr char kDefaultI2cBus[] = "/dev/i2c-1";
-inline constexpr char kDefaultScannerTty[] = "/dev/serial0";
+/// UART0 on GPIO 14/15. NOT /dev/serial0: on a Pi 5 that alias is the 3-pin
+/// debug-UART connector (ttyAMA10), not the header. ttyAMA0 is GPIO 14/15 on a
+/// Pi 5 with `dtparam=uart0=on` and on a Pi 3/4 with `dtoverlay=disable-bt`.
+inline constexpr char kDefaultScannerTty[] = "/dev/ttyAMA0";
 inline constexpr char kDefaultLinkSocket[] = "/run/court-box/link.sock";
 
 } // namespace linux_hal

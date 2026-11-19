@@ -12,7 +12,9 @@ namespace linux_hal {
 
 namespace {
 
-/// The labels of the bank the 40-pin header is wired to, oldest Pi first.
+/// The labels of the bank the 40-pin header is wired to, oldest Pi first. On
+/// the Pi 5 it is the RP1 ("pinctrl-rp1"): gpiochip4 on early 6.1 kernels,
+/// gpiochip0 since 6.6 — which is why it is found by label, never by number.
 constexpr const char* kPiLabels[] = {"pinctrl-bcm2835", "pinctrl-bcm2711", "pinctrl-rp1", "pinctrl-bcm2712"};
 
 bool isPiLabel(const char* label) {

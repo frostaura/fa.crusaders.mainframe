@@ -1,17 +1,31 @@
 # --- crusaders court box (court-pi) — appended to /boot/firmware/config.txt ---
+# Target: Raspberry Pi 5. The [pi4] section keeps a Pi 3/4 spare working.
+[all]
 # I2C1 on GPIO 2/3 for the LCD backpack, at 100 kHz: it sits behind a level
 # shifter on a panel lead, and the HD44780 gains nothing from 400.
 dtparam=i2c_arm=on
 dtparam=i2c_arm_baudrate=100000
-# The PL011 UART on GPIO 14/15 for the QR scanner (Pi 3 / 4 / Zero 2 W: the
-# Bluetooth radio is moved off it; harmless on a Pi 5, whose uart0 is 14/15).
-enable_uart=1
-dtoverlay=disable-bt
 # The SoC watchdog systemd feeds (court-box-watchdog.conf).
 dtparam=watchdog=on
 # Relays: INPUT with PULL-DOWN from the firmware stage, before Linux has even
-# started — the same state the SoC reset leaves and the external resistors hold.
+# started — the state the external resistors hold anyway.
 gpio=17,27,22,23=ip,pd
 # Status LED off.
 gpio=24=op,dl
+
+[pi5]
+# UART0 on GPIO 14/15 for the QR scanner -> /dev/ttyAMA0. (enable_uart on a
+# Pi 5 is the separate 3-pin debug connector, which the box does not use.)
+dtparam=uart0=on
+# The fused 5.1 V 5 A buck feeds USB-C without USB-PD, so the firmware cannot
+# ask it what it can do; this says it can. Leave it out on a 3 A supply.
+usb_max_current_enable=1
+
+[pi4]
+# Pi 3 / 4 / Zero 2 W: move Bluetooth off the PL011 so it is GPIO 14/15 ->
+# /dev/ttyAMA0, the same path as on the Pi 5.
+enable_uart=1
+dtoverlay=disable-bt
+
+[all]
 # --- end crusaders court box ---

@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-court-box-pi
-description: "Court box on a Raspberry Pi (proposed 2026-11-19): court-io + court-brain processes compiling the unchanged Mega and bridge sources, relay fail-dark moved into pull-down resistors, and what is still owed on the bench."
+description: "Court box on a Raspberry Pi 5 (proposed 2026-11-19): court-io + court-brain processes compiling the unchanged Mega and bridge sources, relay fail-dark moved into pull-down resistors, and what is still owed on the bench."
 type: decision
 last_verified: 2026-11-19
 ---
@@ -12,6 +12,11 @@ Branch `claude/friendly-shannon-0y9nhv`. Spec: `docs/specs/court-box-pi.md`; dia
 Asked for by Dean: replace the court box's Mega + ESP8266 with a Pi; door gates stay ESP32.
 **Not adopted yet** — awaiting the founder's go-ahead and a bench run on a real Pi.
 
+- **The board is a Raspberry Pi 5** (Dean, 2026-11-19). *Consequences:* GPIO on RP1 found by
+  label (chip number moved between kernels); scanner on UART0 `/dev/ttyAMA0` with
+  `dtparam=uart0=on`, because `/dev/serial0` on a Pi 5 is the debug connector; a fused 5.1 V 5 A
+  buck plus `usb_max_current_enable=1`; Active Cooler; RP1 reset pulls not relied on. The header
+  is the Pi 4's, so the pin map did not move.
 - **Two processes, not one.** `court-io` = `courtlogic::CourtBox` on `linux_hal`; `court-brain` =
   `court_bridge/main.cpp` compiled unchanged against `court-pi/compat`. Joined by a Unix socket
   carrying the same v3 bytes. *Why:* the half holding the relays must survive the half holding the
