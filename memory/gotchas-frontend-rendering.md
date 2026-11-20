@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-frontend-rendering
+name: technologies-crusaders-squash-control-system-gotchas-frontend-rendering
 description: "Rendering traps the unit suite cannot see: forced-colours backplates, unscrolled sticky focus, unread fixture fields, inheriting <body> changes, px glyphs and mx-auto at 200 % text."
 type: gotcha
 last_verified: 2026-10-04

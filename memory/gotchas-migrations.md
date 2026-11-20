@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-migrations
+name: technologies-crusaders-squash-control-system-gotchas-migrations
 description: "EF migration and schema-change traps: a stale Designer snapshot re-adds columns, --no-build scaffolds empty, a rename scaffolds as drop-and-add, int converts to decimal silently, culture-blind ToString."
 type: gotcha
 last_verified: 2026-10-01

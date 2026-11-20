@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-share-causes-receipts
+name: technologies-crusaders-squash-control-system-decisions-share-causes-receipts
 description: "What a partner's share receipt says when the club acted: club-refund and no-show-penalty headlines, your share stands only to a partner who paid, a cancelled game asks for nothing, paid by hand."
 type: decision
 last_verified: 2026-11-20

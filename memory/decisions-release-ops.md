@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-release-ops
+name: technologies-crusaders-squash-control-system-decisions-release-ops
 description: "Release and operations (2026-11-13, lane infra-ops): immutable sha tags with a forward-only :latest, daily in-stack backups with a drilled restore, a pre-deploy migration check, a non-root API, pinned images, a stack-size ratchet."
 type: decision
 last_verified: 2026-11-20

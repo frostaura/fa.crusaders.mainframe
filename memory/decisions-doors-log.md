@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-doors-log
+name: technologies-crusaders-squash-control-system-decisions-doors-log
 description: "The club door log and its export: the club's day computed on the server, a half-open range built at midnight's own offset, clamped to retention, no member field in the request at all, and a CSV that defuses before it quotes."
 type: decision
 last_verified: 2026-10-03

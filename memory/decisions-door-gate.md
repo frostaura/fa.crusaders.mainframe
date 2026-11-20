@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-door-gate
+name: technologies-crusaders-squash-control-system-decisions-door-gate
 description: "One pull-only ESP32 per door; every readable 2xx and a 403 are answers, all else falls back to the roster; LOCKED before the pin drives; no-power behaviour unmeasured, the owner expects it released."
 type: decision
 last_verified: 2026-11-13

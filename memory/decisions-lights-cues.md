@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-lights-cues
+name: technologies-crusaders-squash-control-system-decisions-lights-cues
 description: "The booking.lights_on/off mirror: one lights_on source, every off said when the court is next free under a per-court lock, lit-cancelled bookings cued off, webhook actors read not inferred."
 type: decision
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-console
+name: technologies-crusaders-squash-control-system-decisions-admin-console
 description: "Admin console rules from the go-live passes: no href at the API, exports built from the reads, Approve is armed, every write reads back, unsettled bookings have a page, Members counts only a whole read."
 type: decision
 last_verified: 2026-11-20

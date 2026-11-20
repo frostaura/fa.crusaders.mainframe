@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-ci-jobs
+name: technologies-crusaders-squash-control-system-gotchas-ci-jobs
 description: "CI job-level traps: a timeout reports as CANCELLED and names no test, a failed job silently SKIPS the suites behind it, and a threshold applied to the tier that cannot satisfy it reads as a product regression."
 type: gotcha
 last_verified: 2026-11-20

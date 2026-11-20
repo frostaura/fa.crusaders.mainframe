@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-ops
+name: technologies-crusaders-squash-control-system-gotchas-ops
 description: "Release and operations traps (2026-11-13): container filters need the project too, an empty host dumps at once, externally created volumes survive down -v, GCC 8 .su paths are basenames, root-owned backup files on Linux."
 type: gotcha
 last_verified: 2026-11-13

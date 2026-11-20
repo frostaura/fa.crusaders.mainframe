@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-bridge
+name: technologies-crusaders-squash-control-system-decisions-bridge
 description: "The ESP8266 bridge 3.1.0: phase A's paced Mega link and snapshot reconcile, phase B's key ring, server-pushed network, supervisor and flash persistence, how it fits the heap floor, and why OTA and the hotspot left before it shipped."
 type: decision
 last_verified: 2026-11-20

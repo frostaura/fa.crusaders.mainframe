@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device-bodies-clock
+name: technologies-crusaders-squash-control-system-decisions-device-bodies-clock
 description: "Every device path reads the injected TimeProvider, never the wall clock: which record carries the clock on each route and service, and device-path ledger rows stamped at the act's instant."
 type: decision
 last_verified: 2026-11-20

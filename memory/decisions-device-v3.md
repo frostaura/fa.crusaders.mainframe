@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device-v3
+name: technologies-crusaders-squash-control-system-decisions-device-v3
 description: "Device contract v3 (2026-11-13): OTA and the setup hotspot removed 2026-11-14, so every change is a cable flash with four secrets; the Mega a steered renderer and relay guard, an ON-only snapshot reconcile, key rotation."
 type: decision
 last_verified: 2026-11-13

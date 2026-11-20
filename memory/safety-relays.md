@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-safety-relays
+name: technologies-crusaders-squash-control-system-safety-relays
 description: "RED: nobody knows the fitted relays (now unidentified SSRs) or whether they switch a contactor coil or the lighting load. If direct, an electrician is needed first; no software touches this, and it gates go-live."
 type: alert
 last_verified: 2026-11-13

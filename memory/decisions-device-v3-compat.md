@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device-v3-compat
+name: technologies-crusaders-squash-control-system-decisions-device-v3-compat
 description: "Device contract v3 addendum (2026-11-13): the frozen firmware must read every future server — the lifeline, tolerant readers, budgets at 80% of every buffer, every 2xx a success, real replies through real parsers."
 type: decision
 last_verified: 2026-11-20

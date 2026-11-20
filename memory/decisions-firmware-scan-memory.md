@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-firmware-scan-memory
+name: technologies-crusaders-squash-control-system-decisions-firmware-scan-memory
 description: "The bridge's remembered scan is one ScanMemory object: tenant scan memory, whole countdowns never shortened, never past the server's age bound less 5 s, else SCAN AGAIN; an undecided answer is BUSY / PRESS AGAIN and keeps the scan."
 type: decision
 last_verified: 2026-11-20

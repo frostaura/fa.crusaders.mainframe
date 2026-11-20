@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-players-words
+name: technologies-crusaders-squash-control-system-decisions-frontend-players-words
 description: "Member screens for games with partners: the invite and accept sheets show only what a yes means, consent words key on what was agreed, the club's acts are the club's, namesakes escalate, writes hold the page."
 type: decision
 last_verified: 2026-11-20

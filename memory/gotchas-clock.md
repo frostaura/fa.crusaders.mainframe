@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-clock
+name: technologies-crusaders-squash-control-system-gotchas-clock
 description: "Clock traps: the closed UTC-midnight family and how to fake the clock here, a code step crossed mid-test, a zone-less member payload read in the phone's zone. Cold entry points carry the club timezone; Playwright runs in New York."
 type: gotcha
 last_verified: 2026-11-20

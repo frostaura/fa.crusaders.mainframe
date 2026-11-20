@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-state
+name: technologies-crusaders-squash-control-system-state
 description: "Code tip 7893321d (PR #16, 2026-11-14, CI green); later main commits are memory-only. v3 images are a cable flash, none flashed. Production 530/1033 (tunnel down) 2026-11-20. Redeploy, flash, relays: Dean's."
 type: state
 last_verified: 2026-11-20
@@ -58,8 +58,10 @@ the repo's visibility (**PUBLIC**), branch protection on `main` (**none**) ([`de
 **Founder-facing pages** `docs/system-blueprint.html` and `docs/court-lights-flows.html` last changed 2026-11-14 (`c95bb782`,
 `407fb05f`); the blueprint was **not republished** — keep `https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4`.
 
-**Clones on this Mac — two, on `main`, level with `origin/main`, clean:** `~/src/fa.crusaders.mainframe` (no other worktree)
-and the iCloud copy (untracked = ignored `.env`, four `secrets.h`, build output). No scratch clone remains ([`watch-secrets.md`](watch-secrets.md)).
+**Renamed 2026-11-20 (founder):** `fa.crusaders.mainframe` → `technologies.crusaders.squash-control-system` (the repo;
+GitHub redirects the old URL; the directory was `crusaders.mainframe`), product *Crusaders Mainframe* → **Crusaders Squash
+Control System**; old product strings: [`watch-rename.md`](watch-rename.md). **Clones — two, on `main`, level with `origin/main`:**
+`~/src/technologies.crusaders.squash-control-system` (clean, no other worktree) and the iCloud copy (ignored `.env`, four `secrets.h`, build output; [`watch-secrets.md`](watch-secrets.md)).
 
 **Still outside code:** the relay safety question ([`safety-relays.md`](safety-relays.md)), Carl's two lock facts
 ([`watch-doors.md`](watch-doors.md)), committee sign-off on charge-at-booking, supervised bench sessions with box and door.

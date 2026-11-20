@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-member-reads
+name: technologies-crusaders-squash-control-system-decisions-member-reads
 description: "Member and desk reads from review rounds 1-3: anonymous invite preview, own seat in any state, one club date, recent games, held parts, what a game cost you, inbox read state for answered asks and own receipts."
 type: decision
 last_verified: 2026-11-20

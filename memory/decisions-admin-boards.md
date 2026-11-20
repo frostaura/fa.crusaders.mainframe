@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-boards
+name: technologies-crusaders-squash-control-system-decisions-admin-boards
 description: "The console's Boards and fault surfaces: v3 panels presence-gated and three-stated, bounds from the API only, key rotation not Regenerate, three-valued per-board overrides, reported beside set, fault words keyed on the server's constants."
 type: decision
 last_verified: 2026-11-20

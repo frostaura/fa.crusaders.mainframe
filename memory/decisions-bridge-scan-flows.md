@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-bridge-scan-flows
+name: technologies-crusaders-squash-control-system-decisions-bridge-scan-flows
 description: "Bridge scan-flow fixes before the first cable flash (2026-11-14): busy vs not-recognised, prompts capped by the scan, whole-call HTTP budget, designed verdict screens, extending your own lit court."
 type: decision
 last_verified: 2026-11-20

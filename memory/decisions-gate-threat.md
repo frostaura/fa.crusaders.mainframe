@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-gate-threat
+name: technologies-crusaders-squash-control-system-decisions-gate-threat
 description: "What the door's posture actually claims: a cleartext LAN, bearer-token codes, provisioning that hands out other members' codes on demand, and an audit trail that stopped being a credential store."
 type: decision
 last_verified: 2026-09-19

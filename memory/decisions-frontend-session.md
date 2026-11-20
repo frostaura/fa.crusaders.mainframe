@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-session
+name: technologies-crusaders-squash-control-system-decisions-frontend-session
 description: "The PWA's session: identity keys every per-person read; a 401 trades the refresh cookie once, single-flight; a refresh ends it on any 4xx but 408/429 or a superseded 401; a lapse keeps the code's key."
 type: decision
 last_verified: 2026-11-20

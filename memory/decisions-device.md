@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device
+name: technologies-crusaders-squash-control-system-decisions-device
 description: "The device contract: one per-tenant API key, auto-registration, no discovery; the brains are on the ESP8266; the wiring is fixed. Runtime credentials arrived with v3; OTA came with it and left again (2026-11-14)."
 type: decision
 last_verified: 2026-11-20

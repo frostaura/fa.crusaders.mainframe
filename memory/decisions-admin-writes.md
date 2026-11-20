@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-writes
+name: technologies-crusaders-squash-control-system-decisions-admin-writes
 description: "Review round 4 (B2, wave B): settings saves are partial and versioned (409 on stale), a schedule keeps the rules it replaced, a future end keeps running, desk cancels need a reason and are recorded."
 type: decision
 last_verified: 2026-10-01

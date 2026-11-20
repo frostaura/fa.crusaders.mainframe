@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-shell
+name: technologies-crusaders-squash-control-system-decisions-frontend-shell
 description: "The app shell: admin tabs join the bar by container width, the header's actions wrap as one group, toasts speak through a region that was there first, coach marks and the tour clamp into view, URL-bound fields own what was typed."
 type: decision
 last_verified: 2026-11-20

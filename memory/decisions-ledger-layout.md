@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-ledger-layout
+name: technologies-crusaders-squash-control-system-decisions-ledger-layout
 description: "R5 lane A: the ledger folds by its own box (Amount never lost), its heads stick to the page, top bars stick by room and publish their height, the wallet rail's primary Top up and last 30 days."
 type: decision
 last_verified: 2026-10-03

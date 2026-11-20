@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-env
+name: technologies-crusaders-squash-control-system-gotchas-env
 description: "This Mac and its checkouts: hidden-flag worktrees lose appsettings mid-run, iCloud duplicates break generated sketches and the link, MSB3021 on appsettings, uv for make install, shared trees break each other's builds."
 type: gotcha
 last_verified: 2026-11-20

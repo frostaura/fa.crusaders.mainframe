@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-unknown-outcomes
+name: technologies-crusaders-squash-control-system-decisions-frontend-unknown-outcomes
 description: "A write whose answer is lost or unsure is read back, never re-sent and never called a refusal; its words name the cause (silent, busy, clash, error); a passing 503 is busy, not down; a proven write says what the answer was."
 type: decision
 last_verified: 2026-11-20

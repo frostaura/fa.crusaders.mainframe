@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-offline-shell
+name: technologies-crusaders-squash-control-system-decisions-frontend-offline-shell
 description: "The shell in the field: document and precache.json no-cache, a stalled navigation served the cached shell at 2 s, My Code and the header kept while whoami is out, a session ending keeps the shell, the member code works on plain http."
 type: decision
 last_verified: 2026-11-20

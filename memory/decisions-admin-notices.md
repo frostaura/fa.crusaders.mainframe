@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-notices
+name: technologies-crusaders-squash-control-system-decisions-admin-notices
 description: "Every admin mail goes through one outbox staged in the event's own save, to active confirmed admins minus the actor and opt-outs; three kinds are non-optional, and tests must drive the outbox themselves."
 type: decision
 last_verified: 2026-10-01

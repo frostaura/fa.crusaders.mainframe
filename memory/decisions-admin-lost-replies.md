@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-lost-replies
+name: technologies-crusaders-squash-control-system-decisions-admin-lost-replies
 description: "Admin writes whose reply is lost are read back before anything is said (R2 desk/approve/settings, R3–R4 every other write via lostReply); dialogs word it via describe; Settings draft and version."
 type: decision
 last_verified: 2026-11-20

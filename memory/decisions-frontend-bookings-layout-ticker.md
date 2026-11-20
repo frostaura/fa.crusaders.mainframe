@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-bookings-layout-ticker
+name: technologies-crusaders-squash-control-system-decisions-frontend-bookings-layout-ticker
 description: "Bookings after the ticker replaced the rail (PR #12): games lists stack on a phone, the 3xl column hugs the grid, the bar follows the grid in Tab order, pinch zoom stays on, e2e one-tap specs call singleTap."
 type: decision
 last_verified: 2026-11-20

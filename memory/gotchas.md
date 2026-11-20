@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas
+name: technologies-crusaders-squash-control-system-gotchas
 description: "The test suite lies in specific ways: no fixture read a real socket, an EmailMessage is not a message, prose against a wrapped text part is green by luck, in-memory EF proves the opposite. Clock traps live in gotchas-clock."
 type: gotcha
 last_verified: 2026-11-20

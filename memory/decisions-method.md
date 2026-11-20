@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-method
+name: technologies-crusaders-squash-control-system-decisions-method
 description: "Quality here is proven by refutation, not by a green suite: every fixer is followed by an agent paid to disprove it, rounds repeat until two consecutive ones find nothing high, and parallel lanes are scoped by FILE, never by theme."
 type: decision
 last_verified: 2026-11-20

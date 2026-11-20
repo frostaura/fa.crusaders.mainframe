@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-minutes-words
+name: technologies-crusaders-squash-control-system-decisions-minutes-words
 description: "Frontend: minutes inside words (sentences, labels, buttons, aria) are spoken long form; the compact '1 h 30 min' is only a standalone figure paired with its spoken twin. A source scan pins copy modules."
 type: decision
 last_verified: 2026-11-20

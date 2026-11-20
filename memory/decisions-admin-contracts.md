@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-contracts
+name: technologies-crusaders-squash-control-system-decisions-admin-contracts
 description: "Every admin reply the console reads is pinned to its C# handler; paged admin reads (ledger totals from the server, members, a night); the change record is words for every action."
 type: decision
 last_verified: 2026-10-01

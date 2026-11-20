@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-frontend-e2e
+name: technologies-crusaders-squash-control-system-gotchas-frontend-e2e
 description: "Browser-harness traps: only the repo's Chromium registers a worker, worktrees serve no webfonts, an async wait predicate is truthy at once, offline emulation leaves onLine true, a stale install fakes a broken build, act() warnings."
 type: gotcha
 last_verified: 2026-11-20

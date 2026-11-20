@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-control-board
+name: technologies-crusaders-squash-control-system-decisions-control-board
 description: "Which court box a control-board tile reports when several claim one court, and how the duplicate is surfaced to the console rather than silently resolved (review round 3, A-11)."
 type: decision
 last_verified: 2026-11-20

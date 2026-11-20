@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-offline-data-words
+name: technologies-crusaders-squash-control-system-decisions-frontend-offline-data-words
 description: "How a member screen words offline: You're offline only when onLine is false, else Can't reach the club; a failed refresh never blanks; nothing kept and offline is said as offline, judged from the failed read."
 type: decision
 last_verified: 2026-11-20

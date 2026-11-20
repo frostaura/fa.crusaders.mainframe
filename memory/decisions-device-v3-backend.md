@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device-v3-backend
+name: technologies-crusaders-squash-control-system-decisions-device-v3-backend
 description: "How the backend implements device contract v3 (2026-11-13): snapshot pairing, money on box-made releases, key restore owner, PSK encryption, lifeline alternation, and what was deferred."
 type: decision
 last_verified: 2026-11-20

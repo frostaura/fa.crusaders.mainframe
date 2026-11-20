@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-perf
+name: technologies-crusaders-squash-control-system-decisions-perf
 description: "Perf round 2026-09-30 backend: writes get their own per-member rate limit, confirmation mail is composed after the response, slug lookups are cached, gzip on both hops, additive paging, photo links, wallet share summaries."
 type: decision
 last_verified: 2026-11-20

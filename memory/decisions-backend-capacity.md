@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-backend-capacity
+name: technologies-crusaders-squash-control-system-decisions-backend-capacity
 description: "Connection capacity (R18 BE18s, R19 BE19L): DB pool bounded under Postgres (40), stream reads gated, no connection is 503 service_busy, gateway keepalive, no nginx limit_req; test pools give slots back."
 type: decision
 last_verified: 2026-11-20

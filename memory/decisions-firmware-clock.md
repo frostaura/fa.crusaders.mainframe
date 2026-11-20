@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-firmware-clock
+name: technologies-crusaders-squash-control-system-decisions-firmware-clock
 description: "Firmware's 32-bit clock rules: every gating Deadline is observed on every pass so none outlives a 2^31 ms quiet spell, and every age is observed per pass and latches past its bound so none reads fresh after 2^32 ms."
 type: decision
 last_verified: 2026-11-20

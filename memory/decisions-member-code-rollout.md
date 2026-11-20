@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-member-code-rollout
+name: technologies-crusaders-squash-control-system-decisions-member-code-rollout
 description: "The member-code rollout: keys and v1 rosters reach every acknowledged codes:m1 board in every phase, only acknowledged boards vote, unacknowledged court boxes block cut-over, a manual rollback holds, and the master key refuses placeholders."
 type: decision
 last_verified: 2026-11-20

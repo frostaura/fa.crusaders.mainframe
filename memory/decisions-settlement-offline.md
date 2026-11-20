@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-settlement-offline
+name: technologies-crusaders-squash-control-system-decisions-settlement-offline
 description: "How a box's offline evidence settles: scans judged at scan time (only future or 30-day-old stamps clamped), a lit cancelled booking charged the minutes its relay ran, roster codes never identify a payer."
 type: decision
 last_verified: 2026-11-20

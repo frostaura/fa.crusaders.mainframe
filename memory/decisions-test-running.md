@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-test-running
+name: technologies-crusaders-squash-control-system-decisions-test-running
 description: "How the backend suite runs: a cloned database AND one shared host per class, giant classes split, CI sharded 5 ways by measured class time with a union proof. 17.5 min became ~6; the rules new tests keep."
 type: decision
 last_verified: 2026-11-20

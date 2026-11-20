@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-players
+name: technologies-crusaders-squash-control-system-decisions-players
 description: "D11–D13: single-payer booking; shares move as ShareTransfer pairs via one idempotent reconcile off Owed; consent caps collection; no debts, and shares received are held to the deadline; Dean's two 2026-09-28 rulings."
 type: decision
 last_verified: 2026-11-20

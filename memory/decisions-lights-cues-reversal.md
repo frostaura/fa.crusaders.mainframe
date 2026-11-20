@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-lights-cues-reversal
+name: technologies-crusaders-squash-control-system-decisions-lights-cues-reversal
 description: "A late check-in's reversal lights cues: on/off a pair or nothing, the consumer ordering rule, and one instant per lighting — stamped at emission only when an off was already said after the scan."
 type: decision
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-share-causes
+name: technologies-crusaders-squash-control-system-decisions-share-causes
 description: "Why a share moved and who moved it, decided off the record: share_cause by the act on the seat, the acting person as every share row's actor, share rows read back off the record, the seat acts on the audit trail."
 type: decision
 last_verified: 2026-11-20

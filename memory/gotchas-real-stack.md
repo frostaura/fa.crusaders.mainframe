@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-real-stack
+name: technologies-crusaders-squash-control-system-gotchas-real-stack
 description: "Real-stack walk (e2e-real) traps: the auth limit, booking seconds ahead so the cue is open, courts held by earlier runs, parallel viewports sharing the admin desk, celebrations mid-walk, the 07:00–21:00 play window."
 type: gotcha
 last_verified: 2026-10-01

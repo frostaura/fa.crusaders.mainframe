@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-wallet-frames
+name: technologies-crusaders-squash-control-system-decisions-wallet-frames
 description: "What the live wallet balance frame tells the phone: a precise reason and signed parts, one frame per action held across scopes, the share cause, who acted, who checked in, and the named frame before its unnamed twin."
 type: decision
 last_verified: 2026-11-20

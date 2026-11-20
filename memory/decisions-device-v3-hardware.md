@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device-v3-hardware
+name: technologies-crusaders-squash-control-system-decisions-device-v3-hardware
 description: "Mega 3.0.0 (2026-11-13): relays released as inputs so a wrong drive level fails dark; relay level, LCD address, scanner baud and line end, court keys become per-board settings reported back by !HW."
 type: decision
 last_verified: 2026-11-13

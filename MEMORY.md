@@ -1,4 +1,4 @@
-# MEMORY — Technologies/projects/crusaders.mainframe
+# MEMORY — Technologies/projects/technologies.crusaders.squash-control-system
 
 - [Red — the relay question is an electrical safety matter, and it is unanswered](memory/safety-relays.md) — RED: nobody knows the fitted relays (now unidentified SSRs) or whether they switch a contactor coil or the lighting load. If direct, an electrician is needed first; no software touches this, and it gates go-live.
 - [Current state](memory/state.md) — Code tip 7893321d (PR #16, 2026-11-14, CI green); later main commits are memory-only. v3 images are a cable flash, none flashed. Production 530/1033 (tunnel down) 2026-11-20. Redeploy, flash, relays: Dean's.
@@ -128,4 +128,5 @@
 - [Open questions](memory/questions.md) — All founder-owned: PIN length (a 4-digit collision charges the wrong member), biometric SDK, gate policy, court-box rosters, walk-behind attendance, play defaults, delivery by PR, MIT, pricing, BA-17, FC-8, who flashes.
 - [Watch list](memory/watch.md) — Unpaid debts, worst first: two gitignored .env files hold live JWT, database, SMTP, encryption and admin-bootstrap secrets, unencrypted and unbacked-up; the redeploy is a manual runbook nothing enforces; charge-at-booking is unsigned-off.
 - [Watch list — the doors](memory/watch-doors.md) — What the door gates leave owed: no-power behaviour unmeasured and two facts owed by Carl, no gate has run on hardware, a court box's roster is an unnamed door key, and everything that is NOT a door row still grows for ever.
+- [Watch — the rename still owed in product files](memory/watch-rename.md) — The 2026-11-20 rename to Crusaders Squash Control System reached context files only. Members still see Crusaders Mainframe in the passkey prompt and the fallback sender; images, localStorage keys and backup path keep the old name.
 - [Watch — secrets at rest](memory/watch-secrets.md) — Where live secrets sit unencrypted on this Mac: two gitignored .env files (dev clone, iCloud clone), four firmware secrets.h, PayFast credentials in clear in tenant_settings. Read by key name only.

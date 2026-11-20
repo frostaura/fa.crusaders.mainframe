@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-member-screens
+name: technologies-crusaders-squash-control-system-decisions-frontend-member-screens
 description: "Member PWA surfaces: the club's name is tenant data, the guide reads the club's facts, a stalled first read says Still trying, the Wallet card measures spendable against the shortest court, one end time, figures glued at paint."
 type: decision
 last_verified: 2026-11-20

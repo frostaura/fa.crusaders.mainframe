@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-night-words
+name: technologies-crusaders-squash-control-system-decisions-night-words
 description: "How the Night words and shows rows: the code holder and scanner named, kinds per view (own, organiser, partner), player acts and money never folded, the server's headline as the words, door and board labels."
 type: decision
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-court-box
+name: technologies-crusaders-squash-control-system-decisions-court-box
 description: "The court box as built, and the topic that holds firmware versions: Mega 3.0.0, bridge 3.1.0, gate 2.0.0, Mega first; scan-first landing, greeting, scan-to-extend a lit court; the Mega's renderer, taps and soak gate."
 type: decision
 last_verified: 2026-11-20

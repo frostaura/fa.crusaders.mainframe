@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-topups
+name: technologies-crusaders-squash-control-system-decisions-topups
 description: "P13: members buy admin-defined minute packages (no cap, no free amount); the purchase lock is all the ITN reads; cancel return and one-hour expiry close abandoned checkouts, reopenable by a late COMPLETE."
 type: decision
 last_verified: 2026-11-20

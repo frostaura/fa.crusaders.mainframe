@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-gates
+name: technologies-crusaders-squash-control-system-gotchas-gates
 description: "Gates that report a red run as green or trip on a function nobody wrote: complexity exits 1 on stdout, lizard's C# and .tsx lexers mis-scope (one form of it no single member causes — split the file), ls-files misses untracked work."
 type: gotcha
 last_verified: 2026-11-20

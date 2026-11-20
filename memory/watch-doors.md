@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-watch-doors
+name: technologies-crusaders-squash-control-system-watch-doors
 description: "What the door gates leave owed: no-power behaviour unmeasured and two facts owed by Carl, no gate has run on hardware, a court box's roster is an unnamed door key, and everything that is NOT a door row still grows for ever."
 type: watch
 last_verified: 2026-11-13

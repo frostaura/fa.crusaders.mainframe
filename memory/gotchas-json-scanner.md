@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-json-scanner
+name: technologies-crusaders-squash-control-system-gotchas-json-scanner
 description: "devapi's heapless JSON scanner treated any quoted string as a key until it was fixed; every server-controlled string is a decoy for a key name, and v3 callers must bound nested reads with findObject."
 type: gotcha
 last_verified: 2026-11-20

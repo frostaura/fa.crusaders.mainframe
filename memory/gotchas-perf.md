@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-perf
+name: technologies-crusaders-squash-control-system-gotchas-perf
 description: "Backend performance at volume: how P10 measured it, the partial index that could not answer an any-status seat probe, and JIT on a mis-estimated plan — fixed in code in P12; admin members list is next."
 type: gotcha
 last_verified: 2026-09-30

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-booking-races-cancels
+name: technologies-crusaders-squash-control-system-decisions-booking-races-cancels
 description: "Cancels that find the booking not open: booking_not_open and not_cancellable at the desk and for a member's own booking, no self-cancel once checked in, and the clock each booking path reads."
 type: decision
 last_verified: 2026-11-20

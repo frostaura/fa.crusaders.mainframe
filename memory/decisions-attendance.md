@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-attendance
+name: technologies-crusaders-squash-control-system-decisions-attendance
 description: "Who attended a game: a player's own scan, or a player's scan lighting the court for its accepted partners; a pay-for payer's scan is nobody's attendance; a cancelled booking is never attended; one checker rule."
 type: decision
 last_verified: 2026-11-20

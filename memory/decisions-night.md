@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-night
+name: technologies-crusaders-squash-control-system-decisions-night
 description: "The admin Night (a member's trace): one fact once, receipts keep their verdict, a refused upload is one refusal at its court, board rows print at the scan, check-in rows are about the organiser, every audit action has a word."
 type: decision
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-players-acts
+name: technologies-crusaders-squash-control-system-decisions-players-acts
 description: "Seat acts on a booking: pay what you can when short, collect and accept-on-behalf at the desk, at_daily_limit and booking_full, one consent rule, who changed a share and who removed or added a seat."
 type: decision
 last_verified: 2026-11-20

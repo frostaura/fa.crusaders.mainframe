@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-mail-words
+name: technologies-crusaders-squash-control-system-decisions-mail-words
 description: "What a member's mail and inbox line must say: court AND day on every line, who acted (the club, never an admin's name), what moved and what stands, a started session's share stands, and figures that agree with their words."
 type: decision
 last_verified: 2026-11-20

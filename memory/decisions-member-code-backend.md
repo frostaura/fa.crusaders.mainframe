@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-member-code-backend
+name: technologies-crusaders-squash-control-system-decisions-member-code-backend
 description: "D1/D10 server side: S never stored, one use per code per class claimed before acting, same-board reuse is a receipt, pay-for pinned to its quote and paid in one commit, players behind one seam wired to P11's accepted seats."
 type: decision
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-env-postgres
+name: technologies-crusaders-squash-control-system-gotchas-env-postgres
 description: "The test Postgres instances are Docker containers, and Docker on this Mac wedges: which container is on which port, a private Homebrew cluster without Docker, and what a fresh remote session must install first."
 type: gotcha
 last_verified: 2026-11-20

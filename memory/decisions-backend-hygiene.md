@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-backend-hygiene
+name: technologies-crusaders-squash-control-system-decisions-backend-hygiene
 description: "P10 backend hygiene rules: a retired settings key stays bound and ignored, the dev seeder skips any held slot, per-booking codes stay until no rollout phase reaches them, PayFast source check now built (advisory)."
 type: decision
 last_verified: 2026-11-20

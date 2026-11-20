@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-settlement
+name: technologies-crusaders-squash-control-system-decisions-settlement
 description: "How the ledger settles: a no-show releases its tail by truncating EndsAt, late evidence reverses it with two NEW rows (balance may go negative), the resold tail is displaced, outage refunds stay NoShow."
 type: decision
 last_verified: 2026-11-20

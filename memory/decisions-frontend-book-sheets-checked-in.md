@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-book-sheets-checked-in
+name: technologies-crusaders-squash-control-system-decisions-frontend-book-sheets-checked-in
 description: "Cancel sheets over a checked-in booking: no member Cancel once attendance is stamped, who checked in is read off the booking record or nobody is named, the desk says partners' shares stand."
 type: decision
 last_verified: 2026-11-20

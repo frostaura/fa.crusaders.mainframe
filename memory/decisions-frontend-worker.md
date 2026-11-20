@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-worker
+name: technologies-crusaders-squash-control-system-decisions-frontend-worker
 description: "The service worker: one per build with caches named for it, activate ends at claim and finishes the install in a self-posted message, a member's install set holds every static import, the old build is purged only once the new one is whole."
 type: decision
 last_verified: 2026-11-20

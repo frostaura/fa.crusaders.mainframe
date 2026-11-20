@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-players-deadline
+name: technologies-crusaders-squash-control-system-decisions-players-deadline
 description: "The share deadline is frozen per booking; a return posts only when coverage pays for it — its own game's earmark (none for S4) plus free balance, first come first served."
 type: decision
 last_verified: 2026-09-29

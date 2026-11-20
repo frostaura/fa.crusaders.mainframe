@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-demo-mode
+name: technologies-crusaders-squash-control-system-decisions-demo-mode
 description: "Demo mode (2026-10-06): a second tenant per club with a mirror admin, the switch is a session swap, mail/PayFast/webhooks/device keys are off for demo clubs, data drawn relative to now and redrawn after 24 h."
 type: decision
 last_verified: 2026-10-06

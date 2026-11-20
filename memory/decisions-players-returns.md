@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-players-returns
+name: technologies-crusaders-squash-control-system-decisions-players-returns
 description: "An uncovered return waits: stamped, set aside from spendable, told once, retried on credit, sweep and start-up; a failed reconcile leaves a marker; nothing strands after an outage."
 type: decision
 last_verified: 2026-11-20

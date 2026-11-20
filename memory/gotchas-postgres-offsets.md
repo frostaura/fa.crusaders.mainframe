@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-postgres-offsets
+name: technologies-crusaders-squash-control-system-gotchas-postgres-offsets
 description: "Npgsql refuses a non-zero DateTimeOffset on a timestamptz parameter, and timestamptz keeps only microseconds while DateTimeOffset counts ticks — so an instant can be refused outright or silently altered on the way in."
 type: gotcha
 last_verified: 2026-09-30

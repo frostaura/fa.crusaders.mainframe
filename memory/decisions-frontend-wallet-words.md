@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-wallet-words
+name: technologies-crusaders-squash-control-system-decisions-frontend-wallet-words
 description: "How a money toast is worded: by the frame's cause and sign, one sentence per action naming each partner, a share said as the act that moved it, who acted named and never guessed, the booking placed, the club's voice mapped to you."
 type: decision
 last_verified: 2026-11-20

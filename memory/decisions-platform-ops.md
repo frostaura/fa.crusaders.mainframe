@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-platform-ops
+name: technologies-crusaders-squash-control-system-decisions-platform-ops
 description: "Health, errors, logs, webhooks, SSRF, biometric: /healthz liveness vs /readyz readiness, a bad body is a coded 400 never a 500, capped logs, a redacted gateway log, webhook rows before attempts, the simulator gated to Development."
 type: decision
 last_verified: 2026-11-20

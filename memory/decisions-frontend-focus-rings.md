@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-focus-rings
+name: technologies-crusaders-squash-control-system-decisions-frontend-focus-rings
 description: "Focus seen and kept: a clipping box insets its rings unless it can hold a filled control (then it gives room); every overflow-hidden box is scanned; every paged list hands focus on through one hook."
 type: decision
 last_verified: 2026-11-20

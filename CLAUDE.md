@@ -1,4 +1,4 @@
-# Crusaders Mainframe (`crusaders.mainframe`)
+# Crusaders Squash Control System (`technologies.crusaders.squash-control-system`)
 
 ## What this is
 
@@ -35,7 +35,7 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
   scoring vectors, consumed by both the frontend and the .NET tests) and `payfast` (the PayFast signature
   corpus, read by the .NET tests). No side may drift from a corpus without a test going red.
 
-Repository: `https://github.com/frostaura/fa.crusaders.mainframe.git`. Its visibility is a founder decision and a status, not a rule — read it with `gh repo view`, never from a context file (it was public while every file here called it private).
+Repository: `https://github.com/frostaura/technologies.crusaders.squash-control-system.git`. Its visibility is a founder decision and a status, not a rule — read it with `gh repo view`, never from a context file (it was public while every file here called it private).
 
 ### Known deviations from the FrostAura mandate
 
@@ -128,4 +128,4 @@ This repo carries **no local `.claude/skills/`** and must not reacquire one. A p
 ## Upkeep
 Three artifacts are kept current **as changes land**, not in a later pass: this `CLAUDE.md`, [`MEMORY.md`](MEMORY.md) with its `memory/` topic store, and the skills layer above (empty by decision). `MEMORY.md` is required here exactly as `CLAUDE.md` is, and cascades downward identically; a `CLAUDE.md` with no `MEMORY.md` beside it is a defect.
 
-Update the memory store at the end of any session that shipped, decided, discovered or abandoned something, and restamp `last_verified:` only for what you actually inspected. **Edit the topic files under `memory/`, never `MEMORY.md` itself** — the index is derived from their frontmatter, and a hand-cut entry is silently discarded by the next regeneration. Regenerate it from the tree root with `python3 .claude/scripts/audit-tree.py --no-git --fix-index --scope Technologies/projects/crusaders.mainframe`; the `--scope` flag is what stops a fan-out agent rewriting a sibling's index mid-flight. This file changes only when a rule changes — a status belongs in `MEMORY.md`. A stale plugin procedure is fixed upstream and reinstalled, never forked back in here. The standard is [`/docs/operating/context-cascade.md`](../../../docs/operating/context-cascade.md).
+Update the memory store at the end of any session that shipped, decided, discovered or abandoned something, and restamp `last_verified:` only for what you actually inspected. **Edit the topic files under `memory/`, never `MEMORY.md` itself** — the index is derived from their frontmatter, and a hand-cut entry is silently discarded by the next regeneration. Regenerate it from the tree root with `python3 .claude/scripts/audit-tree.py --no-git --fix-index --scope Technologies/projects/technologies.crusaders.squash-control-system`; the `--scope` flag is what stops a fan-out agent rewriting a sibling's index mid-flight. This file changes only when a rule changes — a status belongs in `MEMORY.md`. A stale plugin procedure is fixed upstream and reinstalled, never forked back in here. The standard is [`/docs/operating/context-cascade.md`](../../../docs/operating/context-cascade.md).

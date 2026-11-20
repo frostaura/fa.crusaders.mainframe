@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-players-words-cancelled
+name: technologies-crusaders-squash-control-system-decisions-frontend-players-words-cancelled
 description: "Member screens for a cancelled or gone game: who cancelled and why, each partner's share named, a paid share stands or went back, and a game the member can no longer read loses its View booking link."
 type: decision
 last_verified: 2026-11-20

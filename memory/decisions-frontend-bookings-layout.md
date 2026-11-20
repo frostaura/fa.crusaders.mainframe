@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-bookings-layout
+name: technologies-crusaders-squash-control-system-decisions-frontend-bookings-layout
 description: "The Bookings screen's shape: the grid carries no price (P13), a phone opens at the week, a Booking-for summary is the member's, too-far-ahead and offline cells drawn as such, lazy parts; the PR #12 ticker in a sibling."
 type: decision
 last_verified: 2026-11-20

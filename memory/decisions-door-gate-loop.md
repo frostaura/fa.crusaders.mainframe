@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-door-gate-loop
+name: technologies-crusaders-squash-control-system-decisions-door-gate-loop
 description: "The door gate's pass and what shares its one blocking call: why the loop left main.cpp, the load-bearing step order, at most one call with the 15 s watchdog relation and its lamp fault, and the true release-overrun bound."
 type: decision
 last_verified: 2026-11-20

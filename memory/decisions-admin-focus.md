@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-focus
+name: technologies-crusaders-squash-control-system-decisions-admin-focus
 description: "R8-R12 admin console: editors, Show more (one usePagedFocus hook) and dismissed dialogs hand focus on, never to body; rows step down by rem containers; desk sale states its price."
 type: decision
 last_verified: 2026-11-20

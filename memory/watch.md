@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-watch
+name: technologies-crusaders-squash-control-system-watch
 description: "Unpaid debts, worst first: two gitignored .env files hold live JWT, database, SMTP, encryption and admin-bootstrap secrets, unencrypted and unbacked-up; the redeploy is a manual runbook nothing enforces; charge-at-booking is unsigned-off."
 type: watch
 last_verified: 2026-11-20
@@ -52,3 +52,5 @@ compose files, `gh repo view`); item 6 on 2026-09-29; the rest carry their dates
    not the injected `TimeProvider` it reads (`BookingService.cs:71,399`); `ReverseNoShowAsync`'s doc
    (`BookingService.cs:1817-1821`) says a booking-naming adjustment skips the money legs, which `SettledLegsAsync`
    nets (`decisions-settlement.md`). Delete when all five are fixed.
+9. **The 2026-11-20 rename is owed in product files.** The passkey prompt and fallback sender still say "Crusaders
+   Mainframe", and images, `localStorage` keys and the backup path need a migration: [`watch-rename.md`](watch-rename.md).

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-large-text
+name: technologies-crusaders-squash-control-system-decisions-frontend-large-text
 description: "Screens at 320 px and 200 % text: a name gets a line before it breaks, narrow rows stack by rem container queries, boxes beside words are px, text grids are minmax(0,1fr), overflow-wrap anywhere, every route's skeleton fits."
 type: decision
 last_verified: 2026-11-20

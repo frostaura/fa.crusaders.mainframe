@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-member-code-rotation
+name: technologies-crusaders-squash-control-system-decisions-member-code-rotation
 description: "Every rotation ends every open session by a per-user epoch (not a time), raised before and after the save; the desk's reset drops passkeys, sign-out-everywhere does not; a token naming no account in its club is refused."
 type: decision
 last_verified: 2026-09-29

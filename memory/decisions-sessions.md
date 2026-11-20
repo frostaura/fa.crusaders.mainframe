@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-sessions
+name: technologies-crusaders-squash-control-system-decisions-sessions
 description: "Sessions outlive the 15-minute access token via a rotating, hashed refresh cookie (B1); every token names its family (rfid, C1); sign-in and the global backstop limit per account, not per club address."
 type: decision
 last_verified: 2026-11-20

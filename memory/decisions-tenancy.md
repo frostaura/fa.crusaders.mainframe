@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-tenancy
+name: technologies-crusaders-squash-control-system-decisions-tenancy
 description: "Tenancy and onboarding: clubs made by an operator CLI (no platform account), club status fails closed, per-club link addresses, approval waits for a confirmed address, one answer to every application, photo mandatory."
 type: decision
 last_verified: 2026-11-20

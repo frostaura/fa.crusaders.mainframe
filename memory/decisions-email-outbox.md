@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-email-outbox
+name: technologies-crusaders-squash-control-system-decisions-email-outbox
 description: "How mail leaves: IEmailService only queues (SKIP LOCKED sender, backoff, email.undeliverable on a final failure), the admin notice dispatcher sends direct, held member mail is re-derived at the send, coalesced, released in order."
 type: decision
 last_verified: 2026-11-20

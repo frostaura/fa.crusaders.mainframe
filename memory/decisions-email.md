@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-email
+name: technologies-crusaders-squash-control-system-decisions-email
 description: "Every message is sent by a CLUB, not by the platform: one identity resolver, both bodies derived from one block list so they cannot drift, the registration mail merged to match what the screen promises, and no image anywhere."
 type: decision
 last_verified: 2026-11-20
@@ -16,8 +16,8 @@ The voice these are written in is the product's own, held in
   `PeripheralHealthWorker`'s `health.Tenant.DisplayName`, a `tenant?.DisplayName ?? "Crusaders
   Mainframe"` fallback in `BookingService`, and — on eleven templates — a literal in the markup.
   `ClubIdentityResolver` is the single source, and every template takes a `ClubIdentity` first.
-  *Why it is a tenancy bug and not a polish item:* "Crusaders Mainframe" is the repository's name
-  for the software, so on the second club's mail it was a **different club's name**, on the one
+  *Why it is a tenancy bug and not a polish item:* "Crusaders Mainframe" was the repository's name
+  for the software (Crusaders Squash Control System since 2026-11-20), so on the second club's mail it was a **different club's name**, on the one
   surface that leaves the building.
 - **A sweep never signs from the scoped resolver.** `NoShowWorker.TickAsync` and
   `PeripheralHealthWorker.TickAsync` walk every tenant inside **one** scope, resetting `ITenantContext` as

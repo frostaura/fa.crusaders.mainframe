@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-doors-member
+name: technologies-crusaders-squash-control-system-decisions-doors-member
 description: "A member's door history lives on /me/door and, since D9 (2026-09-23), on an audited admin read of one named member; the club log stays unsearchable by person; filtered by tenant AND subject; door rows deleted past retention."
 type: decision
 last_verified: 2026-11-20

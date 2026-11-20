@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-frontend-layout
+name: technologies-crusaders-squash-control-system-gotchas-frontend-layout
 description: "Layout traps measured in Chromium (R3-R4): text overflow is invisible to element rects, a zero flex basis never wraps, implicit grid columns and min-widths beat max-widths at 200 %, ui heights are floors."
 type: gotcha
 last_verified: 2026-11-20

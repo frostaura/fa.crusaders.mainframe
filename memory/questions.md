@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-questions
+name: technologies-crusaders-squash-control-system-questions
 description: "All founder-owned: PIN length (a 4-digit collision charges the wrong member), biometric SDK, gate policy, court-box rosters, walk-behind attendance, play defaults, delivery by PR, MIT, pricing, BA-17, FC-8, who flashes."
 type: question
 last_verified: 2026-11-20

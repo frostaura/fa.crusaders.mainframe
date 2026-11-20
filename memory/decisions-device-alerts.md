@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device-alerts
+name: technologies-crusaders-squash-control-system-decisions-device-alerts
 description: "How a board reports on itself: one outage mail per cooldown derived from the rows, silence about any board no admin has acknowledged, a cap of 16 unacknowledged rows answered 409, and a door that is never a court's evidence."
 type: decision
 last_verified: 2026-09-19

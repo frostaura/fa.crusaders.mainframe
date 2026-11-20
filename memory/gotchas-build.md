@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-build
+name: technologies-crusaders-squash-control-system-gotchas-build
 description: "Firmware toolchain traps: src/iot is several PlatformIO projects on one venv, every arduino/ tree is GENERATED, both cores force gnu++11, build_unflags strips every match, UBSan will not fold an address."
 type: gotcha
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-players-access
+name: technologies-crusaders-squash-control-system-decisions-players-access
 description: "Players access and consent: findable on by default; only a live seat shows a booking, link claims by link only, accept names the share seen, the invite loop is closed, balance_minutes always raw, member mail rides R23."
 type: decision
 last_verified: 2026-11-20

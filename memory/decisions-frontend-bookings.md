@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-bookings
+name: technologies-crusaders-squash-control-system-decisions-frontend-bookings
 description: "Bookings screen (R2/R3 lane F1): latest schedule read wins, ?as= draws member windows, game cards name accepted seats and paid/owed, offline sends nothing, focus returns to the grid."
 type: decision
 last_verified: 2026-11-20

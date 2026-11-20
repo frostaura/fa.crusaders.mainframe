@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions
+name: technologies-crusaders-squash-control-system-decisions
 description: "Product and economics: blueprint Rev 2 is the customer's word on economics; whole minutes replaced credits (P13); charge AT BOOKING still needs committee sign-off; PayFast replaced Peach."
 type: decision
 last_verified: 2026-11-20

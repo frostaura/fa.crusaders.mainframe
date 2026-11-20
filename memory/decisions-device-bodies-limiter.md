@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device-bodies-limiter
+name: technologies-crusaders-squash-control-system-decisions-device-bodies-limiter
 description: "How a board's requests are rate-limited: a per-board device bucket keyed off the body's MAC, ahead of a chained global limiter whose device-only address stage bounds a stolen key over invented MACs."
 type: decision
 last_verified: 2026-11-20

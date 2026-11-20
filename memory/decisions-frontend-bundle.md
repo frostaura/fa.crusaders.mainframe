@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-bundle
+name: technologies-crusaders-squash-control-system-decisions-frontend-bundle
 description: "What loads first and why: shell and My Code in the entry, the admin frame one lazy chunk, 4 icon weights, our own Archivo/JetBrains cuts; first load 557 → 304 (P10) → 255 kB, then 271 → 263 KiB gzip (R7)."
 type: decision
 last_verified: 2026-11-20

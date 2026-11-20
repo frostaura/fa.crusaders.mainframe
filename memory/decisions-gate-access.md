@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-gate-access
+name: technologies-crusaders-squash-control-system-decisions-gate-access
 description: "Who a door opens for: a booking code bounded by its own booking, capped at four hours and clamped at every reader; NoShow and Completed both count; admins pass online only; 403 can mean nothing but out of service."
 type: decision
 last_verified: 2026-09-19

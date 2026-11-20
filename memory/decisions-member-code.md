@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-member-code
+name: technologies-crusaders-squash-control-system-decisions-member-code
 description: "D1's single rotating code as built in firmware: 19 chars to fit the Mega's limits, ON server-only and OFF under a 12-byte per-day key devices hold, rosters naming players; pay-for left the box at bridge 3.1.0."
 type: decision
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-desk-money
+name: technologies-crusaders-squash-control-system-decisions-desk-money
 description: "The desk's money: sell (a package at the confirmed price) and adjust (signed goodwill) are two routes, a key is one member's movement and replays before any shelf check, given minutes are never sold, refunds name their purchase."
 type: decision
 last_verified: 2026-11-20

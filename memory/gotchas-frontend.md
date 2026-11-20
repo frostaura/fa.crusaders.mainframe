@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-frontend
+name: technologies-crusaders-squash-control-system-gotchas-frontend
 description: "React and vitest traps: renderPage(<StrictMode>…) is INERT, a mounted ref is set in a layout effect, user-event typing hangs under jsdom 28, no localStorage under Node 25, lazy chunks race tests, Select.Value drops className."
 type: gotcha
 last_verified: 2026-11-20

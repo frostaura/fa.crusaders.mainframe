@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-door-gate-persistence
+name: technologies-crusaders-squash-control-system-decisions-door-gate-persistence
 description: "Gate 2.0.0 (contract v3, cable-flashed with four secrets): what survives a reset and where (RTC image, NVS on change), undelivered events under their own boot id, the 401 key retry, an abandoned base URL, the scanner idle gap."
 type: decision
 last_verified: 2026-11-20

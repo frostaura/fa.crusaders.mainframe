@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-door-gate-io
+name: technologies-crusaders-squash-control-system-decisions-door-gate-io
 description: "The door gate's edges: a compiler-checked API_BASE_URL that refuses the example file's own placeholder, every secrets value guarded, what a UART overrun costs, and the Arduino-IDE flash route with its version trap."
 type: decision
 last_verified: 2026-11-20

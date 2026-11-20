@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-payfast
+name: technologies-crusaders-squash-control-system-decisions-payfast
 description: "PayFast trust: a club without a passphrase is not configured, an ITN credits only after signature, merchant, COMPLETE, PayFast's validate and the locked amount, once per checkout by the database; a second payment is flagged, never absorbed."
 type: decision
 last_verified: 2026-11-20

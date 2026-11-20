@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-play
+name: technologies-crusaders-squash-control-system-decisions-play
 description: "D14 play MVP: results only on box-checked-in bookings with their own lineup, PAR-11 best of 3/5, confirm or 48 h silence; stats derived on read; weekly streak keyed by Monday date; badges never revoked; one mailed kind."
 type: decision
 last_verified: 2026-11-20

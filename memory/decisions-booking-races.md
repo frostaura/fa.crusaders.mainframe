@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-booking-races
+name: technologies-crusaders-squash-control-system-decisions-booking-races
 description: "Booking writes that race: a deadlocked or serialisation-failed unit is retried whole (3×), a lost optimistic race is decided again, and anything that escapes is 503 conflict_retry with Retry-After, never 500."
 type: decision
 last_verified: 2026-11-20

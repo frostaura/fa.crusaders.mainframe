@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-doors-console
+name: technologies-crusaders-squash-control-system-decisions-doors-console
 description: "The admin doors surface: one vocabulary for four audit actions, a deleted door that is removed rather than absent, an edit that says which one it was, signals with nowhere to put a member, and reopen-all as an undo."
 type: decision
 last_verified: 2026-11-20

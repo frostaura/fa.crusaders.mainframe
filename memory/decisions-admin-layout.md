@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-layout
+name: technologies-crusaders-squash-control-system-decisions-admin-layout
 description: "R4-R5 form factor: full frame; Members beside the record; admin role in row, header and Access tab (one dialog); Transactions totals in view; rails; R5 phone density for Overview, Faults, Boards, schedules."
 type: decision
 last_verified: 2026-10-03

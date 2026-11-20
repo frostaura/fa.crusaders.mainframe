@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-wallet-live
+name: technologies-crusaders-squash-control-system-decisions-frontend-wallet-live
 description: "The phone's live wallet: the chip owns every movement the stream brings, a frame is the member's own only when an in-flight write makes its reason, unnamed twins never toast, stale reads and answers overtaken by a frame are dropped."
 type: decision
 last_verified: 2026-11-20

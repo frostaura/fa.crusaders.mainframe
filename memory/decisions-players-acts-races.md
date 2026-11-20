@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-players-acts-races
+name: technologies-crusaders-squash-control-system-decisions-players-acts-races
 description: "Seat-act races: a dedupe collision is already said, idempotent twins, accept locking the booking row, a lost accept re-read for the seat as it stands, cancel refunds read off the ledger after."
 type: decision
 last_verified: 2026-11-20

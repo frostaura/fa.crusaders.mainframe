@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-device-bodies
+name: technologies-crusaders-squash-control-system-decisions-device-bodies
 description: "How the API reads what a board sends: a lenient body reader (bad bytes become U+FFFD, not-JSON is 400 only), saturating time maths, a diagnostic field never fatal, one body one board, one restore per boot."
 type: decision
 last_verified: 2026-11-20

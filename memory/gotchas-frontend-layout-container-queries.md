@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-gotchas-frontend-layout-container-queries
+name: technologies-crusaders-squash-control-system-gotchas-frontend-layout-container-queries
 description: "Container-query traps at 200 % text: measure the component in rem not the viewport, one rule per width range, classes written whole, the plugin's @[…] emitted before sm:, a rem max-width query is a large-text query."
 type: gotcha
 last_verified: 2026-11-20

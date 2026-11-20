@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-bookings-money
+name: technologies-crusaders-squash-control-system-decisions-frontend-bookings-money
 description: "Bookings screen money and caps: a cap-locked cell says Your limit, held credit per share deadline, money never optimistic, a 402 adopted, a pick past the daily cap said in the selection bar."
 type: decision
 last_verified: 2026-11-20

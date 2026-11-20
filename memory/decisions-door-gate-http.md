@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-door-gate-http
+name: technologies-crusaders-squash-control-system-decisions-door-gate-http
 description: "One HTTP call on the door gate: the framing the real server sends and how G2's fix made every call time out, the three phases and their budgets, and the two since-boot counters the board has nowhere else to put."
 type: decision
 last_verified: 2026-11-20

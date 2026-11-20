@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-watch-secrets
+name: technologies-crusaders-squash-control-system-watch-secrets
 description: "Where live secrets sit unencrypted on this Mac: two gitignored .env files (dev clone, iCloud clone), four firmware secrets.h, PayFast credentials in clear in tenant_settings. Read by key name only."
 type: watch
 last_verified: 2026-11-20
@@ -10,7 +10,7 @@ last_verified: 2026-11-20
 Item 1 of [`watch.md`](watch.md), split out by sub-subject. Re-checked 2026-11-20: each `.env` read as key name plus
 set/empty, no value printed; `TenantSecretsAccessor.cs:13`; `docs/go-live-checklist.md:158`. **Never transcribe a value.**
 
-- **Two gitignored `.env` files hold several classes of live secret.** The `~/src/fa.crusaders.mainframe` clone's
+- **Two gitignored `.env` files hold several classes of live secret.** The `~/src/technologies.crusaders.squash-control-system` clone's
   populates `JWT_SECRET`, `POSTGRES_PASSWORD`, `BOOTSTRAP_ADMIN_PASSWORD` and a real mailbox in both spellings (`SMTP_*`
   and `Smtp__*`; the flat names win), plus the retired `BOOTSTRAP_SLICE_PRICE_CREDITS` (read by nothing; Dean deletes
   it). The iCloud clone's populates its own `JWT_SECRET`, `POSTGRES_PASSWORD` and `SMTP_PASSWORD`, plus

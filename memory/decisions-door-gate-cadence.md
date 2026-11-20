@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-door-gate-cadence
+name: technologies-crusaders-squash-control-system-decisions-door-gate-cadence
 description: "How often the door gate speaks and what a refusal costs it: the 15 s floor under a flapping link, the scan bound that covers both uploads, and what a 403 or a 404 on each device path does to the roster and the queue."
 type: decision
 last_verified: 2026-09-19

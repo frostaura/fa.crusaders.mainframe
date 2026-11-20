@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-firmware-event-drain
+name: technologies-crusaders-squash-control-system-decisions-firmware-event-drain
 description: "Court box wire and event drain (R15 FW15, R16 FW16): every scanned byte escaped, a 4xx drops the head with no backoff, a refusal that keeps it backs off 15 s to 5 min, a 404 keeps it, breaker untouched."
 type: decision
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-launch-bar
+name: technologies-crusaders-squash-control-system-launch-bar
 description: "The working set of conditions agreed on 2026-07-24 for calling Crusaders launched — bookings, lights-on match rate, positive balances, second-club onboarding time, uptime — and the fact that nothing instruments any of them."
 type: decision
 last_verified: 2026-09-19

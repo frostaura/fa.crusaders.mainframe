@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-admin-notices-delivery
+name: technologies-crusaders-squash-control-system-decisions-admin-notices-delivery
 description: "How an admin notice is delivered: a leased claim, per-recipient progress, a cooldown counted from rows that reached somebody on both sides, pruning capped by retention_years, and a feed whose sent_at means sent."
 type: decision
 last_verified: 2026-09-23

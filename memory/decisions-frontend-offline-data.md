@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-offline-data
+name: technologies-crusaders-squash-control-system-decisions-frontend-offline-data
 description: "Member reads kept per member in IndexedDB (never the worker cache), wiped on any ending or switch; drawn at once, refreshed behind; offline-capable routes; offline writes refused, never queued."
 type: decision
 last_verified: 2026-11-20

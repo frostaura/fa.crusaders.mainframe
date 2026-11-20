@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-groups
+name: technologies-crusaders-squash-control-system-decisions-groups
 description: "D2: groups replaced the member class. P13: a group carries a package discount (lowest wins, rand only) and peak priority (tri-state); no group sets a price or a rate any more."
 type: decision
 last_verified: 2026-11-20

@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-change-record
+name: technologies-crusaders-squash-control-system-decisions-change-record
 description: "Rounds 1-4: membership decisions on the change record in their own save (a rejection can be approved); reasons required and mailed; webhooks recorded without secrets; every vocabulary action now has a writer."
 type: decision
 last_verified: 2026-11-20

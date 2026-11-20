@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-frontend-book-sheets
+name: technologies-crusaders-squash-control-system-decisions-frontend-book-sheets
 description: "Book and Cancel sheets: a money sheet never closes mid-write, only a double tap's tail is ignored, a refusal is taken to the reader, a final refusal ends the sheet, unsure words count the slots."
 type: decision
 last_verified: 2026-11-20

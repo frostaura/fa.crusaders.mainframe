@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-gate
+name: technologies-crusaders-squash-control-system-decisions-gate
 description: "The door gate reuses the court box's contract with no EF migration; a board declares its kind once, event kinds are normalised once, a door is never attendance, and its trail finally has a reader."
 type: decision
 last_verified: 2026-11-20

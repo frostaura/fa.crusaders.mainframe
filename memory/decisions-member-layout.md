@@ -1,5 +1,5 @@
 ---
-name: crusaders-mainframe-decisions-member-layout
+name: technologies-crusaders-squash-control-system-decisions-member-layout
 description: "R4 form factor (L1): the layout primitives (SplitView, WithAside, AutoGrid, ContextBar) decide by their own box; member screens use the width; one verb docked in thumb reach; traps found on the way."
 type: decision
 last_verified: 2026-10-03
