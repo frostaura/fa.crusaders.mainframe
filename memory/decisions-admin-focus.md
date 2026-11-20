@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-admin-focus
 description: "R8-R12 admin console: editors, Show more (one usePagedFocus hook) and dismissed dialogs hand focus on, never to body; rows step down by rem containers; desk sale states its price."
 type: decision
-last_verified: 2026-10-03
+last_verified: 2026-11-20
 ---
 
 # Live decisions — admin focus and large-text rows (review round 8, lane FC)
@@ -15,9 +15,10 @@ Tests: `e2e/admin-r8-fc.spec.ts` (geometry at 200 % text and focus, both measure
   re-render by `data-opens-editor` — the opener is usually a fresh element by then. It acts only
   when focus fell to `<body>`, so a save that moved focus on purpose is left alone. Used by Boards'
   two editors, the Packages rail (a phone's sheet does both itself) and Repeating bookings.
-- **"Show more" that reveals rows focuses the first revealed row** (X8-4): Members' list or picker
-  (its name link) and the Night (`[data-night-row]`, `tabIndex -1`) — `flushSync`, then focus. *Why:*
-  the last page takes the button away and focus fell to `<body>`; the next Tab hit the skip link.
+- **"Show more" that reveals rows focuses the first revealed row** (X8-4). *Why:* the last page takes the button away
+  and focus fell to `<body>`; the next Tab hit the skip link. R8/R9 did it list by list with `flushSync`, then focus;
+  R12 below replaced that with one hook everywhere except three lists that keep their own `flushSync` +
+  `focusFirstRevealed`.
 - **Retiring a package is a `ConfirmDialog`** (J8-5), not the inline armed confirm: in the rail
   layout's ~100px Actions column its sentence ran eight lines. Focus floors on the page heading.
 - **A `DataTable` wider than its box says so** (L8-13): a fade on the side with more plus an sr-only
@@ -35,8 +36,8 @@ Tests: `e2e/admin-r8-fc.spec.ts` (geometry at 200 % text and focus, both measure
 - **A list-owned dialog stays mounted while it closes** (X9-1): Retire keeps `{pkg, open}`; unmounting
   on close skipped Radix's close-time focus (focus fell to `<main>`). Dismiss → the row's ⋯ by
   `[data-package-row] button[aria-haspopup=menu]`; success still floors on the heading.
-- **Load more / Show more movements** focus the first revealed row (X9-2): `flushSync`, then the
-  change record's `li[data-change-row]` (tabIndex −1) / the ledger row's details button, in drawn order.
+- **Load more / Show more movements** focus the first revealed row (X9-2): the change record's `li[data-change-row]`
+  (tabIndex −1) / the ledger row's details button, in drawn order.
 - **Step down by the row's own rem width** (L9-3, L9-6): door log row grid from `@[30rem]`; stat and
   totals labels keep capitals+tracking only from a `@[7rem]` label box, else sentence case; totals cells
   `px-2` under a 16rem list. Trap: `typography({variant:"overline"})`'s `tracking-overline` outranks a
@@ -53,8 +54,11 @@ Tests: `e2e/admin-r8-fc.spec.ts` (geometry at 200 % text and focus, both measure
 - **Every "Show more"/"Load more" uses `lib/usePagedFocus(rowSelector, run)`** (X12-2): count rows at
   the press, focus row `before` after the page's update commits (a settle tick queued after it); a
   page that added nothing and took the button → last row. Row target: itself if focusable, else its
-  direct-child link (inbox), else tabindex −1. Inbox, member Bookings/Doors, Match results, Night,
-  Change record. *Why:* fixed list by list in R8/R9 and four lists still dropped to `<body>`.
+  direct-child link (inbox), else tabindex −1. Inbox, member Bookings/Doors, Match results, Night (`MemberNight.tsx:266`),
+  Change record (`AdminChangeRecord.tsx:123`). *Why:* fixed list by list in R8/R9 and four lists still dropped to
+  `<body>`. **Three allow-listed exceptions** keep `flushSync` + their own `focusFirstRevealed`: Transactions
+  (`AdminLedger.tsx:447,525`), the Members list (`AdminMembers.tsx:201-214`, local `usePaging`) and the member picker —
+  listed in `ALLOWED` in `src/paged-focus-scan.test.ts`, which enforces the rest ([`decisions-frontend-focus-rings.md`](decisions-frontend-focus-rings.md)).
 - **A reversal that collided says so** (E12-4, contract C3): `detail.collision_booking_ids` +
   `collision_from` → "This session overlapped another member's booking on the same court from 18:30,
   so both paid for that time." with a link to `/bookings/<id>`, never the other member's name.

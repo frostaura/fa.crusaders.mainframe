@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-sessions
 description: "Sessions outlive the 15-minute access token via a rotating, hashed refresh cookie (B1); every token names its family (rfid, C1); sign-in and the global backstop limit per account, not per club address."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-11-20
 ---
 
 # Live decisions — sessions and sign-in limits (review round 1, lane B)
@@ -57,4 +57,4 @@ Tests: `RefreshCookieHttpTests`, `SignInRateLimitHttpTests`. Epoch rules: `decis
 - **The global backstop is per MEMBER** (B-10): `GlobalPerMinute` (600) per signed-in user;
   anonymous requests per address at `GlobalPerIpPerMinute` (6000). 429 = `rate_limited` +
   `retry_after_seconds`. *Why:* 600 per address 429'd a whole club behind one router. Device requests are limited per
-  BOARD since R16/R17 ([`decisions-backend-r17a.md`](decisions-backend-r17a.md)).
+  BOARD since R16/R17 ([`decisions-device-bodies.md`](decisions-device-bodies.md)).

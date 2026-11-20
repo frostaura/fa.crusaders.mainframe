@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-players
 description: "D11–D13: single-payer booking; shares move as ShareTransfer pairs via one idempotent reconcile off Owed; consent caps collection; no debts, and shares received are held to the deadline; Dean's two 2026-09-28 rulings."
 type: decision
-last_verified: 2026-10-02
+last_verified: 2026-11-20
 ---
 
 # Live decisions — players and splits (D11–D13)
@@ -18,9 +18,10 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
   index on `ExternalReference` makes a raced double-post impossible.
 - **One idempotent `ShareLedger.ReconcileAsync`, called after every seat action, after each
   settlement commit via `ShareHook` (callers, fresh scope, never throws) and by `ShareWorker`.**
-  *Why:* one place a share is computed; `BookingService` was not edited — the hook sits at the
-  endpoints / NoShowWorker / device-event loop. Reversal-displaced and release-reinstated
-  bookings are reached by the worker's minute sweep, not the hook (their ids are not surfaced).
+  *Why:* one place a share is computed. The hook sits at the endpoints, `NoShowWorker`, the device-event loop and,
+  since R13, inside `BookingService` too (`SharesFollowAsync` → `ShareHook.AfterSettlementAsync`,
+  `BookingService.cs:1954-1955`). Reversal-displaced and release-reinstated bookings are reached by the worker's minute
+  sweep, not the hook (their ids are not surfaced).
 - **Lock the DEBITED member only** (partner on collect, organiser on return). Money arriving never overspends.
   The accept also takes a per-SEAT advisory lock after the member's: two members claiming one open
   link seat hold different member locks and deadlocked (40P01, ~1 in 5 runs of the racing test)
@@ -44,6 +45,8 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
   remainder; an amount split refuses a non-whole figure as `split_amount_invalid` by code (the wire stays
   decimal so 7.5 is that 400, not a binding failure)** — also after a remove, decline or withdraw (no auto re-split): their seat is set to P − Σ live partners by ONE SQL update after the commit,
   no version bump (R4 M4-6: the seat kept its old figure; a tracked write would 409 one of two declines at once).
+- **The grid's daily limit is the POST's** (R8 J8-1): `BookingRules.HeldOnDayAsync` counts accepted partner seats for
+  both (`BookingRules.cs:337`, `ScheduleService.cs:204`).
 - **D12 cap: accepted seats count against the partner's own cap**, checked on the first accept of a
   future game under the partner's lock (the cap's unit). Peak/windows/price bind the organiser only.
 - **A payer override on a split booking is silently ignored** (the scan still checks in); pay-for

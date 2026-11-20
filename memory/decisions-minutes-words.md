@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-minutes-words
 description: "Frontend: minutes inside words (sentences, labels, buttons, aria) are spoken long form; the compact '1 h 30 min' is only a standalone figure paired with its spoken twin. A source scan pins copy modules."
 type: decision
-last_verified: 2026-10-03
+last_verified: 2026-11-20
 ---
 
 # Minutes in words vs minutes as a figure (R6 X6-2, contract §7.1)
@@ -46,7 +46,7 @@ last_verified: 2026-10-03
 - **A figure that may wrap keeps number and unit together** (R7 L7-1/J7-5): `components/members/keepUnits`
   binds "4 h" and "33 min" with U+00A0, so it breaks between groups, never "4 h 33 | min"
   (`KeptMinutes` on the member card and header; R8 L7-4: the Book sheet's money rows, slot price and
-  length, and the Profile ring's centre). Not yet folded into `<Minutes>` (integrator ask).
+  length, and the Profile ring's centre). Since R19 `<Minutes>` glues its own paint too (`keepFiguresWhole`, `components/Minutes.tsx:3,29`).
 - **Server half (R9 X9-4):** headlines, mail facts and new ledger lines say durations with
   `MoneyFormat.Minutes` ("after 6 minutes", "Silent for 12 minutes"). `SpokenUnitsTests` sweeps every
   `EmailCatalogue` message and every Api source line for `{…} min|h|d` (exempt: `MoneyFormat.cs`).

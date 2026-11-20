@@ -29,3 +29,7 @@ last_verified: 2026-11-13
   Read every literal outside `Down()` — see `decisions-release-ops.md`.
 - **Images published before 2026-11-13 have no revision label** and only `latest*` tags; for those,
   what runs is knowable only from the database's newest migration.
+- **A second full stack on one host needs its own subnet, gateway tag and DB volume**: the `crusaders-int` integration
+  stack (`:8098`, MailHog `:8035`) pins subnet `172.29.93.0/24`, tags its gateway `crusaders-int-gateway:local` (pass 1
+  had retagged the shared `crusaders-mainframe-gateway:local`) and stamps `BUILD_SHA`; its env was rebuilt from the
+  running containers' own environment, by key name.

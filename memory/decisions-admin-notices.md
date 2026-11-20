@@ -36,15 +36,15 @@ shown on the feed: `decisions-admin-notices-delivery.md`.
   name it and survive the money reset — while its words are a package purchase ("Package
   purchases that need looking at"); the payload gains `package_name`/`minutes`, filled by the
   `AdminNotices.TopUpFailed(reason, identity, name, pending)` overload from the purchase row.
-- **Webhook disable reaches admins for CLUB endpoints only**; the destination is scheme+host.
+- **Webhook disable reaches admins for CLUB endpoints only**; the destination is scheme+host. (Member-owned webhooks are
+  retired, so no owner mail is owed — [`decisions-platform-ops.md`](decisions-platform-ops.md).)
 - **Settings**: `fault_spike_count` (5, 2–100), `fault_spike_minutes` (15, 5–240),
   `application_reminder_hours` (24, 1–168), `admin_notification_retention_days` (90, 7–730),
   `topup_failure_cooldown_minutes` (30, 5–1440), `overdraft_cooldown_minutes` (15, 1–240).
 
 ## Owed
 
-- The Tester 001 production-log check and the From/mailbox mismatch; the member-owned webhook
-  owner's mail; control characters refused in full names at registration; a lease sized for more
+- The Tester 001 production-log check and the From/mailbox mismatch; control characters refused in full names at registration; a lease sized for more
   than one API instance (worst-case pass ≈ 25 min > the 10-min lease).
 
 ## The trap this leaves for tests

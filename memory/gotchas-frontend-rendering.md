@@ -43,6 +43,10 @@ last_verified: 2026-10-04
   narrower rem-guttered column hangs off its right side (the pass card, L10-3) — centre it with
   `ml-[calc((100%-W)/2)]`, which may go negative. A row's no-shrink figure + avatar at 200 % squeezed
   combobox names to nothing AND pushed the page sideways: query the row (avatar under 12rem), wrap.
+- **An arbitrary property in a plain `@[…]/appbar:` variant loses to its base** (R13): Tailwind emits `[--x:…]` after
+  the plugin's container rules, so inline tab labels were always 12px; a media-stacked variant (`max-xl:@[…]`) DOES
+  win, which is how a refactor silently grew every tab 8px and wrapped 768. Measure computed styles before and after
+  moving any class.
 - **The container-queries plugin's `@[44rem]/appbar:` emits NOTHING for some arbitrary properties**
   (R12 L12-1: `[container-type:normal]`, `[--x:1]`) while `[container-type:inline-size]` works —
   grep the served CSS. The raw variant `[@container_appbar_(min-width:44rem)]:![…]` is emitted.

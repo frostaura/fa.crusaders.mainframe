@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-backend-capacity
 description: "Connection capacity (R18 BE18s, R19 BE19L): DB pool bounded under Postgres (40), stream reads gated, no connection is 503 service_busy, gateway keepalive, no nginx limit_req; test pools give slots back."
 type: decision
-last_verified: 2026-10-06
+last_verified: 2026-11-20
 ---
 
 # Live decisions: connection capacity (review rounds 18 and 19, lanes BE18s and BE19L)
@@ -23,7 +23,7 @@ fan-out. What hurt was *bursts*: concurrent stream opens and synchronised keep-a
   frames are not gated (admin-only, few).
 - **No connection = `503 {"error":"service_busy"}` + `Retry-After: 2`** (InternalErrors.Classify):
   pool timeout (NpgsqlException wrapping TimeoutException), 53300, 57P03 — wrapped by EF or bare.
-  Never 500. The client words it as busy (`decisions-frontend-shell-r18.md`).
+  Never 500. The client words it as busy (`decisions-frontend-unknown-outcomes.md`).
 - **"No connection" is not "nothing ran"** (R19): a request takes a connection per command, so the
   refused one can come after part of the request committed. Every retried path must replay, never
   assume a clean slate — the code-use races this exposed are in `decisions-member-code-backend.md`.
@@ -33,7 +33,7 @@ fan-out. What hurt was *bursts*: concurrent stream opens and synchronised keep-a
   request 502 (errno 99). Pinned by GatewayKeepalivePostureTests.
 - **No nginx `limit_req` on /device/** (decided): behind cloudflared/NAT every board shares one
   `$remote_addr`, and all boards share one tenant API key, so neither key partitions per board — it
-  would throttle the whole fleet together. The API's per-board limiter (`decisions-backend-r17a.md`)
+  would throttle the whole fleet together. The API's per-board limiter (`decisions-device-bodies.md`)
   is the right place; with keepalive it answers a 9k req/s flood 429 while members stay served.
 
 ## The test server's slots (R19 BE19L)
@@ -52,3 +52,8 @@ R19's extra classes only moved WHEN the crowding happened. CI shards run one pro
   far the queue got — never a silent minute then "0 rows, expected 16".
 - **The walk-up burst retries only `service_busy`** (≤5, honouring Retry-After). `conflict_retry`
   stays a failure: R16's point is that a lost race is absorbed server-side.
+- **The flood fix was verified on an isolated gateway image** (R18 D18-1): anonymous floods at 1.5k / 3k req/s
+  (keep-alive and fresh connections) → 0 × 502, 0 errno 99, members 200. Headroom noted, not applied (not needed to pass,
+  and it needs a main `nginx.conf` in the image): fresh-connection bursts at 3k req/s put ~13k of ~28k upstream ports in
+  TIME_WAIT (pool 64 × workers overflows); `keepalive 256` + `listen 80 backlog=4096` + `worker_connections 8192` cut it
+  to ~4.5k.

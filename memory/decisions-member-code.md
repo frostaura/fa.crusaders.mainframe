@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-member-code
 description: "D1's single rotating code as built in firmware: 19 chars to fit the Mega's limits, ON server-only and OFF under a 12-byte per-day key devices hold, rosters naming players; pay-for left the box at bridge 3.1.0."
 type: decision
-last_verified: 2026-10-03
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the single rotating member code, in firmware and contract
@@ -52,8 +52,9 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   pay-for forgets the scan ONLY for `code_used`/`not_recognised`** (2.2.4, D9-1, in bridgelogic's
   `WalkUpResult::forgetsScan`) — never on `recognised`, false for every refusal made before the
   token resolves (TOO LONG lost the scan); `code_used` reads `CODE USED` at pay-for too (D9-2).
-- **Versions** are the device contract's, not this topic's: the v3 images (Mega 3.0.0, bridge
-  3.1.0, door 2.0.0, all by cable) is [`decisions-device-v3.md`](decisions-device-v3.md); the flash order and
-  what is owed are in [`state.md`](state.md). The bridge unflags `[common]`'s MINOR/PATCH by its
-  own tokens. Server half: `decisions-member-code-backend.md`; keys in every phase, the cut-over's
-  blockers and the v1 extend fix (2026-11-13): `decisions-member-code-cutover.md`.
+- **Server pay-for, kept for a bridge that may bring it back — the quote asks SPENDABLE, as the confirm does** (R6 E6-5: held minutes were quoted, then refused). The takeover
+  emits `booking.payer_changed`, subject the NEW payer (E6-4 — the payer's side reached no webhook); the booker's
+  detail names `money.paid_by` and costs them 0 (E6-2).
+- **Versions** are recorded once, in [`decisions-court-box.md`](decisions-court-box.md); the flash order is in
+  [`state.md`](state.md). Server half: [`decisions-member-code-backend.md`](decisions-member-code-backend.md); keys in
+  every phase and the cut-over: [`decisions-member-code-rollout.md`](decisions-member-code-rollout.md).

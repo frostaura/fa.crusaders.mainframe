@@ -2,16 +2,16 @@
 name: crusaders-mainframe-decisions-admin-lost-replies
 description: "Admin writes whose reply is lost are read back before anything is said (R2 desk/approve/settings, R3–R4 every other write via lostReply); dialogs word it via describe; Settings draft and version."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the admin console after a lost reply (review rounds 2–3, lane F3)
 
 A 5xx, a timeout or a dropped connection is an UNKNOWN outcome, never "didn't go through".
 
-- **Desk credit movement** (`components/members/adjustmentAttempt.ts`, both hooks): reads
-  `/admin/ledger?userId&from=press−2 min` for a row of type AdminAdjustment/AdminTopUp with this
-  signed amount and this reason as its comment. Found → the receipt, balance re-read from the
+- **Desk credit movement** reads `/admin/ledger?userId&from=press−2 min` for a row of this type with this signed amount
+  and this reason as its comment — `AdminAdjustment` in `components/members/adjustmentAttempt.ts:62`, `AdminTopUp` in
+  `sellAttempt.ts:70` (split when sell and adjust became two routes). Found → the receipt, balance re-read from the
   member detail (null, never 0, if that read fails). Read and absent → "nothing arrived". Unreadable
   → "not known yet, open the ledger". **Why the ledger and not a retry:** a silent re-POST is the
   admin's press made again without asking; the key would make it safe, the wording would not.
@@ -31,7 +31,7 @@ A 5xx, a timeout or a dropped connection is an UNKNOWN outcome, never "didn't go
   delete (id gone), group archive/restore/delete (list), court add/edit (list). **R4 closed the
   rest:** group sheet save (the list reads as sent; a create = a NEW group of that name), group add
   (anybody asked for newly in the group — one save adds all or none), a member's groups (their
-  detail holds the set sent), board edit/delete (the row as asked, or gone). Five direct writes survived (FA-11, closed 2026-11-13: `decisions-admin-golive-pass`).
+  detail holds the set sent), board edit/delete (the row as asked, or gone). Five direct writes survived (FA-11, closed 2026-11-13: `decisions-admin-console`).
 - **`ConfirmDialog` takes `describe(error)`** before `describeFailure`: how a dialog says an `UnsureOutcome`.
 - **The desk top-up's live region speaks the caller's line** (`{ said }`), never "didn't go
   through" over an unknown; a 409 `idempotency_key_reused` re-reads the balance (R3 I-6). **R5
@@ -55,6 +55,6 @@ Response contracts and paging: [`decisions-admin-contracts.md`](decisions-admin-
   own lost earlier press: said as saved. No `version` served → the whole page, as the old API needs.
 - `ConfirmDialog` `notReady`: the primary stays enabled and a press names the missing reason and
   focuses the field, beside a visible "(required)" and `aria-required`. Every admin reason dialog
-  uses it since R3 (AdminRoleSwitch's own-rights box has its own `notReadyMessage`).
+  uses it since R3 (the own-rights box's `notReadyMessage` moved to `AdminRoleDialog.tsx:83` with R5's one-dialog merge).
 - A kept draft says "while you signed in again" only after a 401 (`afterSessionEnd`); a 429 on
   save is transient and names no field (R3 A-9, A-12), as on the desk top-up (R4 I4-4).

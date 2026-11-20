@@ -47,7 +47,8 @@ sequential requests after 5 warm-ups, as the seeded admin (the heaviest member, 
 - **Perf round (2026-09-30), local stack at load 60-160** — latency is noise there; count
   connection opens instead (`qcount.mjs`): book 25 → 17 (pre-handler 4 → 1), book with two
   players 47 → 20, decline 25 → 22. Gzip: entry JS 715 → 216 KB, ledger 276 → 31 KB, members
-  110 → 24 KB. Paging (`cursor=`) cuts both to one page; the member list is still 217 rows unpaged.
+  110 → 24 KB. Paging (`cursor=`) cuts both to one page; without `cursor=` the member list (217 rows on that seed) still answers
+  unpaged — the console asks 200 a page.
   Decisions: [`decisions-perf.md`](decisions-perf.md).
 - **EF logs "Executed DbCommand (n ms)" when the reader opens, not when it drains.** A plan whose
   correlated subplans run per streamed row shows a short command and a long silent gap before the

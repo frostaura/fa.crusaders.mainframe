@@ -28,7 +28,7 @@ unchanged: [`decisions-device.md`](decisions-device.md). What follows is the gat
   falling back after one keeps admitting rostered members for the six-hour staleness window after
   an admin pressed the button meant to stop exactly that. **Residual:** only a board that cannot
   reach the server never hears the 403. The v3 rules as a whole:
-  [`decisions-door-gate-v3.md`](decisions-door-gate-v3.md).
+  [`decisions-door-gate-persistence.md`](decisions-door-gate-persistence.md).
 - **A door is released for `gate.unlock_seconds`, never for what is left of the booking.** The
   roster's `grantMs` is 25 minutes for a late arrival, and a door held open for 25 minutes is not a
   door. The gate's offline degraded mode is also narrower than the court box's *by contract*: only a
@@ -42,18 +42,14 @@ unchanged: [`decisions-device.md`](decisions-device.md). What follows is the gat
   input and starts driving whatever is already latched, so the sketch's `pinMode`-first ordering is
   a door that clicks open on every reset. `IPinOut` is two calls precisely so a fake can prove the
   order; mutation-proved.
-- **OPEN — what the door does with no power is unmeasured.** The owner expects it RELEASED. A
-  power cut takes the lock's own supply too, so the LOCK type decides that case, whatever the flags;
-  a dead board with the lock supply still up is decided by `GATE_UNLOCK_ENERGISES_RELAY` alone.
-  Which lock is fitted and which relay contact feeds it are recorded nowhere. *Corrected
-  2026-09-19:* an earlier version of this topic, the README and go-live §12 asserted "Carl's board
-  is wired fail-secure" and prescribed a lock change and a rewire — unverified, and against the
-  wiring-is-fixed rule. The defaults are Carl's own real-door-tested sketch; go-live §12 now
-  measures both failures and asks Carl the two facts. **Fire egress must be mechanical and
-  independent of this board; nothing here is a life-safety device.**
+- **OPEN — what the door does with no power is unmeasured; the owner expects it RELEASED.** The two facts Carl owes
+  and the bench checks are [`watch-doors.md`](watch-doors.md) item 1 — do not close it by reasoning about the flags. The
+  defaults are Carl's own real-door-tested sketch. **Fire egress must be mechanical and independent of this board;
+  nothing here is a life-safety device.**
 - **How the pass is ordered, and what shares its one blocking call**, is its own topic:
   [`decisions-door-gate-loop.md`](decisions-door-gate-loop.md); how often it speaks and what a
   refusal costs it is [`decisions-door-gate-cadence.md`](decisions-door-gate-cadence.md). The
   edges it talks through — the URL check, the UART, the secrets guard, the flash route — are in
-  [`decisions-door-gate-io.md`](decisions-door-gate-io.md), and the HTTP call itself is in
-  [`decisions-door-gate-http.md`](decisions-door-gate-http.md).
+  [`decisions-door-gate-io.md`](decisions-door-gate-io.md), the HTTP call itself is in
+  [`decisions-door-gate-http.md`](decisions-door-gate-http.md), and what survives a reset is
+  [`decisions-door-gate-persistence.md`](decisions-door-gate-persistence.md).

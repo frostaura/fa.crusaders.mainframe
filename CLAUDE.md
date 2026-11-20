@@ -19,7 +19,7 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
   **A module belongs in `shared/lib` only if a second, unrelated device would want it unchanged** — anything
   that knows a relay, a DIP switch, a court or the Mega↔ESP dialect stays in the device's own project, and
   where the two sides must agree on a constant the `static_assert` lives on the device side
-  (`court-box/lib/bridgelogic/RosterTokenFits.h`).
+  (`court-box/lib/bridgelogic/include/bridgelogic/RosterTokenFits.h`).
   **PlatformIO is the tested build; the Arduino IDE is the deployment route for every board.** Each
   firmware project's `arduino/` holds its generated sketch folders and is never hand-edited —
   `make arduino-export` writes them from both `lib/` directories, `src/` and the `-D` flags in
@@ -30,8 +30,10 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
   C++11 as well as C++17** — `court_mega` and `door_gate` alike. `inline constexpr` variables survive as
   a GCC extension; a multi-statement `constexpr` function does not. Only the `arduino-cli compile` step
   in CI catches this; no PlatformIO build can, because PlatformIO unflags the core's standard.
-- **`src/contracts/device-protocol`** — the wire-protocol fixture corpus, consumed by *both* the C++ and the
-  .NET tests. Neutral ground: neither side may drift from the other without a test going red.
+- **`src/contracts/`** — fixture corpora that are neutral ground between implementations:
+  `device-protocol` (the wire protocol, consumed by *both* the C++ and the .NET tests), `play` (squash
+  scoring vectors, consumed by both the frontend and the .NET tests) and `payfast` (the PayFast signature
+  corpus, read by the .NET tests). No side may drift from a corpus without a test going red.
 
 Repository: `https://github.com/frostaura/fa.crusaders.mainframe.git`. Its visibility is a founder decision and a status, not a rule — read it with `gh repo view`, never from a context file (it was public while every file here called it private).
 
@@ -61,20 +63,20 @@ State these honestly rather than repeating the aspiration:
 ## Conventions and non-obvious rules
 
 - **Free-tier-first external dependencies.** No paid data feeds, no proprietary geocoders, no premium validation services. The timezone source is the IANA tzdb through `TimeZoneInfo`, and **SMTP and PayFast are the only paid third parties**, both tenant-controlled. Money is formatted with `CultureInfo.InvariantCulture`, never the club's own `en-ZA`, whose comma decimal PayFast rejects. `docs/development-plan.md` names further free-tier choices (libphonenumber, a Gravatar avatar fallback, MX-based email validation) that are **not built** — treat them as plan, not convention.
-- **Email never holds a request.** `IEmailService` only QUEUES into the `email_outbox` table (demo suppression applied before storing); the `EmailOutboxWorker` sends over SMTP with backoff and raises an `email.undeliverable` admin notice on a final failure. Never await SMTP in a request or worker, never `Task.Run` a send — call `EmailDispatch.QueueAsync` or `IEmailService.SendAsync`, and treat a returned task as "queued", not "delivered". Only `AdminNotificationDispatcher` (an outbox of its own) uses `IEmailTransport` directly.
+- **Email never holds a request.** `IEmailService` only QUEUES into the `email_outbox` table (demo suppression applied before storing); the `EmailOutboxWorker` sends over SMTP with backoff and raises an `email.undeliverable` admin notice on a final failure. Never await SMTP in a request or worker, never `Task.Run` a send — call `EmailDispatch.QueueAsync` or `IEmailService.SendAsync`, and treat a returned task as "queued", not "delivered". `IEmailTransport` is resolved only by the two senders — the outbox's own `EmailOutboxDispatcher`, and `AdminNotificationDispatcher`, whose table is an outbox of its own — never by request code.
 - **SSRF guard with a deliberate carve-out:** production rejects RFC1918 webhook destinations *unless* the endpoint is on an internal-LAN allow-list. That carve-out exists for legitimate LAN consumers a club points a webhook at — the court box itself is pull-only and never a webhook destination — do not close it.
-- **Webhook delivery:** HMAC-SHA256 in `X-Crusaders-Signature`, timestamp in `X-Crusaders-Timestamp`, per-endpoint queue, backoff 1m/5m/30m/2h/12h/24h, auto-disable after 6 failures plus an email to the owner. A missing template variable is a **config error, not a retryable failure**.
-- **Docker device passthrough:** the .NET service runs in a container but must reach a USB/serial biometric device on the host — needs `--device` passthrough or `privileged: true` with the specific device path.
+- **Webhook delivery:** HMAC-SHA256 in `X-Crusaders-Signature`, timestamp in `X-Crusaders-Timestamp`, per-endpoint queue, backoff 1m/5m/30m/2h/12h/24h, auto-disable after 6 failures. Disabling a club endpoint stages the `webhook.auto_disabled` admin notice to the club's administrators in the same save as the disable (`WebhookSender.StageDisabledNotice`). A missing template variable is a **config error, not a retryable failure**.
+- **Docker device passthrough waits for a real biometric driver.** At-court identification happens at the box; the API ships no driver (`NoBiometricDevice`, with the `Null` simulator honoured only in Development/Testing). A host-attached USB/serial reader would need the backend container's `devices:` entry (left commented out in `docker-compose.yml`) or `privileged: true` with the specific device path — enable it only alongside a real `IBiometricDevice` driver.
 - **CI publishes; it does not deploy.** `.github/workflows/ci.yml` carries the chain as far as multi-arch images on Docker Hub and stops there — there is no redeploy job, by decision. Every image is pushed under an immutable `sha-<commit>` tag and labelled with its commit; only `promote-latest` writes `:latest`, for all three images at once and only forward. Redeploying the club stack is a manual step that pins `CRUSADERS_IMAGE_TAG=sha-<commit>` in Portainer, by `docs/runbooks/redeploy-and-rollback.md` (backup first, `make migrations-pending` against the club's database, the stored stack file read for placeholders). This repo's workflow is the reference to keep in sync, not `fa.startup`'s.
-- **The production stack backs itself up, and a change to it keeps that true.** `docker-compose.prod.yml`'s `backup` service (daily dump + photos, retention, restore) is exercised for real by `make test-infra`; every service rotates its log; third-party images are pinned, never `:latest`; the backend image runs as uid 1654 and `volume-init` hands the volumes over. `docs/runbooks/backup-and-restore.md` is the procedure.
+- **The production stack backs itself up, and a change to it keeps that true.** `docker-compose.prod.yml`'s `backup` service (daily dump + photos, retention, restore) is exercised for real by `make test-infra`; every service rotates its log; third-party images are pinned, never `:latest`; the backend image runs as uid 1654 and hands itself its volumes (`src/backend/docker-entrypoint.sh` chowns them as root, then drops to 1654). `docs/runbooks/backup-and-restore.md` is the procedure.
 
 ## Build / test / run
 
 ```bash
-make install        # restore backend + frontend
-make lint           # dotnet format + eslint/tsc
-make build          # lint, then build both
-make test           # unit
+make install        # restore backend + frontend, and the IoT toolchain venv (needs uv)
+make lint           # dotnet format + eslint/tsc, and the firmware lint (lint-iot)
+make build          # lint, then build backend, frontend and every firmware project
+make test           # firmware host suites (test-iot), then backend + frontend unit suites
 make test-integration # needs API_BOUNDARY_TEST_CONNECTION_STRING (a server; each class clones its own DB)
 make arduino-export # regenerate every firmware project's arduino/ from the PlatformIO sources
 make arduino-check  # regenerate and fail if the committed sketches are stale
@@ -89,7 +91,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 
 ## Where docs live
 
-- `docs/specs/` — `feature-spec.md` · `minutes-and-packages.md` (P13 — the unit, packages, discounts and the wire; the authority on money units) · `settlement-model.md` (the authority on how the ledger settles) · `players-and-splits.md` (D11–D13 — partners, shares, invites, the member inbox) · `multi-tenancy.md` · `biometric-abstraction.md` · `device-serial-protocol.md` (the Mega↔bridge wire; v3 is the last Mega image) · `device-api.md` (the device HTTP API v3: heartbeat snapshot, display settings, key rotation, network changes; no remote firmware update — a firmware change is a cable flash, §7) · `door-gate.md` (the door controller's behaviour oracle, with its sentence→test table) · `member-code.md` (the single rotating member code and D10 pay-for at the box — the `membercode/` corpus's authority) · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
+- `docs/specs/` — `feature-spec.md` · `minutes-and-packages.md` (P13 — the unit, packages, discounts and the wire; the authority on money units) · `settlement-model.md` (the authority on how the ledger settles) · `players-and-splits.md` (D11–D13 — partners, shares, invites, the member inbox) · `play.md` (D14 — results, personal stats, streaks, badges; the `src/contracts/play` corpus's authority) · `multi-tenancy.md` · `biometric-abstraction.md` · `device-serial-protocol.md` (the Mega↔bridge wire; v3 is the last Mega image) · `device-api.md` (the device HTTP API v3: heartbeat snapshot, display settings, key rotation, network changes; no remote firmware update — a firmware change is a cable flash, §7) · `door-gate.md` (the door controller's behaviour oracle, with its sentence→test table) · `member-code.md` (the single rotating member code and D10 pay-for at the box — the `membercode/` corpus's authority) · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
 - `docs/specs/client-blueprints/` — the verbatim client artifact plus its `.md` transcription. **The blueprint is the customer's word and outranks internal specs on economics.**
 - `docs/specs/client-blueprint-deltas.md` — line-by-line reconciliation of blueprint requirements against the build. The most reliable economics reference in the repo.
 - `docs/development-plan.md` — phased build sequence and parking-lot decisions. **Its status column understates reality; trust code over the plan** — see `MEMORY.md`.

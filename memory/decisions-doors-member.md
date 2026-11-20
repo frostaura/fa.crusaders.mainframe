@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-doors-member
 description: "A member's door history lives on /me/door and, since D9 (2026-09-23), on an audited admin read of one named member; the club log stays unsearchable by person; filtered by tenant AND subject; door rows deleted past retention."
 type: decision
-last_verified: 2026-09-23
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the member's doors, and what is deleted
@@ -22,8 +22,9 @@ both is `docs/specs/door-gate.md` §13.
   a PATH SEGMENT, so it cannot widen into a searchable log; it adds one predicate on top of
   `DoorLogQuery`, not a field, so the club log stays unsearchable by person
   (`No_parameter_named_after_a_member_changes_anything` still holds, deliberately unflipped).
-  Default range: the whole door retention. **Owed:** the same read in the undeletable
-  `admin_change_log` (needs a new `AdminChangeActions` entry).
+  Default range: the whole door retention. The read is ALSO on the undeletable `admin_change_log`
+  (`AdminChangeActions.MemberDoorHistoryViewed` = `member.door_history_viewed`, `AdminChangeActions.cs:168`, written by
+  `AdminMemberDoorEndpoints.cs:53,266,290`) — shipped in `d79dc864`, no longer owed.
 - **Filtered by tenant AND by subject, and neither substitutes for the other.** The tenant query
   filter cannot separate two members of one club; the subject comparison cannot separate two
   clubs that happen to hold the same guid. Both cases are driven by tests, including another

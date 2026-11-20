@@ -2,12 +2,12 @@
 name: crusaders-mainframe-decisions-device-v3-backend
 description: "How the backend implements device contract v3 (2026-11-13): snapshot pairing, money on box-made releases, key restore owner, PSK encryption, lifeline alternation, and what was deferred."
 type: decision
-last_verified: 2026-11-13
+last_verified: 2026-11-20
 ---
 
 # Decisions — the backend half of device contract v3 (2026-11-13)
 
-The contract and its why are `decisions-device-v3*.md` and `decisions-member-code-cutover.md`.
+The contract and its why are `decisions-device-v3*.md` and `decisions-member-code-rollout.md`.
 This topic is what the backend lane chose where the spec left room, each with its reason. Code:
 `Endpoints/Device{Telemetry,Lifeline,SnapshotRestore}.cs`, `Services/Device{Settings,KeyRing,
 Network*,Provision,BoardOverrides}.cs`; migration `DeviceContractV3` (edited in place when OTA left).
@@ -22,7 +22,10 @@ Network*,Provision,BoardOverrides}.cs`; migration `DeviceContractV3` (edited in 
   copy can name a booking the server has since dropped; the club must not be told it is restored.
 - **A 2.x box's partial restore records only the relays its `relay_state` says are closed** (all
   only when the count matches) and files the shortfall (BD-6). The v2 one-shot is otherwise kept.
-- **"In play" starts at `StartsAt − activation_cue_window_minutes` on both paths** (MCV1-05).
+- **"In play" starts at `StartsAt − activation_cue_window_minutes` on both paths** (MCV1-05: a booking lit in its cue
+  window was missing from the restore and stayed dark after a power cut). **The server never pairs a release longer than
+  any relay can hold** (MCV1-01, ~721 minutes, filed `implausible`, `DeviceEventEndpoints.cs:1223`): the first online
+  activation after a boot had emitted a release of 4294967272 ms; the bridge's ages no longer go negative either.
 - **The lifeline-only body alternates by cadence parity of the server clock**, no stored state.
   *Why:* deterministic and testable; with today's fields it never fires.
 - **"Owner" for *Restore a key* is a deployment inherent admin (`Admins:Emails`).** *Why:* the
@@ -48,7 +51,9 @@ Network*,Provision,BoardOverrides}.cs`; migration `DeviceContractV3` (edited in 
 - **Deferred, per spec §14:** a remote "switch this court off" (FA-9, BA-27). The remote levers a
   stuck or wrong box has today: *Back to compact*, per-board hw overrides, push network, key
   restore, disable (and the cut-over hold). A firmware fix is a cable flash.
-- **Found, not fixed here:** the 2.x box settings (`lcd_*_seconds`, `scan_memory_seconds`,
-  `clock_trust_minutes`, `device_fault_max_per_hour`) bind snake_case only on the settings PUT;
-  a camelCase spelling is silently ignored (pre-existing). `v3-heartbeat-response-widest` writes
-  `device_fault_max_per_hour` 1000, which the server can never send (bounds 1–120).
+- **Settings spellings, fixed in pass 2** (it was "found, not fixed" here): a snake-only settings key (the 2.x box
+  settings `lcd_*_seconds`, `scan_memory_seconds`, `clock_trust_minutes`, `device_fault_max_per_hour`) is heard
+  camelCase too (`Endpoints/SettingsSpelling.cs`, by reflection); two spellings that disagree are
+  `400 setting_spelled_twice`. *Why not refuse camelCase:* the console sends both spellings for box keys. The widest v3
+  vector now writes `device_fault_max_per_hour` 120 (4086 bytes; it had written 1000, which the server can never send);
+  the court box's buffer comments were corrected to 4086 at integration.

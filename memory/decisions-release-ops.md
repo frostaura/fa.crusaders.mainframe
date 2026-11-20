@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-release-ops
 description: "Release and operations (2026-11-13, lane infra-ops): immutable sha tags with a forward-only :latest, daily in-stack backups with a drilled restore, a pre-deploy migration check, a non-root API, pinned images, a stack-size ratchet."
 type: decision
-last_verified: 2026-11-13
+last_verified: 2026-11-20
 ---
 
 # Release and operations — what was decided, and why
@@ -45,9 +45,10 @@ founder at the box, or makes the release knowable. Procedures: `docs/runbooks/`.
 - **Every service rotates its log and EF Core logs at Warning.** 35 KB/min idle was filling the SD.
 - **The on-prem overlay no longer forces MailHog.** It set the flat `SMTP_HOST`, which the API reads
   before `Smtp__Host`, silently replacing a real relay.
-- **Stack budgets are a ratchet, not a proof** (`src/iot/tools/stack_budget.json`): loop frame,
-  largest frame of ours and, on the ESP8266 only, the deepest `.ci` path from loop(), at the
-  2.3.0/1.1.2 values with the analysis' goals beside them. The v3 bridge and gate must not exceed
-  them; lower them as the code shrinks. Indirect and precompiled callees are not counted.
+- **Stack budgets are a ratchet, not a proof** (`src/iot/tools/stack_budget.json`): loop frame, largest frame of ours
+  and, on the ESP8266 only, the deepest `.ci` path from loop() (the ESP32's GCC 8 writes no call graph), with the
+  analysis' goals beside them. Set at the 2.3.0/1.1.2 values, now at the v3 images' (bridge 208 / 928 / 2768; gate 32 /
+  832); lowered as the code shrinks, raised only in the commit that needs it, with the reason. Indirect and precompiled
+  callees are not counted. `PLATFORMIO_BUILD_FLAGS` rebuilds in place, so the CI step's images are never release artifacts.
 - **Not done here, by rule:** GitHub settings (visibility — the repository is public; branch
   protection on `main`) are Dean's; the health endpoint's build SHA is the backend's.

@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-test-running
 description: "How the backend suite runs: a cloned database AND one shared host per class, giant classes split, CI sharded 5 ways by measured class time with a union proof. 17.5 min became ~6; the rules new tests keep."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-11-20
 ---
 
 # Live decisions — how the test suites run
@@ -56,5 +56,10 @@ shard, merges Cobertura (`tools/merge_coverage.py`, equal to coverlet on a combi
 4. Nothing process-global: no mutable statics, Console redirection or culture changes.
 5. A test that creates its own database uses `CreateEmptyAsync()`/`CloneTemplateAsync()` and disposes it.
 
+- **Proving a race:** hold the lock from the test's own connection and count waiters in `pg_locks` (this lock, this
+  database: `classid<<32|objid`) — never `pg_stat_activity`, which is snapshotted once per transaction and never shows
+  a new waiter to a probe inside the holding transaction. `TwinWriter`/`OtherWriter` interceptors run a competing
+  write just before ours (1×, 2× and past every retry); a `DbCommandInterceptor` can raise a real `PostgresException`
+  (40P01/40001).
 **Real-stack play walk:** books 15 s ahead, both viewports at once — ~30 min per viewport became
 ~2.5 for both when courts are free ([`gotchas-real-stack.md`](gotchas-real-stack.md), [`gotchas-clock.md`](gotchas-clock.md)).

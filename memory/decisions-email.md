@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-email
 description: "Every message is sent by a CLUB, not by the platform: one identity resolver, both bodies derived from one block list so they cannot drift, the registration mail merged to match what the screen promises, and no image anywhere."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-11-20
 ---
 
 # Live decisions — what the club's mail is, and what it may claim
@@ -19,11 +19,13 @@ The voice these are written in is the product's own, held in
   *Why it is a tenancy bug and not a polish item:* "Crusaders Mainframe" is the repository's name
   for the software, so on the second club's mail it was a **different club's name**, on the one
   surface that leaves the building.
-- **The two sweeps build the identity per TENANT, never from the scoped resolver.**
-  `NoShowWorker.TickAsync` and `PeripheralHealthWorker.TickAsync` both walk every tenant inside
-  **one** scope, resetting `ITenantContext` as they go. A scoped, memoised resolver would sign
-  every later club's mail with the first club's name and phone number. Both carry `Club` on the
-  per-tick record instead (`Sweep.Club`, `Health.Club`).
+- **A sweep never signs from the scoped resolver.** `NoShowWorker.TickAsync` and
+  `PeripheralHealthWorker.TickAsync` walk every tenant inside **one** scope, resetting `ITenantContext` as
+  they go, so a scoped, memoised resolver would sign every later club's mail with the first club's name and
+  phone number. `NoShowWorker` carries `Club` on its per-tick record (`Sweep.Club`, `NoShowWorker.cs:94`);
+  the health sweep's mail now goes through the admin notice outbox, which resolves the identity per row at
+  delivery (`ClubIdentityResolver.For`, `AdminNotificationDispatcher.cs:238`) — its `Health` record carries
+  no `Club` (`PeripheralHealthWorker.cs:56`).
 - **Both bodies are derived from one list of blocks.** A template says what the message is about —
   paragraphs, a facts table, one callout, an action — and `EmailChrome` renders that as HTML and as
   text. *Why not a hand-written text half:* that is how the two drift, the figure gets corrected in

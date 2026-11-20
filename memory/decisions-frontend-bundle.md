@@ -2,59 +2,64 @@
 name: crusaders-mainframe-decisions-frontend-bundle
 description: "What loads first and why: shell and My Code in the entry, the admin frame one lazy chunk, 4 icon weights, our own Archivo/JetBrains cuts; first load 557 → 304 (P10) → 255 kB, then 271 → 263 KiB gzip (R7)."
 type: decision
-last_verified: 2026-11-13
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the frontend bundle
 
-Measured with `vite build` into a scratch dir, gzip of what `index.html` names. P10: one 557 kB
-entry → 304 kB. Perf lane 2026-09-30: 328 → 255 kB. R7 (FD2), gzip -9 KiB on one snapshot:
-270.7 → 262.8 (entry 174.3 → 169.2, CSS 24.2 → 21.4, React 72.3).
+Measured with `vite build` into a scratch dir, gzip of what `index.html` names. P10: one 557 kB entry → 304 kB. Perf
+lane 2026-09-30: 328 → 255 kB. R7 (FD2), gzip -9 KiB on one snapshot: 270.7 → 262.8 (entry 174.3 → 169.2, CSS 24.2 →
+21.4, React 72.3).
 
-- **My Code stays in the entry chunk.** **Why:** an offline /my-code at a dark door must not
-  wait on a chunk; `e2e/my-code-offline` (production build) is the proof.
-- **The admin frame, Overview and the two doors pages are ONE lazy chunk (`src/adminFrame.ts`).**
-  They read the shared doors store; a reader mounting after a Suspense boundary fired a second
-  `GET /admin/doors` (E-L6). Kept one read by: `App.tsx`'s `named()` returns a synchronously
-  resolved thenable once its module arrived (frame + page mount in one commit); the chunk is
-  fetched at boot on an /admin path; the doors store takes a read < 2 s old
+- **My Code stays in the entry chunk.** **Why:** an offline /my-code at a dark door must not wait on a chunk;
+  `e2e/my-code-offline` (production build) is the proof.
+- **The admin frame, Overview and the two doors pages are ONE lazy chunk (`src/adminFrame.ts`).** They read the shared
+  doors store; a reader mounting after a Suspense boundary fired a second `GET /admin/doors` (E-L6). Kept one read by:
+  `App.tsx`'s `named()` returns a synchronously resolved thenable once its module arrived (frame + page mount in one
+  commit); the chunk is fetched at boot on an /admin path; the doors store takes a read < 2 s old
   (`DOORS_JOIN_FRESH_MS`). Do not reintroduce a per-page `<Lazy>` under the frame for these four.
-- **Only the Phosphor weights the product draws are built (`ui/iconWeights.ts`).** A build-only
-  plugin in `vite.config.ts` strips the rest (219 kB raw). **Trap:** a weight used but not shipped
-  renders an EMPTY svg in production only — `icons.test` scans every `weight=`. The watermark is a
-  CSS mask (`ui/watermark.css`), so `light` is not shipped.
-- **Copy a shell module needs lives beside it, not in a feature's copy file.** The bell's words are
-  `lib/bellCopy` (29 kB of `playersCopy` in the entry once); R7: the admin badge's disputes
-  sentence moved from `playCopy` into `lib/adminAttention` (−5 KiB first load).
-  `src/entryGraph.test.ts` walks `main.tsx`'s static value imports and fails if `playCopy` re-enters.
-- **Admin doors code is lazy (go-live FM-6):** the badge reaches the doors store via `import()`, the
-  shut banner is `shell/AdminDoorsBanner`; ~30 kB had put the entry at 503.4 kB (now 480.0 / 151.5 gz).
-- **The display and code faces are our own Latin cuts (R7, `src/assets/fonts/`, recipe in
-  `index.css`).** Archivo instanced to wght 600–800 / wdth 100–112 % (90 → 37.5 kB), JetBrains Mono
-  to wght 400–700 without `calt` ligatures (40 → 14.4 kB); latin-ext/vietnamese stay Fontsource's.
-  **Why:** both arrived in the same 1.6 Mbps window as My Code's and Bookings' code. A/B slow
-  profile n=9: first Bookings p50 1625 → 1454 ms, p95 1809 → 1522; code paint not regressed.
-  **Traps:** every face of a family declares ONE weight/stretch range (Chrome matches one
-  capability group — a narrower latin face could drop Latin to the fallback); a new `font-display`
-  weight outside 600–800 or stretch outside 100–112 % needs a new cut (`fontFaces.test` scans).
-- **Only React + the router are grouped by hand** (`manualChunks` → `react`). **Why:** a hand-made
-  group pulls its dependencies — and what the entry shares with them — into the first load (R4:
-  a `ui/` group +48 kB; an `app` closure +40 kB through the barrels). R7 measured again:
-  Rollup 4.60's `onlyExplicitManualChunks` stops the pull, but the icon barrel (`ui/icons.ts`, in
-  the entry) re-exports every icon, so a group holding ANY icon is imported by the entry (+38 kB);
-  a barrel-safe "Schedule's shared modules" group took Schedule 27 → 19 files and put +35–48 kB
-  on Wallet, TopUp, GetStarted and Invites. Declined: production is HTTP/2+ through Cloudflare,
-  where file count costs little; the six-socket rounds are the local stack's.
+- **Only the Phosphor weights the product draws are built (`ui/iconWeights.ts`).** A build-only plugin in
+  `vite.config.ts` strips the rest (219 kB raw). **Trap:** a weight used but not shipped renders an EMPTY svg in
+  production only — `icons.test` scans every `weight=`. The watermark is a CSS mask (`ui/watermark.css`), so `light`
+  is not shipped.
+- **Copy a shell module needs lives beside it, not in a feature's copy file.** The bell's words are `lib/bellCopy` (29
+  kB of `playersCopy` in the entry once); R7: the admin badge's disputes sentence moved from `playCopy` into
+  `lib/adminAttention` (−5 KiB first load). `src/entryGraph.test.ts` walks `main.tsx`'s static value imports and fails
+  if `playCopy`, `playersCopy`, the doors chrome/copy or `deviceActivity`/`deviceLiveness` re-enter (it does not list
+  `movementCopy`/`shareMovementCopy`, which are held lazy by review). R7 already moved `walletCopy`'s and
+  `PendingInviteNote`'s players/invite copy out.
+- **Admin doors code is lazy (go-live FM-6):** the badge reaches the doors store via `import()`, the shut banner is
+  `shell/AdminDoorsBanner`; ~30 kB had put the entry at 503.4 kB (now 480.0 / 151.5 gz).
+- **The display and code faces are our own Latin cuts (R7, `src/assets/fonts/`, recipe in `index.css`).** Archivo
+  instanced to wght 600–800 / wdth 100–112 % (90 → 37.5 kB), JetBrains Mono to wght 400–700 without `calt` ligatures
+  (40 → 14.4 kB); latin-ext/vietnamese stay Fontsource's. **Why:** both arrived in the same 1.6 Mbps window as My
+  Code's and Bookings' code. A/B slow profile n=9: first Bookings p50 1625 → 1454 ms, p95 1809 → 1522; code paint not
+  regressed. **Traps:** every face of a family declares ONE weight/stretch range (Chrome matches one capability group
+  — a narrower latin face could drop Latin to the fallback); a new `font-display` weight outside 600–800 or stretch
+  outside 100–112 % needs a new cut (`fontFaces.test` scans).
+- **Only two hand-made groups** (`vite.config.ts:296-297` `manualChunks`): `react` (react, react-dom, scheduler, the
+  router) and `ui-vendor` (tailwind-merge, `@floating-ui/*` — leaf libraries with no app imports). **Why no more:** a
+  hand-made group pulls its dependencies — and what the entry shares with them — into the first load (R4: a `ui/`
+  group +48 kB; an `app` closure +40 kB through the barrels). R7 measured again: Rollup 4.60's
+  `onlyExplicitManualChunks` stops the pull, but the icon barrel (`ui/icons.ts`, in the entry) re-exports every icon,
+  so a group holding ANY icon is imported by the entry (+38 kB); a barrel-safe "Schedule's shared modules" group took
+  Schedule 27 → 19 files and put +35–48 kB on Wallet, TopUp, GetStarted and Invites. Declined: production is HTTP/2+
+  through Cloudflare, where file count costs little; the six-socket rounds are the local stack's.
 - **`experimentalMinChunkSize: 2_500`:** 110 → 92 files, +1.2 kB gzip; 8 kB put lazy code in the entry (+12).
-- **Member pages' loaders live in `src/routeChunks.ts`**: the opened page's code starts once
-  `whoami` is SENT; **Bookings' once the page's reads have settled** (`whenApiQuiet`, 300 ms idle)
-  — **or, on My Code, once the code's enrol read has LEFT** (`noteCodeAsked`, R6 X6-3: gap 0 p50
-  2180 → 1794 ms). **Why not beside `whoami`:** the code paints 1.0 s later (R4/R5). Tab-bar
-  prefetch waits for quiet before EVERY page. Hints only: failures swallowed, not offline, not
-  under Save-Data.
-- **A member's install set (`precache.json` `first`) leaves out chart chunks and the desk's
-  frame** (R4, P4-6: 666 → 514 kB gzip); precached after control, still every chunk on the phone.
-- **Lazy rare parts:** the date picker's calendar (prefetched on intent), CancelSheet, SplitStep,
-  the celebration dialog, and `/wallet/activity`'s charts (121 kB gz) — no member route statically
-  depends on the chart library.
-- **Retired in P10, not to return:** P1 compat shims, `lucide-react`, `action_glyphs`/ClubUi, D1's booking-code branches (each a second path).
+- **Member pages' loaders live in `src/routeChunks.ts`**: the opened page's code starts once `whoami` is SENT;
+  **Bookings' once the page's reads have settled** (`whenApiQuiet`, 300 ms idle) — **or, on My Code, once the code's
+  enrol read has LEFT** (`noteCodeAsked`, R6 X6-3: gap 0 p50 2180 → 1794 ms). **Why not beside `whoami`:** the code
+  paints 1.0 s later (R4/R5). Tab-bar prefetch waits for quiet before EVERY page. Hints only: failures swallowed, not
+  offline, not under Save-Data.
+- **Every chunk is budgeted at 500 kB raw** (`chunkBudget(limitKb = 500)`, `vite.config.ts:200`, fails the build), not
+  only the entry; the entry stood at 480.0 kB raw / 151.5 kB gzip -9 after the go-live pass and has been within a few
+  kB of the budget before (R14 498.8, R16 494.98) — re-measure before adding copy to it. A member's install set is
+  [`decisions-frontend-worker.md`](decisions-frontend-worker.md).
+- **Prefetched member pages mount in the tap's commit** (R14, `routeChunks.noteChunk` keeps the arrived module and
+  `routeLazy` answers React.lazy synchronously). *Why:* a plain lazy re-imported the prefetched module, suspended
+  once, and React holds a shown fallback ≥ 300 ms. Measured (preview → :8088, fresh context, tap after 4.5 s idle):
+  Wallet 309–313 → 7–16 ms, Bookings 314–319 → 6–30 ms.
+- **Lazy rare parts:** the date picker's calendar (prefetched on intent), CancelSheet, SplitStep, the celebration
+  dialog, and `/wallet/activity`'s charts (121 kB gz) — no member route statically depends on the chart library.
+- **Retired in P10, not to return:** P1 compat shims, `lucide-react`, `action_glyphs`/ClubUi, D1's booking-code
+  branches (each a second path).

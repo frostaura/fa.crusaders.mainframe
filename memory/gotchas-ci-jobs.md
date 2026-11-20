@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-ci-jobs
 description: "CI job-level traps: a timeout reports as CANCELLED and names no test, a failed job silently SKIPS the suites behind it, and a threshold applied to the tier that cannot satisfy it reads as a product regression."
 type: gotcha
-last_verified: 2026-09-29
+last_verified: 2026-11-20
 ---
 
 # Gotchas — the CI jobs themselves, not the tools they run
@@ -37,7 +37,8 @@ The lint and complexity tooling inside these jobs has its own traps:
   structurally satisfy teaches people to edit the threshold.
 - **Collecting coverage costs about 35% of the runtime.** The same suite is 12m34s without it
   and 17m with. That is what pushed `backend-integration` past a 25-minute budget the day the
-  gate moved there; it is 40 now. **Moving a step into a job changes what that job costs — move
+  gate moved there. Since the 5-way shard (2026-09-30) each `backend-integration-shard` has 25 min and the merging
+  `backend-integration` job 10 (`ci.yml:231,332`). **Moving a step into a job changes what that job costs — move
   its budget too.**
 - **The vitest suite grows faster than its budget.** On the 4-core runner the unsharded test
   step went 10m12s → 13m46s in one day (P11 + fixes) and the job was cancelled at 15 min with

@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-device
 description: "The device contract: one per-tenant API key, auto-registration, no discovery; the brains are on the ESP8266; the wiring is fixed. Runtime credentials arrived with v3; OTA came with it and left again (2026-11-14)."
 type: decision
-last_verified: 2026-10-03
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the device contract and firmware
@@ -50,10 +50,15 @@ that needs a wire moved is the wrong fix.
   watchdog reset is a bench check on the go-live list.
 - **Buttons are remappable** as a **per-device override of the club map**, validated against that
   box's own court count — one map validated against every box made mixed fleets unconfigurable.
-- **Every URL a box is handed is gateway-true**, rebuilt from `X-Forwarded-*` and trusted only from
-  `Gateway:TrustedProxies`; an `https` advertised base URL **refuses to start**. The box fetches with
-  a plain `WiFiClient` and has no heap for TLS, so an https base hands it a URL it can never open.
+- **No device answer hands a box a URL any more.** The "gateway-true advertised base URL" (rebuilt from
+  `X-Forwarded-*`, an `https` one refusing to start) went with discovery and provisioning in `826a9e16`
+  (2026-09-05); a box's base URL is compiled in and re-pointed by cable or the server's `net`
+  ([`decisions-device-v3.md`](decisions-device-v3.md)). The reason survives as the firmware's rule: the boards fetch
+  with a plain `WiFiClient` and have no heap for TLS, so `API_BASE_URL` is `http://` (the gate's compiler check refuses
+  `https://`, [`decisions-door-gate-io.md`](decisions-door-gate-io.md)). `Security/GatewayTrust.cs` now serves
+  forwarded-header and rate-limit trust only (`Gateway:TrustedProxies`, `Program.cs:208,704`). *Corrected
+  2026-11-20:* this topic still described the deleted behaviour.
 - **Authentication runs before the rate limiter**, and the policy partitions per member — behind the
   gateway the whole club shared one bucket keyed on the proxy address. The device scheme is not the
-  default one, so device calls are keyed per BOARD by their own middleware (`decisions-backend-r17a.md`).
+  default one, so device calls are keyed per BOARD by their own middleware ([`decisions-device-bodies.md`](decisions-device-bodies.md)).
 - **Gates** (2026-09-19): one ESP32 per door on this contract unchanged — [`decisions-door-gate.md`](decisions-door-gate.md), [`decisions-gate.md`](decisions-gate.md).

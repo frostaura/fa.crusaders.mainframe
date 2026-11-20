@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-bridge-scan-flows
 description: "Bridge scan-flow fixes before the first cable flash (2026-11-14): busy vs not-recognised, prompts capped by the scan, whole-call HTTP budget, designed verdict screens, extending your own lit court."
 type: decision
-last_verified: 2026-11-14
+last_verified: 2026-11-20
 ---
 
 # Decisions — bridge scan flows, before the first cable flash
@@ -46,3 +46,9 @@ Measured on the branch, before the hotspot removal joined it: static RAM 55,524 
 At the merged tip `79a2fe54` (`pio run`, 2026-11-14): 54,256 B, heap **27,664 B, 3,088 B over** the
 24,576 B floor. Deepest stack path 2,720 B (was 2,608; budget 2,656 → 2,768, goal 3,000): BR-14's
 paintOutcome layer; the new press answers are `noinline` so handleButton's frame stays out of it.
+- **Every name a box prints is printable ASCII** (server-side `Services/MemberDisplay.cs`, R11–R14, for activate,
+  walk-up and its replay; pay-for answers carry no name): NFD with combining marks dropped, a few undecomposable letters
+  spelled (ß→SS, Æ→AE, Ø→O, Ł→L), anything else (emoji, CJK) removed, spaces collapsed, nothing printable → `MEMBER`;
+  folded BEFORE the 16-character cut, the end of a hard cut trimmed; `"`/“” → `'`; `\` and `~` separate words (A00 ROM
+  ¥, →); the initial is the first LETTER of the LAST word, skipping JR/SR/JUNIOR/FILHO/NETO/II/III/IV ("PRIYA B" for "…
+  van der Berg"). *Why:* the HD44780 prints ROM glyphs for UTF-8 bytes and the bridge counted "Ë" as two columns.

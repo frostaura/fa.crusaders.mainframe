@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-method
 description: "Quality here is proven by refutation, not by a green suite: every fixer is followed by an agent paid to disprove it, rounds repeat until two consecutive ones find nothing high, and parallel lanes are scoped by FILE, never by theme."
 type: decision
-last_verified: 2026-09-11
+last_verified: 2026-11-20
 ---
 
 # Live decisions — how quality is proven here
@@ -34,10 +34,22 @@ last_verified: 2026-09-11
   construction and only fail on Linux CI; others fail in wall-clock windows. Both are in
   [`gotchas.md`](gotchas.md), and the rule that follows is: reproduce a red run on the **base
   commit in a second worktree** before believing your diff caused it.
-- **Delivery goes straight onto `main`** (founder, 2026-09-23 — it replaced "one branch, one PR"),
-  so every push runs CI's release half too. **Fix everything found, related or not**, with
-  adversarial rounds rather than a fixed number of passes — until the founder calls a stop (P10
-  stopped after round 19 short of two quiet rounds; [`state.md`](state.md)).
+- **Delivery went straight onto `main`** (founder, 2026-09-23 — it replaced "one branch, one PR"), so every push ran
+  CI's release half too; since PR #12 (2026-11-13) the larger passes have landed as branches and PRs merged when green —
+  which is now the rule is an open question ([`questions.md`](questions.md)). **Fix everything found, related or not**,
+  with adversarial rounds rather than a fixed number of passes, until the founder calls a stop. P10 stopped after round
+  19 at Dean's request ("wrap up after this round") with **0 of the 2 quiet rounds** asked for (highs/mediums R16 H1 M8 ·
+  R17 H0 M7 · R18 H1 M5 · R19 H0 M4, ~30 LOW); every R19 finding was fixed and **no fresh review has verified the R19
+  fixes**. The 2026-11-13 ironclad pass ran nine lanes plus a second integration under "fix any and all".
+- **Lanes that build against a spec rather than against each other disagree, every time** (ironclad, both passes): the
+  console and the API on v3 device fields, the door's replay `reason` vs the server's `cause`, the emitter's key/net
+  objects vs the gate's vocabulary, the register/verify contract, a money route with no console. Each was found only by a
+  test that reads the OTHER side's source or real replies (`deviceV3Wire.contract.test.ts`, `make device-replay-check`,
+  shared corpus vectors) — stubbed suites were green on all of them. And some things are found only by running every
+  gate on the MERGED tree: nine functions over the complexity gate from a lane that never ran it, a bridge `loop()` over
+  its 4 KB stack, and `scenario.py`'s glass steps that had never run (E-LCD-3 asserted the Mega 2.1.0 screen and aborted,
+  so "148/150" hid six steps; a 16-cell marquee window not covering the court matched any figure — the predicate now
+  needs the item wholly in view).
 - **The lint gate stays strict and the loader idiom carries per-site disables.** React-hooks errors
   were fixed for real where the rule caught genuine impurity; the recurring fetch-on-mount loader
   got `eslint-disable-next-line` with a stated reason at each site. *Why not a config downgrade:*

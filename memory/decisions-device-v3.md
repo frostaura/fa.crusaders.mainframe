@@ -57,4 +57,4 @@ gate 2.0.0, built by four lanes (backend-device, court-box, door-gate, frontend-
 - **The same day's addendum** made the frozen firmware forward-compatible for its whole life, moved
   every compiled hardware fact to a setting, and made every board report its own health:
   `decisions-device-v3-compat.md`, `decisions-device-v3-hardware.md`, and for the member code
-  `decisions-member-code-cutover.md`.
+  `decisions-member-code-rollout.md`.

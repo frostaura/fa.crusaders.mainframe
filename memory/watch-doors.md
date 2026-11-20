@@ -27,15 +27,10 @@ was decided and why is [`decisions-door-gate.md`](decisions-door-gate.md) and
    (no OTA, no setup portal since 2026-11-14). Bench one board first: a power cut with the server
    down and the RTC image across a watchdog reset. Fire egress must be mechanical; nothing here is a
    life-safety device.
-3. **A court box's roster is a door key, and nothing gates it — open question for the owner.**
-   A gate is pushed no roster until an admin names the door, which stops anyone holding the club
-   device key self-registering a board and being handed the club's live codes. **A court box has
-   no equivalent step:** its heartbeat hands an auto-registered board live booking codes for its
-   courts immediately, and since the gate shipped those same codes open **doors** inside their
-   booking's window. G3 narrowed the blast radius from both ends — such a board now mails nobody,
-   and a club can hold at most 16 unacknowledged rows — but the roster itself is unchanged.
-   *Should an auto-registered court box also get no roster?* Founder's call. It belongs in
-   [`questions.md`](questions.md), where it is recorded.
+3. **A court box's roster is a door key, and nothing gates it.** An auto-registered court box is handed live booking
+   codes with no naming step, and those codes open doors inside their booking's window. G3 narrowed the blast radius
+   (such a board mails nobody; at most 16 unacknowledged rows); the roster is unchanged. The founder's question is
+   recorded once, in [`questions.md`](questions.md).
 4. **The DOOR half of this is closed; everything else still grows for ever.** Wave 1's
    `RetentionWorker` hard-deletes `gate.*`, `device.gate_open` and `device.unknown_scan` rows past
    `door_log_retention_days` (default 90), and the `gate_open`/`unknown_scan` receipts past

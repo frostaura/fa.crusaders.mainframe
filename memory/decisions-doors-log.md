@@ -30,6 +30,10 @@ oracle is `docs/specs/door-gate.md` §13.
   a door's name, a member's name and a gate key are all club-entered. Quoting first leaves it a
   formula once the reader strips the quotes. The value is kept and prefixed, never stripped, so
   a door genuinely named `-Side` survives.
+- **An offline refusal of a genuine v1 code names its member** (R11 D11-2): outcome `refused_offline`
+  (`DoorTrail.Reasons`, CSV "Refused offline", Night "… — refused offline"); `?reason=not_recognised` excludes it; no
+  second verdict row, no fault filed ([`decisions-night-words.md`](decisions-night-words.md)). Door CSVs name gates
+  through `TraceKinds.DoorLabel` ("Unnamed scanner (gate-…)").
 - **R10 E10-4 (FD10):** a gate's `code_used` is "Code already used" (chip) / "The code had already been
   used" (row) in `lib/deviceActivity.ts`, the Night's and member history's word; the log's Outcome filter
   offers it (server `DoorTrail.Reasons` carries it, not `GateAccess.Reasons` — corpus pin). Filters are

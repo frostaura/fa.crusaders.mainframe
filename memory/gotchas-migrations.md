@@ -26,6 +26,11 @@ last_verified: 2026-10-01
   the schema untouched (pinned). Its SQL names the columns as they stand at that moment — `Down`'s
   refusal checks `*Minutes`, `Up`'s checks `*Credits`.
 
+- **Prove a merged chain by schema, not by eye** (ironclad, 2026-11-14): after merging lanes' migrations in timestamp
+  order, a probe migration must come out EMPTY (`has-pending-model-changes` clean — the merged snapshot is the model), and
+  a fresh database and one migrated at an older release (`a77a1d72`, with devices and a member-owned webhook) then
+  upgraded must give identical `pg_dump --schema-only`.
+
 ## Changing the unit of account (P13 lane B0, 2026-10-01)
 
 - **`int` converts to `decimal` implicitly, so retyping a property compiles far less than it

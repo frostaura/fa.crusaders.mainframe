@@ -30,3 +30,8 @@ Who is told what, and why, is `decisions-admin-notices.md`; this is how a row ge
   row stopped being pending. The column is still named `SentAt` (no migration was spent on it).
 - **Subjects are one line** (`EmailChrome.SubjectLine`, in `Compose` and the SMTP transport): name
   rules check length only, and a CR/LF in a name made `MailMessage` refuse the whole message.
+- **Member notices on the same outbox wait for a confirmed address** (2026-11-13): Pending with
+  `awaiting_verified_address`, rechecked every 6 h, released by the verify/welcome link's own save, suppressed after 14
+  days; a suspended recipient is `recipient_inactive`. The two durations are delivery mechanics, so constants. Quiet
+  hours are re-checked at delivery (a deferral hands back the attempt); the admin feed filters `Audience = Admins`; what a
+  held member mail says when it leaves is [`decisions-email-outbox.md`](decisions-email-outbox.md).

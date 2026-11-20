@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-device-v3-compat
 description: "Device contract v3 addendum (2026-11-13): the frozen firmware must read every future server — the lifeline, tolerant readers, budgets at 80% of every buffer, every 2xx a success, real replies through real parsers."
 type: decision
-last_verified: 2026-11-13
+last_verified: 2026-11-20
 ---
 
 # Decisions — forward compatibility for the frozen firmware (v3 addendum, 2026-11-13)
@@ -46,10 +46,12 @@ Taken by the orchestrator under Dean's "fix any and all" go-ahead, after four la
   forwards the Mega's `!BOOT`/`!HW`/`!DIAG` as `mega`.** *Why:* between cable flashes the
   heartbeat is the only window; a brown-out, a wedged LCD and a stack overflow all looked like
   "unreliable hardware" (HW-3, HW-6, ESPR-2). Floors: largest block 4096, stack 512.
-- **A CI gate fails the build on stack and RAM budgets** (bridge worst path 3000 of 4096, loop frame
-  256, any frame 512; gate 6000 of 8192; Mega static RAM 4096). *Why:* the bridge's worst static
-  path was 3776–3968 B of a 4 KB stack before interrupts (ESPR-1); telemetry only reports a crash
-  after the fact (ESPR-4).
+- **A CI gate fails the build on stack and RAM budgets.** The analysis' GOALS are bridge worst path 3000 of 4096,
+  loop frame 256, any frame 512; gate 6000 of 8192; Mega static RAM 4096. The enforced numbers are a ratchet in
+  `src/iot/tools/stack_budget.json` (at `7893321d`: bridge loop 208 / max frame 928 / worst path 2768; gate loop 32 /
+  max frame 832 and no path budget, since the ESP32's GCC 8 writes no call graph) — lowered as code shrinks, raised
+  only with a reason ([`decisions-release-ops.md`](decisions-release-ops.md)). *Why:* the bridge's worst static path was
+  3776–3968 B of a 4 KB stack before interrupts (ESPR-1); telemetry only reports a crash after the fact (ESPR-4).
 - **Flash writes only from the top of `loop()`.** *Why:* the LittleFS write with compaction is the
   deepest stack path in the image, and v3 writes more (snapshot, events, keys).
 - **The stall watchdog (6 h, link up, no accepted beat, restart when idle) is a contract constant,

@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-questions
-description: "All founder-owned and none technical: PIN length (a 4-digit collision charges the wrong member), biometric SDK, gate policy, court-box rosters, walk-behind attendance, pricing beyond Crusaders."
+description: "All founder-owned: PIN length (a 4-digit collision charges the wrong member), biometric SDK, gate policy, court-box rosters, walk-behind attendance, play defaults, delivery by PR, MIT on a public repo, pricing."
 type: question
-last_verified: 2026-09-11
+last_verified: 2026-11-20
 ---
 
 # Open questions
@@ -38,16 +38,25 @@ and none of it is blocked on engineering.
 - **Crusaders' existing member-data migration** — to be settled with the committee.
 - **Should a partner who walks in behind a scanning player count as attended?** (play.md §14 Q4.)
   Today yes — the founder's default since R2, kept in R19 — but only behind a PLAYER's scan; a
-  pay-for payer's scan counts for nobody ([`decisions-attendance-r19.md`](decisions-attendance-r19.md)).
+  pay-for payer's scan counts for nobody ([`decisions-attendance.md`](decisions-attendance.md)).
   "Own seat scan only" is the stricter reading; it changes stats, streaks and badges.
-- **Why does a private repo ship an MIT `LICENSE`?** Confirmed 2026-09-16: `LICENSE` is MIT and
-  `README.md` says so, while this repo is private by the 2026-07-24 default
-  ([`decisions.md`](decisions.md)). Not a contradiction under an opt-in OSS posture, but licensing
-  is **parent-controlled**, the same shape as the licence question open on `fa.lifeos`, and nobody
-  has decided it here. Confirm MIT or replace it before any customer or second tenant sees the repo.
+- **Play defaults awaiting a ruling** (play.md §14, defaults in use): My game on by default; unfinished matches not
+  recordable; the admin card shows the W–L record; B15's own-seat-scan badge rule (the question above).
+- **Bookings screen calls left open at PR #12** ([`decisions-frontend-bookings-layout.md`](decisions-frontend-bookings-layout.md)):
+  the page now scrolls past the grid to the games detail; re-locking pinch zoom would mean accepting an axe WCAG 1.4.4
+  violation. Also recorded for Dean in their topics: the D2 fixer's tri-state peak rule ([`decisions-groups.md`](decisions-groups.md)),
+  the reversible "shares received are held to the deadline" call ([`decisions-players.md`](decisions-players.md)), and
+  the members split view's unbuilt §3.8 placeholder pane ([`decisions-admin-layout.md`](decisions-admin-layout.md)).
+- **Is delivery straight onto `main` still the rule?** The founder set it on 2026-09-23 ([`decisions-method.md`](decisions-method.md));
+  since PR #12 (2026-11-13) larger passes land as branches and PRs merged when green (#12, #15, #16, Dean: "merge when
+  green"). Nobody has recorded which is now the rule.
+- **Is MIT the licence the founder wants on a public repository?** `LICENSE` is MIT ("Copyright (c) FrostAura Global (Pty)
+  Ltd") and `README.md` says so; the repository was private by the 2026-07-24 default ([`decisions.md`](decisions.md)) and
+  is **public** at 2026-11-20 (`gh repo view`). Licensing and visibility are **parent-controlled**, the same shape as the
+  licence question open on `fa.lifeos`, and nobody has decided either here. Confirm before any customer or second
+  tenant sees the repo.
 
 **Deferred by decision — listed so they are not rediscovered as questions:** recurring bookings
-(out of scope for v1) · multi-sport (the column exists, the UI is squash-only) · partner/two-player
-booking (v1.1) · walk-ins and guest passes (an admin books under a per-tenant guest address) · PWA
+(out of scope for v1) · multi-sport (the column exists, the UI is squash-only) · walk-ins and guest passes (an admin books under a per-tenant guest address) · PWA
 push (email carries the load) · a native wrapper (PWA only) · mandatory backup fingers (recommended,
 not enforced) · per-tenant custom domain (schema supports it, UI is v1.1).

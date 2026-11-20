@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-gate
 description: "The door gate reuses the court box's contract with no EF migration; a board declares its kind once, event kinds are normalised once, a door is never attendance, and its trail finally has a reader."
 type: decision
-last_verified: 2026-09-19
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the door gate's shape
@@ -12,10 +12,12 @@ contract underneath is [`decisions-device.md`](decisions-device.md), unchanged b
 who gets through a door is [`decisions-gate-access.md`](decisions-gate-access.md).
 
 - **The device model held, and the bet is worth recording because it paid.** `DeviceKind` and
-  `GateKey` were modelled years before there was hardware, so the whole backend needed **no EF
-  migration** — both have been indexed columns since the device table shipped. Everything else is
-  the court box's, reused rather than forked: the club key, the `/api/v1/device` group, the rate
-  limit, auto-registration, the roster element grammar.
+  `GateKey` were modelled before there was hardware, so the G1–G3 gate CONTRACT needed no EF migration — both have
+  been columns since the device table shipped (`20260822220150_AddDevices.cs:25`; `Kind` is indexed with the tenant,
+  `GateKey` is not indexed). The doors FEATURE as a whole did add migrations later (`AddDoorCardFields`,
+  `AddDeviceShutBy`, `AddDoorTruthColumns`). Everything else is the court box's, reused rather than forked: the club key,
+  the `/api/v1/device` group, the rate limit, auto-registration, the roster element grammar. *Corrected 2026-11-20:* this
+  topic said both were indexed and the whole backend needed no migration.
 - **A board declares its kind once, on its first heartbeat, and can never re-kind its row.**
   Absent means `court_box`; an unrecognised string is a 400. *Why the row wins:* a gate that could
   turn itself into a court box would be handed the club's courts, and a box that could turn itself

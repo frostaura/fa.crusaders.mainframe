@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-perf
 description: "Perf round 2026-09-30 backend: writes get their own per-member rate limit, confirmation mail is composed after the response, slug lookups are cached, gzip on both hops, additive paging, photo links, wallet share summaries."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the perf round's backend changes (2026-09-30, lane B)
@@ -22,10 +22,12 @@ Measured numbers and method: [`gotchas-perf.md`](gotchas-perf.md). Sign-in limit
   cancel it quotes.
 - **The booking confirmation is composed after the response.** The request fixes the figures
   (post-charge balance, penalty policy) and hands the booking id to a `Task.Run` with its own
-  scope and tenant; that reads the address, the membership name and the club, builds the PDF and
-  sends. *Why:* four reads and the PDF sat on the booking POST. **Durability is unchanged** — it
-  was already an in-process fire-and-forget for the SMTP half. NOT a hosted service on purpose:
-  `TestWebAppFactory` removes every `IHostedService`, and the mail must reach the suite.
+  scope and tenant; that reads the address, the membership name and the club, builds the PDF and QUEUES it into the
+  email outbox (`BookingService.cs:579`). *Why:* four reads and the PDF sat on the booking POST. *Superseded
+  rationale:* "durability is unchanged, the SMTP half was already fire-and-forget" stopped being true when the outbox
+  made every other send durable (2026-10-07) — this compose window is now the one non-durable mail path
+  ([`decisions-email-outbox.md`](decisions-email-outbox.md)). NOT a hosted service on purpose: `TestWebAppFactory`
+  removes every `IHostedService`, and the mail must reach the suite.
 - **The tenant slug lookup is cached per host** (`IMemoryCache`, 5 min, hits only). *Why safe:*
   a club row is only ever added — no rename, no delete. **`PasswordChangeGate` is not folded:**
   it must be exact, and a claim-based gate needs every token mint site changed. Not worth it.

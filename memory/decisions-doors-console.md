@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-doors-console
 description: "The admin doors surface: one vocabulary for four audit actions, a deleted door that is removed rather than absent, an edit that says which one it was, signals with nowhere to put a member, and reopen-all as an undo."
 type: decision
-last_verified: 2026-09-21
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the admin doors console
@@ -24,11 +24,13 @@ because a `403` on `/api/v1/device/*` may mean one thing only.
 - **The per-board projection moved rather than being copied.** `DoorActivityView` holds the six
   field rules the club log now also needs. *Why:* one of them decides whether a string is a
   fingerprint or a live access code, and two copies of a privacy check is one too many. The
-  per-board feed is still exactly six keys, pinned, because WIRE-W1 lists it unchanged.
+  per-board feed item is pinned (`AdminDoorLogHttpTests.cs:375-381`) at EIGHT keys — `at`, `delivered_at`,
+  `time_uncertain`, `action`, `reason`, `offline`, `member`, `fingerprint` (`DoorActivityView.cs:34-49`); the code's own
+  comment (`:31`, "six keys") and this topic's old "six"/"seven" are stale.
 - **A deleted door is REMOVED, never a row with no door.** *Why:* `audit_log` has no foreign key
   to `devices`, so a delete never destroyed a scan row, only its READABILITY — and a console
-  asked to tell `door: null` from "no door" went white for the club. The per-board feed
-  keeps WIRE-W1's seven keys: a deleted id 404s it.
+  asked to tell `door: null` from "no door" went white for the club. A deleted id 404s the
+  per-board feed.
 - **An edit says which one it was and who made it**, from a `changes` list comparing before with
   after; changing nothing writes no row and answers `unchanged: true`. *Why:* a console sends the
   whole card on every save, so nine identical "details were changed" rows buried the one that

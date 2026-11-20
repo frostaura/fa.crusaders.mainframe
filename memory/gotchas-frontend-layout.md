@@ -2,14 +2,16 @@
 name: crusaders-mainframe-gotchas-frontend-layout
 description: "Layout traps measured in Chromium (R3-R4): text overflow is invisible to element rects, a zero flex basis never wraps, implicit grid columns and min-widths beat max-widths at 200 %, ui heights are floors."
 type: gotcha
-last_verified: 2026-10-03
+last_verified: 2026-11-20
 ---
 
 # Gotchas — layout, measured in a real browser (review round 3, lane F3)
 
-- **`cn` (tailwind-merge, unconfigured) does not know `h-touch`**, so `h-auto` beside it left both
-  and `h-touch` won ("Create a / repeating / booking" spilled out of 44px). Since R4 Button, Input
-  and SelectTrigger carry `min-h-touch`, not `h-touch`; any other `h-touch` still needs `!h-auto`.
+- **tailwind-merge knows only the stock scale unless told**: `h-touch h-auto` kept both and `h-touch` won ("Create a /
+  repeating / booking" spilled out of 44px). Fixed twice: Button, Input and SelectTrigger carry `min-h-touch` (R4), and
+  `cn` is now `extendTailwindMerge` with the named spacing steps `touch`, `appbar`, `tabbar` (`lib/utils.ts:12`), so the
+  caller's class wins — no `!h-auto` needed. Other custom names are still unknown to it (the overline `tracking-*` trap,
+  [`decisions-admin-focus.md`](decisions-admin-focus.md)); a new named token must be added there.
 - **Text overflowing its own box is invisible to `getBoundingClientRect` on elements.** A mono
   event name ("booking.late_cancellation") ran 150px past a phone's edge from inside a span that
   measured in bounds, and `<main>` scrolled sideways with no element to blame. Probe TEXT nodes with
@@ -20,8 +22,7 @@ last_verified: 2026-10-03
   The Overview's quick-link cards overflowed a phone at 200 % text with only `grid gap-3`.
 - **200 % text in e2e is `html { font-size: 32px }`** after navigation; rem floors (`min-w-48`),
   rem bases and fixed two-column grids are what break there — Tailwind's `sm` is still 640 CSS px.
-- **A save-bar "covers the field" test must put the field where the bar grows over it**: shorten the
-  viewport (a filtered page cannot scroll there; a resize also re-measures the bar).
+- **A save-bar "covers the field" test puts the field where the bar grows over it** (shorten the viewport).
 - **For 200 % text, measure the COMPONENT in rem, not the viewport** (R4, lane F2):
   `[container-type:inline-size]` on a wrapper and `[@container(min-width:17rem)]:…` variants follow
   the text size, where `sm:` (640 CSS px) never does. Inbox rows, Profile stats and badges use it.
@@ -33,6 +34,9 @@ last_verified: 2026-10-03
   dialog title cut to 64px) — give the rows `shrink-0` when the box should scroll instead.
 - **A figure beside a name wraps UNDER it, not squeezes it**: `flex flex-wrap justify-between`
   with `ml-auto` on the figure; a `shrink-0` figure broke names mid-word ("Bon/gani").
+- **A rem `min-w-*` on text is a 200 % bug** (12rem = 384 px): use a flex *basis* that may shrink (`grow basis-48
+  min-w-0`); `theme-vocabulary` refuses arbitrary `min-w-[min(...)]`. A flex item with `max-w-full` still sits at its
+  min-content (a long email) — `min-w-0` is the fix, not more max-width.
 - **A `min-width` beats a `max-width`** (R4, X4-2): `min-w-48` is 384 px at 200 % text and ran
   the account menu off a 375 phone despite `max-w-[calc(100vw-1rem)]`. Floors on popovers are
   `min(12rem, 100vw-1rem)`; height caps are Radix's `--radix-*-content-available-height` + scroll.

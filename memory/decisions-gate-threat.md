@@ -43,4 +43,5 @@ to assume a door is held to a higher standard than the court box it was built fr
 - **Three residuals are stated rather than engineered around.** The roster is capped at 48 after
   ordering, so a club with more bookings has a **49th member no door admits offline**; a roster is
   a snapshot, so a suspension or sweep after the push does not reach the board until the next
-  heartbeat; and nothing purges `device_event_receipts` or `audit_log` ([`watch-doors.md`](watch-doors.md)).
+  heartbeat; and door rows and gate receipts are purged past retention, but court-box receipts and every other
+  `audit_log` row are not ([`watch-doors.md`](watch-doors.md) item 4).

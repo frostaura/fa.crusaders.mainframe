@@ -13,7 +13,7 @@ along by a file that is re-measured every session.
 
 - 100% of bookings through the system within 60 days of launch, with no parallel WhatsApp or paper
 - ≥95% of lights-on events matching a valid booking, and <2% disputed penalties
-- ≥70% of active members holding positive credit
+- ≥70% of active members holding a positive balance (written "positive credit" before P13 retired the word)
 - a second club onboarded end to end in under two operator-hours
 - ≥99.5% uptime in club hours, degrading gracefully when biometrics are unavailable
 - acceptance is social: *"the committee says 'this is now how we run the courts.'"*
@@ -26,7 +26,7 @@ since 2026-09-19 ([`state.md`](state.md)), so it is now a debt: the kind discove
 number is wanted this week.
 
 **Two of them gained a lever on 2026-11-13** (backend-platform pass): a second club is created with
-`tenant create` instead of raw SQL ([`decisions-platform-pass.md`](decisions-platform-pass.md)),
+`tenant create` instead of raw SQL ([`decisions-tenancy.md`](decisions-tenancy.md)),
 and `/readyz` gives an uptime monitor something true to poll
 ([`decisions-platform-ops.md`](decisions-platform-ops.md)). Neither is measured yet: no
 second club has been timed and no monitor polls `/readyz`.

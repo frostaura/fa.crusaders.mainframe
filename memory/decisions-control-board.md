@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-control-board
 description: "Which court box a control-board tile reports when several claim one court, and how the duplicate is surfaced to the console rather than silently resolved (review round 3, A-11)."
 type: decision
-last_verified: 2026-10-03
+last_verified: 2026-11-20
 ---
 
 # Live decisions — the control board's box per court
@@ -20,7 +20,7 @@ Code: `Services/ControlBoardReader.cs`. Tests: `ControlBoardHttpTests`, `R3Contr
   banks answering for one set of lights — and the board is a mirror: it must show the duplicate
   for the console to warn about, not choose between them and hide it.
 - The query budget is unchanged (still six); the choice is made in memory from the device list.
-- **The console's tile says it** (lane F3, `duplicateBoxesWarning` in `lib/monitoringCopy.ts`): how
+- **The console's tile says it** (lane F3; `duplicateBoxesParts`, `lib/monitoringCopy.ts:362`, used by `CourtTile.tsx`): how
   many boxes are set to the court, which one the tile follows and why, the others with when each
   was last heard, and to take the extras out of service on Boards. Nothing for one box.
 - **Round 4 (A4-5):** the payload also lists every court box once (`boxes`: code, name, MAC, link,
@@ -35,6 +35,11 @@ Code: `Services/ControlBoardReader.cs`. Tests: `ControlBoardHttpTests`, `R3Contr
 - **R7 L7-2 (console, 320 / 200 %):** the tile is `@container/tile`; the state word and countdown
   are capped by their band's width (`min(…, 18cqi / 22cqi)` — only a narrow band shrinks them),
   and Booked by / Next stack under their terms below a 14rem tile. `e2e/admin-r7.spec.ts`.
-- **v3 (2026-11-13, console):** a lit court counts the LIGHTS' time (`lights.until`), the two
-  booking-vs-box disagreements are tile states, the offline banner says when the boxes were last
-  heard, wall view covers the app's chrome — `decisions-admin-device-v3`.
+- **v3 (2026-11-13, console):** a lit court counts down to `lights.until` (else `seconds_remaining` re-based on the
+  view's `generated_at` — *not* `as_of`, which is the last event; FA-8); "Lights on, nothing booked" and "checked in,
+  lights off" need the box's CONFIRMED state and the club's grace window; the offline banner says when the boxes were
+  last heard; wall view is an overlay over the app's chrome. No remote switch-off — deferred by `device-api.md` §14; the
+  copy says paid courts are put back on from the club's record, which never switches one off.
+- **The two mismatches are server faults too** (pass 2, BA-04): `lights_on_nothing_booked` (warning) and
+  `checked_in_lights_off` (error), filed by the admin sweep by the tile's own rule and resolved by it ("Cleared on its
+  own"). *Why faults:* Faults, the Overview's Needs attention and the spike mail then need nothing new.

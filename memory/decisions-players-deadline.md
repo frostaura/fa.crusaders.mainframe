@@ -23,7 +23,7 @@ Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the refuter rounds
   overdrew an organiser who had spent it. The hold on this booking is what may go back, so it
   covers — ordinary returns never wait.
 - **Admin remove / settle-outside refuse an uncovered hand-back** without `allowNegativeBalance`
-  (`400 overdraft_not_authorised {return_credits, covered_credits}`), whatever the deadline; with
+  (`400 overdraft_not_authorised {return_minutes, covered_minutes}`), whatever the deadline; with
   it, on the change record (`overdraft_authorised`). The ledger holds the same line in a race.
 - **Coverage earmarks held money and queues waiting returns** (rounds 4–5, orchestrator): a
   return may use its own game's earmark (less earlier returns' need there) only as far as money

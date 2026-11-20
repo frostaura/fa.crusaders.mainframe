@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-groups
 description: "D2: groups replaced the member class. P13: a group carries a package discount (lowest wins, rand only) and peak priority (tri-state); no group sets a price or a rate any more."
 type: decision
-last_verified: 2026-10-02
+last_verified: 2026-11-20
 ---
 
 # Live decisions — groups are the one configurable concept (D2)
@@ -22,7 +22,8 @@ deleted or archived (409 `group_is_system_default`). Resolution lives in `Servic
   first cut was two-state ("every group grants"), so every pre-D2 group was born withholding and
   the migration silently took peak from every league member also in another group (review
   D2-P1, reproduced). Tri-state mirrors the rate's null; an explicit false still beats any grant
-  and is named in `withheld_by_groups` (`peak_hours_league_only`, code kept stable); no grant at
+  and is named in `withheld_by_groups` (wire code `peak_hours_league_only` kept stable, C# `PeakHoursPriorityOnly`,
+  `BookingRefusals.cs:57`); no grant at
   all is "no", so an unclassified member has no priority. A deviation from the plan's literal
   "peak only if all groups grant", made by the D2 fixer — Dean may overrule.
 - **`member_groups_enabled=false` does NOT switch the discount off** — it governs windows and
@@ -37,7 +38,9 @@ deleted or archived (409 `group_is_system_default`). Resolution lives in `Servic
   off Up's own change-log rows); it leaves the group rows and cannot delete the change-log rows.
 - **Deprecated `member_class` for ONE release** on admin members list/spend and `member.*`
   webhooks, derived from the league group; `minutes.purchased` never carries it (P13 §12.10).
-  Remove it in the release after the Groups page ships.
+  Remove it in the release after the Groups page ships. **Overdue:** the Groups page shipped
+  (`pages/AdminGroups.tsx`) and the field is still emitted — `AdminMemberEndpoints.cs:445`
+  (`MemberTariff.LegacyClassOf`) and the `member.approved` webhook (`MemberApprovalService.cs:338`).
 - **`group.archived` still does not demand a reason** — enforcing it would break the production
   Groups page, which archives with a bare `{status}`; enforce it with the P6 Groups rebuild. The
   league group is refused outright, so no archive can re-price members today.

@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-json-scanner
 description: "devapi's heapless JSON scanner treated any quoted string as a key until it was fixed; every server-controlled string is a decoy for a key name, and v3 callers must bound nested reads with findObject."
 type: gotcha
-last_verified: 2026-11-13
+last_verified: 2026-11-20
 ---
 
 # Gotchas — the shared JSON scanner
@@ -32,6 +32,11 @@ wide as this tree gets. The toolchain traps around it are in
   would still break the 2.x callers, so the rule is on the callers. `findObject` bounds the read at
   BOTH ends — `findKey` plus a read from there bounds only the start, and would adopt a key added
   after the object closed.
+- **A field a caller ACTS ON is read at the top level, never by the flat scan** (round G4 B2): the gate's
+  `onGateResponse` read `opened` with `findKey`, and `{"outer":{"opened":true}}` released the lock. `devapi/Json.h:168-183`
+  now names the flat scan "the wrong reader for anything a caller ACTS ON"; such callers use the `findTopLevel*` /
+  `topLevel*Field` family (a field of a named object: `findTopLevelObject` first). The gate's scan reply is read by
+  `GateReply.cpp` (`jv::member(object, "opened")`); `GateFlow.cpp:65` only delegates to it.
 - **Every server-controlled string is a decoy for a key name, and three of them are typed by an
   admin.** A tenant slugged `roster` loses its roster; a door named `heartbeat_seconds` pins every
   box to its compiled-in cadence; a `reason` of `court_number` or `granted_seconds` sends a member

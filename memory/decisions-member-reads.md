@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-member-reads
 description: "Member and desk reads from review rounds 1-3: anonymous invite preview, own seat in any state, one club date, recent games, held parts, what a game cost you, inbox read state for answered asks and own receipts."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-11-20
 ---
 
 # Live decisions — what a member (or a stranger with a link) may read (review round 1)
@@ -58,3 +58,8 @@ Asked by the frontend lanes; built in lane B. Tests: `R1PlayersHttpTests`, `R1Ma
 - **Round 4 (lane B1):** "own move" now covers the organiser's remove, split change and CANCEL
   (`ReconcileOptions.OwnActionBy`, the request's user via `ShareHookHttp`; ledger actor unchanged),
   and a cancelled game's `returned_minutes` counts only returns from `CancelledAt` on (M4-4).
+- **Role `payer`** (R7 E7-5, D10 pay-for): the booking detail answers a payer read-only (all permissions false, no dead
+  seats); `/me/bookings/upcoming|recent` and the admin member Bookings list it. *Why:* the member whose wallet carried
+  the charge read "Booking not found". **`GET /wallet?include=share_bookings` also carries `share_places`** (R14 E14-7)
+  — `{bookingId: {court_name, starts_at}}` for every booking the member has a share row on, readable or not, own rows
+  only. Admin "Last 30 days" (R9 E9-1): bookings = the list's `PlayedBy`, sessions = `AttendanceQuery`, no-shows = booker.
