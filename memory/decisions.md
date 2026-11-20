@@ -56,9 +56,9 @@ lives in `docs/specs/client-blueprint-deltas.md`.
 - **2-year retention** of usage history via a nightly anonymisation worker.
 - **POPI compliance is deliberately out of scope** (founder, 2026-05-06: "forget about legislation for now"). A
   decision, not an oversight — **revisit before any club other than Crusaders onboards.**
-- **This repo was made private**, as the first project under the 2026-07-24 private-by-default rule. It is **public**
-  at 2026-11-20 (`gh repo view`) — visibility is Dean's setting and a status, never read from a file (CLAUDE.md); the
-  licence question that goes with it is open ([`questions.md`](questions.md)).
+- **Public, by founder decision (2026-11-20)**: all nine `frostaura` repos were made public that night, each history
+  scanned for credentials first. It had been private under the 2026-07-24 default. Re-read it with `gh repo view`
+  (CLAUDE.md); the licence question is open ([`questions.md`](questions.md)).
 - **Commercial club software and any philanthropic squash programme stay decoupled** unless root decides otherwise;
   the Foundation squash programme was killed 2026-07-24.
 - **This repo carries no local `.claude/skills/` and must not reacquire one.** The vendored Gaia toolkit was removed

@@ -1,6 +1,6 @@
 ---
 name: technologies-crusaders-squash-control-system-decisions-release-ops
-description: "Release and operations (2026-11-13, lane infra-ops): immutable sha tags with a forward-only :latest, daily in-stack backups with a drilled restore, a pre-deploy migration check, a non-root API, pinned images, a stack-size ratchet."
+description: "Release and ops: immutable sha tags with a forward-only :latest, in-stack backups with a drilled restore, a pre-deploy migration check, a non-root API, pinned images; the rename kept every name live state reads."
 type: decision
 last_verified: 2026-11-20
 ---
@@ -19,7 +19,7 @@ founder at the box, or makes the release knowable. Procedures: `docs/runbooks/`.
   failed build leave a mixed set and a late older run put old code back, and with no tag nobody
   could name what the club ran — so neither the owed migrations nor a rollback could be worked out.
   The stack pins `CRUSADERS_IMAGE_TAG`; unset falls back to `:latest` so an old Portainer file keeps
-  working.
+  working — apart from its image names, which the 2026-11-20 rename changed (below).
 - **Backups live in the stack, write to the host, and are tested for real.** A `backup` service on
   the server's own `postgres:16-alpine` image (pg_dump must match the server major) dumps daily plus
   the photos, keeps 14 days but never fewer than 3 (a job failing for a month must not prune its
@@ -39,7 +39,7 @@ founder at the box, or makes the release knowable. Procedures: `docs/runbooks/`.
   *Why:* a container escape should not land as root on the Pi, and a non-root image without the
   chown fails every upload on volumes a root backend created. It replaced a `volume-init` service
   (gone from every compose file, `1f5fa9ae`) because the founder required the deploy to stay as
-  before: the club's existing Portainer stack file deploys unchanged.
+  before: the club's existing Portainer stack file deployed unchanged, until the rename below.
 - **Third-party images are pinned** (cloudflared 2026.10.7, nginx 1.31.8-alpine, MailHog v1.0.1,
   arduino-cli v1.5.1, actionlint 1.7.12), so a redeploy changes only what this repository changed.
 - **Every service rotates its log and EF Core logs at Warning.** 35 KB/min idle was filling the SD.
@@ -50,5 +50,12 @@ founder at the box, or makes the release knowable. Procedures: `docs/runbooks/`.
   analysis' goals beside them. Set at the 2.3.0/1.1.2 values, now at the v3 images' (bridge 208 / 928 / 2768; gate 32 /
   832); lowered as the code shrinks, raised only in the commit that needs it, with the reason. Indirect and precompiled
   callees are not counted. `PLATFORMIO_BUILD_FLAGS` rebuilds in place, so the CI step's images are never release artifacts.
-- **Not done here, by rule:** GitHub settings (visibility — the repository is public; branch
+- **The 2026-11-20 rename (`e15b3f9f`) renamed what is cheap to rename and kept what live state depends on.**
+  Images became `frostaura/technologies.crusaders.squash-control-system-{backend,frontend,gateway}`, with the product
+  name in docs, defaults (passkey RP name, fallback sender), the wallet CSV and the health `service`. **Kept, by
+  design:** the database name, the backup host path, JWT issuer and audience, `localStorage` keys and the Web Lock
+  name, the dev member-code derivation string, the `Crusaders.Mainframe.*` namespaces, projects and `MainframeDbContext`,
+  and everything under `src/iot` and `src/contracts`. *Why:* each is read by deployed data, live sessions, remembered
+  devices or cable-flashed boards; renaming one strands dumps, logs every member out or bricks a box's handshake.
+- **Not done here, by rule:** GitHub settings (visibility — public by the founder's 2026-11-20 decision; branch
   protection on `main`) are Dean's; the health endpoint's build SHA is the backend's.

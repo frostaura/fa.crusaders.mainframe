@@ -56,10 +56,9 @@ Everything below is **founder-owned (Dean)** unless noted, and none of it is blo
 - **Is delivery straight onto `main` still the rule?** The founder set it on 2026-09-23 ([`decisions-method.md`](decisions-method.md));
   since PR #12 (2026-11-13) larger passes land as branches and PRs merged when green (#12, #15, #16, Dean: "merge when
   green"). Nobody has recorded which is now the rule.
-- **Is MIT the licence the founder wants on a public repository?** `LICENSE` is MIT ("Copyright (c) FrostAura Global
-  (Pty) Ltd") and `README.md` says so; the repository was private by the 2026-07-24 default ([`decisions.md`](decisions.md))
-  and is **public** at 2026-11-20 (`gh repo view`). Licensing and visibility are **parent-controlled**, and nobody has
-  decided either here. Confirm before any customer or second tenant sees the repo.
+- **Is MIT the licence the founder wants now the repository is public?** `LICENSE` is MIT ("Copyright (c) FrostAura
+  Global (Pty) Ltd") and `README.md` says so. Visibility was decided on 2026-11-20 ([`decisions.md`](decisions.md));
+  the licence never was. Parent-controlled. Confirm before any customer or second tenant relies on it.
 
 **Deferred by decision — listed so they are not rediscovered as questions:** recurring bookings (out of scope for v1)
 · multi-sport (the column exists, the UI is squash-only) · walk-ins and guest passes (an admin books under a per-tenant
