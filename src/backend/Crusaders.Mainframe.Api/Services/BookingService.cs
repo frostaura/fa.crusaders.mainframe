@@ -3190,7 +3190,7 @@ public sealed class BookingService
 
             var pdf = Email.ReceiptPdf.ForBooking(
                 // The club's own name. This read the tenant row directly and fell back to the
-                // literal "Crusaders Mainframe" — the software's name — on a receipt a member
+                // literal "Crusaders Mainframe" — the software's former name — on a receipt a member
                 // keeps against a disputed charge, and on every other club's receipts.
                 clubName: (await _club.GetAsync(ct)).Name,
                 memberName: membership?.FullName ?? "Member",

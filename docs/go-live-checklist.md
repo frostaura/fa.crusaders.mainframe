@@ -89,7 +89,8 @@ Delete any `PORTAINER_URL`, `PORTAINER_TOKEN`, `PORTAINER_STACK_ID`, `PORTAINER_
 or `OTA_PRIVATE_KEY` still set on the repository — nothing reads them, and a secret nothing
 reads is a credential nobody is watching.
 
-**Before each manual redeploy, check the stack names `<user>/crusaders-mainframe-gateway`
+**Before each manual redeploy, check the stack names `<user>/technologies.crusaders.squash-control-system-{backend,frontend,gateway}`
+(not the pre-rename `crusaders-mainframe-*` images, which stopped receiving releases on 2026-11-20)
 and does not bind-mount `./nginx/nginx.conf`.** CI used to refuse a stack in either state;
 it no longer can. A stack in either state keeps its old gateway config — every LAN member
 back in one rate-limit bucket — while reporting a successful deploy.

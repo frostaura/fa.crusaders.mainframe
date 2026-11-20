@@ -37,7 +37,7 @@ These live in `tenant_secrets`, encrypted at rest. Admin enters them via the ten
    - `merchantTransactionId = <pending_topup.id>` (so the webhook can reconcile)
    - `customer.merchantCustomerId = <user.id>`
    - `customer.email`
-   - amount, currency, description (`Crusaders Mainframe top-up — R{amount}`)
+   - amount, currency, description (`Crusaders Squash Control System top-up — R{amount}`)
    - `notificationUrl` = our webhook endpoint
    - `shopperResultUrl` = our return URL (mobile app)
 4. PeachPayments returns a `checkoutId`. Backend redirects the player to PeachPayments' hosted page with that ID.

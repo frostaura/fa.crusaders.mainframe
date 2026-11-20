@@ -1,4 +1,4 @@
-<title>Crusaders Mainframe Blueprint</title>
+<title>Crusaders Squash Control System Blueprint</title>
 <!-- Self-contained by rule: no external stylesheets, scripts or fonts. Archivo / IBM Plex Mono are used when installed locally; the system stacks below are the designed fallback. -->
 <style>
 :root{
@@ -171,7 +171,7 @@ ul.tight li{margin:5px 0}
 
 <div class="shell">
 <nav class="rail" aria-label="Sections">
-  <div class="brand">Crusaders Mainframe<span class="mono">SYSTEM BLUEPRINT · REV 2026-09-19</span></div>
+  <div class="brand">Crusaders Squash Control System<span class="mono">SYSTEM BLUEPRINT · REV 2026-09-19</span></div>
   <div class="grp">System</div>
   <a href="#overview">Topology</a>
   <div class="grp">Hardware</div>
@@ -202,7 +202,7 @@ ul.tight li{margin:5px 0}
 <header class="hero" id="top">
   <div style="height:42px"></div>
   <div class="stamp"><b>●</b> ON-PREM SAAS · CLUB LAN · 4 COURTS · ONE BOARD PER DOOR</div>
-  <h1>Crusaders Mainframe Blueprint</h1>
+  <h1>Crusaders Squash Control System Blueprint</h1>
   <p class="sub">The full system on one page — a multi-tenant booking SaaS whose last hop is a relay coil: React PWA → .NET 10 API → PostgreSQL ledger → outbound webhooks → an ESP8266 bridge that asks the API first and falls back to its cached roster → an ATmega2560 that physically switches the court lights. Revised 2026-09-05 to the state of the <a href="#fixes">E2E fix programme</a> branch, after the simplification that removed request signing, discovery and OTA, and again on 2026-09-06 for the round-3 fixes: the webhook catalogue, the roster’s contents, and one route to detecting a lost event queue that this page used to assert and that the firmware refutes. Revised again on <b>2026-09-19</b> for the second device kind — <a href="#doorgate">the door gate</a>, one ESP32 per door on the same club key and the same pull-only discipline — which is also why the device API is now five calls rather than four. Test <em>counts</em> were removed rather than corrected — see <a href="#gates">why</a>.</p>
   <div class="tiles">
     <div class="tile hw"><div class="v">4</div><div class="k">Courts per box, relays A–D</div></div>
@@ -1671,7 +1671,7 @@ litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
     </div>
   </div>
   <div class="footer">
-    <span>Crusaders Mainframe · FrostAura Technologies · sources: <span class="mono">docs/specs/{feature-spec,deployment,settlement-model,device-serial-protocol,door-gate}.md</span>, <span class="mono">docs/go-live-checklist.md</span>, <span class="mono">src/contracts/device-protocol/</span>, <span class="mono">src/iot/README.md</span> + <span class="mono">court-box/README.md</span> + <span class="mono">door-gate/README.md</span> + the generated <span class="mono">arduino/README.md</span> files, the <span class="mono">Device*</span> endpoints and <span class="mono">Security/DeviceAuth/</span>, <span class="mono">docker-compose{,.prod}.yml</span>, <span class="mono">ci.yml</span>, <span class="mono">docs/reviews/</span>, project memory</span>
+    <span>Crusaders Squash Control System · FrostAura Technologies · sources: <span class="mono">docs/specs/{feature-spec,deployment,settlement-model,device-serial-protocol,door-gate}.md</span>, <span class="mono">docs/go-live-checklist.md</span>, <span class="mono">src/contracts/device-protocol/</span>, <span class="mono">src/iot/README.md</span> + <span class="mono">court-box/README.md</span> + <span class="mono">door-gate/README.md</span> + the generated <span class="mono">arduino/README.md</span> files, the <span class="mono">Device*</span> endpoints and <span class="mono">Security/DeviceAuth/</span>, <span class="mono">docker-compose{,.prod}.yml</span>, <span class="mono">ci.yml</span>, <span class="mono">docs/reviews/</span>, project memory</span>
     <span class="mono">REV 2026-09-19</span>
   </div>
 </section>

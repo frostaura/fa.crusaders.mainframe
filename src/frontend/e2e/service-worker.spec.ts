@@ -50,7 +50,7 @@ import { pinPhoneOffline } from "./offlinePhone";
 const here = dirname(fileURLToPath(import.meta.url));
 const swSource = () => readFileSync(resolve(here, "../public/sw.js"), "utf8");
 
-const SHELL_HTML = "<!doctype html><html><head><title>Crusaders Mainframe</title></head><body><div id=\"root\">shell</div></body></html>";
+const SHELL_HTML = "<!doctype html><html><head><title>Crusaders Squash Control System</title></head><body><div id=\"root\">shell</div></body></html>";
 
 /**
  * The origin under test.
@@ -88,7 +88,7 @@ test.beforeAll(async () => {
 
     if (url.pathname === "/manifest.webmanifest") {
       res.writeHead(200, { "content-type": "application/manifest+json" });
-      res.end(JSON.stringify({ name: "Crusaders Mainframe", start_url: "/" }));
+      res.end(JSON.stringify({ name: "Crusaders Squash Control System", start_url: "/" }));
       return;
     }
 
@@ -192,7 +192,7 @@ test("what §12 still promises: the app opens with no signal", async ({ page, co
 
   // Warm the shell the way a member's first visit does.
   await page.goto(`${origin}/schedule`);
-  await expect(page).toHaveTitle("Crusaders Mainframe");
+  await expect(page).toHaveTitle("Crusaders Squash Control System");
 
   await context.setOffline(true);
   // The test ends offline: this page is never online again, so its next document may be pinned.
@@ -202,7 +202,7 @@ test("what §12 still promises: the app opens with no signal", async ({ page, co
     expect(await page.evaluate(() => navigator.onLine), "the next document must see a phone with no signal").toBe(false);
     // A route the member has never opened still gets the interface rather than the browser's
     // offline page: the worker falls back to the one cached shell for every navigation.
-    await expect(page).toHaveTitle("Crusaders Mainframe");
+    await expect(page).toHaveTitle("Crusaders Squash Control System");
     await expect(page.locator("#root")).toHaveText("shell");
   } finally {
     await context.setOffline(false);

@@ -34,7 +34,7 @@ const CROSS_CUTTING: Record<string, string> = {
    * offering a retry that cannot succeed.
    */
   tenant_not_found:
-    "This club isn't set up on Mainframe yet, so nothing here can work. That's a setup problem on the club's side, not something you can fix — please let the club committee know.",
+    "This club isn't set up on the Crusaders Squash Control System yet, so nothing here can work. That's a setup problem on the club's side, not something you can fix — please let the club committee know.",
   tenant_unresolved:
     "We couldn't tell which club this request was for. If you reached this page from a link or a bookmark, try going to the club's own web address instead.",
   tenant_mismatch:

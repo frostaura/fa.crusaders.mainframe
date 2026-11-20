@@ -20,7 +20,7 @@ public class HealthEndpointTests : IClassFixture<TestWebAppFactory>
         var payload = await response.Content.ReadFromJsonAsync<HealthPayload>();
         Assert.NotNull(payload);
         Assert.Equal("ok", payload!.status);
-        Assert.Equal("crusaders.mainframe", payload.service);
+        Assert.Equal("technologies.crusaders.squash-control-system", payload.service);
     }
 
     private sealed record HealthPayload(string status, string service, DateTimeOffset time);

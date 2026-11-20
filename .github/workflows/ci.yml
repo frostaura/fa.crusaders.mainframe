@@ -1054,7 +1054,7 @@ jobs:
           file: ./src/backend/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:sha-${{ github.sha }}-amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technologies.crusaders.squash-control-system-backend:sha-${{ github.sha }}-amd64
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=sha-${{ github.sha }}
@@ -1088,7 +1088,7 @@ jobs:
           file: ./src/backend/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:sha-${{ github.sha }}-arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technologies.crusaders.squash-control-system-backend:sha-${{ github.sha }}-arm64
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=sha-${{ github.sha }}
@@ -1122,7 +1122,7 @@ jobs:
           file: ./src/frontend/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:sha-${{ github.sha }}-amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technologies.crusaders.squash-control-system-frontend:sha-${{ github.sha }}-amd64
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=sha-${{ github.sha }}
@@ -1156,7 +1156,7 @@ jobs:
           file: ./src/frontend/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:sha-${{ github.sha }}-arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technologies.crusaders.squash-control-system-frontend:sha-${{ github.sha }}-arm64
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=sha-${{ github.sha }}
@@ -1190,7 +1190,7 @@ jobs:
           file: ./nginx/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:sha-${{ github.sha }}-amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technologies.crusaders.squash-control-system-gateway:sha-${{ github.sha }}-amd64
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=sha-${{ github.sha }}
@@ -1224,7 +1224,7 @@ jobs:
           file: ./nginx/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:sha-${{ github.sha }}-arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technologies.crusaders.squash-control-system-gateway:sha-${{ github.sha }}-arm64
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=sha-${{ github.sha }}
@@ -1255,7 +1255,7 @@ jobs:
         run: |
           set -euo pipefail
           for image in backend frontend gateway; do
-            repo="$REGISTRY_USER/crusaders-mainframe-$image"
+            repo="$REGISTRY_USER/technologies.crusaders.squash-control-system-$image"
             docker buildx imagetools create -t "$repo:sha-$GITHUB_SHA" \
               "$repo:sha-$GITHUB_SHA-amd64" "$repo:sha-$GITHUB_SHA-arm64"
           done
@@ -1312,7 +1312,7 @@ jobs:
           }
           promote=yes
           for image in backend frontend gateway; do
-            repo="$REGISTRY_USER/crusaders-mainframe-$image"
+            repo="$REGISTRY_USER/technologies.crusaders.squash-control-system-$image"
             current="$(revision_of "$repo:latest")"
             if [ -z "$current" ]; then
               echo "$image: :latest carries no revision label; it predates release tagging"
@@ -1330,7 +1330,7 @@ jobs:
             exit 0
           fi
           for image in backend frontend gateway; do
-            repo="$REGISTRY_USER/crusaders-mainframe-$image"
+            repo="$REGISTRY_USER/technologies.crusaders.squash-control-system-$image"
             docker buildx imagetools create -t "$repo:latest" "$repo:sha-$GITHUB_SHA"
           done
           echo ":latest is sha-$GITHUB_SHA for backend, frontend and gateway." >> "$GITHUB_STEP_SUMMARY"

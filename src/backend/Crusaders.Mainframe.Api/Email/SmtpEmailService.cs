@@ -21,8 +21,8 @@ public sealed class SmtpEmailService : IEmailTransport
         var port = int.TryParse(_config["SMTP_PORT"], out var p) ? p : _config.GetValue("Smtp:Port", 587);
         var user = NonEmpty(_config["SMTP_USER"]) ?? NonEmpty(_config["Smtp:User"]);
         var pass = NonEmpty(_config["SMTP_PASSWORD"]) ?? NonEmpty(_config["Smtp:Password"]);
-        var from = NonEmpty(_config["SMTP_FROM"]) ?? NonEmpty(_config["Smtp:From"]) ?? "noreply@crusadersmainframe.local";
-        var fromName = NonEmpty(_config["SMTP_FROM_NAME"]) ?? NonEmpty(_config["Smtp:FromName"]) ?? "Crusaders Mainframe";
+        var from = NonEmpty(_config["SMTP_FROM"]) ?? NonEmpty(_config["Smtp:From"]) ?? "noreply@squash-control-system.local";
+        var fromName = NonEmpty(_config["SMTP_FROM_NAME"]) ?? NonEmpty(_config["Smtp:FromName"]) ?? "Crusaders Squash Control System";
 
         static string? NonEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 

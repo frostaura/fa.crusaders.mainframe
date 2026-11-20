@@ -6,7 +6,7 @@ import {
 } from "./src/lib/tokens";
 
 /**
- * Crusaders Mainframe — the Tailwind theme.
+ * Crusaders Squash Control System — the Tailwind theme.
  *
  * <p>
  * This file holds no values. Every colour, size, radius, shadow, duration and layer comes from

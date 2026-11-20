@@ -373,8 +373,9 @@ public class EmailDesignTests
     /// isolation is structural everywhere else in this system; it was not true of email, where
     /// four subject lines ended "— Crusaders Mainframe", every footer said a member had
     /// registered for it, and <c>BookingService</c> fell back to that literal when it could not
-    /// resolve a tenant. "Crusaders Mainframe" is the software's name. On the second club's
-    /// mail it is a different club's.
+    /// resolve a tenant. "Crusaders Mainframe" was the software's name then, and the
+    /// Crusaders Squash Control System is its name now; neither is a club's. On the second
+    /// club's mail either is a different club's.
     /// </summary>
     [Fact]
     public void No_message_hardcodes_the_first_clubs_name_or_the_products_own()
@@ -382,7 +383,7 @@ public class EmailDesignTests
         foreach (var (name, message) in Catalogue())
         {
             var whole = message.Subject + "\n" + message.HtmlBody + "\n" + message.PlainBody;
-            foreach (var literal in new[] { "Crusaders", "Mainframe" })
+            foreach (var literal in new[] { "Crusaders", "Mainframe", "Squash Control System" })
             {
                 Assert.False(whole.Contains(literal, StringComparison.OrdinalIgnoreCase),
                     $"{name} hardcodes '{literal}' while rendering for {EmailCatalogue.Riverside.Name}.");

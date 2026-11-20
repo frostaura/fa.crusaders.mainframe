@@ -249,7 +249,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
         var csv = await response.Content.ReadAsStringAsync();
 
         Assert.Contains(
-            $"crusaders-mainframe_wallet_{First:yyyy-MM-dd}-{Last:yyyy-MM-dd}.csv",
+            $"crusaders-squash-control-system_wallet_{First:yyyy-MM-dd}-{Last:yyyy-MM-dd}.csv",
             response.Content.Headers.ContentDisposition!.ToString());
 
         // The file says 1-6 March; these are the rows that make that true or false.

@@ -56,7 +56,7 @@ describe("describeFailure", () => {
 
     it("falls back to the shared sentence for a code the screen does not know", () => {
       expect(describeFailure(api(404, { error: "tenant_not_found" }), { codes: { other: "x" } }))
-        .toMatch(/isn't set up on Mainframe/i);
+        .toMatch(/isn't set up on the Crusaders Squash Control System/i);
     });
 
     /**

@@ -40,7 +40,7 @@ export const BASE_URL_WORDS: Readonly<Record<Exclude<BaseUrlReason, "ok">, strin
   too_long: `The address is longer than the ${BASE_URL_MAX} characters a board can hold.`,
   https: "Boards can only call plain http:// on the club network — they have no room for https.",
   grammar: "Write it as http:// then the server's address and an optional :port — no path, no slash at the end.",
-  host: "The server's address has to be an IPv4 address (192.168.1.20) or a lowercase name (mainframe.lan).",
+  host: "The server's address has to be an IPv4 address (192.168.1.20) or a lowercase name (squash.lan).",
   port: "The port has to be a number from 1 to 65535, with no leading zero.",
 };
 

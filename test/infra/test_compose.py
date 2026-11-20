@@ -30,19 +30,19 @@ class ReleaseTagTests(unittest.TestCase):
             with self.subTest(tag=tag):
                 svc = services(compose_config(PROD, CRUSADERS_IMAGE_TAG=tag))
                 for name in OUR_IMAGES:
-                    self.assertEqual(svc[name]["image"], f"frostaura/crusaders-mainframe-{name}:{tag}")
+                    self.assertEqual(svc[name]["image"], f"frostaura/technologies.crusaders.squash-control-system-{name}:{tag}")
 
     def test_unset_it_falls_back_to_latest(self):
         svc = services(compose_config(PROD))
         for name in OUR_IMAGES:
-            self.assertEqual(svc[name]["image"], f"frostaura/crusaders-mainframe-{name}:latest")
+            self.assertEqual(svc[name]["image"], f"frostaura/technologies.crusaders.squash-control-system-{name}:latest")
 
 
 class PinnedImageTests(unittest.TestCase):
     """IO-17: nothing third-party floats. A redeploy changes only what this repository changed."""
 
     def assert_pinned(self, image: str, where: str):
-        if image.startswith("frostaura/crusaders-mainframe-"):
+        if image.startswith("frostaura/technologies.crusaders.squash-control-system-"):
             return  # ours: pinned by CRUSADERS_IMAGE_TAG (above)
         name, _, tag = image.rpartition(":")
         self.assertTrue(name and tag, f"{where}: {image} has no tag")

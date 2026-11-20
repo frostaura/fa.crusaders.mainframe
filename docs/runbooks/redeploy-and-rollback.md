@@ -32,9 +32,15 @@ Portainer. Read the first section every time — it is the part that has gone wr
    - no `CHANGE-ME` is left — above all `Jwt__Secret` and `MemberCodes__MasterKey`: the API refuses
      to start on either placeholder, and a member-code master key **changed** after members enrol
      changes every member's code;
-   - the gateway service names `frostaura/crusaders-mainframe-gateway` and bind-mounts no
-     `nginx.conf` (a stack that does keeps its old gateway config through every redeploy);
-   - an older stack file still deploys: the backend image hands its own volumes to its
+   - the backend, frontend and gateway services name
+     `frostaura/technologies.crusaders.squash-control-system-{backend,frontend,gateway}`. Releases up
+     to the 2026-11-20 rename were published as `frostaura/crusaders-mainframe-{backend,frontend,gateway}`
+     and nothing newer ever will be: a stack that still names those keeps redeploying the last
+     pre-rename release while reporting success. Change all three image names in the same edit that
+     pins the tag — and a rollback to a pre-rename `sha-<commit>` uses the old names;
+   - the gateway service bind-mounts no `nginx.conf` (a stack that does keeps its old gateway config
+     through every redeploy);
+   - apart from those image names, an older stack file still deploys: the backend image hands its own volumes to its
      unprivileged user, so no new service or value is required. The current
      `docker-compose.prod.yml` adds the `backup` service and `${CRUSADERS_IMAGE_TAG:-latest}`;
      carry those across when convenient, never as a precondition of a redeploy.
@@ -59,7 +65,7 @@ manifests succeeded, for all three images together, and only forward (an older r
 late leaves it alone). Deploy by the sha tag, never by `:latest`:
 
 ```bash
-docker buildx imagetools inspect frostaura/crusaders-mainframe-backend:sha-<commit>   # exists?
+docker buildx imagetools inspect frostaura/technologies.crusaders.squash-control-system-backend:sha-<commit>   # exists?
 ```
 
 ## Redeploy
@@ -94,7 +100,7 @@ revert to an older commit that must become `:latest`). With Docker Hub credentia
 
 ```bash
 for i in backend frontend gateway; do
-  docker buildx imagetools create -t frostaura/crusaders-mainframe-$i:latest frostaura/crusaders-mainframe-$i:sha-<commit>
+  docker buildx imagetools create -t frostaura/technologies.crusaders.squash-control-system-$i:latest frostaura/technologies.crusaders.squash-control-system-$i:sha-<commit>
 done
 ```
 

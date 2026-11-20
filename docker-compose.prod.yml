@@ -74,7 +74,7 @@ services:
     logging: *default-logging
 
   backend:
-    image: frostaura/crusaders-mainframe-backend:${CRUSADERS_IMAGE_TAG:-latest}
+    image: frostaura/technologies.crusaders.squash-control-system-backend:${CRUSADERS_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -194,7 +194,7 @@ services:
     logging: *default-logging
 
   frontend:
-    image: frostaura/crusaders-mainframe-frontend:${CRUSADERS_IMAGE_TAG:-latest}
+    image: frostaura/technologies.crusaders.squash-control-system-frontend:${CRUSADERS_IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       - backend
@@ -204,7 +204,7 @@ services:
     # A built image, not stock nginx:alpine with the config bind-mounted: the release chain moves
     # images and nothing else, so a stack that does not NAME this image keeps its old gateway
     # config through every redeploy. CI no longer checks for that — it is on whoever redeploys.
-    image: frostaura/crusaders-mainframe-gateway:${CRUSADERS_IMAGE_TAG:-latest}
+    image: frostaura/technologies.crusaders.squash-control-system-gateway:${CRUSADERS_IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       # STILL PUBLISHED, even though cloudflared now runs inside this stack and reaches the

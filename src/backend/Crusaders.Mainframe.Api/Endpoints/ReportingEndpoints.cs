@@ -39,7 +39,7 @@ public static class ReportingEndpoints
             // The club's own first and last day, not the UTC window's edges: the window
             // ends at the START of the day after the last one, so formatting `t` would name
             // a day the file does not contain.
-            var name = $"crusaders-mainframe_wallet_{firstDay:yyyy-MM-dd}-{lastDay:yyyy-MM-dd}.csv";
+            var name = $"crusaders-squash-control-system_wallet_{firstDay:yyyy-MM-dd}-{lastDay:yyyy-MM-dd}.csv";
             ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
             return Results.Text(await MemberWalletCsv.BuildAsync(db, userId, entries, ct), "text/csv", Encoding.UTF8);
         });

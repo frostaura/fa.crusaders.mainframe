@@ -1,4 +1,4 @@
-# Development Plan — Crusaders Mainframe
+# Development Plan — Crusaders Squash Control System
 
 The phased build plan from "scaffold on disk" (where we are) to "Crusaders Squash Club uses this in production" (where we're going). Specs in [`./specs/`](./specs/) are the contract; this document is the sequence and acceptance criteria.
 
@@ -27,7 +27,7 @@ Per principle 5, all external dependencies are either tenant-controlled paid ser
 
 | Concern | Choice | Why |
 | --- | --- | --- |
-| Email delivery | Reuse FrostAura GoDaddy SMTP (`smtpout.secureserver.net`, creds in `.env`, mirrored from `fa.startup/.env`) for dev/staging; per-tenant SMTP for production. | Already paid for; keeps cost zero for dev. Per-tenant production gives clubs control over deliverability and from-address branding. |
+| Email delivery | Reuse FrostAura GoDaddy SMTP (`smtpout.secureserver.net`, creds in `.env`) for dev/staging; per-tenant SMTP for production. | Already paid for; keeps cost zero for dev. Per-tenant production gives clubs control over deliverability and from-address branding. |
 | Payment processing | **PayFast** hosted checkout (per-tenant merchant entity). | South African processor, ZAR-native, hosted checkout keeps PCI scope minimal. Superseded PeachPayments 2026-08-22 by founder decision. |
 | Phone validation | `libphonenumber` (Google's OSS port — `PhoneNumbers` NuGet package). | Free, accurate, offline. |
 | Avatar fallback (when player photo missing or fails to load) | Gravatar public URL pattern (`https://www.gravatar.com/avatar/<md5(email)>?d=identicon`). No API key required. | Free, public, predictable. Players can opt out by setting `?d=blank`. |
@@ -120,7 +120,7 @@ Repo skeleton. The runnable shell.
 - Project directory + `CLAUDE.md` (Technologies project schema)
 - All specs in `docs/specs/*`
 - Root files: `.gitignore`, `.dockerignore`, `.editorconfig`, `LICENSE`, `README.md`, `Makefile`, `.env`/`.env.example`, `docker-compose.yml`, `nginx/nginx.conf`
-- `.github/workflows/ci.yml` mirroring fa.startup's pipeline (lint/build/test/security/multi-arch image build; the Portainer redeploy job was removed 2026-09-19 — CI publishes and stops)
+- `.github/workflows/ci.yml` modelled on an earlier Technologies pipeline (lint/build/test/security/multi-arch image build; the Portainer redeploy job was removed 2026-09-19 — CI publishes and stops)
 - `src/backend/` — solution, `Crusaders.Mainframe.Api` (minimal API + EF Core/Npgsql + JWT + tenant resolution middleware + auto-migrate), `Crusaders.Mainframe.Tests` (xUnit + WebApplicationFactory smoke test), Dockerfile
 - `src/frontend/` — React 19 + Vite + Tailwind (soft-palette tokens) + Figtree + vitest, App shell with API health probe, Dockerfile + nginx SPA config
 - Gaia agents/skills bootstrapped under `.claude/` and `.github/`
@@ -134,7 +134,7 @@ Repo skeleton. The runnable shell.
 | Seed script: insert Crusaders tenant + default settings | S | `make seed` is callable; running it creates the `crusaders` tenant + default `tenant_settings` row |
 | First Playwright e2e test asserting `/healthz` returns ok via the gateway | S | `make test-e2e` passes locally and in CI |
 | First cross-tenant injection test (placeholder asserting `MainframeDbContext` filters by `_tenant.TenantId`) | S | Test exists and passes; sets the pattern for every subsequent tenant-scoped table |
-| GitHub repo created, CI green on first push to `main`, Docker Hub repos created (`frostaura/crusaders-mainframe-{backend,frontend}`), Portainer stack created | S | First green run, first published images, manual portainer-deploy verified |
+| GitHub repo created, CI green on first push to `main`, Docker Hub repos created (`frostaura/technologies.crusaders.squash-control-system-{backend,frontend}`), Portainer stack created | S | First green run, first published images, manual portainer-deploy verified |
 
 **Critical-path:** yes. Phase 1 starts with auth, which depends on the DB being migratable and seedable.
 
@@ -400,7 +400,7 @@ Decisions still pending. Unblock these as they become load-bearing.
 | 9 | Number of mandatory backup biometric fingers | 1 primary + 1 strongly-recommended backup; not enforced | `biometric-abstraction.md` § Admin-led enrollment |
 | 10 | Crusaders existing data migration plan | TBD with the committee | Phase 7 |
 | 11 | Custom domain support per tenant | Schema supports it; UI lands in v1.1 | `multi-tenancy.md` |
-| 12 | Docker Hub namespace confirmation | Assumed `frostaura/crusaders-mainframe-{backend,frontend}` | `.github/workflows/ci.yml`, `deployment.md` |
+| 12 | Docker Hub namespace confirmation | Assumed `frostaura/technologies.crusaders.squash-control-system-{backend,frontend}` | `.github/workflows/ci.yml`, `deployment.md` |
 
 ---
 

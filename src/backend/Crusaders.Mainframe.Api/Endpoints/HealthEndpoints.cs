@@ -35,7 +35,7 @@ public static class HealthEndpoints
     public static readonly TimeSpan DatabaseTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>The service name both replies carry.</summary>
-    public const string Service = "crusaders.mainframe";
+    public const string Service = "technologies.crusaders.squash-control-system";
 
     public static IEndpointRouteBuilder MapHealthEndpoints(this IEndpointRouteBuilder app)
     {

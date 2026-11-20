@@ -1,4 +1,4 @@
-# Feature Specification — Crusaders Mainframe
+# Feature Specification — Crusaders Squash Control System
 
 This is the canonical functional spec. Engineering implements this; deviations require a spec update first.
 
@@ -121,7 +121,7 @@ What a member did on court, kept for them alone. **Match results** (squash PAR-1
 - The court lights are switched by the **court box** (ESP8266 bridge + Mega relay bank with an independent auto-off timer), which decides locally from an online activation or its cached heartbeat roster and pulls everything from the API; it is never a webhook destination. `lights-controller.md` (webhook-driven Arduino) is superseded — see `device-serial-protocol.md` and *the court box and its key* below.
 - When a player has a booking that becomes "live" (current time falls within the booked slice):
   1. The on-court UI awaits a biometric match.
-  2. On a successful match against the booked player, the mainframe fires a `booking.lights_on` webhook to the Arduino, the relay flips, and a `LightsOn` event is recorded.
+  2. On a successful match against the booked player, the server fires a `booking.lights_on` webhook to the Arduino, the relay flips, and a `LightsOn` event is recorded.
   3. If no successful match within `grace_window_minutes` (configurable, default 5) past the slice start:
      - The booking is marked `no_show`.
      - `no_show_penalty` ledger entry written: `penalty_pct * slice_cost` (default 30%).

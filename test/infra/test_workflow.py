@@ -46,7 +46,7 @@ class PublishTests(unittest.TestCase):
             with self.subTest(job=name):
                 push = next(s for s in self.jobs[name]["steps"] if s.get("uses", "").startswith("docker/build-push-action"))
                 tags = push["with"]["tags"].splitlines()
-                self.assertEqual(tags, [f"${{{{ secrets.DOCKERHUB_USERNAME }}}}/crusaders-mainframe-{image}:sha-${{{{ github.sha }}}}-{arch}"])
+                self.assertEqual(tags, [f"${{{{ secrets.DOCKERHUB_USERNAME }}}}/technologies.crusaders.squash-control-system-{image}:sha-${{{{ github.sha }}}}-{arch}"])
 
     def test_every_image_is_labelled_with_its_commit(self):
         for name in BUILD_JOBS:
@@ -130,7 +130,7 @@ class PromoteStepBehaviourTests(unittest.TestCase):
             registry = json.load(open({str(self.registry)!r}))
             if args[:3] == ["buildx", "imagetools", "inspect"]:
                 ref = args[3]
-                if ref == "FAIL/crusaders-mainframe-backend:latest":
+                if ref == "FAIL/technologies.crusaders.squash-control-system-backend:latest":
                     print("ERROR: unauthorized: authentication required", file=sys.stderr); sys.exit(1)
                 if ref not in registry:
                     print(f"ERROR: docker.io/{{ref}}: not found", file=sys.stderr); sys.exit(1)
@@ -145,7 +145,7 @@ class PromoteStepBehaviourTests(unittest.TestCase):
         stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
 
     def promote(self, sha: str, latest: dict, user: str = "frostaura") -> subprocess.CompletedProcess:
-        self.registry.write_text(json.dumps({f"{user}/crusaders-mainframe-{i}:latest": rev
+        self.registry.write_text(json.dumps({f"{user}/technologies.crusaders.squash-control-system-{i}:latest": rev
                                              for i, rev in latest.items()}))
         env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "GITHUB_SHA": sha,
                "REGISTRY_USER": user, "RUNNER_TEMP": str(self.tmp),
@@ -157,7 +157,7 @@ class PromoteStepBehaviourTests(unittest.TestCase):
 
     def assert_promoted(self, sha):
         self.assertEqual(self.created_latest(),
-                         [f"-t frostaura/crusaders-mainframe-{i}:latest frostaura/crusaders-mainframe-{i}:sha-{sha}" for i in IMAGES])
+                         [f"-t frostaura/technologies.crusaders.squash-control-system-{i}:latest frostaura/technologies.crusaders.squash-control-system-{i}:sha-{sha}" for i in IMAGES])
 
     def test_latest_from_before_release_tagging_is_replaced(self):
         done = self.promote(self.commits[1], {i: None for i in IMAGES})

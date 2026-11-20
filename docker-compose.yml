@@ -88,7 +88,7 @@ services:
       Cors__AllowedOrigins__2: ${CORS_ALLOWED_ORIGIN_LAN:-http://localhost:8088}
       WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-http://localhost:8088,http://localhost:4173}
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
-      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-Crusaders Mainframe}
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-Crusaders Squash Control System}
       # First-run bootstrap. Defaults to FALSE here: in Development the Seeder below already
       # creates the tenant, and turning both on would have the bootstrap win the race for the
       # courts and price them at its own rate rather than the seeder's. Set BOOTSTRAP_ENABLED=true
@@ -116,8 +116,8 @@ services:
       Smtp__Port: ${SMTP_PORT:-1025}
       Smtp__User: ${SMTP_USER:-}
       Smtp__Password: ${SMTP_PASSWORD:-}
-      Smtp__From: ${SMTP_FROM:-noreply@crusadersmainframe.local}
-      Smtp__FromName: ${SMTP_FROM_NAME:-Crusaders Mainframe}
+      Smtp__From: ${SMTP_FROM:-noreply@squash-control-system.local}
+      Smtp__FromName: ${SMTP_FROM_NAME:-Crusaders Squash Control System}
       Media__StoragePath: /app/media
       Biometric__TemplateStorePath: /app/biometric/templates
       # A comma-delimited TrustedProxies (not the indexed form) because indexed configuration
@@ -176,7 +176,7 @@ services:
     build:
       context: ./nginx
       dockerfile: Dockerfile
-    image: ${GATEWAY_IMAGE:-crusaders-mainframe-gateway:local}
+    image: ${GATEWAY_IMAGE:-technologies.crusaders.squash-control-system-gateway:local}
     ports:
       - "${GATEWAY_PORT:-8088}:80"
     environment:

@@ -1,5 +1,5 @@
 ---
-# Crusaders Mainframe — static analysis for every firmware project under src/iot.
+# Crusaders Squash Control System — static analysis for every firmware project under src/iot.
 #
 # WarningsAsErrors is deliberately narrow: the checks listed there are ones that
 # cause FIELD failures on a relay controller, not style preferences. In particular

@@ -1,4 +1,4 @@
-# Design System — Crusaders Mainframe
+# Design System — Crusaders Squash Control System
 
 The product should feel like **a premium club app you are proud to open**: precise, calm, quick,
 sporty without being loud. It serves a member on a phone in the club foyer and an admin running the

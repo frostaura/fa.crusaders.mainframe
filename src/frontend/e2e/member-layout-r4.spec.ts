@@ -148,7 +148,7 @@ test.describe("Home, signed out (SPEC 3.18)", () => {
     await expect(page.getByRole("heading", { name: "Crusaders Squash", level: 1 })).toBeVisible();
     await healthy(page);
     const league = (await box(page, 'section[aria-labelledby="league"]'))!;
-    const app = (await box(page, 'section[aria-labelledby="mainframe"]'))!;
+    const app = (await box(page, 'section[aria-labelledby="squash-control-system"]'))!;
     expect(app.x).toBeGreaterThanOrEqual(league.right);
     expect(Math.abs(app.y - league.y)).toBeLessThan(4);
     expect(await widthUsed(page)).toBeGreaterThanOrEqual(0.9);

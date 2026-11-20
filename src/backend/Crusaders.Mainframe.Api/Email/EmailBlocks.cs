@@ -8,9 +8,9 @@ namespace Crusaders.Mainframe.Api.Email;
 /// record existed the footer of every message read "You received this because you registered
 /// for Crusaders Mainframe", four subject lines ended in "— Crusaders Mainframe", and
 /// <c>BookingService</c> fell back to the literal <c>"Crusaders Mainframe"</c> when it could
-/// not resolve a tenant. "Crusaders Mainframe" is the repository's name for the software. It
-/// is not the name of any club, it is not a name the first club's own members would recognise,
-/// and on the second club's mail it is a different club's name — which is the multi-tenancy
+/// not resolve a tenant. "Crusaders Mainframe" was the software's name then (it is now the
+/// Crusaders Squash Control System). It is not the name of any club, it is not a name the first
+/// club's own members would recognise, and on the second club's mail it is a different club's name — which is the multi-tenancy
 /// invariant failing on the one surface that leaves the building.
 /// </para>
 ///

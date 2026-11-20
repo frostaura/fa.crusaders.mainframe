@@ -50,7 +50,7 @@ public class TenantHostResolutionTests
     [Theory]
     [InlineData("crusaders.example.com", "crusaders")]
     [InlineData("crusaders.example.com:8088", "crusaders")]
-    [InlineData("another-club.mainframe.co.za", "another-club")]
+    [InlineData("another-club.squash-control-system.co.za", "another-club")]
     // A two-label host resolves its first label too, which is what makes a
     // per-tenant custom domain work: crusaders.co.za -> "crusaders".
     [InlineData("crusaders.co.za", "crusaders")]

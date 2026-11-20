@@ -21,8 +21,8 @@ describe("App", () => {
 
   /**
    * The heading is the CLUB's name, not the software's. An anonymous visitor at / is a squash
-   * player looking for their club; "Crusaders Mainframe" is what FrostAura calls the product
-   * they happen to be using, and it was the largest text on the page.
+   * player looking for their club; "Crusaders Squash Control System" is what FrostAura calls the
+   * product they happen to be using, and it was the largest text on the page.
    */
   it("renders the club name as the heading for an anonymous visitor", async () => {
     render(<App />);

@@ -38,8 +38,8 @@ export function CourtMotif({ className }: { className?: string }) {
  */
 export function AppExplainer({ children }: { children?: ReactNode }) {
   return (
-    <section aria-labelledby="mainframe" className="rounded-lg border border-border bg-bg-muted p-5 sm:p-6">
-      <h2 id="mainframe" className="text-lg font-semibold">Booking, minutes and court lights</h2>
+    <section aria-labelledby="squash-control-system" className="rounded-lg border border-border bg-bg-muted p-5 sm:p-6">
+      <h2 id="squash-control-system" className="text-lg font-semibold">Booking, minutes and court lights</h2>
       {/*
         What the member actually does, which is not what this paragraph used to say.
 

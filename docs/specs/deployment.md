@@ -54,7 +54,7 @@ Then, **only on a push to `main`**: `build-backend-{amd64,arm64}`, `build-fronte
 
 **Three images, not two.** The gateway used to be stock `nginx:alpine` with `nginx/nginx.conf` bind-mounted from a checkout on the host. The deploy chain moves images and nothing else, so that config was a file the release could not deliver: a club merging a gateway fix got a new backend behind the *old* config, with every LAN member back in one rate-limit bucket, and the dashboard reporting a successful deploy. `nginx/Dockerfile` bakes the config in, so it ships by the same path as the code it belongs to.
 
-**Check the stack by hand before every redeploy.** A redeploy re-pulls the images the stack *names*, so a stack that does not name `<user>/crusaders-mainframe-gateway`, or that still bind-mounts `./nginx/nginx.conf`, keeps its old gateway config while reporting a successful deploy. CI used to refuse a stack in either state; with the deploy job removed, nothing checks it — and nothing else can, because the tests exercise the API given forwarded headers and cannot tell a stale deployed gateway from a fresh one. The whole pre-redeploy routine — a backup, `make migrations-pending` against the club's database, the stored stack file read for placeholders — is [`../runbooks/redeploy-and-rollback.md`](../runbooks/redeploy-and-rollback.md).
+**Check the stack by hand before every redeploy.** A redeploy re-pulls the images the stack *names*, so a stack that does not name `<user>/technologies.crusaders.squash-control-system-gateway`, or that still bind-mounts `./nginx/nginx.conf`, keeps its old gateway config while reporting a successful deploy. CI used to refuse a stack in either state; with the deploy job removed, nothing checks it — and nothing else can, because the tests exercise the API given forwarded headers and cannot tell a stale deployed gateway from a fresh one. The whole pre-redeploy routine — a backup, `make migrations-pending` against the club's database, the stored stack file read for placeholders — is [`../runbooks/redeploy-and-rollback.md`](../runbooks/redeploy-and-rollback.md).
 
 ## Required GitHub secrets
 | Secret | Purpose |
@@ -113,9 +113,11 @@ It is a **comma-delimited string**, not a JSON array, and that is load-bearing: 
 `docker compose exec backend dotnet Crusaders.Mainframe.Api.dll tenant create --slug <slug> --name "<club>" --admin-email <address>` — see `multi-tenancy.md`. The club is then reached at the deployment's host with its slug as the first label (`https://<slug>.frostaura.net` for a deployment at `https://crusaders.frostaura.net`), so that host needs a DNS record and a public hostname on the tunnel; `tenant set-url` records a different address when the club uses one. `App__PublicBaseUrl` stays the deployment's (the default club's) address.
 
 ## Image names and tags
-- `frostaura/crusaders-mainframe-backend`
-- `frostaura/crusaders-mainframe-frontend`
-- `frostaura/crusaders-mainframe-gateway`
+- `frostaura/technologies.crusaders.squash-control-system-backend`
+- `frostaura/technologies.crusaders.squash-control-system-frontend`
+- `frostaura/technologies.crusaders.squash-control-system-gateway`
+
+Releases up to the 2026-11-20 product rename were published as `frostaura/crusaders-mainframe-{backend,frontend,gateway}`; CI no longer pushes there, so a stack naming those images never receives a newer release, and a rollback to a pre-rename commit names the old images.
 
 Each carries `sha-<commit>` (immutable, multi-arch, the tag to deploy), `sha-<commit>-amd64` / `-arm64` (the per-arch halves), and `:latest` (the newest release that passed, moved forward only). `docker-compose.prod.yml` selects all three with one variable, `CRUSADERS_IMAGE_TAG` (default `latest`). What a running container is: `docker inspect <container> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'`. Images published before 2026-11-13 carry no revision label and only the three `latest*` tags.
 

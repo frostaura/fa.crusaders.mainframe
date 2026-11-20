@@ -11,7 +11,7 @@ PayFast hosted checkout, per-tenant merchant credentials. The member never types
 number into anything this project serves, which is what keeps PCI scope to a redirect.
 
 ```
-member                  mainframe                    PayFast
+member                  server                       PayFast
   │                         │                           │
   │  POST /minutes/purchase │                           │
   ├────────────────────────►│                           │

@@ -62,9 +62,9 @@ public sealed record EmailMessage(
     /// <b>It is the largest piece of the club's identity and it was a deployment-wide
     /// constant.</b> <c>SMTP_FROM_NAME</c> is one value for the whole process, so on a
     /// deployment serving two clubs every message from both arrived from the same sender —
-    /// and that sender was "Crusaders Mainframe", which is the repository's name for the
-    /// software. A member scanning an inbox reads the sender and the subject and usually
-    /// nothing else, so this is the field that decides whether a club's mail is recognisable
+    /// and that sender was "Crusaders Mainframe", the software's name at the time (it is now
+    /// the Crusaders Squash Control System). A member scanning an inbox reads the sender and
+    /// the subject and usually nothing else, so this is the field that decides whether a club's mail is recognisable
     /// at a glance or looks like something they did not sign up for.
     /// </para>
     ///

@@ -1,4 +1,4 @@
-# Crusaders Mainframe
+# Crusaders Squash Control System
 
 Multi-tenant SaaS for racquet-sport club court-light scheduling on a minutes-based booking model (members buy minute packages; a booking costs its playing minutes) with on-court identification. First customer: **Crusaders Squash Club**.
 
@@ -15,6 +15,8 @@ A FrostAura Technologies project. Strategic context, charter, feature spec, desi
 
 ## Quick start (local dev)
 ```bash
+git clone https://github.com/frostaura/technologies.crusaders.squash-control-system.git
+cd technologies.crusaders.squash-control-system
 cp .env.example .env       # then edit secrets
 make install               # restore backend + npm install frontend
 make up                    # docker compose: backend + frontend + postgres + mailhog + gateway

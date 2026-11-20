@@ -153,12 +153,12 @@ order, after Mega 3.0.0 and bridge 3.0.0 are flashed and the box is heartbeating
    checklist's commissioning entries, and the relay facts in
    `memory/safety-relays.md`, so the next person does not re-derive them.
 
-[Superseded design] The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
+[Superseded design] The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The server drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
 
 ## Why this shape
-- **No new abstraction.** The mainframe already has a webhook delivery worker with signing, retries, and per-endpoint queues. The Arduino is registered as a webhook endpoint per tenant; lights events fire to it like any other consumer.
-- **Hardware decoupled.** The mainframe knows nothing about Arduino-vs-PLC-vs-Shelly. If a tenant later swaps to a different controller, they re-register the endpoint URL.
-- **LAN-local.** The Arduino sits on the same network as the on-prem mainframe machine. Calls are local (single-digit ms), so retries are rare in practice.
+- **No new abstraction.** The server already has a webhook delivery worker with signing, retries, and per-endpoint queues. The Arduino is registered as a webhook endpoint per tenant; lights events fire to it like any other consumer.
+- **Hardware decoupled.** The server knows nothing about Arduino-vs-PLC-vs-Shelly. If a tenant later swaps to a different controller, they re-register the endpoint URL.
+- **LAN-local.** The Arduino sits on the same network as the on-prem server. Calls are local (single-digit ms), so retries are rare in practice.
 
 ## Wiring it via templated webhooks (no per-court mapping needed)
 Each court has a stable numeric identifier within its tenant — `court_number` (1, 2, 3, 4 for the Crusaders default of 4 courts). The Arduino's HTTP routes use that number directly, so the tenant admin registers **two** templated webhook endpoints (see `webhooks.md` § URL templating) and the system handles every court without any per-court mapping table:
@@ -182,43 +182,43 @@ Minimal surface — the Arduino is dumb on purpose.
 
 The Arduino maps `court_number → relay channel` internally (a small array in firmware: `courts[court_number] = relay_channel`). For the standard Crusaders config it's a 1:1 identity mapping — court 1 → channel 1, etc. — but the indirection is deliberate so a re-cabling at the relay board doesn't require a database change.
 
-`duration_seconds` is the booking's remaining time. The Arduino sets a local timer and **auto-turns-off when the timer expires**, even if it never receives the explicit `off` call. This is the safety net for "the mainframe died mid-session" — lights still go off when the booking ends.
+`duration_seconds` is the booking's remaining time. The Arduino sets a local timer and **auto-turns-off when the timer expires**, even if it never receives the explicit `off` call. This is the safety net for "the server died mid-session" — lights still go off when the booking ends.
 
 If a new `on` call arrives for a channel that's already on, the Arduino **extends** the timer (back-to-back bookings flow through cleanly without flicker).
 
 ## Authentication
 LAN-only is not sufficient by itself — the Arduino is on the same network as anything else the club plugs in. Two layers:
-1. **Shared secret in body.** The mainframe includes a per-tenant `controller_secret` in every request body; the Arduino rejects requests whose secret doesn't match its compiled-in value.
-2. **HMAC signature** (optional, if compute budget allows). The mainframe's standard `X-Crusaders-Signature` header (HMAC-SHA256 of the body) is also sent. An Arduino with an ESP32 can validate this; an Uno R3 cannot — fall back to shared-secret-only on weaker boards.
+1. **Shared secret in body.** The server includes a per-tenant `controller_secret` in every request body; the Arduino rejects requests whose secret doesn't match its compiled-in value.
+2. **HMAC signature** (optional, if compute budget allows). The server's standard `X-Crusaders-Signature` header (HMAC-SHA256 of the body) is also sent. An Arduino with an ESP32 can validate this; an Uno R3 cannot — fall back to shared-secret-only on weaker boards.
 
 The shared secret is set when the Arduino is flashed; rotation requires a re-flash. Document this clearly so admins know rotation is not a UI operation.
 
 ## Fail-safe behavior — TBD, decision required
-Three possible behaviors when the Arduino loses network connectivity to the mainframe:
+Three possible behaviors when the Arduino loses network connectivity to the server:
 - **A. Maintain.** Lights stay in their current state until the local timer expires. Players in the middle of a session keep playing. Players whose booking *should* start during the outage get nothing — they call an admin.
 - **B. Auto-off after timeout.** Same as A, but if the Arduino sees no traffic for >N minutes it forces all channels off. Conservative; risks switching lights off mid-game during a transient network blip.
-- **C. Local override pad.** A physical button at the court can force lights on for one slice-length, manually, with the override logged and reconciled when the mainframe is back.
+- **C. Local override pad.** A physical button at the court can force lights on for one slice-length, manually, with the override logged and reconciled when the server is back.
 
-Recommendation is **A + C** — timer-based auto-off is the safety net for "the mainframe is gone," and the override pad lets an admin or a player rescue an in-progress session if the network drops. (Decision pending — see `CLAUDE.md` working notes.)
+Recommendation is **A + C** — timer-based auto-off is the safety net for "the server is gone," and the override pad lets an admin or a player rescue an in-progress session if the network drops. (Decision pending — see `CLAUDE.md` working notes.)
 
 ## Flow at booking time
 1. Player identifies at the court (biometric / PIN / QR — see `biometric-abstraction.md` § Identification triple-stack, per blueprint B.1).
-2. **If a different player presses "I'll pay"** at the touchpad and identifies (blueprint B.2), the mainframe records `paid_by_user_id` on the booking and debits *that* user's account instead.
-3. Mainframe **posts the `booking_charge` ledger entry** (charge happens at lights-on per blueprint A.9, not at booking creation), writes a `LightsOn` event, computes `duration_seconds = booking.ends_at - now`.
-4. Mainframe fires `booking.lights_on` webhook to the configured controller URL for the matched court (court_number flowing through the URL template).
+2. **If a different player presses "I'll pay"** at the touchpad and identifies (blueprint B.2), the server records `paid_by_user_id` on the booking and debits *that* user's account instead.
+3. The server **posts the `booking_charge` ledger entry** (charge happens at lights-on per blueprint A.9, not at booking creation), writes a `LightsOn` event, computes `duration_seconds = booking.ends_at - now`.
+4. The server fires `booking.lights_on` webhook to the configured controller URL for the matched court (court_number flowing through the URL template).
 5. Arduino receives, flips relay, starts local timer, returns 200.
-6. Mainframe records the response (status + latency) for observability.
+6. The server records the response (status + latency) for observability.
 7. On 200: nothing further. On non-200 / timeout: webhook system retries per the standard backoff. **If the webhook ultimately fails, the ledger entry is not rolled back** — the player paid for an attempt that didn't reach the relay; admin gets paged for manual intervention.
 
 ## End-of-booking cleanup
-- The Arduino's local timer is the primary off-switch (works without mainframe).
-- The mainframe ALSO fires a `booking.lights_off` webhook at booking end, as a belt-and-braces.
-- [Superseded, and never built — R16] ~~If the mainframe knows a booking has ended early (cancellation), it fires an immediate `off` call with the cancelled booking's id.~~ No cancellation fires an immediate off. A cancelled booking that was lit gets its `booking.lights_off` at its `EndsAt`, from the lights-cue sweep (recent ones only, R14 D14-2); a cancelled booking that was never lit gets none. A no-show reversal that re-lit the court and was then cancelled at the desk is swept the same way (R16 D16-4). The box's own timer is what actually turns the relays off. Current rules: `webhooks.md` (`booking.lights_off` and *Ordering the lights events*); `Webhooks/LightsCueWorker.cs`.
+- The Arduino's local timer is the primary off-switch (works without the server).
+- The server ALSO fires a `booking.lights_off` webhook at booking end, as a belt-and-braces.
+- [Superseded, and never built — R16] ~~If the server knows a booking has ended early (cancellation), it fires an immediate `off` call with the cancelled booking's id.~~ No cancellation fires an immediate off. A cancelled booking that was lit gets its `booking.lights_off` at its `EndsAt`, from the lights-cue sweep (recent ones only, R14 D14-2); a cancelled booking that was never lit gets none. A no-show reversal that re-lit the court and was then cancelled at the desk is swept the same way (R16 D16-4). The box's own timer is what actually turns the relays off. Current rules: `webhooks.md` (`booking.lights_off` and *Ordering the lights events*); `Webhooks/LightsCueWorker.cs`.
 
 ## Observability
-- Mainframe records every request to the Arduino: timestamp, channel, action, response status, latency. Visible in the admin "Peripheral health" view.
-- Mainframe polls each Arduino's `/health` endpoint every 60s; on 3 consecutive failures, fires `peripheral.unhealthy` event and pages the admin.
-- The Arduino itself emits no logs — it's a relay with HTTP. Diagnostics live mainframe-side.
+- The server records every request to the Arduino: timestamp, channel, action, response status, latency. Visible in the admin "Peripheral health" view.
+- The server polls each Arduino's `/health` endpoint every 60s; on 3 consecutive failures, fires `peripheral.unhealthy` event and pages the admin.
+- The Arduino itself emits no logs — it's a relay with HTTP. Diagnostics live server-side.
 
 ## Hardware notes
 - **Recommended starting board:** ESP32 — has WiFi out of the box, enough RAM for HMAC validation, ~R150 in South Africa.
