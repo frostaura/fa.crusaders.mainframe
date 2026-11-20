@@ -59,4 +59,4 @@ Booking grid and sheets: [`decisions-frontend-bookings.md`](decisions-frontend-b
   on dismissal, and a queued badge says "Earned <date>" (it can open over an unrelated pending result; the frontend has
   no local trigger — the server awards only on confirmation).
 - **A sheet may drop what it duplicates on a window short for its text** (R10 L10-6, `useShortSheet`): under 24 root
-  ems of window HEIGHT (measured in JS — a media query's rem ignores the page font size) the accept sheet drops Cancel.
+  ems of window HEIGHT (measured in JS — a media query's rem ignores the page font size) the accept sheet drops Cancel (the × stays; Done stays).

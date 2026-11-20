@@ -1,13 +1,14 @@
 ---
 name: crusaders-mainframe-decisions-players-acts
-description: "Seat acts on a booking: pay what you can when short, collect and accept-on-behalf at the desk, at_daily_limit and booking_full, idempotent twins, accept locking the booking row, lost accepts re-read."
+description: "Seat acts on a booking: pay what you can when short, collect and accept-on-behalf at the desk, at_daily_limit and booking_full, one consent rule, who changed a share and who removed or added a seat."
 type: decision
 last_verified: 2026-11-20
 ---
 
 # Live decisions — acting on a seat (players, partners, the desk)
 
-Money rules: [`decisions-players.md`](decisions-players.md); who/why: [`decisions-share-causes.md`](decisions-share-causes.md).
+Money rules: [`decisions-players.md`](decisions-players.md); who/why: [`decisions-share-causes.md`](decisions-share-causes.md);
+lost races, twins and the accept/cancel row lock: [`decisions-players-acts-races.md`](decisions-players-acts-races.md).
 
 ## Pay what you can (Dean: "the others should be able to decide how to split what's left")
 - **The partner's side is an accept with `payMinutes`** — valid when `max(1, paid) ≤ payMinutes < share`
@@ -43,24 +44,10 @@ Money rules: [`decisions-players.md`](decisions-players.md); who/why: [`decision
   → `409 booking_full {max_players: 4}`; fewer free seats than asked → `409 too_many_players {max_players: 3,
   free_seats}`; a NAMED seat someone holds with room elsewhere stays `seat_taken`. Checked after `already_in_booking`,
   before the invite-loop and cap rules.
-- **One consent rule** (R16): `PlayerNotices.NeedsConsent` everywhere (detail, invite view, `/me/invites/{pid}`, split).
-
-## Twins and races
-- **A dedupe-key collision is "already said", never a fault** (R18, `Services/Players/SeatRaces`): a 23505 on
-  `booking_participants` = a seat really taken → `seat_taken`; any other 23505 (notification dedupe keys) or a version
-  miss = a lost race — `PlayersService.SaveAsync(ct, Landing)` / `PlayersAdminService.SaveAndSettleAsync` re-read the
-  seat: in the act's target state → 200 `{participant_id, status}`; else `409 conflict_retry`. *Why:* parallel desk
-  accepts 500'd on `IX_admin_notifications_TenantId_DedupeKey`; twin declines read "That seat was taken".
-- **Seat acts are idempotent in their target state** — decline on Declined, withdraw on Withdrawn, remove on Removed,
-  accept-on-behalf on Accepted, settle-outside on settled → 200 and NO writes (`SettledOutsideAt` keeps its first
-  instant). Another state is still refused for what happened (decline after accept = `not_invited`). **An identical
-  re-split twin is 200** (R19, `SplitTwinAsync`: same mode, shares, weights, consent → same body, nothing written).
-- **Accept locks the booking row `FOR NO KEY UPDATE`** after the member and seat advisory locks (R18). A cancel landing
-  mid-accept waits, or the accept answers `409 booking_not_open {booking_id}` with no money moved. *Not `FOR SHARE`:*
-  the accept's save updates the booking (play recompute marker) and two shared holders deadlocked upgrading.
-- **A lost accept is answered for the seat as it now stands** (R19 `AfterLostAcceptAsync`): gone or claimed by another
-  → `invite_closed`; closed or cancelled → the accept's own refusal; still open → `409 share_changed {share_minutes}`
-  when the share differs UP or DOWN from `expectedShareMinutes`, else `409 conflict_retry`.
-- **Cancel refunds are read after the cancel, off the ledger** (R19 `SplitCancelView.AfterAsync`): paid = still paid in
-  + returns posted from `CancelledAt` on; refund = that − `TargetFor`. *Why:* a pre-cancel snapshot missed an accept
-  that landed while the cancel waited on the row lock. Member, desk and bulk cancel all call it.
+- **One consent rule** (R16 J16-1): `PlayerNotices.NeedsConsent` everywhere (detail, invite view, `/me/invites/{pid}`,
+  split). Seat rows and invites carry `share_changed_by` `organiser|club|null` + `share_changed_by_name` (organiser
+  only; a desk change is never named to a member) off the newest `players.split_changed` record (`ShareChanger`).
+- **Who took a seat off, who put it on** (R15 J15-1): the 404 booking detail (own seat only) and `GET /me/invites/{pid}`
+  carry `removed_by: "club"|"organiser"|null` (off the `players.removed` record; null when not removed or pre-R14);
+  invites (list, single, token view) carry `added_by_club` (`InvitedByUserId` ≠ organiser, guests never,
+  `SeatFacts.AddedByClub`). *Why:* "Mia took you off" must never be said of the club's act.

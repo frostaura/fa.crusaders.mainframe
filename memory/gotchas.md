@@ -60,6 +60,8 @@ Every trap whose hidden input is the wall clock is in [`gotchas-clock.md`](gotch
   property suite's mid-run step desk-cancels only unstarted games, so S4 neither shrinks (a 409 was silently swallowed)
   nor widens. A seat-removal twin in a race test runs as SQL on its own connection (an HTTP removal waits on the inbox
   rows the accept marks read — a test-rig deadlock only).
+- **A return that waits because the organiser's free balance is below zero is the coverage rule working, not a missing
+  return** ([`decisions-players-returns.md`](decisions-players-returns.md)) — a fixture that inserts a charge without crediting the organiser sees exactly that.
 - **After deleting a feature, run the browser suite, not just the unit suites.** An e2e spec covered the
   discovery-and-claim flow for weeks after the flow was removed from the product, red in a required job the whole
   time.

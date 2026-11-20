@@ -21,6 +21,11 @@ Mechanics: [`decisions-frontend-wallet-live.md`](decisions-frontend-wallet-live.
   arriving as `mixed` with a refund and share rows goes through the cancel sentence (J14-4) — shares are never the
   penalty. **A settlement with shares is one sentence** (R13 E13-5, `settledWithShares`): its OWN rows, then the
   partners' share rows, then the net (the sweep had counted the share as penalty).
+- **A share toast says why the share moved** (R11 E11-1): the frame's `share_cause` (+ `share_kept_minutes` on a
+  no-show) flows `liveBalance` → `BalanceDelta.shareCause` → `shareRowSentence` / `shareMovementPlain`, in the inbox's
+  words ("— the club refunded the session: the court's box was offline", "— nobody checked in, and 4 minutes are your
+  part of the no-show penalty", "taken again … — the session was attended", the scanner named below). Unknown causes
+  say the old sentence (`shareMovementCopy.ts:136-164`).
 - **A share moved by an act is said as the act** (R14 X14-2, `actedShareSentence`): partner "Omar took you off Court 3 ·
   Mon 5 Oct — 7 minutes came back", "Otto changed the split on …", "You withdrew from …", "The club took you off …";
   organiser "Sam withdrew from … — went back to them", "You took Sam off …". *Why:* `share_returned` once covered removal
@@ -39,7 +44,8 @@ Mechanics: [`decisions-frontend-wallet-live.md`](decisions-frontend-wallet-live.
 - **A toast stands alone, so it says which booking** (R14–R16): a placed frame (`court_name` + `booking_starts_at` →
   `BalanceDelta.place`) reads "10 minutes of your share of Court 1 · Tue 8 Oct came back — the club took you off the
   game", "Your missed booking on Court 2 · Mon 5 Oct, 18:30 …", "The club cancelled your booking on Court 3 · Mon 5 Oct:
-  …"; `shareRowSentence({ dated: true })` from the chip, while ledger lines under a group heading keep the court alone
+  …"; a displacement names court AND time (`displaced_refund` off `placeAt`, `movementCopy.ts:275`);
+  `shareRowSentence({ dated: true })` from the chip, while ledger lines under a group heading keep the court alone
   (group headings carry the start time). A returned share is "your share", never "A share … moved". Unplaced frames keep
   the old sentences. Share toasts end with a full stop; the ledger's row lines do not.
 - **Pay-for toasts** read the rows' `counterparty_name` with court + day + time; "Another member" is only the null

@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-frontend-book-sheets
-description: "Book and Cancel sheets: a money sheet never closes mid-write, only a double tap's tail is ignored, a refusal is taken to the reader, a final refusal ends the sheet, who checked in is read off the record."
+description: "Book and Cancel sheets: a money sheet never closes mid-write, only a double tap's tail is ignored, a refusal is taken to the reader, a final refusal ends the sheet, unsure words count the slots."
 type: decision
 last_verified: 2026-11-20
 ---
@@ -35,31 +35,23 @@ The grid: [`decisions-frontend-bookings.md`](decisions-frontend-bookings.md); un
   primary "Done", headed "Not cancelled" (R19 L19-5), and "The schedule behind this is up to date now" names the place the
   sheet was opened over (schedule · `/bookings/:id` · a member's bookings, read off the route). A rate limit, a missing
   reason or a lost answer keep everything — they can be tried again.
-- **No member Cancel once `attendance.checked_in_at` is set** (R15 D15-5), whatever an older `can_cancel` says: the
-  member-route CancelSheet refuses up front off the quote's `checkedIn` (a member's, or an admin's own — the server's
-  member route is `actorIsAdmin: false`) in `ALREADY_CHECKED_IN_TEXT` (subject-free, `bookingErrors.ts:40-41`), with no
-  Cancel to press. The club route is unaffected.
-- **Who checked in is read off the booking record, never assumed** (R19 J19-3, `checkedInBy.ts`): the quote has no
-  scanner; a player row whose own `checked_in_at` is the SAME instant as `attendance.checked_in_at` lit the court (compared
-  as instants); a partner wins, else the organiser; no such row (a pay-for payer lit it) or an unreadable record → nobody
-  named ("Someone has already checked in…"). One read per sheet (`useCheckedInRecord`, only when the quote says checked
-  in, single booking) feeds the desk sentence, the member's own refusal ("You've" only for their own scan), the
-  shares-stand note and the toast; the sentence waits for the record (no swap in a polite region) while Cancel stays
-  pressable. Bulk row reason `already_checked_in` is subject-free. A `checked_in_by` quote field would save the read
-  (asked; not built).
-- **The desk's club cancel says the partners' shares stand, off the record** (R16 J16-7): on a club cancel whose fresh
-  quote says `checkedIn`, `CancelSheet` reads `GET /bookings/{id}` and says `ADMIN_CANCEL.sharesStand` (info, polite) —
-  the quote's `partner_refunds` is empty when nothing is refunded. Same rule as `AdminCancelPanel`, both through
-  `lib/standingShares.ts`. A failed read says nothing about the shares.
+- **Cancel over a checked-in booking** — no member Cancel, who checked in, the shares that stand:
+  [`decisions-frontend-book-sheets-checked-in.md`](decisions-frontend-book-sheets-checked-in.md).
 - **The Done line follows the live wallet once it has caught up** (R19 J19-2, `BookSheet.useOwnFigureNow`): the
-  viewer's own run shows the chip's figure from the moment the live wallet equals the answer's `balanceAfter` or a frame
-  newer than the SEND arrived (`useSentMark`), latched. *Why not always live:* with no page wiring the live figure is the
+  viewer's own run (`who.kind === "self"`) shows the chip's figure — spendable when anything is held, else the balance —
+  from the moment the live wallet equals the answer's `balanceAfter` or a stream frame newer than the SEND arrived
+  (`useSentMark`: the frame count is kept current on every render before the send and frozen from it, so a frame
+  landing inside the request counts), latched. *Why not always live:* with no page wiring the live figure is the
   PRE-booking one; *why not always the answer:* a club adjustment just after left the line 9 minutes behind. A desk
   booking for a member keeps the answer's figure ("…after this booking").
 - **Said once, counted, placed** (R11–R18): a cancel from a booking's page is said once, by the sheet's toast, and focus
-  goes to the cancelled banner (`[data-cancelled]`); a lost-reply cancel toast claims nothing about the screen ("its
-  figures aren't in this message — your wallet shows what came back"); unsure booking sentences are count-aware
-  (`refusalSentence(error, withPlayers, forName, slots)`: `UNSURE_MANY_TEXT`, "the slots are still free"); several slots
-  read in ONE order — start time, then the day's court order (`slotOrder.ts`), bulk rows put back in the order sent; no
-  room is said with its figure (`409 too_many_players {free_seats}` → "Only 1 seat is still free on this booking — add 1
-  player, or fewer.").
+  goes to the cancelled banner (`[data-cancelled]`), never `<main>` — the panel unmounts with its trigger
+  (`AttendanceAndCancel.tsx:59-64`); a lost-reply cancel toast claims nothing about the screen ("its figures aren't in
+  this message — your wallet shows what came back") — *Why:* the booking page re-reads and shows the refund; unsure
+  booking sentences are count-aware (R18 X18-5, `refusalSentence(error, withPlayers, forName, slots)`; over one slot
+  `UNSURE_MANY_TEXT`, `CONFLICT_UNSURE_MANY_TEXT`, `BOOK_MANY_UNREAD_TEXT` — "the slots are still free", "one of those
+  courts"; cancels have no plural sentence, a several-cancel answers row by row); a `503 service_busy` on a booking
+  sheet is `SERVICE_BUSY_BOOK_TEXT` unread and `SERVICE_BUSY_UNSURE_TEXT` after the read-back (still read back: a 5xx is
+  never a "no"); several slots read in ONE order — start time, then the day's court order (`slotOrder.ts`), bulk rows
+  put back in the order sent; no room is said with its figure (`409 too_many_players {free_seats}` → "Only 1 seat is
+  still free on this booking — add 1 player, or fewer.").

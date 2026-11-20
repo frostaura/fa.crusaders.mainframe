@@ -10,10 +10,10 @@ last_verified: 2026-11-20
 Each came from a finding reproduced on the running app; the pinning tests are
 `lib/scheduleDay.test.tsx`, `pages/bookings-review-r2|r3.test.tsx`, `e2e/bookings-r2|r3.spec.ts`.
 
-- **Only the latest schedule read may touch the day, the error or the spinner** (F1-2). A reply for
-  a day the member has left is dropped; a background re-read (`reconcile`) lands on screen only
-  while its day is still shown, but still resolves to the sheet that asked. *Why:* Tuesday's slow
-  reply replaced Wednesday's day and the page, which draws only the day asked for, drew nothing.
+- **Only the latest schedule read may touch the day, the error or the spinner** (F1-2). A reply for a day the member
+  has left is dropped; a background re-read (`reconcile`) lands on screen only while its day is still shown, but still
+  resolves to the sheet that asked. *Why:* Tuesday's slow reply replaced Wednesday's day and the page, which draws
+  only the day asked for, drew nothing.
 - **`useScheduleDay().error` is the failure itself, never a sentence** (F4-17). *Why:* `StateBlock`
   words it; a pre-worded string was worded again as an unknown throw — a 503 read "something went
   wrong" on Bookings and "down or restarting" everywhere else.
@@ -26,10 +26,9 @@ Each came from a finding reproduced on the running app; the pinning tests are
   `?result=confirm` (`recentAction`). The viewer's own past cells on the grid are links to the
   booking. *Why:* a finished game was on no screen, so its result was reachable only by email.
   `bookingsApi.recent()` is also what ProfileResults' "record a result" list should read (F2-17).
-- **A 4xx refusal on the admin quote gets no Try again** (`worthRetrying`, F1-4) — only a failure
-  to hear back, 5xx, 408, 429 and 401 do (`bookingErrors.ts:428-431`; the 401 rides the session's refresh, and the
-  doc comment at `:424-427` still omits it). The server's window refusal sends a day KEY ("wed"), read as
-  "Wednesday".
+- **A 4xx refusal on the admin quote gets no Try again** (`worthRetrying`, F1-4) — only a failure to hear back, 5xx,
+  408, 429 and 401 do (`bookingErrors.ts:428-431`; the 401 rides the session's refresh, and the doc comment at
+  `:424-427` still omits it). The server's window refusal sends a day KEY ("wed"), read as "Wednesday".
 - **A cap-locked cell says "Your limit" with a gauge, never "Full" with a lock** (F1-6) — the court
   is free; the name says the shown day unless it is today (F1-5).
 - **Held credit is explained per share deadline** (C4, F4-18's book-sheet half): `heldPartsOf`
@@ -60,6 +59,9 @@ Each came from a finding reproduced on the running app; the pinning tests are
 - **A 402 `insufficient_balance` is adopted** (R7–R8): its `current_minutes` (the club's SPENDABLE) replaces the
   sheet's figure while the wallet still says the stale one, and the wallet is re-read so the chip follows (an invite
   Accept's 402 too); a slot-cap 409 is said with its figures, joined games counted. Games read `sold_ends_at ?? ends_at`.
-  `DaySummary` (from a 72rem page) says "You can book N more slots today" under a cap, today only, never for an admin.
+  `DaySummary` (in the detail under the grid) says "You can book N more slots today" under a cap, today only, never for an admin.
+- **A pick past the daily cap is said in the selection bar** (R4 M4-7, `lib/gridSelection.ts`): the bar shows the short
+  form (`selectionCapShort`, "Limit reached: 4 of 4 today"); the screen reader hears the full rule (`selectionCapSentence`),
+  which names what is chosen, never "You can book N more" — *why:* that beside four ticked slots invited a fifth.
 - Sheets (in-flight guard, double tap, refusals): [`decisions-frontend-book-sheets.md`](decisions-frontend-book-sheets.md).
   Under an open sheet the grid states `pointer-events: auto` (see gotchas-frontend-rendering).

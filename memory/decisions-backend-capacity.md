@@ -33,7 +33,7 @@ fan-out. What hurt was *bursts*: concurrent stream opens and synchronised keep-a
   request 502 (errno 99). Pinned by GatewayKeepalivePostureTests.
 - **No nginx `limit_req` on /device/** (decided): behind cloudflared/NAT every board shares one
   `$remote_addr`, and all boards share one tenant API key, so neither key partitions per board — it
-  would throttle the whole fleet together. The API's per-board limiter (`decisions-device-bodies.md`)
+  would throttle the whole fleet together. The API's per-board limiter (`decisions-device-bodies-limiter.md`)
   is the right place; with keepalive it answers a 9k req/s flood 429 while members stay served.
 
 ## The test server's slots (R19 BE19L)

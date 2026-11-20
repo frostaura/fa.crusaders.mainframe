@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-share-causes
-description: "Why a share moved and who moved it, decided off the record: share_cause by the act on the seat, the acting person as every share row's actor, the seat acts on the audit trail, paid by hand, and stands only to a partner who paid."
+description: "Why a share moved and who moved it, decided off the record: share_cause by the act on the seat, the acting person as every share row's actor, share rows read back off the record, the seat acts on the audit trail."
 type: decision
 last_verified: 2026-11-20
 ---
@@ -10,6 +10,7 @@ last_verified: 2026-11-20
 The money rules are [`decisions-players.md`](decisions-players.md); the frame that carries the cause is
 [`decisions-wallet-frames.md`](decisions-wallet-frames.md). Nothing here is a stored ledger column: the cause is decided
 off the receipts and the audit record, because storing it was a schema change nobody asked for.
+What a partner's receipt says when the club refunded, cancelled or settled by hand: [`decisions-share-causes-receipts.md`](decisions-share-causes-receipts.md).
 
 - **The causes** (`WalletShareCauses`, `LedgerService.cs:678-724`): `share_paid`, `club_collected`, `attended`,
   `share_returned`, `organiser_removed`, `split_changed`, `club_settled`, `player_added`, `share_back`,
@@ -21,10 +22,6 @@ off the receipts and the audit record, because storing it was a schema change no
   `players.split_changed` row for the seat NEWER than its last share movement (else a later desk adjustment read as the
   organiser's split); settle-outside is `club_settled`; an add that lowers an equal/ratio split is `player_added` (R16);
   anything else is `share_back`, actor null.
-- **The club refunded the session** (R10 E10-7): `ShareLedger.ClubRefundOf` — outage, displaced, no-show (never after a
-  reversal; a collect or removal keeps its own words) — sets `club_refund` on the `players.share_moved` payload and
-  mail. A no-show return names the penalty part (`kept_minutes` = paid before the return − returned); a zero penalty
-  keeps the club-refund words.
 - **The acting person is every share row's actor** (R14 `ShareLedger.ActorOf`): the caller's
   `ReconcileOptions.ActorUserId`, else derived — the scanner (attended), the `booking.cancelled` record's actor (club,
   member or late cancel), the withdrawing partner, the organiser (removal, split change — both now pass
@@ -52,13 +49,3 @@ off the receipts and the audit record, because storing it was a schema change no
   `players.accepted` (a fresh self-accept) and `players.declined`.
 - **Cause before effect** (R15 E15-4): `ShareSweep.SettleBookingAsync` raises the partners' `players.game_cancelled`
   record and notice BEFORE `ReconcileAsync`, saved before any share row it explains.
-- **"Your share stands" only to a partner who paid one** (R17 E17-2): on a started game the club cancels, the
-  `cancelled_share_stands` frame, the inbox ending and the mail's "stands" go only to a live seat with `PaidAsync > 0`;
-  paid 0 reads "it had started, but you had paid no share, so nothing moves" (`GameCancelledPayload.PaidNoShare`).
-- **A cancelled game asks nobody for anything** (R17): `ShareLedger.UnpaidAsync` treats a Cancelled booking as closed even
-  with `evenIfClosed`, and `PlayerNotices.NeedsConsent(booking, seat)` is false on one (no single-argument overload, so
-  no caller can forget the booking). Reconcile's own `IsClosed` is NOT changed: a cancelled court lit after all still
-  collects partners' shares through Owed.
-- **Paid by hand says what came back** (R17 E17-3): `PlayerNotices.SettledOutsideAsync(…, paidInApp)` — partner "— the
-  N minutes you paid in the app go back to you", organiser "— … go back to them"; "nothing moves in the app" only when
-  nothing was paid in the app. Every server string says "paid by hand" (`AdminChangeActions.cs:350`).

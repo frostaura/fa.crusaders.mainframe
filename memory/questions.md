@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-questions
-description: "All founder-owned: PIN length (a 4-digit collision charges the wrong member), biometric SDK, gate policy, court-box rosters, walk-behind attendance, play defaults, delivery by PR, MIT on a public repo, pricing."
+description: "All founder-owned: PIN length (a 4-digit collision charges the wrong member), biometric SDK, gate policy, court-box rosters, walk-behind attendance, play defaults, delivery by PR, MIT on a public repo, pricing, BA-17."
 type: question
 last_verified: 2026-11-20
 ---
@@ -47,6 +47,9 @@ and none of it is blocked on engineering.
   violation. Also recorded for Dean in their topics: the D2 fixer's tri-state peak rule ([`decisions-groups.md`](decisions-groups.md)),
   the reversible "shares received are held to the deadline" call ([`decisions-players.md`](decisions-players.md)), and
   the members split view's unbuilt §3.8 placeholder pane ([`decisions-admin-layout.md`](decisions-admin-layout.md)).
+- **Is BA-17 decided or open?** (Owner: Dean.) The admin rail names the page; one pass recorded leaving it as
+  "recorded design, by decision", two others as "needs a design decision"
+  ([`decisions-admin-console.md`](decisions-admin-console.md)). Rule it either way and delete the other wording.
 - **Is delivery straight onto `main` still the rule?** The founder set it on 2026-09-23 ([`decisions-method.md`](decisions-method.md));
   since PR #12 (2026-11-13) larger passes land as branches and PRs merged when green (#12, #15, #16, Dean: "merge when
   green"). Nobody has recorded which is now the rule.

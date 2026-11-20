@@ -60,5 +60,5 @@ that needs a wire moved is the wrong fix.
   2026-11-20:* this topic still described the deleted behaviour.
 - **Authentication runs before the rate limiter**, and the policy partitions per member — behind the
   gateway the whole club shared one bucket keyed on the proxy address. The device scheme is not the
-  default one, so device calls are keyed per BOARD by their own middleware ([`decisions-device-bodies.md`](decisions-device-bodies.md)).
+  default one, so device calls are keyed per BOARD by their own middleware ([`decisions-device-bodies-limiter.md`](decisions-device-bodies-limiter.md)).
 - **Gates** (2026-09-19): one ESP32 per door on this contract unchanged — [`decisions-door-gate.md`](decisions-door-gate.md), [`decisions-gate.md`](decisions-gate.md).

@@ -32,7 +32,9 @@ fact twice, told one that did not happen, or put it at the wrong instant.
   `displaced_collision`) — and a v1 upload's `wrong_court` outcome (R14 D14-3) — carry the member as subject and are `TraceKinds.AcceptedVerdictActions` — never a refusal.
 - **A board row's `court` is a RELAY INDEX, never a court** (R12 D12-2): uploads stamp `court_number` from the box's
   relay map; the trace falls back to the relay through the box's map NOW, else names the box ("the court box" for an
-  unnamed one, `CourtBoxPlaceholderName`). Any audit row with no stored court names its `booking_id`'s court (R13).
+  unnamed one, `CourtBoxPlaceholderName`). `detail.court` on a board row is the court number or absent — never the
+  relay index (`AdminMemberTraceAssembly.AuditDetail`). Any audit row with no stored court names its `booking_id`'s
+  court (R13).
 - **Subjects** (R18–R19): check-in rows are about the booking's ORGANISER (`court.activated` stores it; a seat's
   `court.checked_in` maps from `organiser_user_id`, `AdminMemberTraceAssembly.SubjectOf`); the actor is always the
   scanner. Every receipt row's subject is the organiser (JSON + CSV); restore rows too.
@@ -49,7 +51,8 @@ fact twice, told one that did not happen, or put it at the wrong instant.
   return included. **The Night never groups money** (R9): a wallet strand, ledger source or amount is its own row.
 - **Privacy:** one privacy audit row per VIEW, not per request (`ViewAuditOnce`: same admin, path+query, member within
   30 s; exports never folded), and a night's pages are one view (the fold keys on the query minus `limit`/`cursor`).
-  *Why:* StrictMode and retries fetched twice and each wrote an undeletable row. Process-local by design.
+  *Why:* StrictMode and retries fetched twice and each wrote an undeletable row. Process-local by design (the single
+  backend container is the whole deployment) — on another topology the worst case is the old duplicate, never a lost row.
 - **No audit action reads "no word for"** (R18 E18-3): `R18TraceGuardTests` scans the WHOLE API (every audit-shaped
   `const string …Action`, every literal on an `Action = …` line); each must reach a word or
   `TraceKinds.NotAPersonsNight`. Declared exclusions include the club console's acts (doors shut/reopen/export,

@@ -54,5 +54,8 @@ kind→icon map, so a new kind needs only its server word and, if it is one pers
   never the "Door gate" placeholder, else "Unnamed scanner (code)"; door CSVs too.
 - **Never folded:** a player's acts on a booking and the seat-act kinds (`PLAYER_ACTS` in `nightTimeline`, each keyed
   alone, like money); `account.*` rows; restores fold only with restores (`nightCopy.actorClause` takes the row).
+  `court.checked_in` is in `PLAYER_ACTS` — never folded client-side (`nightTimeline.ts:93-96`): three partners
+  scanning in a minute are three people, never "3 in 1 minute"; only the server folds the scanner's own first scan
+  into `court.activated`.
 - **Console layout:** a Night card is a grid (time column + text) that stacks under an 18rem container; rows focusable
   for paging (`[data-night-row]`); the lights row names `code_holder`.

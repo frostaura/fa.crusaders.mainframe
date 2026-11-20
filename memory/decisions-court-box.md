@@ -45,7 +45,7 @@ bridge's own choices: [`decisions-bridge.md`](decisions-bridge.md), [`decisions-
   last Mega image ("designed to almost never need reflashing"), so anything missing costs a cable flash of the Mega.
 - **The Mega drives the PCF8574 itself; LiquidCrystal_I2C is gone** (`LcdDisplay.h`): the library fixed the address at
   construction and hid its nibble writer; the probe and periodic re-init need both. 400 kHz, falling back to 100 kHz on
-  a NACK/error. Relay level, LCD address, scanner baud and court keys are runtime facts
+  a NACK/error (PCF8574 is rated 100 kHz). Relay level, LCD address, scanner baud and court keys are runtime facts
   ([`decisions-device-v3-hardware.md`](decisions-device-v3-hardware.md)).
 - **A 256-byte uplink queue, two link drains a pass, an 8 ms paint budget** (`CourtBox.h:86`, `LcdDisplay.h:61`).
   *Why:* DL-01/02 lost frames at the 64-byte rings. Static RAM 3,977 / 8,192 B (measured at `79a2fe54`; no firmware

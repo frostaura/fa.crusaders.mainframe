@@ -22,13 +22,10 @@ last_verified: 2026-11-20
   The Overview's quick-link cards overflowed a phone at 200 % text with only `grid gap-3`.
 - **200 % text in e2e is `html { font-size: 32px }`** after navigation; rem floors (`min-w-48`),
   rem bases and fixed two-column grids are what break there — Tailwind's `sm` is still 640 CSS px.
-- **A save-bar "covers the field" test puts the field where the bar grows over it** (shorten the viewport).
-- **For 200 % text, measure the COMPONENT in rem, not the viewport** (R4, lane F2):
-  `[container-type:inline-size]` on a wrapper and `[@container(min-width:17rem)]:…` variants follow
-  the text size, where `sm:` (640 CSS px) never does. Inbox rows, Profile stats and badges use it.
-  Give each width range ONE rule (`_and_(max-width:…)`): two container variants that set the same
-  property compete by stylesheet order. Write every class whole — `${WIDE}:col-span-1` built
-  from parts is never seen by Tailwind's scanner and emits nothing. R7: `@[16rem]/x:` (plugin) is emitted BEFORE `sm:`, so it never beats a viewport rule — write base-small + `@[…]:` grow and leave `sm:` alone; gutters that must not grow with text are `min(rem,px)` constants in `ui/layout.ts`.
+- **A save-bar "covers the field" test puts the field where the bar grows over it**: shorten the viewport (a filtered
+  page cannot scroll there; a resize also re-measures the bar — `e2e/admin-layout-r3.spec.ts`).
+- **Container queries are text-size queries** — measure the component in rem, one rule per width range, the plugin's
+  `@[…]` order against `sm:`: [`gotchas-frontend-layout-container-queries.md`](gotchas-frontend-layout-container-queries.md).
 - **A rem-sized badge dot on a px glyph hides it at 200 %** (a 24px dot over a 20px icon). R8: a
   `min-h-*` on a flex-COLUMN child replaces `min-height:auto`, so it SHRINKS to that floor (a 2-line
   dialog title cut to 64px) — give the rows `shrink-0` when the box should scroll instead.
@@ -49,10 +46,6 @@ last_verified: 2026-11-20
   24 px under "Forgot password?" at 200 %; `min(0px, calc((1lh - 44px) / 2))` is ~0 there.
 - **Measure "clipped label" on the `button-label` layer**, not scrollWidth: the hidden pending
   spinner overflows every icon button by a few px and is never seen.
-- **A rem `max-width` container query is a large-text query** (R4, lane F3): `[@container(max-width:18rem)]`
-  is 288 px at normal text and 576 px at 200 %, so a tile hides (or an avatar stacks) only when the
-  TEXT is large for the box — the switcher, the Overview's links, the member header and the app bar
-  (R5 `@container/appbar`: tabs inline from 44rem). A query container does NOT trap a fixed child.
 - **`auto-fit` cannot collapse a track that a `col-span-full` item spans**: the armed confirm's
   sentence kept three tracks open and the pair took two of three (R4 A-15). Give the pair its own grid.
 - **A utility's `display` beats the `hidden` ATTRIBUTE** (R4, L2): preflight's `[hidden]` and `.flex`

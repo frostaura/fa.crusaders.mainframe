@@ -56,4 +56,5 @@ The server's frame is [`decisions-wallet-frames.md`](decisions-wallet-frames.md)
   merges the `share_transfer` frame that follows (R12); alone it says the old sentence.
 - **Toasts** are announced by one waiting polite region ([`decisions-frontend-shell.md`](decisions-frontend-shell.md));
   a toast leaves with its page (a route change drops toasts raised >1.5 s before it; one raised with the navigation
-  stays — the provider re-renders per route, so its context value is memoised).
+  stays — the provider re-renders per route, so its context value is memoised: a fresh `{push}` re-rendered every
+  caller and broke render-count tests).

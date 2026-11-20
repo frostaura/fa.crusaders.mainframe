@@ -52,7 +52,9 @@ From `frontend-admin.json` (FA-1…13), `browser-admin.json` (BA-01…27) and pa
 - **Load-proof tests** (FA-13): vitest `testTimeout`/`hookTimeout` 20 s; relative-time assertions freeze `Date` only
   (`vi.useFakeTimers({ toFake: ["Date"] })`), never the page's timers.
 - **Not done, with reasons:** HTTP/1.1 connection starvation (wants gateway HTTP/2), the paint-grid density, hidden H1s;
-  BA-17 (the rail names the page — recorded design) and BA-21 need a design decision; FM-8's per-host shell needs gateway
+  BA-21 needs a design decision. **BA-17 (the rail names the page) is recorded both ways:** "not changed, by decision
+  … recorded design" (old app-rest pass 2) and "waits on / needs a design decision" (old ironclad pass 2 and state). The
+  sources disagreed before the reorganisation; nobody has ruled — open in [`questions.md`](questions.md). FM-8's per-host shell needs gateway
   SSI; BM-9 (mixed wire case) needs every reader on both sides switched in one change; BD-9 (a booking code buying at
   `/extend` reopens threat-model #19; every shipped phone shows v1, which extends) and FC-8's 1.x-gate corner (every door
   gets 2.0.0 at its cable flash) were left by decision.

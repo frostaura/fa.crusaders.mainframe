@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-lights-cues
-description: "The booking.lights_on/off mirror: one lights_on source, every off said when the court is next free under a per-court lock, lit-cancelled bookings cued off, reversal on/off a pair or nothing, one instant per lighting."
+description: "The booking.lights_on/off mirror: one lights_on source, every off said when the court is next free under a per-court lock, lit-cancelled bookings cued off, webhook actors read not inferred."
 type: decision
 last_verified: 2026-11-20
 ---
@@ -10,6 +10,7 @@ last_verified: 2026-11-20
 Spec: `docs/specs/webhooks.md` (`booking.lights_off`, *Ordering the lights events*); code `Webhooks/LightsCueWorker.cs`,
 `Services/CourtActivationService.cs`, `Services/CourtCueLock.cs`. A consumer mirrors one court's state from these;
 every rule below exists because a mirror built on the earlier one read a paid court dark or a dark court lit for ever.
+A reversal's on/off pair and the instant every `lights_on` is stamped at: [`decisions-lights-cues-reversal.md`](decisions-lights-cues-reversal.md).
 
 - **`CourtActivationService` is the one `booking.lights_on` source** (activation, walk-up, pay-for, the reversal);
   `LightsCueWorker` only ever emits `booking.lights_off` (`LightsCueTests` pins "no lights_on event at all").
@@ -44,21 +45,9 @@ every rule below exists because a mirror built on the earlier one read a paid co
 - **A cancelled relit reversal is swept like any lit cancellation** (D16-4: `Cancelled && CheckedInAt &&
   NoShowReversedAt > LightsOffCuedAt`, inside the lookback) and counts as a holder whose off is still to come; so does
   a relit reversal still Booked and reversed after its old cue.
-- **Reversal on/off are a pair or nothing** (R14 E14-4, narrowed R15 D15-2): the reversal's on is suppressed only when a
-  holder was lit AT the scan (`LitFrom(holder) <= scan`); if the holder lit later, the on is sent at the scan and the
-  holder's off closes the court. The reversal is cue-stamped (`LightsOffCuedAt` ≥ `NoShowReversedAt`) either way, so the
-  attended-and-over pass owes no second off. *Why:* the restored end IS the survivor's start, so R14 always suppressed,
-  and an on stamped at the scan arriving after the survivor's never got an off. A reversal AFTER the off cue gets one
-  more `lights_off` at the restored end (`CompleteAttendedAsync` restamps `LightsOffCuedAt`).
-- **Consumer rule that covers what source cannot:** order by `occurred_at`; an off that ARRIVED before the on of the
-  same booking does not close that on (the no-show sweep's off was said before the upload reversed it).
-- **One instant per lighting** (R19 E19-2): `occurred_at` of every `booking.lights_on` is the scan instant the Night
-  prints (`data.scanned_at` = it), UNLESS an off for the court was already said after the scan and the session still
-  runs — then it is stamped at emission (`ReversalOnAtAsync`, `CourtActivationService.cs:496,608`; R16 E16-2), so a
-  consumer ordering by `occurred_at` never reads the court dark after an off. An over session keeps the scan stamp (an
-  on stamped now would sort after its past off and hold the court lit for ever).
 - **Webhook actors:** `minutes.*` and `booking.created` `actor.is_admin` is the actor's `User.IsAdmin`, read
-  (`LedgerService.HoldsAdminAsync`; `BookingService.cs:914`), never `actorId != userId` — that called a member paying
-  for a friend's court at the box an administrator. `minutes.sold_at_desk` carries `zar_received` (0 on a gift) and
+  (`LedgerService.HoldsAdminAsync` — one tenant-filtered read, never for `Guid.Empty`; `BookingService.cs:914`), never
+  `actorId != userId` — that called a member paying for a friend's court at the box an administrator. An admin is an
+  admin on their own wallet too. `minutes.sold_at_desk` carries `zar_received` (0 on a gift) and
   `given`; reversal mirror names follow the sign (`minutes.refund_reversed` / `minutes.penalty_returned`,
   [`decisions-settlement.md`](decisions-settlement.md)).

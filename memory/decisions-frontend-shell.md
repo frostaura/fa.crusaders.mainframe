@@ -36,10 +36,11 @@ Layout system: [`decisions-member-layout.md`](decisions-member-layout.md); focus
   button (described by the words, inset ring, 44px hit box); tapping the surface still dismisses. **Toast gutters are
   pixel-capped** (rem gutters made a one-sentence toast 410px tall at 320 / 200 %). **Never tried with a real screen
   reader** ([`state.md`](state.md)).
-- **Coach marks and the tour stay in view** (R17 L17-7, R18 L18-6): marks are `sticky="always"` with the top bar in their
-  collision padding (the rail scrolls on its own and "partial" let a mark ride its anchor off-screen, −498px); the tour's
-  anchor is clamped into the visible band (`clampedRect` — Radix `sticky` shifts only on the alignment axis); past an edge
-  the rect is a zero-height line at that edge, the outline stays on the real control.
+- **Coach marks and the tour stay in view** (R17 L17-7, R18 L18-6): marks are `sticky="always"` with the top bar in
+  their collision padding (the rail scrolls on its own and "partial" let a mark ride its anchor off-screen, −498px); the
+  tour's anchor is clamped into the visible band (`clampedRect` — Radix `sticky` shifts only on the alignment axis, so a
+  side="bottom" mark rode a scrolled section bar off the top, −368 px); past an edge the rect is a zero-height line at
+  that edge, the outline stays on the real control.
 - **A ring on the QR plate is `brand-strong`** (navy 700 in both themes): the plate is white in both, and the dark accent
   measured 2.02:1 on it.
 - **A URL-bound text field owns what was typed** (R15 L15-2, `lib/useUrlText`): the URL is written after 250 ms of quiet;

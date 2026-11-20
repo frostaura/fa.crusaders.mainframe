@@ -26,8 +26,10 @@ data (`public/sw.js` header, `offline-shell` and `sw-update` specs).
   P5-6, `useDataOwner` like the tab bar); the chip draws the kept wallet read ("Last known at HH:MM"), never re-asked
   while the check is out. *Why:* Sign out was unreachable. **R8:** a session the club could not confirm right now keeps
   the chrome even unconfirmed (status `offline` + a token — a 429 on a fresh phone kept only the crest); no Admin tab
-  unconfirmed; the chip with nothing kept and the check answered says "unavailable" (+ "You're offline" when
-  unreachable), never "loading" for ever (`chipBalance` `none`).
+  unconfirmed; the chip with nothing kept and the check answered says "unavailable", never "loading" for ever
+  (`chipBalance` `none`); unreachable adds "You're offline" only when `navigator.onLine === false`, else "Can't reach
+  the club" (R15 X15-3, `MinutesChip.noFigureLabel`, `:287-295`; the rule is in
+  [`decisions-frontend-offline-data-words.md`](decisions-frontend-offline-data-words.md)).
 - **A session ending deletes every `crusaders-` cache EXCEPT `crusaders-shell-*` / `crusaders-assets-*`** (`lib/pwa`
   page half + the worker's `CLEAR_CACHES`; R5 M5-1). *Why:* they hold no member data, and purging them meant a lapsed
   phone could not open at all offline — My Code included — though the lapse screen promises the code works. The leaking

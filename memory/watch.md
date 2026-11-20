@@ -9,7 +9,7 @@ last_verified: 2026-11-20
 
 Ordered by risk. [`safety-relays.md`](safety-relays.md) outranks all of these; the doors have their own list,
 [`watch-doors.md`](watch-doors.md). Each item is expanded, with the consequence of skipping it, in
-`docs/go-live-checklist.md`. Items 1, 2 and 7 were re-checked on 2026-11-20 (key names only; `ci.yml`, the compose files,
+`docs/go-live-checklist.md`. Items 1, 2, 7 and 8 were re-checked on 2026-11-20 (key names only; `ci.yml`, the compose files,
 `gh repo view`); item 6 on 2026-09-29; the rest carry their dates.
 
 1. **Three gitignored `.env` files hold several classes of live secret** — read by **variable names only**, never
@@ -53,3 +53,10 @@ Ordered by risk. [`safety-relays.md`](safety-relays.md) outranks all of these; t
    Toolkit**, unwaivered — **Owner: Dean** (a parent stack call held at division level); adopt or record a rationale.
 7. **No architecture document exists for the backend.** The specs cover features and the iot READMEs the hardware;
    nothing describes the API's own shape but `Program.cs` and `Endpoints/` (no `docs/architecture/` at `7893321d`).
+8. **Product files still point at memory topics the 2026-11-20 reorganisation renamed** (a memory pass may not edit
+   docs or code; owed by the next product change). `docs/specs/multi-tenancy.md:79` cites `decisions-platform-pass.md`
+   (now [`decisions-tenancy.md`](decisions-tenancy.md)), and its sentence is stale: a suspended club's boards already
+   hear `403 club_suspended` (`DeviceAuthenticationHandler.cs:80-92`). `docs/specs/device-api.md:144` and
+   `Services/RelayRestorePlan.cs:71` cite `decisions-court-box-extend` (now [`decisions-court-box.md`](decisions-court-box.md)).
+   Same class: the `WalkUpServices.Clock` comment (`DeviceEventEndpoints.cs:2219-2221`) says `BookingService` reads
+   the wall clock; it reads the injected `TimeProvider` (`BookingService.cs:71,399`). Delete when all four are fixed.

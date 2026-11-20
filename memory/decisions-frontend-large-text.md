@@ -17,10 +17,13 @@ rail sweep — still opt-in).
   (re-measured with `lang="en"`), so it is no last resort for surnames; give the name its own line, and on the narrowest
   boxes step the type and inset down. Members cards: `useLongNameCards` measures each name's longest word (canvas, the
   link's font) against the who column's FLOOR (half the card less the avatar) — judging by the current width would flip
-  the card back and forth — and sets `data-long-name`; it re-marks on resize AND row insertion (MutationObserver
-  childList, never attributes, so its own toggle cannot loop). The pass band from 14 to 21rem lets the member's name take
-  the band's width; inbox headlines step text-xs < 10rem, sm to 17rem, base above; the account menu identity wraps,
-  the address breaking at "@" and dots (`EmailWithBreaks`); a long-name card's columns are `auto · 1fr · auto` so its
+  the card back and forth — and sets `data-long-name` (card range only, 20rem to the 48rem table); it re-marks on resize
+  AND row insertion (MutationObserver childList, never attributes, so its own toggle cannot loop) — *why:* a search
+  swapping a same-size page left a new long row unmeasured. In the pass band from 14 to 21rem the crest and avatar flank
+  only the overline and club and the member's name takes the band's width (flanked, 169px at 150 % split
+  "Wolfeschlegelstein"); inbox headlines step text-xs < 10rem, sm to 17rem, base above; the account menu identity wraps,
+  the address breaking at "@" and dots (`EmailWithBreaks`), and the avatar stands over the words under a 13.5rem row
+  (L14-4); a long-name card's columns are `auto · 1fr · auto` so its
   badges wrap in ONE row, and under 13rem the card is `p-2` with the name `text-xs`; the change record under its 12rem
   list box takes `p-2` and `text-xs` names. **The word-split test**: a word may split only when its
   unbroken width (nowrap clone, same font) exceeds the row's content box.
@@ -28,7 +31,7 @@ rail sweep — still opt-in).
   own width (an element cannot container-query ITSELF — the `@container` sits on the parent); the invite facts grid is one
   column under `@[16rem]`; the picker row `@container/row` 15rem; invite list items `@container/card` 17rem; the invite
   page card p-3 under 18rem; game facts lose their box under 13rem; record terms use an `auto` term column on a subgrid
-  from 30rem (MemberOverview, MemberDoors); under a 14rem box an Alert's mark takes its own line. Facts and figures pair
+  from 30rem (L15-3, MemberOverview, MemberDoors: every value in one column, the term column as wide as the longest term); under a 14rem box an Alert's mark takes its own line. Facts and figures pair
   from 44rem of `@container/invite`; the invite deep link is `content` width.
 - **Boxes beside words at 200 % are px, and step aside in a rem container** (R18 L18-1/3): the sheet tile's racquet box is
   an inline 40 px and hides under a 12rem row; Split inputs are `calc(7ch + 1.5rem)` with the name above under a 16rem
@@ -49,7 +52,7 @@ rail sweep — still opt-in).
   under their term; a figure beside a name wraps UNDER it; icons beside wrapping text are `shrink-0`; segmented links
   never shrink below word + padding (the bar wraps, `WalletNav`); a lone verb's docked bar hugs the verb.
 - **A finished game draws only the teams somebody sat on** (R14 L14-2, `PlayerChips.drawnTeams`): cancelled, completed and
-  no-show games draw no free seats and no empty team; a lone team takes the block's width; a booked game keeps both teams
-  and free seats. The booking page uses one gap token (`detailLayout.ts`).
+  no-show games draw no free seats and no empty team; a lone team takes the block's width, chips two-up from a 32rem
+  team box (`@[32rem]/team`); a booked game keeps both teams and free seats. The booking page uses one gap token (`detailLayout.ts`).
 - **Traps:** a `//` comment between JSX children paints as text (it shipped once on every accept sheet) — `{/* */}` only;
   arbitrary px spacing is banned outside `components/ui` — use containers.

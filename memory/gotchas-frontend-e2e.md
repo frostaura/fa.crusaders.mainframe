@@ -27,7 +27,7 @@ React/vitest traps are [`gotchas-frontend.md`](gotchas-frontend.md); real-stack 
 - **Chromium's offline emulation leaves `navigator.onLine` TRUE on the next document** (measured): a spec that goes offline
   and then navigates must pin it false (init script), or the app reads "can't reach the club" for a phone with no signal.
   And under `context.setOffline(true)` wording keyed on `onLine` alone said "Couldn't refresh" — offline is judged from
-  the failed read too ([`decisions-frontend-offline-data.md`](decisions-frontend-offline-data.md)).
+  the failed read too ([`decisions-frontend-offline-data-words.md`](decisions-frontend-offline-data-words.md)).
 - **A stale install reads as a catastrophically broken build** (FM-12): `node_modules` older than `package-lock.json`
   gave 228 tsc errors, a vite build that could not find a font and 355 failed vitest files; the main checkout sat like
   that for two months and every lane that ran a gate there reported false regressions. `vite.config.ts` now stops every

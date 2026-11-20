@@ -57,4 +57,4 @@ Tests: `RefreshCookieHttpTests`, `SignInRateLimitHttpTests`. Epoch rules: `decis
 - **The global backstop is per MEMBER** (B-10): `GlobalPerMinute` (600) per signed-in user;
   anonymous requests per address at `GlobalPerIpPerMinute` (6000). 429 = `rate_limited` +
   `retry_after_seconds`. *Why:* 600 per address 429'd a whole club behind one router. Device requests are limited per
-  BOARD since R16/R17 ([`decisions-device-bodies.md`](decisions-device-bodies.md)).
+  BOARD since R16/R17 ([`decisions-device-bodies-limiter.md`](decisions-device-bodies-limiter.md)).

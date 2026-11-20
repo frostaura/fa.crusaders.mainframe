@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-frontend-players-words
-description: "Member screens for games with partners: the invite and accept sheets show only what a yes means, consent words key on what was agreed, cancelled games say who and why, the club's acts are the club's, namesakes escalate."
+description: "Member screens for games with partners: the invite and accept sheets show only what a yes means, consent words key on what was agreed, the club's acts are the club's, namesakes escalate, writes hold the page."
 type: decision
 last_verified: 2026-11-20
 ---
@@ -9,7 +9,7 @@ last_verified: 2026-11-20
 
 Server truth behind these: [`decisions-players-access.md`](decisions-players-access.md),
 [`decisions-share-causes.md`](decisions-share-causes.md). Copy lives in `lib/playersCopy.ts`, `lib/inviteFacts*`,
-`components/players/**`.
+`components/players/**`. A cancelled or gone game: [`decisions-frontend-players-words-cancelled.md`](decisions-frontend-players-words-cancelled.md).
 
 - **Accept sheet** (R9): held minutes with two or more deadlines are listed by part (the Wallet's `heldPartsLine`);
   figures read "Available now / after" with anything held or owed back, else "Balance now / after" (the Book sheet's
@@ -32,22 +32,13 @@ Server truth behind these: [`decisions-players-access.md`](decisions-players-acc
   (`gridCopy.ts:116`); some → "Cancel one of your own bookings…"; the locked cell says "you've used your 4 slots".
 - **Mixed lengths name their length** (R12 J12-2, `usePlayersStep.confirmLines`): one length → "On each booking you
   pay…"; mixed → "On the 15-minute booking…"; split headings are adjectives ("Each 15-minute booking").
-- **A cancelled game says who and why** (R13 J13-6, `cancellationWords`, fields read via `lib/playersApi.ts:183-185` —
-  the interim `CancellationWire` type is gone): "The club cancelled this game." + "Reason: …" on its own line, the
-  displacement sentence, "You cancelled", "Sam cancelled"; no fields (older server) → "This game was cancelled." The
-  organiser's cancel note and the free cancel name each member partner (`DETAIL_CANCEL.partnersBack`,
-  `CANCEL_SHEET.free(whose, partners)`; singular for one; guests and open seats hold no share); the desk's split-cancel
-  note is third person (`SPLIT_CANCEL.note(subject, partners)`). A partner's cancelled share: paid → stands; returned →
-  "the N you'd paid went back"; by hand → "nothing moved in the app"; paid nothing → "Paid nothing · nothing owed", never
-  "went back". A cancelled page draws wrappers only with content and no admin seat hands.
 - **The club's acts are the club's** (R15 J15-1): `removed_by` (the seat read, else the 404) → "The club took you off …" /
   "Olga took you off …"; null names nobody ("You were taken off …"), never the organiser; `added_by_club` → "The club
-  added you to Owen's game"; "Booked by the club" from `booked_by_club` (absent = the member's own). One wording for paid
+  added you to Owen's game"; `booked_by_club` (R9 J9-5, absent = the member's own) → "The club booked this for you"
+  (`DETAIL_COPY.bookedForYou`), "Booked for you" on upcoming games — the admin's "Booked by the club" is another
+  page's unnamed-booker fallback (`memberDetailCopy.bookedByUnknown`). One wording for paid
   by hand: admin menu "Mark as paid by hand"; a settled seat in Change split "paid by hand — nothing moves for them in
   the app".
-- **A gone game** (R13 J13-3, R14): `share_bookings[id] === null` (key PRESENT) means the member can no longer read it —
-  no "View booking"; absent means not summarised and keeps the link; `share_places` fills a null summary as a `gone`
-  place-only booking (`LedgerTable.isGone`). A 404 detail reads its own seat (`own_seat_id` or `?seat=` → `NotOnGame`).
 - **The pull-out states the figure** (R12 X12-4): `withdrawBody(paid)` / `withdrawn(paid)` from the seat's
   `paid_minutes`; nothing paid → "nothing moves". Accept confirmation is what THIS press paid, total beside it.
 - **Namesakes escalate as a group** (R16–R17): the picker line is games played with you / member since (never email,
@@ -55,8 +46,9 @@ Server truth behind these: [`decisions-players-access.md`](decisions-players-acc
   string maths) then "· ref K7Q2" (`namesakeDetails(rows, base)` per rendered list); the desk's Book-as rows carry
   `DETAIL_ADMIN.memberSubtitle` ("#1042 · email"). One initials helper, `lib/initials.ts`, mirroring
   `MemberDisplay.SurnameInitial` (last non-suffix word: Jr, Sr, Junior/Júnior, Filho, Neto, II–IV), held single by a scan.
-- **Focus and hold** (R5–R18): Remove player and Change split hold the page while in flight (`useSheetHistory`, waiting
-  line in place of Keep/Cancel; a landing after a forced teardown is a toast); a danger notice on the booking page is
-  scrolled to centre and focused a task after render; the picker keeps a refusal's focus on close
-  (`keepRefusalFocus`); a refused reason-required admin dialog focuses the first complaint (`complaintFocus.ts`);
+- **Focus and hold** (R5–R18): Remove player and Change split hold the page while in flight (`useSheetHistory`;
+  Back/Escape/×/Keep are refused while the write is out, a waiting line in place of Keep/Cancel; a landing after a
+  forced teardown is a toast); a danger notice on the booking page is scrolled to centre and focused a task after
+  render; the picker keeps a refusal's focus on close (`keepRefusalFocus` — jsdom never animates, so the unit test
+  fakes an exit animation); a refused reason-required admin dialog focuses the first complaint (`complaintFocus.ts`);
   "(you)" by member id (`isViewerSeat` — the organiser's own seat may have no id); PauseSwitch is optimistic with rollback.

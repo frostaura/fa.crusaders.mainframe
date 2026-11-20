@@ -51,4 +51,4 @@ Versions are recorded once, in [`decisions-court-box.md`](decisions-court-box.md
 - **The breaker (`devlink::ApiBreaker`) is deliberately unchanged.** *Why:* it decides whether SCANS
   go online; a 401/403/404/429 means the API is there, and opening it would route every scan to the
   roster and change the gate's binary too. The server half — one box's refusals spending every
-  box's budget — was closed by the per-board limiter (`decisions-device-bodies.md`).
+  box's budget — was closed by the per-board limiter (`decisions-device-bodies-limiter.md`).

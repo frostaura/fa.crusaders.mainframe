@@ -32,14 +32,16 @@ Contract `docs/specs/minutes-and-packages.md` §3.7, §12.8. Code `Endpoints/Wal
   `AdminTopUp` with `ZarPaid` 0; no-charge mail. A R0.00 package may still be sold under a paid code.
 - **No rand taken = given, whatever the payment code** (R14 J14-5): `GivenMinutes.IsGiven` (AdminTopUp, `ZarPaid` null
   or 0) is the one rule for reports, the Night and the desk mail (`WalletEndpoints.DeskSaleIsGift` →
-  `PackageGivenAtDesk`); the ledger keeps the code as typed; a free package is "Give"/"given" in the console.
+  `PackageGivenAtDesk`); the ledger keeps the code as typed; a free package is "Give"/"given" in the console. The
+  sell sheet's button and receipt follow `isGiven(flow)` = free package OR R0.00 typed (`SellPackageSheet.tsx`).
 - **Given minutes are not sold** (R13 J13-2, R14 J14-2): `/admin/reports/revenue` counts paid funding only in
   `gross_topups_minutes`, `net_minutes` and `zar_per_minute_sold`; gifts are `given_minutes` (additive; sold + given =
   every funding row, so it reconciles with Transactions). `/admin/reports/daily` rows carry `given_minutes` as a SUBSET of
   `top_ups_minutes` (buckets still sum to `net_movement_minutes`); the console's Sold = top-ups − given, and Given is its
   own stat / column / series ("Given by the club") only in a period with a gift. *Why:* the totals card said 3 h sold
-  beside a Sales card saying 1 h 45 — one word, one meaning. Member reports carry `given_minutes` too ("Given by the
-  club", never "Bought").
+  beside a Sales card saying 1 h 45 — one word, one meaning. Member reports carry `given_minutes` as a SUBSET of
+  `top_ups_minutes` (AdminTopUp with `ZarPaid` 0), never added to the net (`ReportingEndpoints.cs:572-574`; "Given by
+  the club", never "Bought").
 - **Rand given back is a `PaymentReversal` naming the purchase** ([`decisions-payfast.md`](decisions-payfast.md)): the
   desk sheet on a member's ⋯ (BM-6) is purchase → amounts → check, rand and minutes asked apart, capped at what
   `/reversible` says is left. **A lost reply re-reads the PURCHASE** (grew by this press → landed; read, not grown →
@@ -50,10 +52,11 @@ Contract `docs/specs/minutes-and-packages.md` §3.7, §12.8. Code `Endpoints/Wal
   `slice_minutes`, in the mail's words (`shortOfCourtLine`); `useTakeBackRoom(userId)` reads them — unknown → no line;
   below zero the overdraft warning speaks. Callers must pass `TopUpSheet userId`.
 - **The Sell sheet after a 409** (R10): the body's `discount` goes on the header with the package, the shelf is re-read
-  quietly (the chosen package keeps the 409's price — the server judges the next press); the notice is said ONCE,
-  scrolled into view, and focus lands on Sell (`saleFocus.ts`: Radix parks focus on the dialog container when the armed
-  confirm unmounts, which `ConfirmButton`/`focusAfterAction` do not treat as adrift). The sheet cannot close mid-credit
-  ([`decisions-admin-lost-replies.md`](decisions-admin-lost-replies.md)).
+  quietly (the chosen package keeps the 409's price — the server judges the next press); the notice is said ONCE (the
+  Sell button's live region on the check; itself only when a gift became paid and the step changed —
+  `SellPackageSheet.tsx:118-126,303`), scrolled into view, and focus lands on Sell (`saleFocus.ts`: Radix parks focus on
+  the dialog container when the armed confirm unmounts, which `ConfirmButton`/`focusAfterAction` do not treat as
+  adrift). The sheet cannot close mid-credit ([`decisions-admin-lost-replies.md`](decisions-admin-lost-replies.md)).
 - **A desk movement naming a booking reconciles shares at the call site** (the share sweep looks back a week only), and
   an admin adjustment naming a booking is how a no-show is compensated ([`decisions-settlement.md`](decisions-settlement.md)).
 - **Reports:** `penalty_count` counts bookings whose penalty rows net to a debit (a returned penalty is none);

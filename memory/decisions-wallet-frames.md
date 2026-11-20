@@ -33,10 +33,14 @@ The `balance` SSE frame is how a member's phone learns a movement it did not ask
   `LedgerPosting.CounterpartyUserId`), the frame `court_name` and `booking_starts_at` (`LedgerService.cs:261-265`) and
   `BookingId`. `actor_name` names the actor only when they are a player on the game and not the frame's own member
   (`ShareWhy.ActorIsPlayer`); admins stay "the club"; `share_paid` names nobody.
-- **Who checked in:** `checked_in_by_name` (null when it was the frame's own member) on reversal and attended-share
-  frames — the scanner is the seat stamped at `booking.CheckedInAt`, else the earliest `court.activated` scanner, else
-  the booker (`ClubCancelNotices.CheckedInByAsync`, the one rule); `checked_in_by_you` when the late check-in was this
-  member's own scan. The started-session cancel frame is built in `BookingService` and sent with `PublishFrameAsync`.
+- **Who checked in:** `checked_in_by_name` (null when it was the frame's own member); `checked_in_by_you` when the
+  scanner is this member. Three sources, not one rule (R12 E12-2 / R18 E18-2): reversal legs carry unstored
+  `LedgerPosting.CheckedInBy` = the late scan's identified scanner (`BookingService.cs:1871`, `scan?.UserId`); the
+  attended share's `ShareWhy.CheckedInBy` is the seat stamped at `booking.CheckedInAt`, else the booker
+  (`ShareLedger.ScannerOfAsync`, no `court.activated` step); only the started-session cancel frames
+  (`cancelled_no_refund`, `cancelled_share_stands`) use `ClubCancelNotices.CheckedInByAsync` — seat, else the earliest
+  `court.activated` scanner (a pay-for payer holds no seat), else the booker — so one cancel's frames name one person.
+  The started-session cancel frame is built in `BookingService` and sent with `PublishFrameAsync`.
 - **A desk-made booking's charge frame names the club** (R17 E17-1): `LedgerPosting.ByClub` → `WalletFrame.ByClub`
   (merged with OR) → `actor_name: "The club"` (`LedgerService.ClubActorName`), the mail's `MadeByClub` rule (actor ≠
   member). No inbox line: the member inbox has no club-booking kind.
