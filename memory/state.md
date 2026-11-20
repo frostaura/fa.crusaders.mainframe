@@ -7,6 +7,11 @@ last_verified: 2026-11-20
 
 # Current state
 
+**Update 2026-11-21:** the founder re-enabled every CI workflow. The push that carries this line is
+the first since, so its run is the first chance to publish under the new image names. Sentences
+below that call CI paused or disabled describe the night of 2026-11-20 and are superseded once that
+run's result is recorded here.
+
 Re-measured **late 2026-11-20** (`git fetch`/`rev-list`, `gh run`/`workflow list`, `gh repo view`, Docker Hub's
 repository API, `curl`). Re-run before relying on any of it.
 
