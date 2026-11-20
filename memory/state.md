@@ -1,16 +1,17 @@
 ---
 name: crusaders-mainframe-state
-description: "main at 7893321d (PR #16 merged 2026-11-14, CI green): the v3 images are a cable flash with four secrets and none is flashed. Production answered 530 on 2026-11-20. Redeploy, flash and the relay question are Dean's."
+description: "Code tip 7893321d (PR #16, 2026-11-14, CI green); later main commits are memory-only. v3 images are a cable flash, none flashed. Production 530/1033 (tunnel down) 2026-11-20. Redeploy, flash, relays: Dean's."
 type: state
 last_verified: 2026-11-20
 ---
 
 # Current state
 
-Re-measured **2026-11-20** by command (`git log`/`rev-parse`, `gh pr list/view`, `gh run list`, `gh repo view`, `curl
--I`); nothing was fetched first, so re-run before relying on any of it.
+Re-measured **2026-11-20** by command (`git log`/`rev-parse`, `gh pr list/view`, `gh run list`, `gh repo view`, `curl`);
+clones, `origin/main` and production re-checked after a `git fetch` that evening. Re-run before relying on any of it.
 
-**The code.** `main` = `origin/main` = **`7893321d`** — "Merge pull request #16 from frostaura/fix/firmware-final"
+**The code.** Product tip **`7893321d`** — later `main` commits touch only `CLAUDE.md`, `MEMORY.md` and `memory/`
+(`git diff --name-only 7893321d origin/main`). It is "Merge pull request #16 from frostaura/fix/firmware-final"
 (2026-11-14 11:02 +0200); its `main` CI run **succeeded** (the image jobs publish `sha-7893321d` manifests and promote
 `:latest`; nothing redeploys). PR #15 (`fix/ironclad`, Dean: "fix any and all, full e2e testing" / "merge when green")
 merged first at `4e4ee0db`; that commit's own `main` run failed and PR #16's run is the green one. Dispositions:
@@ -27,9 +28,9 @@ Measured at `79a2fe54` (`pio run`; no firmware changed between it and the tip): 
 **27,664 B, 3,088 B over** the 24,576 B floor; Mega 3,977 B. Lane-reported gates (not re-run): `test-iot` 177/418/178,
 build, export, corpus, complexity, Linux gcc strict, 20k soak. **No flash of any image is recorded anywhere.**
 
-**Production.** `crusaders.frostaura.net` answered **HTTP 530** to `HEAD /` and `/healthz` on 2026-11-20 (Cloudflare
-had shown **1033**, no tunnel connector, on 2026-11-13; on 2026-10-14 the SPA served while every `/api` and `/healthz`
-502'd). What the Pi runs is unknown from outside ([`gotchas-ops.md`](gotchas-ops.md)).
+**Production.** `crusaders.frostaura.net` answered **HTTP 530** from Cloudflare to `HEAD` and `GET` on `/`,
+`/api/health`, `/health` and `/healthz` at 2026-11-20 22:56 SAST, body `error code: 1033` — no tunnel connector, as on
+2026-11-13 (on 2026-10-14 the SPA served while every `/api` and `/healthz` 502'd). What the Pi runs is unknown from outside ([`gotchas-ops.md`](gotchas-ops.md)).
 
 **What only Dean can do, in this order** (`docs/go-live-checklist.md` has every step):
 1. **Bring production back** and read why it stopped (the tunnel connector first, then the backend's log — a missing
@@ -54,14 +55,11 @@ and backend; FM-8 (gateway SSI), BM-9, BA-21, and FC-8's 1.x corner and BA-17, b
 walk-behind attendance ruling ([`questions.md`](questions.md)). Dean's settings: the offsite backup cron (not installed),
 the repo's visibility (**PUBLIC**), branch protection on `main` (**none**) ([`decisions-release-ops.md`](decisions-release-ops.md)).
 
-**Founder-facing pages** `docs/system-blueprint.html` and `docs/court-lights-flows.html` were last changed 2026-11-14
-(`c95bb782`, `407fb05f`); the blueprint was **not republished** then — keep its URL
-`https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4` on every republish.
+**Founder-facing pages** `docs/system-blueprint.html` and `docs/court-lights-flows.html` last changed 2026-11-14 (`c95bb782`,
+`407fb05f`); the blueprint was **not republished** — keep `https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4`.
 
-**Clones on this Mac:** `~/src/fa.crusaders.mainframe` (this worktree's parent; its `main` at `a77a1d72`, clean,
-behind `origin/main` and fast-forwardable); `~/src/.crusaders-merge-main` at `77625574`; the iCloud copy at `64ec7f43`
-(two context-only commits never pushed — ported into this store on 2026-11-20).
+**Clones on this Mac — two, on `main`, level with `origin/main`, clean:** `~/src/fa.crusaders.mainframe` (no other worktree)
+and the iCloud copy (untracked = ignored `.env`, four `secrets.h`, build output). No scratch clone remains ([`watch-secrets.md`](watch-secrets.md)).
 
 **Still outside code:** the relay safety question ([`safety-relays.md`](safety-relays.md)), Carl's two lock facts
-([`watch-doors.md`](watch-doors.md)), committee sign-off on charge-at-booking, and supervised bench sessions with the
-real box and door.
+([`watch-doors.md`](watch-doors.md)), committee sign-off on charge-at-booking, supervised bench sessions with box and door.

@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-watch
-description: "Unpaid debts, worst first: three gitignored .env files hold live JWT, database, SMTP, admin-bootstrap and Portainer secrets, unencrypted and unbacked-up; the redeploy is a manual runbook nothing enforces; charge-at-booking is unsigned-off."
+description: "Unpaid debts, worst first: two gitignored .env files hold live JWT, database, SMTP, encryption and admin-bootstrap secrets, unencrypted and unbacked-up; the redeploy is a manual runbook nothing enforces; charge-at-booking is unsigned-off."
 type: watch
 last_verified: 2026-11-20
 ---
@@ -9,21 +9,12 @@ last_verified: 2026-11-20
 
 Ordered by risk. [`safety-relays.md`](safety-relays.md) outranks all of these; the doors have their own list,
 [`watch-doors.md`](watch-doors.md). Each item is expanded, with the consequence of skipping it, in
-`docs/go-live-checklist.md`. Items 1, 2, 7 and 8 were re-checked on 2026-11-20 (key names only; `ci.yml`, the compose files,
-`gh repo view`); item 6 on 2026-09-29; the rest carry their dates.
+`docs/go-live-checklist.md`. Items 1, 2, 7 and 8 were re-checked on 2026-11-20 (item 1 in its own topic; `ci.yml`, the
+compose files, `gh repo view`); item 6 on 2026-09-29; the rest carry their dates.
 
-1. **Three gitignored `.env` files hold several classes of live secret** — read by **variable names only**, never
-   transcribe a value. The `~/src/fa.crusaders.mainframe` clone's populates `JWT_SECRET`, `POSTGRES_PASSWORD`,
-   `BOOTSTRAP_ADMIN_PASSWORD` and a real mailbox in both spellings (`SMTP_*` and `Smtp__*`; the flat names win), plus the
-   retired `BOOTSTRAP_SLICE_PRICE_CREDITS` (read by nothing; Dean deletes it). `~/src/.crusaders-merge-main/.env` has its
-   own JWT, SMTP and bootstrap-admin values. The iCloud copy's still holds `MASTER_SECRETS_ENCRYPTION_KEY`,
-   `LIGHTS_CONTROLLER_DEFAULT_SECRET`, `ConnectionStrings__DefaultConnection` (the database password again), the dead
-   `PEACH_PAYMENTS_BASE_URL` and all four `PORTAINER_*` values — **`PORTAINER_TOKEN` a live stack-control credential that
-   nothing reads any more; delete those four.** All are untracked, which closes the commit risk and nothing else: they are
-   unencrypted, the `~/src` copies live on this disk alone and the iCloud copy is only *synced* (a deletion is mirrored, so
-   it is not a backup). PayFast merchant credentials sit **in clear** in `tenant_settings`
-   (`Services/TenantSecretsAccessor.cs`, whose comment defers a master KEK to unbuilt work). Production's secrets are in
-   the Portainer stack file only — the password-manager list is the last item of `docs/go-live-checklist.md` §2b.
+1. **Live secrets sit unencrypted and unbacked-up on this Mac** — two gitignored `.env` files (dev clone and iCloud
+   clone), four firmware `secrets.h`, PayFast credentials in clear in `tenant_settings`. Inventory by key name only,
+   and what to delete: [`watch-secrets.md`](watch-secrets.md).
 2. **The redeploy is manual.** Since 2026-11-13 it has a runbook (`docs/runbooks/redeploy-and-rollback.md`): backup,
    `make migrations-pending` against the club's database, the stored stack file read for `CHANGE-ME`, the gateway image
    and no `nginx.conf` bind, deploy by `sha-<commit>`. Those checks are made **by a person** — nothing refuses a bad
