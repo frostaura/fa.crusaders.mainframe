@@ -61,7 +61,7 @@ the repo's visibility (**PUBLIC**), branch protection on `main` (**none**) ([`de
 **Renamed 2026-11-20 (founder):** `fa.crusaders.mainframe` → `technologies.crusaders.squash-control-system` (the repo;
 GitHub redirects the old URL; the directory was `crusaders.mainframe`), product *Crusaders Mainframe* → **Crusaders Squash
 Control System**; old product strings: [`watch-rename.md`](watch-rename.md). **Clones — two, on `main`, level with `origin/main`:**
-`~/src/technologies.crusaders.squash-control-system` (clean, no other worktree) and the iCloud copy (ignored `.env`, four `secrets.h`, build output; [`watch-secrets.md`](watch-secrets.md)).
+`~/src/technologies.crusaders.squash-control-system` (no other worktree; late 2026-11-20 it held uncommitted product edits, a rename in flight that is not this store's) and the iCloud copy (ignored `.env`, four `secrets.h`, build output; [`watch-secrets.md`](watch-secrets.md)).
 
 **Still outside code:** the relay safety question ([`safety-relays.md`](safety-relays.md)), Carl's two lock facts
 ([`watch-doors.md`](watch-doors.md)), committee sign-off on charge-at-booking, supervised bench sessions with box and door.

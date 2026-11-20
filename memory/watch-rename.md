@@ -10,7 +10,8 @@ last_verified: 2026-11-20
 The founder renamed the repo, the directory and the product on 2026-11-20 ([`state.md`](state.md)). A
 memory pass may not edit product files, so every string below still says `Mainframe`. Counted with `git grep -i
 mainframe` at `origin/main` on 2026-11-20: about 7,400 hits outside the context files. Delete each line once
-it ships.
+it ships. Late that night the `~/src` clone held uncommitted edits to 44 of these files, so a rename was
+under way in another session. Re-run the grep against `origin/main` before you trust this list.
 
 **What a person sees, so fix these first:**
 
