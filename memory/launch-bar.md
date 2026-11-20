@@ -21,9 +21,10 @@ along by a file that is re-measured every session.
 **Nothing instruments any of it.** There is no report, no dashboard and no query behind a single
 one of these numbers, so on the day somebody asks how launch is going the answer would have to be
 assembled by hand from the ledger and the audit trail. That was a deliberate gap while nothing
-was live — a scoreboard for a system nobody used would be re-done. A production stack has been up
-since 2026-09-19 ([`state.md`](state.md)), so it is now a debt: the kind discovered late, when the
-number is wanted this week.
+was live — a scoreboard for a system nobody used would be re-done. A production stack exists, so it
+is now a debt: the kind discovered late, when the number is wanted this week. Whether it is up today
+is [`state.md`](state.md)'s to say (it records HTTP 530 on 2026-11-20); *corrected 2026-11-20:* this
+said it "has been up since 2026-09-19", which `state.md` never recorded.
 
 **Two of them gained a lever on 2026-11-13** (backend-platform pass): a second club is created with
 `tenant create` instead of raw SQL ([`decisions-tenancy.md`](decisions-tenancy.md)),

@@ -27,7 +27,7 @@ Contract `docs/specs/minutes-and-packages.md` §3.7, §12.8. Code `Endpoints/Wal
   J11-1): `WalletEndpoints.Replay` compares `stored.UserId` too — key K on another member's URL had answered 200 with the
   first member's entry. **A replay quotes its own balances** (R17 J17-6, `ReplayBalancesAsync` reads
   `balance_before/after_minutes` off the movement's `credit.adjusted` audit row, else the balance now). *Why:* a raced
-  double-click answered from a balance read before its twin committed.
+  double-click answered from a balance read before its twin committed, and a later replay answered from today's balance.
 - **`package_free`** (R7 J7-10): a fourth sell code, valid only on a R0.00 shelf price; rand optional and 0;
   `AdminTopUp` with `ZarPaid` 0; no-charge mail. A R0.00 package may still be sold under a paid code.
 - **No rand taken = given, whatever the payment code** (R14 J14-5): `GivenMinutes.IsGiven` (AdminTopUp, `ZarPaid` null

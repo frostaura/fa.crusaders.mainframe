@@ -9,8 +9,8 @@ last_verified: 2026-11-13
 
 Founder decisions taken by the orchestrator under Dean's "fix any and all" go-ahead, after the
 2026-11-13 pre-go-live analysis. Specs: `docs/specs/device-api.md`, `device-serial-protocol.md`
-(v3), `door-gate.md` §14; corpus `provision/`, `display/`, `compat/`. Mega 3.0.0, bridge 3.1.0,
-gate 2.0.0, built by four lanes (backend-device, court-box, door-gate, frontend-admin).
+(v3), `door-gate.md` §14; corpus `provision/`, `display/`, `compat/`. Built by four lanes (backend-device,
+court-box, door-gate, frontend-admin); the images' versions: [`decisions-court-box.md`](decisions-court-box.md).
 
 - **No remote firmware update: every firmware change, to any chip, is a cable flash** (founder,
   2026-11-14: *"I don't want OTA. That's a complexity we don't need right now."*). *Why, as he gave

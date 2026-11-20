@@ -55,7 +55,8 @@ fact twice, told one that did not happen, or put it at the wrong instant.
   backend container is the whole deployment) — on another topology the worst case is the old duplicate, never a lost row.
 - **No audit action reads "no word for"** (R18 E18-3): `R18TraceGuardTests` scans the WHOLE API (every audit-shaped
   `const string …Action`, every literal on an `Action = …` line); each must reach a word or
-  `TraceKinds.NotAPersonsNight`. Declared exclusions include the club console's acts (doors shut/reopen/export,
+  `TraceKinds.NotAPersonsNight`. *Why the whole API:* the old guard read four named files and `court.lights_restored`
+  is written from a fifth. Declared exclusions include the club console's acts (doors shut/reopen/export,
   monitoring resolve/export, member-code phase, retention), `credit.adjusted` (its ledger row is already on the wallet
   strand), `court.extended` (its walk-up twin already says it) and `members.exported` / `no_shows.exported`.
 - **Paging:** the console asks 100 events and "Show more" with the cursor for the same day.

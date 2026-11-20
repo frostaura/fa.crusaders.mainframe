@@ -28,10 +28,11 @@ The `balance` SSE frame is how a member's phone learns a movement it did not ask
 - **Why a share moved: `share_cause`** (+ `share_kept_minutes` on a no-show), carried on the unstored
   `LedgerPosting.Share` and decided by `ShareLedger.CauseOf` from the receipts' own facts
   ([`decisions-share-causes.md`](decisions-share-causes.md)). It reaches only the FRAME (`LedgerService.cs:268`); `GET
-  /wallet` rows read a cause re-derived off the record (`ShareRowCauses`), never a stored column.
+  /wallet` rows carry no cause; the member wallet CSV and the Night re-derive it off the record (`ShareRowCauses`, its
+  only callers `ReportingEndpoints.cs:639`, `AdminMemberTraceAssembly.cs:232`), never a stored column.
 - **Place and people:** each `parts` item carries `counterparty_name` (non-null on a share or pay-for leg,
-  `LedgerPosting.CounterpartyUserId`), the frame `court_name` and `booking_starts_at` (`LedgerService.cs:261-265`) and
-  `BookingId`. `actor_name` names the actor only when they are a player on the game and not the frame's own member
+  `LedgerPosting.CounterpartyUserId`); the frame carries `court_name` and `booking_starts_at` (`LedgerService.cs:261-265`),
+  resolved from the internal `BookingId`, which is not on the wire. `actor_name` names the actor only when they are a player on the game and not the frame's own member
   (`ShareWhy.ActorIsPlayer`); admins stay "the club"; `share_paid` names nobody.
 - **Who checked in:** `checked_in_by_name` (null when it was the frame's own member); `checked_in_by_you` when the
   scanner is this member. Three sources, not one rule (R12 E12-2 / R18 E18-2): reversal legs carry unstored

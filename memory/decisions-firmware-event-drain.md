@@ -7,7 +7,7 @@ last_verified: 2026-11-20
 
 # Live decisions: what the court box sends, and how its event drain reacts (rounds 15–16)
 
-Versions are recorded once, in [`decisions-court-box.md`](decisions-court-box.md). The gate's own drain rule (404 keeps,
+Versions: [`decisions-court-box.md`](decisions-court-box.md). The gate's own drain rule (404 keeps,
 403 empties the roster) is in [`decisions-door-gate-cadence.md`](decisions-door-gate-cadence.md).
 
 ## Escaping (R15, D15-1)

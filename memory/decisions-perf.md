@@ -29,7 +29,9 @@ Measured numbers and method: [`gotchas-perf.md`](gotchas-perf.md). Sign-in limit
   ([`decisions-email-outbox.md`](decisions-email-outbox.md)). NOT a hosted service on purpose: `TestWebAppFactory`
   removes every `IHostedService`, and the mail must reach the suite.
 - **The tenant slug lookup is cached per host** (`IMemoryCache`, 5 min, hits only). *Why safe:*
-  a club row is only ever added — no rename, no delete. **`PasswordChangeGate` is not folded:**
+  a club row is only ever added — no rename, no delete — except `Status` (`tenant suspend|activate`, from the operator
+  CLI in another process), which lands within the 5-minute window (`TenantResolutionMiddleware.cs:83-91`,
+  [`decisions-tenancy.md`](decisions-tenancy.md)). **`PasswordChangeGate` is not folded:**
   it must be exact, and a claim-based gate needs every token mint site changed. Not worth it.
 - **Compression lives in nginx, not Kestrel.** The SPA image gzips its assets; the gateway gzips
   the API's JSON and passes the SPA's through. **`text/event-stream` is never in `gzip_types`**

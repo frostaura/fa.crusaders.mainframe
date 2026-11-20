@@ -29,11 +29,6 @@ Each came from a finding reproduced on the running app; the pinning tests are
 - **A 4xx refusal on the admin quote gets no Try again** (`worthRetrying`, F1-4) — only a failure to hear back, 5xx,
   408, 429 and 401 do (`bookingErrors.ts:428-431`; the 401 rides the session's refresh, and the doc comment at
   `:424-427` still omits it). The server's window refusal sends a day KEY ("wed"), read as "Wednesday".
-- **A cap-locked cell says "Your limit" with a gauge, never "Full" with a lock** (F1-6) — the court
-  is free; the name says the shown day unless it is today (F1-5).
-- **Held credit is explained per share deadline** (C4, F4-18's book-sheet half): `heldPartsOf`
-  reads `held_parts` (wire) or `parts` (parsed balance figures); more than one part shows
-  each part with its own deadline ("… until … · … until …"; whole minutes since P13), else the single `held_until` line stands.
 - **Forced colours: the week strip's chips opt out (`forced-color-adjust: none`) and draw in system
   colours** — selected Highlight, past borderless GrayText, today a CanvasText ring; the current
   court chip is Highlight (F1-11). *Why:* ToggleGroup items are `role=radio` with
@@ -51,17 +46,7 @@ Each came from a finding reproduced on the running app; the pinning tests are
   reply was lost reads the day back like book and cancel do (gone = lifted).
 - **A sheet closing over a re-drawn cell returns focus to the grid's tab stop** (R3 X-6,
   `gridTabStop`), not `<main>`; the dialog's own return stands while the opener still exists.
-- **Money is never optimistic; waiting is never silent (perf lane, 2026-09-30).** Book reports the
-  slots it sends (`onSending`) and the grid draws them "Holding…" (busy, not pressable, no price,
-  no claim of a booking or charge); a refusal takes it back at once, a landed booking becomes the
-  confirming cell in the SAME commit (`startTransition`), a sheet closed mid-flight drops it. The
-  confirmation is drawn from the POST answer and commits before the grid's re-draw.
-- **A 402 `insufficient_balance` is adopted** (R7–R8): its `current_minutes` (the club's SPENDABLE) replaces the
-  sheet's figure while the wallet still says the stale one, and the wallet is re-read so the chip follows (an invite
-  Accept's 402 too); a slot-cap 409 is said with its figures, joined games counted. Games read `sold_ends_at ?? ends_at`.
-  `DaySummary` (in the detail under the grid) says "You can book N more slots today" under a cap, today only, never for an admin.
-- **A pick past the daily cap is said in the selection bar** (R4 M4-7, `lib/gridSelection.ts`): the bar shows the short
-  form (`selectionCapShort`, "Limit reached: 4 of 4 today"); the screen reader hears the full rule (`selectionCapSentence`),
-  which names what is chosen, never "You can book N more" — *why:* that beside four ticked slots invited a fifth.
+- Money, holds and caps on the grid (Your limit, held parts, never optimistic, the 402, the selection-bar cap):
+  [`decisions-frontend-bookings-money.md`](decisions-frontend-bookings-money.md).
 - Sheets (in-flight guard, double tap, refusals): [`decisions-frontend-book-sheets.md`](decisions-frontend-book-sheets.md).
   Under an open sheet the grid states `pointer-events: auto` (see gotchas-frontend-rendering).

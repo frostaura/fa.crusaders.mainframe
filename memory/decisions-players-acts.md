@@ -11,6 +11,8 @@ Money rules: [`decisions-players.md`](decisions-players.md); who/why: [`decision
 lost races, twins and the accept/cancel row lock: [`decisions-players-acts-races.md`](decisions-players-acts-races.md).
 
 ## Pay what you can (Dean: "the others should be able to decide how to split what's left")
+Spec `players-and-splits.md` §4, §6's notice table, §7. Pinned in `PayWhatYouCanHttpTests` and
+`components/players/__tests__/leftoverSplit.test.tsx` / `payWhatYouCan.test.tsx`.
 - **The partner's side is an accept with `payMinutes`** — valid when `max(1, paid) ≤ payMinutes < share`
   (`PayWhatYouCan.IsValid`), else `400 pay_minutes_invalid`. **Only a partner who is SHORT may**: paid + spendable
   covering the share is `409 share_affordable`, read under the payer lock (2026-11-13, BM-5; *why:* any partner could

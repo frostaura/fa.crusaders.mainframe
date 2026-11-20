@@ -33,7 +33,7 @@ that accepts and never answers (the transport's 15 s timeout), 89 ms after.
 - **Residual**: the booking confirmation still composes (reads + receipt PDF) in a `Task.Run` before it queues
   (`BookingService.cs:579`), a perf-round choice ([`decisions-perf.md`](decisions-perf.md)); a crash in that window
   loses the mail. Everything else is durable.
-- **Deploy**: migration `AddEmailOutbox` is additive; mail in flight at the restart that shipped it was not recoverable.
+- **Deploy**: migration `AddEmailOutbox` is additive (create table and indexes only), no manual step; mail in flight at the restart that shipped it was not recoverable.
 
 ## Held member mail, judged when it leaves (review round 2, C8)
 Code `Services/Players/MemberMailRelease.cs`, on `AdminNotificationDispatcher`'s member path (member mail rides the

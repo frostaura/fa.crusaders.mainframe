@@ -56,7 +56,8 @@ Gate traps (lizard, `make complexity`): [`gotchas-gates.md`](gotchas-gates.md); 
   `[env:door_gate]` once unflagged `-DFW_VERSION_MINOR=0` and then set the identical token, so neither survived and
   `fwversion/Version.h`'s `#ifndef` fallback of 0 supplied it — 1.0.0 on both builds by luck. The gate now sets its
   version outright and inherits nothing (`door-gate/platformio.ini:241-243`), and `src/gate/main.cpp:105-113`
-  `#error`s unless all three parts are defined and are 2.0.0; the court box unflags `[common]`'s `MAJOR=2` / `MINOR=0`
+  `#error`s unless all three parts are defined and are the gate's own (the values:
+  [`decisions-court-box.md`](decisions-court-box.md)); the court box unflags `[common]`'s `MAJOR=2` / `MINOR=0`
   and sets its own (a different token survives). The exporter mirrors the rule and fails if a name survives twice with
   different values.
 

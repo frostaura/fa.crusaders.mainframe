@@ -15,7 +15,8 @@ which clock each device path reads: [`decisions-device-bodies-clock.md`](decisio
 
 - **A device body is read by `Endpoints/DeviceBody` (a `BindAsync` on each request record), never the framework
   binder** (R15 D15-1). Invalid UTF-8, and a `\u0000` escape (R16), become U+FFFD and the body is parsed and USED: a
-  garbled scan is a code nobody holds, so `/events` receipts it and the drain moves on. Not JSON at all → `400
+  garbled scan is a code nobody holds, so `/events` receipts it and the drain moves on. *Why not a 500:* a 500 there is
+  "retry" to the firmware — one byte pinned the queue and tripped the breaker. Not JSON at all → `400
   malformed_body` plus a server `malformed_body` fault (against the board if the bytes name a registered MAC, else
   folded by code — the key holder chooses the bytes). **Contract with the firmware: a malformed device body is 400
   only, never 401/403/408/429/5xx** — the firmware drops the head event on any other 4xx and its breaker counts only

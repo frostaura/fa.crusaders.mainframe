@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-court-box
-description: "The court box as built, and the one place firmware versions live: Mega 3.0.0, bridge 3.1.0, gate 2.0.0, Mega first; scan-first landing, greeting, scan-to-extend a lit court; the Mega's renderer, taps and soak gate."
+description: "The court box as built, and the topic that holds firmware versions: Mega 3.0.0, bridge 3.1.0, gate 2.0.0, Mega first; scan-first landing, greeting, scan-to-extend a lit court; the Mega's renderer, taps and soak gate."
 type: decision
 last_verified: 2026-11-20
 ---
@@ -10,7 +10,7 @@ last_verified: 2026-11-20
 The contract and its why: [`decisions-device.md`](decisions-device.md) and the `decisions-device-v3*.md` topics; the
 bridge's own choices: [`decisions-bridge.md`](decisions-bridge.md), [`decisions-bridge-scan-flows.md`](decisions-bridge-scan-flows.md).
 
-## Versions — recorded here and nowhere else
+## Versions — the topic that holds them; every other topic points here
 - **At `7893321d`: Mega 3.0.0, bridge 3.1.0, door gate 2.0.0** (`court-box/platformio.ini:351,357` and `:414-415,439`
   over `[common]` 2.0.0; `door-gate/platformio.ini:241-243`, which sets the gate's version outright). Host suites and the
   simulator report 3.0.0 (`[court_version]`, `:289-290`) — a host build calling itself 2.0.0 had made the bridge speak v2
@@ -21,7 +21,7 @@ bridge's own choices: [`decisions-bridge.md`](decisions-bridge.md), [`decisions-
   old "never reflash the Mega" rule held only while nothing the Mega did had to change; 2.1.0's polarity and v3's defects
   ended it. The Devices page showing these versions is what confirms a flash. `platformio.ini`'s own history comments
   are partly stale (the bridge block at `:431-438` still says both chips are 3.0.0; the 2.3.0 entry is joined onto the
-  previous line at `:59`).
+  previous line at `:65`).
 
 ## The panel, as the founder directed it (2026-10-11, `4ac90a67`, `be903b60`, `0d92f5f4`, `6f62f3c8`)
 - **The landing screen is "scan your code"** (v3: `SCAN YOUR QR CODE` expanded, `SCAN YOUR QR` compact), and every
@@ -60,5 +60,6 @@ bridge's own choices: [`decisions-bridge.md`](decisions-bridge.md), [`decisions-
 - **`test_soak` is the acceptance gate**: 1,000 sequences × 4 simulated minutes; I1 landing ≤ 62 s after the last input,
   I2 owed courts lit 5 s after a Mega reset, I3 no relay past end of play, I4 every scan on the Mega's TX line in 200 ms.
   Mutation-checked; `SOAK_SEED`/`SOAK_TRACE` reproduce. **The Reconciler never gives up on owed light**: after three
-  failed `!WANT`s it reports `relight_failed` once and keeps trying at the 60 s pace (the soak found a garbled `!BOOT`
-  leaving a paid court dark). `test_compat`'s court-box executor is still owed (the gate has `test_gate_compat`).
+  failed `!WANT`s it reports `relight_failed` once and keeps trying at the 60 s pace; a relay that went from lit to dark
+  under an owed snapshot (a lost `!BOOT`, or its own deadline under a longer booking) is re-lit at once, not after the
+  pace (`V3Heartbeat.h:178-181`, `sawLit_`). *Why:* the soak found both (a garbled `!BOOT` left a paid court dark). `test_compat`'s court-box executor is still owed (the gate has `test_gate_compat`).

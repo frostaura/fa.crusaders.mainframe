@@ -27,12 +27,11 @@ Firmware toolchain traps: [`gotchas-build.md`](gotchas-build.md). Machine- and c
   (`ReturnType<typeof f>`).
 - **lizard's C# parser mis-scopes any expression-bodied member whose body contains braces** (`=> new { … }`, `=> x
   switch { … }`, a property pattern), dumping the rest of the file into a `*global*` pseudo-function the length of the
-  file — the gate trips naming no real function at line
-  0. Every "Block body for the lizard reason" comment in the tree is this (bisected 2026-09-22). The fix is a block
-     body, not a whitelist entry; a method directly *after* an expression-bodied private constructor misfiles
-     identically. Placement, not content. **It is latent under 200 lines** (the `*global*` length is the file's), so
-     it trips on whoever grows the file — round 3's webhook edit. A positional `record` with generic parameters counts
-     each type argument as a parameter.
+  file — the gate trips naming no real function at line 0. Every "Block body for the lizard reason" comment in the
+  tree is this (bisected 2026-09-22). The fix is a block body, not a whitelist entry; a method directly *after* an
+  expression-bodied private constructor misfiles identically. Placement, not content. **It is latent under 200 lines**
+  (the `*global*` length is the file's), so it trips on whoever grows the file — round 3's webhook edit. A positional
+  `record` with generic parameters counts each type argument as a parameter.
 - **The same `*global*` warning also has a form no single member causes.** `EmailChrome.cs` — 490 lines, mostly raw
   string literals full of markup — lost its class partway down and reported `*global*` at 491 lines with five of ~20
   members found; removing any one member did not fix it (it is the *density* of raw strings). The fix was **smaller

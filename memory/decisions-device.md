@@ -26,7 +26,8 @@ that needs a wire moved is the wrong fix.
   alternatives were a copy that drifts or a package versioned for two consumers of one repo.
 - **Flashing is the Arduino IDE**, from the generated sketches in `src/iot/court-box/arduino/`;
   PlatformIO stays the tested build and `court_mega` compiles byte-identical between the two. *Why:*
-  the founder flashes these boards, and a Makefile target is not how that happens at a squash club.
+  the founder flashes these boards, and a Makefile target is not how that happens at a squash club. (The store
+  also says Carl does — [`decisions-door-gate-io.md`](decisions-door-gate-io.md); open in [`questions.md`](questions.md).)
   The C++11 consequence is a build trap — [`gotchas-build.md`](gotchas-build.md).
 - **The brains live on the ESP8266.** The ATmega2560 cannot be flashed over WiFi — its ESP sits on
   Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET — so the Mega is a thin I/O
@@ -56,7 +57,7 @@ that needs a wire moved is the wrong fix.
   ([`decisions-device-v3.md`](decisions-device-v3.md)). The reason survives as the firmware's rule: the boards fetch
   with a plain `WiFiClient` and have no heap for TLS, so `API_BASE_URL` is `http://` (the gate's compiler check refuses
   `https://`, [`decisions-door-gate-io.md`](decisions-door-gate-io.md)). `Security/GatewayTrust.cs` now serves
-  forwarded-header and rate-limit trust only (`Gateway:TrustedProxies`, `Program.cs:208,704`). *Corrected
+  forwarded-header and rate-limit trust only (`Gateway:TrustedProxies`, `Program.cs:239-251,767`). *Corrected
   2026-11-20:* this topic still described the deleted behaviour.
 - **Authentication runs before the rate limiter**, and the policy partitions per member — behind the
   gateway the whole club shared one bucket keyed on the proxy address. The device scheme is not the

@@ -10,13 +10,15 @@ last_verified: 2026-11-20
 Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membercode/` (generated).
 
 - **Token = `1` + REF(4 Crockford) + ON(8) + OFF(6) = 19 characters.** *Why:* it fits every limit
-  the Mega already enforces (`!SCAN` 24, roster cap 20), so the Mega is not reflashed; every
-  legacy code is 12, so length alone separates the two.
+  the Mega already enforced (`!SCAN` 24, roster cap 20), so the code itself needed no Mega change (the Mega is
+  flashed to 3.0.0 for v3's own reasons, [`decisions-device-v3.md`](decisions-device-v3.md)); every legacy code is
+  12, so length alone separates the two.
 - **ON = TOTP-8 under the member secret S (HKDF of the master key), server and phone only; OFF =
   TOTP-6 under K_day = HMAC(S, "crusaders/kday/v1|" + club day), first 12 bytes.** *Why:* devices
   can check OFF offline without ever holding S, so a stolen box forges OFF for ~a day for the
   members it holds and never ON, and uploads are re-checked with ON (`code.forgery_suspected`).
-  12 bytes, base64url, is what fits 72 keys into a door's 4096-byte body (3879 at the widest).
+  12 bytes, base64url, is what fitted 72 keys into a gate 1.x door's 4096-byte body (3879 at the widest); gate
+  2.0.0's heartbeat budget is 6144 of an 8192-byte buffer (`src/contracts/device-protocol/compat/cases.json`).
 - **Devices get a step counter, never a Unix time**; `caps:["codes:m1"]` last on every heartbeat.
 - **A roster entry names the booking's players: `m` + 1–4 REFs.** Scanned strings match only
   legacy entries and a PROVED REF matches only REF lists. *Why:* a REF is printed in every code;
@@ -55,6 +57,5 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
 - **Server pay-for, kept for a bridge that may bring it back — the quote asks SPENDABLE, as the confirm does** (R6 E6-5: held minutes were quoted, then refused). The takeover
   emits `booking.payer_changed`, subject the NEW payer (E6-4 — the payer's side reached no webhook); the booker's
   detail names `money.paid_by` and costs them 0 (E6-2).
-- **Versions** are recorded once, in [`decisions-court-box.md`](decisions-court-box.md); the flash order is in
-  [`state.md`](state.md). Server half: [`decisions-member-code-backend.md`](decisions-member-code-backend.md); keys in
+- **Versions and the flash order:** [`decisions-court-box.md`](decisions-court-box.md). Server half: [`decisions-member-code-backend.md`](decisions-member-code-backend.md); keys in
   every phase and the cut-over: [`decisions-member-code-rollout.md`](decisions-member-code-rollout.md).

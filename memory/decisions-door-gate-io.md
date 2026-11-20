@@ -44,8 +44,9 @@ around building them are in [`gotchas-build.md`](gotchas-build.md).
   halves was swallowed. `setRxBufferSize(1024)` and `onReceiveError` are still installed BEFORE
   `Serial2.begin`, where they are honoured, and the assembler is still reset at boot and on a link
   edge as its header had always promised.
-- **The gate is flashed from the Arduino IDE, like every other board here.** Carl flashes the boards
-  and has no PlatformIO. `src/iot/tools/arduino_export.py --project` generates
+- **The gate is flashed from the Arduino IDE, like every other board here**, by someone with no PlatformIO.
+  **Who is recorded both ways:** this topic said Carl; [`decisions-device.md`](decisions-device.md) and
+  `docs/specs/member-code.md` §8.1 say Dean — open in [`questions.md`](questions.md). `src/iot/tools/arduino_export.py --project` generates
   `door-gate/arduino/door_gate/`; `make arduino-check` covers both projects. **Verified by compiling
   the generated sketch** (`arduino-cli`, `esp32:esp32@2.0.17`, 59% of flash), not inferred.
 - **The gate sets its own firmware version outright and no longer inherits `[common]`.**

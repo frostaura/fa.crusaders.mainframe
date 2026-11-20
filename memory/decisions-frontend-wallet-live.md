@@ -34,7 +34,9 @@ The server's frame is [`decisions-wallet-frames.md`](decisions-wallet-frames.md)
   answer that finds a frame arrived since is dropped (unnamed twins count). *Why:* a slow focus read overwrote a newer
   frame and toasted "went up" when it went down. **Write answers follow the same rule** (FE17x): `apply(minutes,
   { sentAt? })` drops an answer overtaken by any frame — `sentAt` is `frameMark()` at the SEND, else the mark when this
-  tab's money-moving bracket opened; a dropped answer sets no `expectSelf`; no re-read (the stream's silence detector
+  tab's money-moving bracket opened (an overlapping request, or one inside `SELF_GRACE_MS` of the last settling, keeps
+  the earlier mark — 3 s, `liveBalance.ts:282`: the frame lands a few hundred ms either side of the answer, and 3 s
+  covers a slow outbox without swallowing a separate movement for long); a dropped answer sets no `expectSelf`; no re-read (the stream's silence detector
   covers a dead stream). **The wallet page hands over only a read it SENT with no frame since**; reads it joined
   (send time unknown) are never applied, and if their figure disagrees the page reads again so rows match the card.
 - **The flyout is the NET change of the figure over a burst of frames under 1 s apart** (R3 M-1: a split cancel's last

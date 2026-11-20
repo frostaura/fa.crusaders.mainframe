@@ -20,12 +20,16 @@ What a partner's receipt says when the club refunded, cancelled or settled by ha
   keeps its cause — the caller is gone by then. `share_returned` = the partner WITHDREW, only (the frontend keys on it);
   `organiser_removed` needs the `players.removed` row (a pre-R14 removal is `share_back`); `split_changed` needs a
   `players.split_changed` row for the seat NEWER than its last share movement (else a later desk adjustment read as the
-  organiser's split); settle-outside is `club_settled`; an add that lowers an equal/ratio split is `player_added` (R16);
-  anything else is `share_back`, actor null.
+  organiser's split); settle-outside is `club_settled`; an add that lowers an equal/ratio split is `player_added` (R16,
+  J16-2: one `players.split_changed` per partner, `because: "player_added"` — *why a `split_changed` and not a new
+  action:* every reader of split changes, `SeatFacts`, `ShareRowCauses` and the Night, picks it up); anything else is
+  `share_back`, actor null.
 - **The acting person is every share row's actor** (R14 `ShareLedger.ActorOf`): the caller's
   `ReconcileOptions.ActorUserId`, else derived — the scanner (attended), the `booking.cancelled` record's actor (club,
   member or late cancel), the withdrawing partner, the organiser (removal, split change — both now pass
   `ReconcileOptions(organiserId)`), the removal record's actor; null = system; it **never defaults to the booker**.
+  **An add's lowered shares are the ADDER's act** (organiser, receipt born read, or the desk) — `ReconcileOptions(actorId)`
+  (`PlayersService.cs:352-354`), never the system.
   Derived actors never make a receipt born read (`OwnActionBy` unchanged). Accept, decline and accept-on-behalf
   reconciles carry NO actor: a waiting return of another seat retried there would be misattributed (R16).
 - **A late check-in's reversal is the scanner's** (R14 E14-3): its audit row, both legs and the re-collected shares;

@@ -40,23 +40,24 @@ Ordered by risk. [`safety-relays.md`](safety-relays.md) outranks all of these; t
    only run against the imposter in the harness; the MD5 parameter-string parity is what will break first against the
    live gateway. A stored blank passphrase now reads as "not configured" ([`decisions-payfast.md`](decisions-payfast.md)).
 5. **A power cut during an offline window costs the club, silently.** Queued device events survive the WiFi going
-   away, a router reboot and a two-day outage — and since bridge 3.1.0 / gate 2.0.0 they are persisted per sealed entry
-   to flash and re-uploaded under their own boot id, so a cut no longer loses them by design; **none of that has run on a
+   away, a router reboot and a two-day outage — and since the v3 images they are persisted per sealed entry to flash
+   and re-uploaded under their own boot id, so a cut no longer loses them by design; **none of that has run on a
    chip** (LittleFS wear and the RTC epoch are provable only there, [`decisions-bridge.md`](decisions-bridge.md)). Where
    the court that was lit is still never reported, the settlement refunds that booking **in full** and stamps
    `peripheral_outage`: the club gives away a court whose lights ran and the ledger looks correct. It used to fall on the
    member, who would have complained; nobody will complain about this. Accepted knowingly — a half-built ring that
    replays a stale activation charges twice.
-6. **Half of the frontend deviation is closed; Redux Toolkit is the half left.** Verified 2026-09-29 after P10:
-   `components.json` (new-york), shadcn/ui primitives on the unified `radix-ui` package in `components/ui/`, Phosphor
-   through one barrel, the P1 compat shims and `lucide-react` deleted. State is still React context, **no Redux
-   Toolkit**, unwaivered — **Owner: Dean** (a parent stack call held at division level); adopt or record a rationale.
+6. **Half of the frontend deviation is closed; Redux Toolkit is the half left.** The shadcn/ui half, as CLAUDE.md
+   describes it, was verified 2026-09-29 after P10 (`components.json`, `lucide-react` deleted). State is still React
+   context, **no Redux Toolkit**, unwaivered — **Owner: Dean** (a parent stack call held at division level); adopt or record a rationale.
 7. **No architecture document exists for the backend.** The specs cover features and the iot READMEs the hardware;
    nothing describes the API's own shape but `Program.cs` and `Endpoints/` (no `docs/architecture/` at `7893321d`).
-8. **Product files still point at memory topics the 2026-11-20 reorganisation renamed** (a memory pass may not edit
-   docs or code; owed by the next product change). `docs/specs/multi-tenancy.md:79` cites `decisions-platform-pass.md`
-   (now [`decisions-tenancy.md`](decisions-tenancy.md)), and its sentence is stale: a suspended club's boards already
-   hear `403 club_suspended` (`DeviceAuthenticationHandler.cs:80-92`). `docs/specs/device-api.md:144` and
+8. **Product files cite renamed topics or say superseded things** (a memory pass may not edit docs or code; owed by
+   the next product change). `docs/specs/multi-tenancy.md:79` cites `decisions-platform-pass.md` (now
+   [`decisions-tenancy.md`](decisions-tenancy.md)) and is stale: a suspended club's boards already hear
+   `403 club_suspended` (`DeviceAuthenticationHandler.cs:80-92`). `docs/specs/device-api.md:144` and
    `Services/RelayRestorePlan.cs:71` cite `decisions-court-box-extend` (now [`decisions-court-box.md`](decisions-court-box.md)).
-   Same class: the `WalkUpServices.Clock` comment (`DeviceEventEndpoints.cs:2219-2221`) says `BookingService` reads
-   the wall clock; it reads the injected `TimeProvider` (`BookingService.cs:71,399`). Delete when all four are fixed.
+   Comments: `WalkUpServices.Clock` (`DeviceEventEndpoints.cs:2219-2221`) says `BookingService` reads the wall clock,
+   not the injected `TimeProvider` it reads (`BookingService.cs:71,399`); `ReverseNoShowAsync`'s doc
+   (`BookingService.cs:1817-1821`) says a booking-naming adjustment skips the money legs, which `SettledLegsAsync`
+   nets (`decisions-settlement.md`). Delete when all five are fixed.

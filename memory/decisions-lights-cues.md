@@ -38,15 +38,16 @@ A reversal's on/off pair and the instant every `lights_on` is stamped at: [`deci
 - **A lit booking that is then cancelled is cued off at its `EndsAt`** (D14-2; cancel never moves `EndsAt`), stamped
   by the same walk under the lock, never promoted, never sent `booking.completed`; it is also a HOLDER in the walk,
   because its relay runs on (statuses read: Booked, Completed, NoShow, Cancelled with `CheckedInAt`,
-  `LightsCueWorker.cs:265-268`). **Bounded to `EndsAt` within `CancelledLitLookback` (2 h, `:58`)** in SQL — without it
+  `LightsCueWorker.cs:264-267`). **Bounded to `EndsAt` within `CancelledLitLookback` (2 h, `:58`)** in SQL — without it
   the first deploy sent every consumer a stale off for each historical row. The query is a seq scan; the fix if it ever
   matters is a partial index `WHERE "LightsOffCuedAt" IS NULL` (a migration). An UNLIT cancelled booking gets no off;
   no cancellation fires an immediate off (`lights-controller.md` marks that old sentence superseded).
 - **A cancelled relit reversal is swept like any lit cancellation** (D16-4: `Cancelled && CheckedInAt &&
   NoShowReversedAt > LightsOffCuedAt`, inside the lookback) and counts as a holder whose off is still to come; so does
   a relit reversal still Booked and reversed after its old cue.
-- **Webhook actors:** `minutes.*` and `booking.created` `actor.is_admin` is the actor's `User.IsAdmin`, read
-  (`LedgerService.HoldsAdminAsync` — one tenant-filtered read, never for `Guid.Empty`; `BookingService.cs:914`), never
+- **Webhook actors:** `minutes.*` and `booking.created` `actor.is_admin` is the actor's `User.IsAdmin`, read — one
+  tenant-filtered read, never for `Guid.Empty`, in two private twins: `LedgerService.HoldsAdminAsync` (`:551`) for
+  `minutes.*`, `BookingService`'s own (`:1942`, called at `:914`) for `booking.created` — never
   `actorId != userId` — that called a member paying for a friend's court at the box an administrator. An admin is an
   admin on their own wallet too. `minutes.sold_at_desk` carries `zar_received` (0 on a gift) and
   `given`; reversal mirror names follow the sign (`minutes.refund_reversed` / `minutes.penalty_returned`,

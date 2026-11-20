@@ -27,8 +27,9 @@ unchanged: [`decisions-device.md`](decisions-device.md). What follows is the gat
   framework's 201 read as an outage taught the breaker the server was down (FC-4). *Why the 403:*
   falling back after one keeps admitting rostered members for the six-hour staleness window after
   an admin pressed the button meant to stop exactly that. **Residual:** only a board that cannot
-  reach the server never hears the 403. The v3 rules as a whole:
-  [`decisions-door-gate-persistence.md`](decisions-door-gate-persistence.md).
+  reach the server never hears the 403. The gate's state across resets and its v3 readers:
+  [`decisions-door-gate-persistence.md`](decisions-door-gate-persistence.md); the contract as a whole:
+  [`decisions-device-v3.md`](decisions-device-v3.md).
 - **A door is released for `gate.unlock_seconds`, never for what is left of the booking.** The
   roster's `grantMs` is 25 minutes for a late arrival, and a door held open for 25 minutes is not a
   door. The gate's offline degraded mode is also narrower than the court box's *by contract*: only a

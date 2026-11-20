@@ -17,8 +17,11 @@ How a box's offline evidence is judged and charged: [`decisions-settlement-offli
   the money. *Why this shape:* the GiST exclusion constraint and every overlap predicate exempt only Cancelled; a NoShow
   exemption would let a fresh no-show be overwritten before settlement. Before it, a swept no-show held its slot dark.
 - **There is no "un-no-show" endpoint.** Compensate through the admin adjustment **naming the booking**
-  (`relatedBookingId`, positive `AdminAdjustment`): the reversal then skips the money legs (`manual_compensation`); an
-  unnamed one is invisible and the member is corrected twice. A goodwill credit naming the booking lowers `Owed`, so it
+  (`relatedBookingId`, `AdminAdjustment`): the reversal nets it off its own legs (`SettledLegsAsync`,
+  `BookingService.cs:2030-2041`) — a positive adjustment lowers the penalty-return leg, a negative one the
+  refund-reversal leg, audited `manual_compensation`; an unnamed one is invisible and the member is corrected twice
+  (*corrected 2026-11-20:* this said the legs were skipped, as the method's doc comment still does — [`watch.md`](watch.md)
+  item 8). A goodwill credit naming the booking lowers `Owed`, so it
   passes a pro-rata refund on to partners (Dean, 2026-09-28 — [`decisions-players.md`](decisions-players.md)).
 - **Late attendance evidence reverses a settled no-show.** A box offline past the grace window lights the court from
   its roster and queues the scan; by upload time the sweep has already refunded and penalised the member who actually

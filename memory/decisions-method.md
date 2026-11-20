@@ -32,7 +32,7 @@ last_verified: 2026-11-20
   `Contains`, which passes on duplicates. Assert counts where duplication is the failure mode.
 - **A green run on the founder's Mac is not a green run.** Some tests cannot fail here by
   construction and only fail on Linux CI; others fail in wall-clock windows. Both are in
-  [`gotchas.md`](gotchas.md), and the rule that follows is: reproduce a red run on the **base
+  [`gotchas-clock.md`](gotchas-clock.md), and the rule that follows is: reproduce a red run on the **base
   commit in a second worktree** before believing your diff caused it.
 - **Delivery went straight onto `main`** (founder, 2026-09-23 — it replaced "one branch, one PR"), so every push ran
   CI's release half too; since PR #12 (2026-11-13) the larger passes have landed as branches and PRs merged when green —

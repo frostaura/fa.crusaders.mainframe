@@ -22,6 +22,9 @@ Cancels that find the booking not open, who may cancel, and which clock each pat
   one round trip. Every booking write had the same 500.
 - **A retried unit is one whose writes all roll back together** — one `SaveChanges` or one `PayerLock` transaction —
   which is what makes a double charge impossible. Mail, events and outbox publishes stay after the commit, never repeated.
+  **Where that invariant is pinned:** `R16DeadlockRetryHttpTests` (29 cases; a `DbCommandInterceptor` raises a real
+  40P01 / 40001 once, twice, then past every retry; each asserts one booking or block, one charge, one audit row, equal
+  balances) and `R16WalkUpDeadlockHttpTests` (a real 40P01 on twin walk-ups).
 - **Between attempts the change tracker is restored to a mark** (each entry's state, current and original values,
   modified flags; entries the attempt added or loaded are detached), never reloaded. *Why:* callers stage work that
   must commit WITH the unit (the booking row `CreateAsync` adds before `CommitAsync`; the pay-for nonce row and its audit
@@ -41,7 +44,8 @@ Cancels that find the booking not open, who may cancel, and which clock each pat
 
 - **`DatabaseRetry.ReDecideOnLostRaceAsync(db, unit, ct)`** (`:94`) re-runs a unit on `DbUpdateConcurrencyException`,
   up to 3, with no rewind: the unit may already have committed an earlier save (the charge under the payer lock). It
-  forgets what the losing attempt added, keeps what the CALLER staged unsaved, and re-reads every tracked booking and
+  forgets what the losing attempt added, keeps what the CALLER staged unsaved (a desk change record, a pay-for nonce
+  row), and re-reads every tracked booking and
   seat plus any row the attempt changed; a miss rolls back to EF's savepoint without aborting the transaction.
 - Applied to `CourtActivationService.ActivateAsync` (every courtside path) and `BookingService.CancelAsync`.
   Activation re-decides only while its booking is still `Booked`; one the sweep settled under an upload goes to

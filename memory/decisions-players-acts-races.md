@@ -13,7 +13,9 @@ The acts themselves: [`decisions-players-acts.md`](decisions-players-acts.md).
   `booking_participants` = a seat really taken → `seat_taken`; any other 23505 (notification dedupe keys) or a version
   miss = a lost race — `PlayersService.SaveAsync(ct, Landing)` / `PlayersAdminService.SaveAndSettleAsync` re-read the
   seat: in the act's target state → 200 `{participant_id, status}`; else `409 conflict_retry`. *Why:* parallel desk
-  accepts 500'd on `IX_admin_notifications_TenantId_DedupeKey`; twin declines read "That seat was taken".
+  accepts 500'd on `IX_admin_notifications_TenantId_DedupeKey`; twin declines read "That seat was taken". **A players
+  screen says its own `conflict_retry` sentence** (`PLAYERS_REFUSAL`, `playersCopy.ts:125`), which `playersRefusal`
+  picks ahead of the generic one (`describeFailure`); only a lost-reply read-back (`unsure`) goes first.
 - **Seat acts are idempotent in their target state** — decline on Declined, withdraw on Withdrawn, remove on Removed,
   accept-on-behalf on Accepted, settle-outside on settled → 200 and NO writes (`SettledOutsideAt` keeps its first
   instant). Another state is still refused for what happened (decline after accept = `not_invited`). **An identical

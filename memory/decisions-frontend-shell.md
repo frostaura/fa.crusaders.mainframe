@@ -52,7 +52,8 @@ Layout system: [`decisions-member-layout.md`](decisions-member-layout.md); focus
   `focusFirstComplaint`, nothing sent, the input `aria-required` (R17 X17-7).
 - **A select's list is capped**: `min(--radix-select-content-available-width, 100vw - 1rem)`, floor `min(8rem, 100vw -
   1rem)`, options `[overflow-wrap:anywhere]`. **A removed door is never named by its UUID** (`removedDoorName` ends in
-  `doorDisplayName`; `removed_doors` lacks `device_code`, so it reads "Unnamed scanner").
+  `doorDisplayName`; `removed_doors` carries `device_code` since R13 L13-1 (`AdminDoorLogEndpoint.cs:226-227`,
+  `doorsCopy.ts:166-174`), so an unnamed gate reads "Unnamed scanner (gate-…)").
 - **`glueFigureLabel` (`ui/figure-text`) is shared by Button, ToggleGroupItem and TabsTrigger** — paint glued, accessible
   name plain; a control whose child is markup glues inside its own aria-hidden / aria-labelled span.
 - **`credit-scan` also reads `index.html` and `public/*.webmanifest|html|js`** (the no-"credit" invariant reaches the shell).

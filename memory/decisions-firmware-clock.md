@@ -21,7 +21,8 @@ The type now enforces part of it: `tb::Deadline`'s `at` is private (`timebase/Ti
     before the drain when offline, so `DrainPace::ready()` — the only thing that disarms an elapsed window — never ran.
     A parameter rather than the caller's guard, because the guard is exactly what hid it. An elapsed window is disarmed
     within one pass; a running window is not shortened by offline passes (tested).
-  - Door gate: `GateApp::forgetElapsedWindows(now)` runs first in every `pass()` and disarms `eventsAt_`,
+  - Door gate: `GateApp::forgetElapsedWindows(now)` runs in every `pass()` before any step reads a window — after only
+    the uptime tick, the watchdog kick and `persistDirty` (`GateApp.cpp:129-134`) — and disarms `eventsAt_`,
     `heartbeatFloorAt_`, `firstCallAt_`, `scanCallFloorAt_` and `unreadableAt_` once ended (disarmed reads exactly as
     elapsed, so no decision changes); `UnlockTimer::tick()` spends an ended relock dwell. Each line proved by deleting it:
     after a long outage the drain AND heartbeat stayed silent with the link back (the roster never refilled); a boot
@@ -51,4 +52,5 @@ The type now enforces part of it: `tb::Deadline`'s `at` is private (`timebase/Ti
     contradiction deferred to the next periodic frame (10 s), self-healing, no lights or money effect. The Mega's own
     timers were out of scope.
 - **A gate version follows its shared libraries' behaviour**: the gate moved to 1.1.2 in R18 because the roster and step
-  clock changed; `gate_sim.py`'s DSIM check reads the version from the gate's `[env:simulator]` (2.0.0 now).
+  clock changed; `gate_sim.py`'s DSIM check reads the version from the gate's `[env:simulator]` (the current one:
+  [`decisions-court-box.md`](decisions-court-box.md)).

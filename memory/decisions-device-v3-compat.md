@@ -41,7 +41,8 @@ Taken by the orchestrator under Dean's "fix any and all" go-ahead, after four la
   be the least-needed last.
 - **`make device-replay-check` runs the server's real replies through both firmwares'
   host-compiled parsers.** *Why:* the corpus holds bytes someone wrote; the live server had already
-  drifted from it (19-char `server_time`, a 120 cap) and no test noticed (FC-9).
+  drifted from it (19-char `server_time`, a 120 cap) and no test noticed (FC-9). It is CI job
+  `device-replay` (`ci.yml:409`), and every image build waits for it (`needs:` at `:1035,1069,1103,1137,1171,1205`).
 - **Every board reports `diag` (reset reason, heap, largest block, stack low-water) and the box
   forwards the Mega's `!BOOT`/`!HW`/`!DIAG` as `mega`.** *Why:* between cable flashes the
   heartbeat is the only window; a brown-out, a wedged LCD and a stack overflow all looked like
