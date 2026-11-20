@@ -22,7 +22,8 @@ The admin console's read-backs are [`decisions-admin-lost-replies.md`](decisions
   void/uphold off Match results. **Nothing to read back → "not known"**: a reminder (nudge) and a new share link (its
   token lived only in the lost reply); an open seat found by a read-back offers "make a new link".
 - **An unknown outcome inside a `ConfirmDialog` is said by its `describe` prop**; the dialog stays open with the typed
-  reason (closing it lost the admin's reason and put the alert between the row's two buttons).
+  reason (closing it lost the admin's reason and put the alert between the row's two buttons); a withdraw known not to
+  have landed does not re-read the card.
 - **The cause is named — four of them** (R19 X19-2, `lostReply.unsureReasonOf` / `answerReasonOf`, `:96,104`;
   `unsureCauseOf` is retired): **busy** (`503 service_busy`, 429) → "The club's system was too busy to take this just
   now … in a moment", never "didn't answer"; **conflict** (`503 conflict_retry`) → "Someone else was changing … at the same
